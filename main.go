@@ -49,7 +49,7 @@ func main() {
 	for update := range updates {
 		for _, handle := range handles {
 			if handle.ShouldHandle(update) {
-				handle.HandleUpdate(update, bot)
+				go handle.HandleUpdate(update, bot)
 			}
 		}
 	}
