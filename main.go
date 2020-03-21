@@ -2,20 +2,11 @@ package main
 
 import (
 	"csust-got/config"
+	"csust-got/module"
+	"csust-got/module/conds"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 )
-
-type HandleFunc func(update tgbotapi.Update, bot *tgbotapi.BotAPI)
-type HandleCondFunc func(update tgbotapi.Update) bool
-type BotModule struct {
-	HandleUpdate HandleFunc
-	ShouldHandle HandleCondFunc
-}
-
-func NonEmpty(update tgbotapi.Update) bool {
-	return update.Message != nil
-}
 
 func main() {
 	conf, err := config.FromFolder(".")
@@ -36,7 +27,9 @@ func main() {
 
 	updates, err := bot.GetUpdatesChan(u)
 
-	handles := []BotModule{{echo, NonEmpty}}
+	handles := []module.Module{
+		module.Stateless(echo, conds.NonEmpty),
+	}
 	for update := range updates {
 		for _, handle := range handles {
 			if handle.ShouldHandle(update) {
