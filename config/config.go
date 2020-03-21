@@ -1,8 +1,7 @@
-package csust_got
+package config
 
 import (
-	"bufio"
-	"errors"
+	"io/ioutil"
 	"os"
 	"path"
 )
@@ -19,13 +18,9 @@ func FromFolder(folder string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	tokenReader := bufio.NewReader(tokenFile)
-	tokenBytes, isPrefix, err := tokenReader.ReadLine()
+	tokenBytes, err := ioutil.ReadAll(tokenFile)
 	if err != nil {
 		return nil, err
-	}
-	if isPrefix {
-		return nil, errors.New(".token file too long to read")
 	}
 	conf := &Config{
 		Token: string(tokenBytes),
