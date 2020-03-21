@@ -17,8 +17,13 @@ func hello() module.Module {
 	toggleRunning := func(update tgbotapi.Update) {
 		running = !running
 	}
+	getRunning := func(update tgbotapi.Update) bool {
+		return running
+	}
 	return module.Stateless(handle,
-		conds.IsCommand("hello").SideEffectOnTrue(toggleRunning))
+		conds.IsCommand("hello").
+			SideEffectOnTrue(toggleRunning).
+			Or(conds.BoolFunction(getRunning)))
 }
 
 func main() {
@@ -41,7 +46,6 @@ func main() {
 	updates, err := bot.GetUpdatesChan(u)
 
 	handles := []module.Module{
-		module.Stateless(echo, conds.NonEmpty),
 		module.IsolatedChat(func(update tgbotapi.Update) module.Module {
 			return hello()
 		}, conds.IsCommand("hello")),

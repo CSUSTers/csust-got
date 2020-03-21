@@ -11,6 +11,10 @@ func (p Predicate) And(other Predicate) Predicate {
 	return Predicate{andPredicate{p, other}}
 }
 
+func (p Predicate) Or(other Predicate) Predicate {
+	return Predicate{orPredicate{p, other}}
+}
+
 // SideEffect will be triggered if the predicate is true.
 func (p Predicate) SideEffectOnTrue(sideEffect func(update tgbotapi.Update)) Predicate {
 	next := func(update tgbotapi.Update) bool {
@@ -33,6 +37,15 @@ func (p andPredicate) Test(update tgbotapi.Update) bool {
 	return p.lhs.Test(update) && p.rhs.Test(update)
 }
 
+type orPredicate struct {
+	lhs predicate
+	rhs predicate
+}
+
+func (o orPredicate) Test(update tgbotapi.Update) bool {
+	return o.lhs.Test(update) || o.rhs.Test(update)
+}
+
 type functionalPredicate struct {
 	pred func(update tgbotapi.Update) bool
 }
@@ -46,10 +59,10 @@ func BoolFunction(pred func(update tgbotapi.Update) bool) Predicate {
 }
 
 // NonEmpty is the condition of a module which only processes non-empty message.
-var NonEmpty Predicate = BoolFunction(nonEmpty)
+var NonEmpty = BoolFunction(nonEmpty)
 
 // IsAnyCommand is the condition of a module which only process Command message.
-var IsAnyCommand Predicate = BoolFunction(command)
+var IsAnyCommand = BoolFunction(command)
 
 // IsCommand handles the update when the command is exactly the argument.
 func IsCommand(command string) Predicate {
