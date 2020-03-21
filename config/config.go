@@ -2,9 +2,21 @@ package config
 
 import (
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 )
+
+
+var BotConfig *Config
+
+func init() {
+	var err error
+	BotConfig, err = FromFolder("../")
+	if err != nil {
+		log.Panic(err)
+	}
+}
 
 // Config the interface for common configs.
 type Config struct {

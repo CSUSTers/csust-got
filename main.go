@@ -27,11 +27,7 @@ func hello() module.Module {
 }
 
 func main() {
-	conf, err := config.FromFolder(".")
-	if err != nil {
-		log.Panic(err)
-	}
-	bot, err := tgbotapi.NewBotAPI(conf.Token)
+	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
 		log.Panic(err)
 	}
