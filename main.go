@@ -10,18 +10,15 @@ import (
 
 func hello() module.Module {
 	running := false
-	shouldHandle := func(u tgbotapi.Update) bool {
-		recv := u.Message
-		if recv != nil && recv.IsCommand() && recv.Command() == "hello" {
-			running = !running
-		}
-		return running
-	}
 	handle := func(u tgbotapi.Update, b *tgbotapi.BotAPI) {
 		msg := tgbotapi.NewMessage(u.Message.Chat.ID, "Hello ^_^")
 		_, _ = b.Send(msg)
 	}
-	return module.Stateless(handle, shouldHandle)
+	toggleRunning := func(update tgbotapi.Update) {
+		running = !running
+	}
+	return module.Stateless(handle,
+		conds.IsCommand("hello").SideEffectOnTrue(toggleRunning))
 }
 
 func main() {
@@ -47,10 +44,7 @@ func main() {
 		module.Stateless(echo, conds.NonEmpty),
 		module.IsolatedChat(func(update tgbotapi.Update) module.Module {
 			return hello()
-		}, func(update tgbotapi.Update) bool {
-			recv := update.Message
-			return recv != nil && recv.IsCommand() && recv.Command() == "hello"
-		}),
+		}, conds.IsCommand("hello")),
 	}
 	for update := range updates {
 		for _, handle := range handles {
