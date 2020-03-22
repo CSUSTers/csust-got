@@ -2,6 +2,7 @@ package module
 
 import (
 	"csust-got/module/conds"
+	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
@@ -15,23 +16,24 @@ type isolatedChatModule struct {
 	shouldRegister conds.Predicate
 }
 
-func (i *isolatedChatModule) HandleUpdate(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+func (i *isolatedChatModule) HandleUpdate(context Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	chat := update.Message.Chat
 	handler := i.registeredMods[chat.ID]
-	handler.HandleUpdate(update, bot)
+	handler.HandleUpdate(context.SubContext(fmt.Sprint(chat.ID)), update, bot)
 }
 
-func (i *isolatedChatModule) ShouldHandle(update tgbotapi.Update) bool {
+func (i *isolatedChatModule) ShouldHandle(context Context, update tgbotapi.Update) bool {
 	chat := update.Message.Chat
 	// Registered chat.
+	newCtx := context.SubContext(fmt.Sprint(chat.ID))
 	if module, ok := i.registeredMods[chat.ID]; ok {
-		return module.ShouldHandle(update)
+		return module.ShouldHandle(newCtx, update)
 	}
 	// Not yet registered chat, but we should register now.
 	if i.shouldRegister.ShouldHandle(update) {
 		module := i.factory(update)
 		i.registeredMods[chat.ID] = module
-		return module.ShouldHandle(update)
+		return module.ShouldHandle(newCtx, update)
 	}
 	return false
 }

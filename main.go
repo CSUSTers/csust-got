@@ -8,7 +8,7 @@ import (
 	"log"
 )
 
-func hello() module.Module {
+func hello(tgbotapi.Update) module.Module {
 	running := false
 	handle := func(u tgbotapi.Update, b *tgbotapi.BotAPI) {
 		msg := tgbotapi.NewMessage(u.Message.Chat.ID, "Hello ^_^")
@@ -21,8 +21,7 @@ func hello() module.Module {
 		return running
 	}
 	return module.Stateless(handle,
-		conds.IsCommand("hello").
-			SideEffectOnTrue(toggleRunning).
+		conds.IsCommand("hello").SideEffectOnTrue(toggleRunning).
 			Or(conds.BoolFunction(getRunning)))
 }
 
@@ -41,25 +40,18 @@ func main() {
 
 	updates, err := bot.GetUpdatesChan(u)
 
-	handles := []module.Module{
-		module.IsolatedChat(func(update tgbotapi.Update) module.Module {
-			return hello()
-		}, conds.IsCommand("hello")),
+	ctx := module.GlobalContext()
+	handles := []struct {
+		mod module.Module
+		ctx module.Context
+	}{
+		{module.IsolatedChat(hello, conds.IsCommand("hello")), ctx.SubContext("hello")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
-			if handle.ShouldHandle(update) {
-				go handle.HandleUpdate(update, bot)
+			if handle.mod.ShouldHandle(handle.ctx, update) {
+				go handle.mod.HandleUpdate(handle.ctx, update, bot)
 			}
 		}
 	}
-}
-
-func echo(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
-	msg.ReplyToMessageID = update.Message.MessageID
-
-	_, _ = bot.Send(msg)
 }

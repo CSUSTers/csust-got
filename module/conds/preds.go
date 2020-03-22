@@ -54,6 +54,7 @@ func (f functionalPredicate) ShouldHandle(update tgbotapi.Update) bool {
 	return f.pred(update)
 }
 
+// BoolFunction wraps a `func(Update) bool` to a Predicate.
 func BoolFunction(pred func(update tgbotapi.Update) bool) Predicate {
 	return Predicate{functionalPredicate{pred: pred}}
 }
