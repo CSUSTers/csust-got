@@ -2,7 +2,8 @@ package manage
 
 import (
 	"csust-got/module"
-	"github.com/go-redis/redis/v7"
+    "csust-got/util"
+    "github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 )
@@ -12,16 +13,20 @@ var key = "enabled"
 // NoSticker is a switch for NoStickerMode
 func NoSticker(update tgbotapi.Update) module.Module {
 	handler := func(ctx module.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		v := 0
-		if isNoStickerMode(ctx) {
-			v = 1
+		v, text := 0, "NoStickerMode is off."
+		if !isNoStickerMode(ctx) {
+			v, text = 1, "Do NOT send Sticker!"
 		}
 
 		_, err := ctx.GlobalClient().Set(ctx.WrapKey(key), v, 0).Result()
 		if err != nil {
 			log.Println("ERROR: Can't set NoStickerMode")
 			log.Println(err.Error())
+            util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID,
+                "ERROR: Can't set NoStickerMode"+err.Error()))
+            return
 		}
+		util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, text))
 	}
 	return module.Stateful(handler)
 }
@@ -32,7 +37,7 @@ func DeleteSticker(update tgbotapi.Update) module.Module {
 	handler := func(ctx module.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		message := update.Message
 
-		if isNoStickerMode(ctx) {
+		if !isNoStickerMode(ctx) {
 			return
 		}
 
