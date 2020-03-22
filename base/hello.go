@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/context"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
@@ -37,7 +38,7 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 }
 
 func IsoHello(tgbotapi.Update) module.Module {
-	handle := func(ctx module.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		enable, err := ctx.GlobalClient().Get(ctx.WrapKey("enabled")).Int()
 		enabled := enable > 0
 		if err != nil {
