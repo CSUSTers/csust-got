@@ -49,6 +49,7 @@ func main() {
 	}{
 		{module.IsolatedChat(hello, preds.IsCommand("hello")), ctx.SubContext("hello")},
 		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("sayhello")},
+		{module.Stateless(base.WelcomeNewMember, preds.NonEmpty), ctx.SubContext("welcome")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
