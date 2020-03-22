@@ -1,4 +1,4 @@
-package csust_got
+package config
 
 import (
 	"fmt"

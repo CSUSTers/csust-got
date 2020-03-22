@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+
+  bot:
+    build: .
+    container_name: bot
+    restart: always
+    depends_on:
+      - redis
+    links:
+      - redis
+    environment:
+      DEBUG: "false"
+      TOKEN: ${CSUST_BOT_TOKEN}
+      REDIS_ADDR: "redis:6379"
+      REDIS_PASSWORD: "csust-bot-redis-password"
+
+  redis:
+    image: "redis:alpine"
+    container_name: bot-redis
+    expose:
+      - "6379"
+    volumes:
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./data:/data
+    command:
+      - /usr/local/etc/redis/redis.conf
