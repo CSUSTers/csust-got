@@ -32,7 +32,7 @@ func main() {
 		log.Panic(err)
 	}
 
-	bot.Debug = true
+	bot.Debug = config.BotConfig.DebugMode
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
