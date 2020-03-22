@@ -65,6 +65,9 @@ var NonEmpty = BoolFunction(nonEmpty)
 // IsAnyCommand is the condition of a module which only process Command message.
 var IsAnyCommand = BoolFunction(command)
 
+// HasSticker is the condition of a module which process Sticker message.
+var HasSticker = BoolFunction(sticker)
+
 // IsCommand handles the update when the command is exactly the argument.
 func IsCommand(command string) Predicate {
 	isThat := func(update tgbotapi.Update) bool {
@@ -79,4 +82,8 @@ func nonEmpty(update tgbotapi.Update) bool {
 
 func command(update tgbotapi.Update) bool {
 	return nonEmpty(update) && update.Message.IsCommand()
+}
+
+func sticker(update tgbotapi.Update) bool {
+	return nonEmpty(update) && update.Message.Sticker != nil
 }

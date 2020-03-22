@@ -8,6 +8,9 @@ import (
 func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
     message := update.Message
     memberSlice := message.NewChatMembers
+    if memberSlice == nil {
+        return
+    }
     for _, member := range *memberSlice {
         text := "Welcome to this group!" + getName(member)
         go sendNotificationTo(bot, message.Chat.ID, text)

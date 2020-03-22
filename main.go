@@ -3,6 +3,7 @@ package main
 import (
 	"csust-got/base"
 	"csust-got/config"
+	"csust-got/manage"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
@@ -31,9 +32,11 @@ func main() {
 		ctx module.Context
 	}{
 		{module.IsolatedChat(base.IsoHello, preds.IsCommand("hello")), ctx.SubContext("hello")},
-		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("sayhello")},
+		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say hello")},
 		{module.Stateless(base.WelcomeNewMember, preds.NonEmpty), ctx.SubContext("welcome")},
-		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello_to_all")},
+		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello to all")},
+		{module.IsolatedChat(manage.NoSticker, preds.IsCommand("no_sticker")), ctx.SubContext("no sticker")},
+		{module.IsolatedChat(manage.DeleteSticker, preds.HasSticker), ctx.SubContext("delete sticker")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
