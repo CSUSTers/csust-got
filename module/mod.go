@@ -6,8 +6,8 @@ import (
 )
 
 type Module interface {
-	HandleUpdate(update tgbotapi.Update, bot *tgbotapi.BotAPI)
-	ShouldHandle(update tgbotapi.Update) bool
+	HandleUpdate(context Context, update tgbotapi.Update, bot *tgbotapi.BotAPI)
+	ShouldHandle(context Context, update tgbotapi.Update) bool
 }
 
 type HandleFunc func(update tgbotapi.Update, bot *tgbotapi.BotAPI)
@@ -16,11 +16,11 @@ type trivialModule struct {
 	shouldHandle conds.Predicate
 }
 
-func (t trivialModule) HandleUpdate(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+func (t trivialModule) HandleUpdate(_ Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	t.handleUpdate(update, bot)
 }
 
-func (t trivialModule) ShouldHandle(update tgbotapi.Update) bool {
+func (t trivialModule) ShouldHandle(_ Context, update tgbotapi.Update) bool {
 	return t.shouldHandle.ShouldHandle(update)
 }
 
