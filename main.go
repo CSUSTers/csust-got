@@ -27,16 +27,17 @@ func main() {
 	updates, err := bot.GetUpdatesChan(u)
 
 	ctx := module.GlobalContext(orm.GetClient(), config.BotConfig)
+	stickerContext := ctx.SubContext("no sticker")
 	handles := []struct {
 		mod module.Module
 		ctx module.Context
 	}{
-		{module.IsolatedChat(base.IsoHello), ctx.SubContext("hello")},
+		//{module.IsolatedChat(base.IsoHello), ctx.SubContext("hello")},
 		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say_hello")},
 		{module.Stateless(base.WelcomeNewMember, preds.NonEmpty), ctx.SubContext("welcome")},
 		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello_to_all")},
-		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_stacker")), ctx.SubContext("no_sticker")},
-		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), ctx.SubContext("no_sticker")},
+		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")), stickerContext},
+		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), stickerContext},
 	}
 	for update := range updates {
 		for _, handle := range handles {
