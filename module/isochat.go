@@ -22,11 +22,13 @@ func (i *isolatedChatModule) HandleUpdate(context Context, update tgbotapi.Updat
 	newCtx := context.SubContext(fmt.Sprint(chat.ID))
 	if module, ok := i.registeredMods[chat.ID]; ok {
 		module.HandleUpdate(newCtx, update, bot)
+		return
 	}
 	if i.shouldRegister.ShouldHandle(update) {
 		module := i.factory(update)
 		i.registeredMods[chat.ID] = module
 		module.HandleUpdate(newCtx, update, bot)
+		return
 	}
 }
 
