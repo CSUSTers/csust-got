@@ -32,11 +32,11 @@ func main() {
 		ctx module.Context
 	}{
 		{module.IsolatedChat(base.IsoHello), ctx.SubContext("hello")},
-		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say hello")},
+		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say_hello")},
 		{module.Stateless(base.WelcomeNewMember, preds.NonEmpty), ctx.SubContext("welcome")},
-		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello to all")},
-		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_stacker")), ctx.SubContext("no sticker")},
-		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), ctx.SubContext("delete sticker")},
+		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello_to_all")},
+		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_stacker")), ctx.SubContext("no_sticker")},
+		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), ctx.SubContext("no_sticker")},
 	}
 	for update := range updates {
 		for _, handle := range handles {

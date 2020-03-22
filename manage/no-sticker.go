@@ -22,8 +22,6 @@ func NoSticker(update tgbotapi.Update) module.Module {
 		if err != nil {
 			log.Println("ERROR: Can't set NoStickerMode")
 			log.Println(err.Error())
-            util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID,
-                "ERROR: Can't set NoStickerMode"+err.Error()))
             return
 		}
 		util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, text))
