@@ -25,7 +25,7 @@ func (p Predicate) SideEffectOnTrue(sideEffect func(update tgbotapi.Update)) Pre
 }
 
 type predicate interface {
-	Test(update tgbotapi.Update) bool
+	ShouldHandle(update tgbotapi.Update) bool
 }
 
 type andPredicate struct {
@@ -33,8 +33,8 @@ type andPredicate struct {
 	rhs predicate
 }
 
-func (p andPredicate) Test(update tgbotapi.Update) bool {
-	return p.lhs.Test(update) && p.rhs.Test(update)
+func (p andPredicate) ShouldHandle(update tgbotapi.Update) bool {
+	return p.lhs.ShouldHandle(update) && p.rhs.ShouldHandle(update)
 }
 
 type orPredicate struct {
@@ -42,15 +42,15 @@ type orPredicate struct {
 	rhs predicate
 }
 
-func (o orPredicate) Test(update tgbotapi.Update) bool {
-	return o.lhs.Test(update) || o.rhs.Test(update)
+func (o orPredicate) ShouldHandle(update tgbotapi.Update) bool {
+	return o.lhs.ShouldHandle(update) || o.rhs.ShouldHandle(update)
 }
 
 type functionalPredicate struct {
 	pred func(update tgbotapi.Update) bool
 }
 
-func (f functionalPredicate) Test(update tgbotapi.Update) bool {
+func (f functionalPredicate) ShouldHandle(update tgbotapi.Update) bool {
 	return f.pred(update)
 }
 

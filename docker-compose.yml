@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+
+  bot:
+    build: .
+    container_name: bot
+    restart: always
+    depends_on:
+      - redis
+    environment:
+      DEBUG: "false"
+      TOKEN: "YOUR_BOT_TOKEN"
+
+  redis:
+    image: "redis:alpine"
+    container_name: bot-redis
+    volumes:
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./data:/data

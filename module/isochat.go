@@ -28,7 +28,7 @@ func (i *isolatedChatModule) ShouldHandle(update tgbotapi.Update) bool {
 		return module.ShouldHandle(update)
 	}
 	// Not yet registered chat, but we should register now.
-	if i.shouldRegister.Test(update) {
+	if i.shouldRegister.ShouldHandle(update) {
 		module := i.factory(update)
 		i.registeredMods[chat.ID] = module
 		return module.ShouldHandle(update)

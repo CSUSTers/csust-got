@@ -21,7 +21,7 @@ func (t trivialModule) HandleUpdate(update tgbotapi.Update, bot *tgbotapi.BotAPI
 }
 
 func (t trivialModule) ShouldHandle(update tgbotapi.Update) bool {
-	return t.shouldHandle.Test(update)
+	return t.shouldHandle.ShouldHandle(update)
 }
 
 // Stateless creates a 'stateless' module.
