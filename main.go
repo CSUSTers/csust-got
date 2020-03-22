@@ -3,6 +3,7 @@ package main
 import (
 	"csust-got/base"
 	"csust-got/config"
+	"csust-got/context"
 	"csust-got/manage"
 	"csust-got/module"
 	"csust-got/module/preds"
@@ -26,11 +27,11 @@ func main() {
 
 	updates, err := bot.GetUpdatesChan(u)
 
-	ctx := module.GlobalContext(orm.GetClient(), config.BotConfig)
+	ctx := context.Global(orm.GetClient(), config.BotConfig)
 	stickerContext := ctx.SubContext("no sticker")
 	handles := []struct {
 		mod module.Module
-		ctx module.Context
+		ctx context.Context
 	}{
 		//{module.IsolatedChat(base.IsoHello), ctx.SubContext("hello")},
 		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say_hello")},

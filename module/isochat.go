@@ -1,6 +1,7 @@
 package module
 
 import (
+	"csust-got/context"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 )
@@ -14,7 +15,7 @@ type isolatedChatModule struct {
 	factory        Factory
 }
 
-func (i *isolatedChatModule) HandleUpdate(context Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+func (i *isolatedChatModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	// Registered chat.
 	chat := update.Message.Chat
 	newCtx := context.SubContext(fmt.Sprint(chat.ID))

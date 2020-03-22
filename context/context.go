@@ -1,4 +1,4 @@
-package module
+package context
 
 import (
 	"csust-got/config"
@@ -32,7 +32,7 @@ func (ctx Context) SubContext(sub string) Context {
 	}
 }
 
-func GlobalContext(globalClient *redis.Client, globalConfig *config.Config) Context {
+func Global(globalClient *redis.Client, globalConfig *config.Config) Context {
 	return Context{
 		namespace:    "",
 		globalClient: globalClient,
