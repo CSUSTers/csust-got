@@ -1,8 +1,8 @@
 package base
 
 import (
+    "csust-got/util"
     tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-    "log"
 )
 
 func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
@@ -16,11 +16,7 @@ func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 func sendNotificationTo(bot *tgbotapi.BotAPI, chatID int64, text string) {
     message := tgbotapi.NewMessage(chatID, text)
-    _, err := bot.Send(message)
-    if err != nil {
-        log.Println("ERROR: Can't send message")
-        log.Println(err.Error())
-    }
+    util.SendMessage(bot, message)
 }
 
 func getName(user tgbotapi.User) string {
