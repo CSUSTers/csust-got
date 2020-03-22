@@ -1,13 +1,23 @@
 package module
 
-import "fmt"
+import (
+	"csust-got/config"
+	"fmt"
+	"github.com/go-redis/redis/v7"
+)
 
 type Context struct {
-	namespace string
+	namespace    string
+	globalClient *redis.Client
+	globalConfig *config.Config
 }
 
-func NewContext(namespace string) Context {
-	return Context{namespace: namespace}
+func (ctx Context) GlobalClient() *redis.Client {
+	return ctx.globalClient
+}
+
+func (ctx Context) GlobalConfig() *config.Config {
+	return ctx.globalConfig
 }
 
 func (ctx Context) WrapKey(key string) string {
@@ -15,9 +25,17 @@ func (ctx Context) WrapKey(key string) string {
 }
 
 func (ctx Context) SubContext(sub string) Context {
-	return NewContext(ctx.WrapKey(sub))
+	return Context{
+		ctx.WrapKey(sub),
+		ctx.globalClient,
+		ctx.globalConfig,
+	}
 }
 
-func GlobalContext() Context {
-	return Context{namespace: ""}
+func GlobalContext(globalClient *redis.Client, globalConfig *config.Config) Context {
+	return Context{
+		namespace:    "",
+		globalClient: globalClient,
+		globalConfig: globalConfig,
+	}
 }

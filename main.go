@@ -3,7 +3,8 @@ package main
 import (
 	"csust-got/config"
 	"csust-got/module"
-	"csust-got/module/conds"
+	"csust-got/module/preds"
+	"csust-got/orm"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 )
@@ -21,8 +22,8 @@ func hello(tgbotapi.Update) module.Module {
 		return running
 	}
 	return module.Stateless(handle,
-		conds.IsCommand("hello").SideEffectOnTrue(toggleRunning).
-			Or(conds.BoolFunction(getRunning)))
+		preds.IsCommand("hello").SideEffectOnTrue(toggleRunning).
+			Or(preds.BoolFunction(getRunning)))
 }
 
 func main() {
@@ -40,18 +41,16 @@ func main() {
 
 	updates, err := bot.GetUpdatesChan(u)
 
-	ctx := module.GlobalContext()
+	ctx := module.GlobalContext(orm.GetClient(), config.BotConfig)
 	handles := []struct {
 		mod module.Module
 		ctx module.Context
 	}{
-		{module.IsolatedChat(hello, conds.IsCommand("hello")), ctx.SubContext("hello")},
+		{module.IsolatedChat(hello, preds.IsCommand("hello")), ctx.SubContext("hello")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
-			if handle.mod.ShouldHandle(handle.ctx, update) {
-				go handle.mod.HandleUpdate(handle.ctx, update, bot)
-			}
+			go handle.mod.HandleUpdate(handle.ctx, update, bot)
 		}
 	}
 }

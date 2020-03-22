@@ -1,4 +1,4 @@
-package conds
+package preds
 
 import tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 

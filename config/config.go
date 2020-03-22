@@ -1,12 +1,12 @@
 package config
 
 import (
+	"github.com/go-redis/redis/v7"
 	"io/ioutil"
 	"log"
 	"os"
 	"path"
 )
-
 
 var BotConfig *Config
 
@@ -29,7 +29,7 @@ func init() {
 
 // Config the interface for common configs.
 type Config struct {
-	Token string
+	Token     string
 	RedisAddr string
 	RedisPass string
 	DebugMode bool
@@ -64,8 +64,15 @@ func FromEnv() *Config {
 			Token:     token,
 			RedisAddr: redisAddr,
 			RedisPass: redisPass,
-			DebugMode: debug=="true",
+			DebugMode: debug == "true",
 		}
 	}
 	return nil
+}
+
+func (c Config) NewRedisClient() *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:     c.RedisAddr,
+		Password: c.RedisPass,
+	})
 }
