@@ -1,6 +1,7 @@
 package main
 
 import (
+	"csust-got/base"
 	"csust-got/config"
 	"csust-got/module"
 	"csust-got/module/preds"
@@ -47,6 +48,7 @@ func main() {
 		ctx module.Context
 	}{
 		{module.IsolatedChat(hello, preds.IsCommand("hello")), ctx.SubContext("hello")},
+		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("sayhello")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
