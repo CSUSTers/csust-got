@@ -25,9 +25,10 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	resultChan := make(chan HandleResult, len(p))
 	for i, module := range p {
 		ctx := context.SubContext(fmt.Sprint(i))
+		m := module
 		log.Printf("parallelModules: Send to subcontext %v\n", ctx)
 		go func() {
-			resultChan <- module.HandleUpdate(ctx, update, bot)
+			resultChan <- m.HandleUpdate(ctx, update, bot)
 		}()
 	}
 	for r := range resultChan {
