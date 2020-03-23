@@ -5,6 +5,7 @@ import (
     "csust-got/util"
     tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
     "math/rand"
+    "strconv"
     "time"
 )
 
@@ -14,7 +15,7 @@ import (
 func FakeBanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
     sec := time.Duration(rand.Intn(30)+90)*time.Second
     chatID := update.Message.Chat.ID
-    text := "我实现了你的愿望！现在好好享用这" + string(sec) + "秒~"
+    text := "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
     message := tgbotapi.NewMessage(chatID, text)
     message.ReplyToMessageID = update.Message.MessageID
     util.SendMessage(bot, message)
