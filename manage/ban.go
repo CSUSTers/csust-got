@@ -41,6 +41,8 @@ func banSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, duration time.Du
     }
 
     resp, err := bot.RestrictChatMember(restrictConfig)
+    log.Println("RestrictChatMember")
+    log.Println(resp)
     if err != nil {
         log.Println("ERROR: Can't restrict chat member.")
         log.Println(err.Error())
