@@ -6,8 +6,18 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+type HandleResult int
+
+const (
+	NextOfChain HandleResult = iota
+	NoMore
+)
+
 type Module interface {
-	HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI)
+	// HandleUpdate should handle a update, and return whether the next handler of chain should be handed.
+	// Note your module might be executed 'parallel' default, which will ignore your returning value.
+	// If you want to register a 'chain of filter', use `Chain` please.
+	HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult
 }
 type HandleFunc func(update tgbotapi.Update, bot *tgbotapi.BotAPI)
 type StatefulHandleFunc func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI)
@@ -15,8 +25,9 @@ type trivialModule struct {
 	handleUpdate StatefulHandleFunc
 }
 
-func (t trivialModule) HandleUpdate(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+func (t trivialModule) HandleUpdate(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	t.handleUpdate(ctx, update, bot)
+	return NextOfChain
 }
 
 // Stateful warps a stateful function to a Module.
