@@ -8,6 +8,7 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
+	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 )
@@ -21,7 +22,7 @@ func main() {
 	bot.Debug = config.BotConfig.DebugMode
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
-	log.Printf("Bot\n%v", bot)
+	fmt.Printf("Bot\n%v", bot)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
