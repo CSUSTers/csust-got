@@ -21,6 +21,7 @@ func main() {
 	bot.Debug = config.BotConfig.DebugMode
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
+	log.Printf("Bot\n%v", bot)
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -39,8 +40,10 @@ func main() {
 		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello_to_all")},
 		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")), stickerContext},
 		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), stickerContext},
+		{module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")), ctx.SubContext("ban_self")},
 	}
 	for update := range updates {
+		log.Printf("Update\n%v", update)
 		for _, handle := range handles {
 			go handle.mod.HandleUpdate(handle.ctx, update, bot)
 		}

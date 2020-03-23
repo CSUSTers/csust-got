@@ -30,7 +30,7 @@ func NoSticker(update tgbotapi.Update) module.Module {
 	return module.Stateful(handler)
 }
 
-// If a message has Sticker, the message will arrive this function.
+// DeleteSticker is a handle, if a message has Sticker, the message will arrive this function.
 // If this chat in NoStickerMode, Sticker may be deleted.
 func DeleteSticker(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {

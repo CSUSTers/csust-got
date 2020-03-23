@@ -9,6 +9,8 @@ import (
 	"log"
 )
 
+
+// Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
@@ -23,6 +25,8 @@ func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	util.SendMessage(bot, messageReply)
 }
 
+
+// HelloToAll is handle for command `hello_to_all`
 func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
@@ -37,6 +41,8 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	util.SendMessage(bot, messageReply)
 }
 
+
+// IsoHello is handle for auto hello to someone, just for test, we not use it.
 func IsoHello(tgbotapi.Update) module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		enable, err := ctx.GlobalClient().Get(ctx.WrapKey("enabled")).Int()
