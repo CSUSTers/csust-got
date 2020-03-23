@@ -6,7 +6,7 @@ import (
 )
 
 func NewUser() *tgbotapi.User {
-    userID := rand.Intn(1<<63)
+    userID := rand.Intn(1<<31)
     return &tgbotapi.User{
         ID:           userID,
         FirstName:    "FirstName",

@@ -9,8 +9,8 @@ import (
 func NewMessageFromGroup() *tgbotapi.Message {
     userA := NewUser()
     chatA := NewGroupChat()
-    date := rand.Intn(1<<63)
-    id := rand.Intn(1<<63)
+    date := rand.Intn(1<<31)
+    id := rand.Intn(1<<31)
     return &tgbotapi.Message{
         MessageID:             id,
         From:                  userA,
@@ -24,8 +24,8 @@ func NewMessageFromGroup() *tgbotapi.Message {
 func NewCommand(command string) *tgbotapi.Message {
     userA := NewUser()
     chatA := NewGroupChat()
-    date := rand.Intn(1<<63)
-    id := rand.Intn(1<<63)
+    date := rand.Intn(1<<31)
+    id := rand.Intn(1<<31)
     return &tgbotapi.Message{
         MessageID:             id,
         From:                  userA,

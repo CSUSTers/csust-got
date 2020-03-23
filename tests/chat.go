@@ -6,7 +6,7 @@ import (
 )
 
 func NewGroupChat() *tgbotapi.Chat {
-    chatID := -rand.Int63n(1 << 63)
+    chatID := -rand.Int63n(1 << 62)
     return &tgbotapi.Chat{
         ID:                  chatID,
         Type:                "supergroup",
@@ -16,7 +16,7 @@ func NewGroupChat() *tgbotapi.Chat {
 }
 
 func NewPrivateChat() *tgbotapi.Chat {
-    chatID := rand.Int63n(1 << 63)
+    chatID := rand.Int63n(1 << 62)
     return &tgbotapi.Chat{
         ID:        chatID,
         Type:      "private",

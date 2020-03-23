@@ -7,7 +7,7 @@ import (
 
 
 func NewUpdateMessageFromGroup() *tgbotapi.Update {
-    id := rand.Intn(1<<63)
+    id := rand.Intn(1<<62)
     message := NewMessageFromGroup()
     return &tgbotapi.Update{
         UpdateID:           id,
@@ -17,7 +17,7 @@ func NewUpdateMessageFromGroup() *tgbotapi.Update {
 
 
 func NewUpdateCommand(command string) *tgbotapi.Update {
-    id := rand.Intn(1<<63)
+    id := rand.Intn(1<<62)
     message := NewCommand(command)
     return &tgbotapi.Update{
         UpdateID:           id,
