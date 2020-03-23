@@ -5,6 +5,7 @@ import (
     tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
     "log"
     "math/rand"
+    "strconv"
     "time"
 )
 
@@ -15,7 +16,7 @@ func BanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
     chatID := update.Message.Chat.ID
     text := "太强了，我居然ban不掉您，您TQL！"
     if BanSomeone(bot, chatID, update.Message.From.ID, sec) {
-        text = "我实现了你的愿望！现在好好享用这" + string(int64(sec.Seconds())) + "秒~"
+        text = "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
     }
     message := tgbotapi.NewMessage(chatID, text)
     message.ReplyToMessageID = update.Message.MessageID
