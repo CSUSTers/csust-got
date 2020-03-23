@@ -33,11 +33,11 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	}
 	for r := range resultChan {
 		log.Printf("parallelModules: receive from handler %#v\n", r)
-		if r == NoMore {
-			return NoMore
+		if r == NextOfChain {
+			return NextOfChain
 		}
 	}
-	return NextOfChain
+	return NoMore
 }
 
 type sharedContext []Module
