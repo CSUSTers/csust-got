@@ -40,6 +40,7 @@ func main() {
 		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")), stickerContext},
 		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), stickerContext},
 		{module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")), ctx.SubContext("ban_self")},
+		{module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")), ctx.SubContext("fake_ban_myself")},
 	}
 	for update := range updates {
 		for _, handle := range handles {
