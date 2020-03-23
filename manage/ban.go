@@ -33,7 +33,7 @@ func banSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, duration time.Du
 
     restrictConfig := tgbotapi.RestrictChatMemberConfig {
         ChatMemberConfig:      chatMember,
-        UntilDate:             time.Now().Add(duration).UTC().Unix(),
+        UntilDate:             time.Now().Add(duration).In(time.UTC).Unix(),
         CanSendMessages:       &canSendMessages,
         CanSendMediaMessages:  nil,
         CanSendOtherMessages:  nil,
