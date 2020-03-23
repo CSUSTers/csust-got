@@ -28,23 +28,17 @@ func main() {
 	updates, err := bot.GetUpdatesChan(u)
 
 	ctx := context.Global(orm.GetClient(), config.BotConfig)
-	stickerContext := ctx.SubContext("no sticker")
-	handles := []struct {
-		mod module.Module
-		ctx context.Context
-	}{
-		//{module.IsolatedChat(base.IsoHello), ctx.SubContext("hello")},
-		{module.Stateless(base.Hello, preds.IsCommand("say_hello")), ctx.SubContext("say_hello")},
-		{module.Stateless(base.WelcomeNewMember, preds.NonEmpty), ctx.SubContext("welcome")},
-		{module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")), ctx.SubContext("hello_to_all")},
-		{module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")), stickerContext},
-		{module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker), stickerContext},
-		{module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")), ctx.SubContext("ban_self")},
-		{module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")), ctx.SubContext("fake_ban_myself")},
-	}
+	handles := module.Parallel([]module.Module{
+		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
+		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
+		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
+		module.SharedContext([]module.Module{
+			module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
+			module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)}),
+		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
+		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
+	})
 	for update := range updates {
-		for _, handle := range handles {
-			go handle.mod.HandleUpdate(handle.ctx, update, bot)
-		}
+		go handles.HandleUpdate(ctx, update, bot)
 	}
 }
