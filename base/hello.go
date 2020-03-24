@@ -64,13 +64,20 @@ func IsoHello(tgbotapi.Update) module.Module {
 func Shutdown(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
 		key := "shutdown"
+		shutdown, err := util.GetBool(ctx, key)
+		if err != nil {
+			log.Println("ERROR: failed to access redis.", err)
+		}
 		if preds.IsCommand("shutdown").ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩。晚安。")
-			if err := util.WriteBool(ctx, key, true); err != nil {
+			if shutdown {
+				msg.Text = "我已经睡了，还请不要再找我了……"
+			} else if err := util.WriteBool(ctx, key, true); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "睡不着……"
 			}
 			util.SendMessage(bot, msg)
+			return module.NoMore
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！")
@@ -79,10 +86,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 				msg.Text = "我不愿面对这苦涩的一天……"
 			}
 			util.SendMessage(bot, msg)
-		}
-		shutdown, err := util.GetBool(ctx, key)
-		if err != nil {
-			log.Println("ERROR: failed to access redis.", err)
+			return module.NextOfChain
 		}
 		if shutdown {
 			return module.NoMore
