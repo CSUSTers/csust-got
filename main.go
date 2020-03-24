@@ -39,7 +39,7 @@ func main() {
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 	})
 	handles = module.Sequential([]module.Module{
-		base.Shutdown(),
+		module.IsolatedChat(base.Shutdown),
 		handles,
 	})
 	for update := range updates {
