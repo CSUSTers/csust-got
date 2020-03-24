@@ -2,6 +2,7 @@ package module
 
 import (
 	"csust-got/context"
+	"csust-got/module/preds"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -64,4 +65,19 @@ func Parallel(group []Module) Module {
 // SharedContext makes a group of modules execute SEQUENTIAL and share the exact one Context.
 func SharedContext(group []Module) Module {
 	return sharedContext(group)
+}
+
+// BlockWhen blocks next of chain when the predicate returns false.
+func BlockWhen(predicate preds.Predicate) Module {
+	return trivialModule{handleUpdate: func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+		if predicate.ShouldHandle(update) {
+			return NextOfChain
+		}
+		return NoMore
+	}}
+}
+
+// Filter crates a Module that can block next of chain by its return value.
+func Filter(f ChainedHandleFunc) Module {
+	return trivialModule{f}
 }

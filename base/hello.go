@@ -9,7 +9,6 @@ import (
 	"log"
 )
 
-
 // Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
@@ -24,7 +23,6 @@ func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	util.SendMessage(bot, messageReply)
 }
-
 
 // HelloToAll is handle for command `hello_to_all`
 func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
@@ -41,24 +39,19 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	util.SendMessage(bot, messageReply)
 }
 
-
 // IsoHello is handle for auto hello to someone, just for test, we not use it.
 func IsoHello(tgbotapi.Update) module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		enable, err := ctx.GlobalClient().Get(ctx.WrapKey("enabled")).Int()
-		enabled := enable > 0
+		key := "enabled"
+		enabled, err := util.GetBool(ctx, key)
 		if err != nil {
 			log.Println("ERROR: failed to access redis.", err)
 		}
 
 		if preds.IsCommand("hello").ShouldHandle(update) {
-			var newI int
-			if enabled {
-				newI = 0
-			} else {
-				newI = 1
+			if err := util.ToggleBool(ctx, key); err != nil {
+				log.Println("ERROR: failed to access redis.", err)
 			}
-			ctx.GlobalClient().Set(ctx.WrapKey("enabled"), newI, 0)
 		}
 
 		if enabled {
@@ -66,4 +59,29 @@ func IsoHello(tgbotapi.Update) module.Module {
 		}
 	}
 	return module.Stateful(handle)
+}
+
+func Shutdown() module.Module {
+	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
+		key := "shutdown"
+		if preds.IsCommand("shutdown").ShouldHandle(update) {
+			if err := util.WriteBool(ctx, key, true); err != nil {
+				log.Println("ERROR: failed to access redis.", err)
+			}
+		}
+		if preds.IsCommand("boot").ShouldHandle(update) {
+			if err := util.WriteBool(ctx, key, false); err != nil {
+				log.Println("ERROR: failed to access redis.", err)
+			}
+		}
+		shutdown, err := util.GetBool(ctx, key)
+		if err != nil {
+			log.Println("ERROR: failed to access redis.", err)
+		}
+		if shutdown {
+			return module.NoMore
+		}
+		return module.NextOfChain
+	}
+	return module.Filter(handler)
 }

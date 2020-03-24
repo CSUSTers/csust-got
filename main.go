@@ -38,6 +38,10 @@ func main() {
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 	})
+	handles = module.Sequential([]module.Module{
+		base.Shutdown(),
+		handles,
+	})
 	for update := range updates {
 		go handles.HandleUpdate(ctx, update, bot)
 	}
