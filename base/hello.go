@@ -5,8 +5,10 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+	"time"
 )
 
 // Hello is handle for command `hello`
@@ -68,7 +70,9 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		if err != nil {
 			log.Println("ERROR: failed to access redis.", err)
 		}
-		if preds.IsCommand("shutdown").ShouldHandle(update) {
+		if preds.IsCommand("shutdown").
+			Or(preds.IsCommand("halt")).
+			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩。晚安。")
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了……"
@@ -94,4 +98,28 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		return module.NextOfChain
 	}
 	return module.Filter(handler)
+}
+
+func RunTask() module.Module {
+	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+		message := update.Message
+		arg := message.CommandArguments()
+		newMessage := tgbotapi.NewMessage(message.Chat.ID, "")
+		defer util.SendMessage(bot, newMessage)
+		var delay time.Duration
+		var text string
+		if n, err := fmt.Sscanf(arg, "%d %s", &delay, &text); n < 1 || err != nil {
+			newMessage.Text = "你说啥，我听不太懂欸……"
+		}
+		newMessage.Text = fmt.Sprintf("好的，在 %d 秒后我会来叫你……“%s”，嗯。", delay, text)
+		task := func() {
+			msg := tgbotapi.NewMessage(message.Chat.ID, "")
+			uid := message.From.UserName
+			msg.Text = fmt.Sprintf("@%s 我来了，你要我提醒你……“%s”，大概没错吧。", uid, text)
+			util.SendMessage(bot, msg)
+		}
+		ctx.DoAfterNamed(task, delay*time.Second, text)
+	}
+	m := module.Stateful(handle)
+	return module.WithPredicate(m, preds.IsCommand("run_after_sec"))
 }
