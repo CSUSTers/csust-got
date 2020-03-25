@@ -107,7 +107,7 @@ func RunTask() module.Module {
 		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你说啥，我听不太懂欸……")
 		var delay time.Duration
 		var text string
-		if n, err := fmt.Sscanf(arg, "%d %s", &delay, &text); n < 1 || err != nil {
+		if n, err := fmt.Sscanf(arg, "%d %s", &delay, &text); n < 1 || err != nil || delay < 0 {
 			util.SendMessage(bot, newMessage)
 			return
 		}
