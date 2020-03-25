@@ -3,9 +3,9 @@ package context
 import (
 	"context"
 	"csust-got/config"
-	"csust-got/util"
 	"fmt"
 	"github.com/go-redis/redis/v7"
+	"math/rand"
 	"time"
 )
 
@@ -15,6 +15,10 @@ type TaskInfo struct {
 	ID     TaskID
 	Name   string
 	Cancel context.CancelFunc
+}
+
+func NewRandomKey() int64 {
+	return rand.Int63()
 }
 
 type Context struct {
@@ -39,9 +43,9 @@ func (ctx Context) WrapKey(key string) string {
 
 func (ctx Context) DoAfterNamed(task Task, delay time.Duration, name string) TaskID {
 	sub, cancel := context.WithCancel(ctx.executeCtx)
-	id := TaskID(util.NewRandomKey())
+	id := TaskID(NewRandomKey())
 	for _, ok := ctx.runningTasks[id]; ok; {
-		id = TaskID(util.NewRandomKey())
+		id = TaskID(NewRandomKey())
 	}
 	t := TaskInfo{
 		ID:     id,
