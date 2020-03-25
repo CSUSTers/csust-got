@@ -104,12 +104,12 @@ func RunTask() module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		message := update.Message
 		arg := message.CommandArguments()
-		newMessage := tgbotapi.NewMessage(message.Chat.ID, "")
-		defer util.SendMessage(bot, newMessage)
+		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你说啥，我听不太懂欸……")
 		var delay time.Duration
 		var text string
 		if n, err := fmt.Sscanf(arg, "%d %s", &delay, &text); n < 1 || err != nil {
-			newMessage.Text = "你说啥，我听不太懂欸……"
+			util.SendMessage(bot, newMessage)
+			return
 		}
 		newMessage.Text = fmt.Sprintf("好的，在 %d 秒后我会来叫你……“%s”，嗯。", delay, text)
 		task := func() {
@@ -119,6 +119,7 @@ func RunTask() module.Module {
 			util.SendMessage(bot, msg)
 		}
 		ctx.DoAfterNamed(task, delay*time.Second, text)
+		util.SendMessage(bot, newMessage)
 	}
 	m := module.Stateful(handle)
 	return module.WithPredicate(m, preds.IsCommand("run_after_sec"))
