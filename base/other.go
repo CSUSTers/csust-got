@@ -20,6 +20,6 @@ func FakeBanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
     message.ReplyToMessageID = update.Message.MessageID
     util.SendMessage(bot, message)
     if rand.Intn(100) < 2 {
-        manage.BanSomeone(bot, chatID, update.Message.From.ID, sec)
+        manage.BanSomeone(bot, chatID, update.Message.From.ID, true, sec)
     }
 }
