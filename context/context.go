@@ -4,9 +4,16 @@ import (
 	"csust-got/config"
 	"fmt"
 	"github.com/go-redis/redis/v7"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/checker/decls"
 	"math/rand"
 	"time"
+)
+
+const (
+	ConstChatID   = "chatID"
+	ConstChatName = "chatName"
 )
 
 type Task func()
@@ -61,8 +68,11 @@ func EvalCELWithVals(env *cel.Env, prog string, vals map[string]interface{}) (in
 	return result.Value(), nil
 }
 
-func (ctx Context) EvalCEL(cel string) (interface{}, error) {
-	return EvalCELWithVals(ctx.cel, cel, make(map[string]interface{}))
+func (ctx Context) EvalCEL(cel string, msg *tgbotapi.Message) (interface{}, error) {
+	return EvalCELWithVals(ctx.cel, cel, map[string]interface{}{
+		ConstChatID:   msg.Chat.ID,
+		ConstChatName: fmt.Sprintf("%s %s", msg.Chat.FirstName, msg.Chat.LastName),
+	})
 }
 
 func (ctx Context) DoAfterNamed(task Task, delay time.Duration, name string) TaskID {
@@ -96,7 +106,9 @@ func (ctx Context) SubContext(sub string) Context {
 }
 
 func Global(globalClient *redis.Client, globalConfig *config.Config) Context {
-	env, _ := cel.NewEnv()
+	env, _ := cel.NewEnv(cel.Declarations(
+		decls.NewIdent(ConstChatID, decls.Int, nil),
+		decls.NewIdent(ConstChatName, decls.String, nil)))
 	return Context{
 		namespace:    "",
 		globalClient: globalClient,
