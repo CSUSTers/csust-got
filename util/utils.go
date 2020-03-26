@@ -45,7 +45,7 @@ func GetAdminList(bot *tgbotapi.BotAPI, chatID int64) []tgbotapi.ChatMember {
 func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 	admins := GetAdminList(bot, chatID)
 	for _, v := range admins {
-		if v.User.ID == userID && v.CanRestrictMembers {
+		if v.User.ID == userID && (v.CanRestrictMembers || v.Status == "creator") {
 			return true
 		}
 	}

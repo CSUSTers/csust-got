@@ -139,15 +139,15 @@ func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, h
 // only allow text or media message
 func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
 
-    flag := true
+    flag := false
 
     restrictConfig := tgbotapi.RestrictChatMemberConfig {
         ChatMemberConfig:      chatMember,
         UntilDate:             time.Now().Add(duration).UTC().Unix(),
-        CanSendMessages:       &flag,
-        CanSendMediaMessages:  &flag,
-        CanSendOtherMessages:  nil,
-        CanAddWebPagePreviews: nil,
+        CanSendMessages:       nil,
+        CanSendMediaMessages:  nil,
+        CanSendOtherMessages:  &flag,
+        CanAddWebPagePreviews: &flag,
     }
 
     return ban(bot, restrictConfig)
