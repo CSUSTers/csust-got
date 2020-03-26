@@ -71,7 +71,7 @@ func EvalCELWithVals(env *cel.Env, prog string, vals map[string]interface{}) (in
 func (ctx Context) EvalCEL(cel string, msg *tgbotapi.Message) (interface{}, error) {
 	return EvalCELWithVals(ctx.cel, cel, map[string]interface{}{
 		ConstChatID:   msg.Chat.ID,
-		ConstChatName: fmt.Sprintf("%s %s", msg.Chat.FirstName, msg.Chat.LastName),
+		ConstChatName: fmt.Sprintf("%s", msg.Chat.Title),
 	})
 }
 

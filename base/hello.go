@@ -135,6 +135,7 @@ func Evaluating(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAP
 	result, err := ctx.EvalCEL(text, message)
 	reply := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprint(result))
 	reply.ReplyToMessageID = message.MessageID
+	reply.ParseMode = "markdown"
 	if err != nil {
 		reply.Text = fmt.Sprintf("我没办法做这种事。\n```\n%s\n```", err)
 	}
