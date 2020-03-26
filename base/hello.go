@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/command"
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/module/preds"
@@ -103,15 +104,19 @@ func Shutdown(update tgbotapi.Update) module.Module {
 func RunTask() module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		message := update.Message
-		arg := message.CommandArguments()
+		cmd, _ := command.FromMessage(message)
+
 		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你说啥，我听不太懂欸……")
-		var delay time.Duration
-		var text string
-		if n, err := fmt.Sscanf(arg, "%d %s", &delay, &text); n < 1 || err != nil || delay < 0 {
+
+		delay, err := util.EvalDuration(cmd.Arg(0))
+		text := cmd.Arg(1)
+		if err != nil || delay < 1 {
 			util.SendMessage(bot, newMessage)
 			return
 		}
-		newMessage.Text = fmt.Sprintf("好的，在 %d 秒后我会来叫你……“%s”，嗯。", delay, text)
+
+		newMessage.Text = fmt.Sprintf("好的，在 %v 后我会来叫你……“%s”，嗯。", delay, text)
+		newMessage.ReplyToMessageID = message.MessageID
 		task := func() {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "")
 			uid := message.From.UserName
@@ -122,5 +127,5 @@ func RunTask() module.Module {
 		util.SendMessage(bot, newMessage)
 	}
 	m := module.Stateful(handle)
-	return module.WithPredicate(m, preds.IsCommand("run_after_sec"))
+	return module.WithPredicate(m, preds.IsCommand("run_after"))
 }
