@@ -38,3 +38,4 @@ func RunTask() module.Module {
     m := module.Stateful(handle)
     return module.WithPredicate(m, preds.IsCommand("run_after"))
 }
+

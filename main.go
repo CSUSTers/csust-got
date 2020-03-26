@@ -39,6 +39,7 @@ func main() {
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		timer.RunTask(),
+		module.WithPredicate(module.Stateful(base.Evaluating), preds.IsCommand("eval")),
 	})
 	handles = module.Sequential([]module.Module{
 		module.IsolatedChat(base.Shutdown),
