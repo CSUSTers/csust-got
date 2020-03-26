@@ -56,6 +56,8 @@ func BanCommand(update tgbotapi.Update, bot *tgbotapi.BotAPI, hard bool) {
 			targetSlice = append(targetSlice, username)
 		}
 	}
+	log.Println(cmdTargetSlice)
+	log.Println(targetSlice)
 
 	if len(targetSlice) > 0 {
 		success := BanMultiByUsername(bot, chatID, targetSlice, hard, banTime)
@@ -137,15 +139,15 @@ func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, h
 // only allow text or media message
 func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
 
-    flag := false
+    flag := true
 
     restrictConfig := tgbotapi.RestrictChatMemberConfig {
         ChatMemberConfig:      chatMember,
         UntilDate:             time.Now().Add(duration).UTC().Unix(),
-        CanSendMessages:       nil,
-        CanSendMediaMessages:  nil,
-        CanSendOtherMessages:  &flag,
-        CanAddWebPagePreviews: &flag,
+        CanSendMessages:       &flag,
+        CanSendMediaMessages:  &flag,
+        CanSendOtherMessages:  nil,
+        CanAddWebPagePreviews: nil,
     }
 
     return ban(bot, restrictConfig)
