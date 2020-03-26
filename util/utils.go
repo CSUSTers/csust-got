@@ -5,6 +5,7 @@ import (
 	"log"
 )
 
+// SendMessage will use the bot to send a message.
 func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	_, err := bot.Send(message)
 	if err != nil {
@@ -13,3 +14,10 @@ func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	}
 }
 
+func GetName(user tgbotapi.User) string {
+	name := user.FirstName
+	if user.LastName != "" {
+		name += " " + user.LastName
+	}
+	return name
+}
