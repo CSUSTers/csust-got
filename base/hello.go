@@ -9,7 +9,6 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
-	"time"
 )
 
 // Hello is handle for command `hello`
@@ -123,7 +122,7 @@ func RunTask() module.Module {
 			msg.Text = fmt.Sprintf("@%s 我来了，你要我提醒你……“%s”，大概没错吧。", uid, text)
 			util.SendMessage(bot, msg)
 		}
-		ctx.DoAfterNamed(task, delay*time.Second, text)
+		ctx.DoAfterNamed(task, delay, text)
 		util.SendMessage(bot, newMessage)
 	}
 	m := module.Stateful(handle)
