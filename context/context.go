@@ -14,6 +14,7 @@ import (
 const (
 	ConstChatID   = "chatID"
 	ConstChatName = "chatName"
+	ConstMessage  = "message"
 )
 
 type Task func()
@@ -72,6 +73,7 @@ func (ctx Context) EvalCEL(cel string, msg *tgbotapi.Message) (interface{}, erro
 	return EvalCELWithVals(ctx.cel, cel, map[string]interface{}{
 		ConstChatID:   msg.Chat.ID,
 		ConstChatName: fmt.Sprintf("%s", msg.Chat.Title),
+		ConstMessage:  msg,
 	})
 }
 
@@ -108,7 +110,8 @@ func (ctx Context) SubContext(sub string) Context {
 func Global(globalClient *redis.Client, globalConfig *config.Config) Context {
 	env, _ := cel.NewEnv(cel.Declarations(
 		decls.NewIdent(ConstChatID, decls.Int, nil),
-		decls.NewIdent(ConstChatName, decls.String, nil)))
+		decls.NewIdent(ConstChatName, decls.String, nil),
+		decls.NewIdent(ConstMessage, decls.Any, nil)))
 	return Context{
 		namespace:    "",
 		globalClient: globalClient,
