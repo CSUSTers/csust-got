@@ -1,4 +1,7 @@
 # csust-got
+
+[![Go Report](https://goreportcard.com/badge/github.com/csusters/csust-got)](https://goreportcard.com/report/github.com/csusters/csust-got)
+
 csust new telegram bot in go
 
 ## Deploy
