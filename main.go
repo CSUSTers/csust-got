@@ -8,6 +8,7 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
+	"csust-got/timer"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 )
@@ -37,7 +38,7 @@ func main() {
 			module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)}),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
-		base.RunTask(),
+		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
 		module.IsolatedChat(base.Shutdown),
