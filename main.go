@@ -39,6 +39,7 @@ func main() {
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
+		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{

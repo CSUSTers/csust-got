@@ -30,5 +30,15 @@ func (c Command) Argc() int {
 }
 
 func (c Command) Arg(idx int) string {
+	if idx >= c.Argc() {
+		return ""
+	}
 	return c.args[idx]
+}
+
+func (c Command) MultiArgsFrom(idx int) []string {
+	if idx >= c.Argc() {
+		return []string{}
+	}
+	return c.args[idx:]
 }
