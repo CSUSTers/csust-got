@@ -38,6 +38,41 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, duration time.Du
         UserID:             userID,
     }
 
+    return hardBan(bot, chatMember, duration)
+}
+
+// BanSomeone Use to ban someone, return true if success.
+func BanSomeoneByUsername(bot *tgbotapi.BotAPI, userName string, userID int, duration time.Duration) bool {
+
+    chatMember := tgbotapi.ChatMemberConfig{
+        UserID:             userID,
+        SuperGroupUsername: userName,
+    }
+
+    return hardBan(bot, chatMember, duration)
+}
+
+// only allow text or media message
+func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
+
+    canSendMessages := false
+
+    restrictConfig := tgbotapi.RestrictChatMemberConfig {
+        ChatMemberConfig:      chatMember,
+        UntilDate:             time.Now().Add(duration).UTC().Unix(),
+        CanSendMessages:       nil,
+        CanSendMediaMessages:  nil,
+        CanSendOtherMessages:  &canSendMessages,
+        CanAddWebPagePreviews: &canSendMessages,
+    }
+
+    return ban(bot, restrictConfig)
+}
+
+
+// can't send anything
+func hardBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
+
     canSendMessages := false
 
     restrictConfig := tgbotapi.RestrictChatMemberConfig {
@@ -48,6 +83,12 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, duration time.Du
         CanSendOtherMessages:  nil,
         CanAddWebPagePreviews: nil,
     }
+
+    return ban(bot, restrictConfig)
+}
+
+
+func ban(bot *tgbotapi.BotAPI, restrictConfig tgbotapi.RestrictChatMemberConfig) bool {
 
     resp, err := bot.RestrictChatMember(restrictConfig)
     if err != nil {
