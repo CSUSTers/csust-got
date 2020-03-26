@@ -4,9 +4,6 @@ import (
 	"csust-got/config"
 	"fmt"
 	"github.com/go-redis/redis/v7"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/checker/decls"
 	"math/rand"
 	"time"
 )
@@ -34,7 +31,6 @@ type Context struct {
 	globalClient *redis.Client
 	globalConfig *config.Config
 	runningTasks map[TaskID]TaskInfo
-	cel          *cel.Env
 }
 
 func (ctx Context) GlobalClient() *redis.Client {
@@ -47,34 +43,6 @@ func (ctx Context) GlobalConfig() *config.Config {
 
 func (ctx Context) WrapKey(key string) string {
 	return fmt.Sprintf("%s:%s", ctx.namespace, key)
-}
-
-func EvalCELWithVals(env *cel.Env, prog string, vals map[string]interface{}) (interface{}, error) {
-	parsed, issue := env.Parse(prog)
-	if issue != nil {
-		return nil, issue.Err()
-	}
-	checked, issue := env.Check(parsed)
-	if issue != nil {
-		return nil, issue.Err()
-	}
-	program, err := env.Program(checked)
-	if err != nil {
-		return nil, err
-	}
-	result, _, err := program.Eval(vals)
-	if err != nil {
-		return nil, err
-	}
-	return result.Value(), nil
-}
-
-func (ctx Context) EvalCEL(cel string, msg *tgbotapi.Message) (interface{}, error) {
-	return EvalCELWithVals(ctx.cel, cel, map[string]interface{}{
-		ConstChatID:   msg.Chat.ID,
-		ConstChatName: fmt.Sprintf("%s", msg.Chat.Title),
-		ConstMessage:  msg,
-	})
 }
 
 func (ctx Context) DoAfterNamed(task Task, delay time.Duration, name string) TaskID {
@@ -103,20 +71,14 @@ func (ctx Context) SubContext(sub string) Context {
 		ctx.globalClient,
 		ctx.globalConfig,
 		ctx.runningTasks,
-		ctx.cel,
 	}
 }
 
 func Global(globalClient *redis.Client, globalConfig *config.Config) Context {
-	env, _ := cel.NewEnv(cel.Declarations(
-		decls.NewIdent(ConstChatID, decls.Int, nil),
-		decls.NewIdent(ConstChatName, decls.String, nil),
-		decls.NewIdent(ConstMessage, decls.Any, nil)))
 	return Context{
 		namespace:    "",
 		globalClient: globalClient,
 		globalConfig: globalConfig,
 		runningTasks: make(map[TaskID]TaskInfo),
-		cel:          env,
 	}
 }
