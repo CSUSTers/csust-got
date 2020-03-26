@@ -3,8 +3,12 @@
 [![Go Report](https://goreportcard.com/badge/github.com/csusters/csust-got)](https://goreportcard.com/report/github.com/csusters/csust-got)
 [![codebeat badge](https://codebeat.co/badges/4d134b7f-e345-4378-b00d-7ab2177b94bc)](https://codebeat.co/projects/github-com-csusters-csust-got-master)
 ![GitHub language count](https://img.shields.io/github/languages/count/csusters/csust-got)
+![GitHub](https://img.shields.io/github/license/csusters/csust-got)
+
 ![GitHub code size](https://img.shields.io/github/languages/code-size/csusters/csust-got)
 ![GitHub repo size](https://img.shields.io/github/repo-size/csusters/csust-got)
+![GitHub issues](https://img.shields.io/github/issues/csusters/csust-got)
+![GitHub closed issues](https://img.shields.io/github/issues-closed/csusters/csust-got)
 
 csust new telegram bot in go
 
