@@ -38,6 +38,7 @@ func main() {
 			module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)}),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
+		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
