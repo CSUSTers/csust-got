@@ -54,7 +54,7 @@ func FakeBan(update tgbotapi.Update) module.Module {
 		}
 		return module.NextOfChain
 	}
-	return module.Sequential([]module.Module{module.Filter(interrupter), filteredBanner})
+	return module.SharedContext([]module.Module{module.Filter(interrupter), filteredBanner})
 }
 
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
