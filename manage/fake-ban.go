@@ -93,7 +93,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 		return "您在过去的24h里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。"
 	}
 	text, ok := genericBan(spec)
-	success, err := ctx.GlobalClient().SetXX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
+	success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
 	if err != nil {
 		text += fmt.Sprintf("世界正在变得躁动不安。。。")
 		log.Println("ERROR: redis access error.", err)
