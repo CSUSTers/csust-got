@@ -48,6 +48,7 @@ func FakeBan(update tgbotapi.Update) module.Module {
 		target := update.Message.From.ID
 		_, err := ctx.GlobalClient().Get(ctx.WrapKey(fmt.Sprint(target))).Result()
 		if err != redis.Nil {
+			_, _ = bot.DeleteMessage(tgbotapi.NewDeleteMessage(update.Message.Chat.ID, update.Message.MessageID))
 			return module.NoMore
 		}
 		return module.NextOfChain
