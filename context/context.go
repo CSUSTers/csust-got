@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-const (
-	ConstChatID   = "chatID"
-	ConstChatName = "chatName"
-	ConstMessage  = "message"
-)
-
 type Task func()
 type TaskID int64
 type TaskInfo struct {
@@ -76,7 +70,7 @@ func (ctx Context) SubContext(sub string) Context {
 
 func Global(globalClient *redis.Client, globalConfig *config.Config) Context {
 	return Context{
-		namespace:    "",
+		namespace:    "csust-got",
 		globalClient: globalClient,
 		globalConfig: globalConfig,
 		runningTasks: make(map[TaskID]TaskInfo),
