@@ -44,6 +44,7 @@ func main() {
 	})
 	handles = module.Sequential([]module.Module{
 		module.IsolatedChat(base.Shutdown),
+		module.IsolatedChat(manage.FakeBan),
 		handles,
 	})
 	for update := range updates {
