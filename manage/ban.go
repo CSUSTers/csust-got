@@ -49,32 +49,33 @@ func BanCommand(update tgbotapi.Update, bot *tgbotapi.BotAPI, hard bool) {
 	}
 	text := "我没办法完成你要我做的事……即便我已经很努力了……结局还是如此。"
 
-	cmdTargetSlice := cmd.MultiArgsFrom(1)
-	targetSlice := make([]string, 0)
-	for i := range cmdTargetSlice {
-		if username, ok := util.GetUserNameFromString(cmdTargetSlice[i]); ok {
-			targetSlice = append(targetSlice, username)
-		}
-	}
-	log.Println(cmdTargetSlice)
-	log.Println(targetSlice)
+	//cmdTargetSlice := cmd.MultiArgsFrom(1)
+	//targetSlice := make([]string, 0)
+	//for i := range cmdTargetSlice {
+	//	if username, ok := util.GetUserNameFromString(cmdTargetSlice[i]); ok {
+	//		targetSlice = append(targetSlice, username)
+	//	}
+	//}
+	//log.Println(cmdTargetSlice)
+	//log.Println(targetSlice)
 
-	if len(targetSlice) > 0 {
-		success := BanMultiByUsername(bot, chatID, targetSlice, hard, banTime)
-		if len(success) == 0 {
-			text = "我可能没有办法帮你完成你要我做的事情……只好……对不起！"
-		} else {
-			if len(success) == len(targetSlice) {
-				text = "委派下来的工作已经做完了。"
-			} else {
-				text = "我已经尝试尽力完成工作。"
-			}
-			for _, v := range success {
-				text += " ＠" + v
-			}
-			text += fmt.Sprintf(" 将会沉默 %d 秒。只不过……你真的希望事情变这样吗？", int64(banTime.Seconds()))
-		}
-	} else if update.Message.ReplyToMessage != nil {
+	//if len(targetSlice) > 0 {
+	//	success := BanMultiByUsername(bot, chatID, targetSlice, hard, banTime)
+	//	if len(success) == 0 {
+	//		text = "我可能没有办法帮你完成你要我做的事情……只好……对不起！"
+	//	} else {
+	//		if len(success) == len(targetSlice) {
+	//			text = "委派下来的工作已经做完了。"
+	//		} else {
+	//			text = "我已经尝试尽力完成工作。"
+	//		}
+	//		for _, v := range success {
+	//			text += " ＠" + v
+	//		}
+	//		text += fmt.Sprintf(" 将会沉默 %d 秒。只不过……你真的希望事情变这样吗？", int64(banTime.Seconds()))
+	//	}
+	//}
+	if update.Message.ReplyToMessage != nil {
 		if banTarget == nil {
 			banTarget = update.Message.ReplyToMessage.From
 		}
@@ -110,31 +111,33 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, hard bool, durat
 }
 
 // BanSomeoneByUsername Use to ban someone by username, return true if success.
-func BanSomeoneByUsername(bot *tgbotapi.BotAPI, chatID int64, username string, hard bool, duration time.Duration) bool {
-
-    chatMember := tgbotapi.ChatMemberConfig{
-        ChatID:             chatID,
-        SuperGroupUsername: username,
-    }
-
-	if hard {
-		return hardBan(bot, chatMember, duration)
-	}
-	return softBan(bot, chatMember, duration)
-}
+// Not Work
+//func BanSomeoneByUsername(bot *tgbotapi.BotAPI, chatID int64, username string, hard bool, duration time.Duration) bool {
+//
+//    chatMember := tgbotapi.ChatMemberConfig{
+//        ChatID:             chatID,
+//        SuperGroupUsername: username,
+//    }
+//
+//	if hard {
+//		return hardBan(bot, chatMember, duration)
+//	}
+//	return softBan(bot, chatMember, duration)
+//}
 
 
 // BanMultiByUsername Use to ban by slice of username, return true if success.
-func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, hard bool, duration time.Duration) []string {
-
-	success := make([]string, 0)
-	for i := range username {
-		if BanSomeoneByUsername(bot, chatID, username[i], hard, duration) {
-			success = append(success, username[i])
-		}
-	}
-	return success
-}
+// Not Work
+//func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, hard bool, duration time.Duration) []string {
+//
+//	success := make([]string, 0)
+//	for i := range username {
+//		if BanSomeoneByUsername(bot, chatID, username[i], hard, duration) {
+//			success = append(success, username[i])
+//		}
+//	}
+//	return success
+//}
 
 // only allow text or media message
 func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
