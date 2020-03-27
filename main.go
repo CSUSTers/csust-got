@@ -43,8 +43,8 @@ func main() {
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
-		module.IsolatedChat(base.Shutdown),
 		module.IsolatedChat(manage.FakeBan),
+		module.IsolatedChat(base.Shutdown),
 		handles,
 	})
 	for update := range updates {
