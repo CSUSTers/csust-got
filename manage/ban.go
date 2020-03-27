@@ -41,6 +41,7 @@ func FakeBan(update tgbotapi.Update) module.Module {
 		} else {
 			msg.Text = fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", util.GetName(*banTarget), banTime)
 		}
+		util.SendMessage(bot, msg)
 	}
 	filteredBanner := module.WithPredicate(module.Stateful(banner), preds.IsCommand("fake_ban"))
 	interrupter := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
