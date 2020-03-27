@@ -31,16 +31,31 @@ func FakeBan(update tgbotapi.Update) module.Module {
 			banTarget = fwd.From
 		}
 
+		isCD, err := ctx.GlobalClient().Get(ctx.WrapKey(strconv.Itoa(bigBrother.ID))).Result()
+		if err != nil && err != redis.Nil {
+			log.Println("ERROR: redis access error.")
+			return
+		}
+
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "你走到了我的尽头……你看破了我的一切，你到了我未尝到过之处。我什么也做不了。")
 		if banTarget == nil {
 			msg.Text = "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他；即便他是群主也义不容辞。"
-		} else if banTime <= 0 || banTime > 24*time.Hour {
+		} else if banTime <= 0 || banTime > 1*time.Hour {
 			msg.Text = "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。"
 		} else if err := ctx.GlobalClient().Set(ctx.WrapKey(fmt.Sprint(banTarget.ID)), "banned", banTime).Err(); err != nil {
 			log.Println("Failed to connect to redis: ", err)
 			msg.Text = "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。"
+		} else if isCD == "true" {
+			msg.Text = "您在过去的24h里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。"
 		} else {
 			msg.Text = fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", util.GetName(*banTarget), banTime)
+			ok, err := ctx.GlobalClient().SetXX(ctx.WrapKey(strconv.Itoa(bigBrother.ID)), "true", 24*time.Hour).Result()
+			if err != nil {
+				msg.Text += fmt.Sprintf("世界正在变得躁动不安。。。")
+				log.Println("ERROR: redis access error.")
+			} else if !ok {
+				msg.Text += fmt.Sprintf("世界正在变得躁动不安。。。")
+			}
 		}
 		util.SendMessage(bot, msg)
 	}
