@@ -5,7 +5,6 @@ import (
 	"csust-got/module/preds"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
-	"log"
 )
 
 type chainedModules []Module
@@ -27,13 +26,11 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	for i, module := range p {
 		ctx := context.SubContext(fmt.Sprint(i))
 		m := module
-		log.Printf("parallelModules: Send to subcontext %v\n", ctx)
 		go func() {
 			resultChan <- m.HandleUpdate(ctx, update, bot)
 		}()
 	}
 	for r := range resultChan {
-		log.Printf("parallelModules: receive from handler %#v\n", r)
 		if r == NextOfChain {
 			return NextOfChain
 		}
