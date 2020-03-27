@@ -36,7 +36,7 @@ func FakeBan(update tgbotapi.Update) module.Module {
 			msg.Text = "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他；即便他是群主也义不容辞。"
 		} else if banTime <= 0 || banTime > 24*time.Hour {
 			msg.Text = "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。"
-		} else if err := ctx.GlobalClient().Set(ctx.WrapKey(fmt.Sprint(banTarget.ID)), "banned", banTime); err != nil {
+		} else if err := ctx.GlobalClient().Set(ctx.WrapKey(fmt.Sprint(banTarget.ID)), "banned", banTime).Err(); err != nil {
 			log.Println("Failed to connect to redis: ", err)
 			msg.Text = "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。"
 		} else {
