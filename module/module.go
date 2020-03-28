@@ -42,10 +42,11 @@ func Stateful(f StatefulHandleFunc) Module {
 // WithPredicate warps a Module with specified Predicate.
 // The method `handleUpdate` will only be invoked when the Predicate is true.
 func WithPredicate(m Module, p preds.Predicate) Module {
-	return Stateful(func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	return Filter(func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 		if p.ShouldHandle(update) {
-			m.HandleUpdate(ctx, update, bot)
+			return m.HandleUpdate(ctx, update, bot)
 		}
+		return NextOfChain
 	})
 }
 
