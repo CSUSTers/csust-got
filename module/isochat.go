@@ -1,6 +1,7 @@
 package module
 
 import (
+	"csust-got/context"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 )
@@ -14,19 +15,18 @@ type isolatedChatModule struct {
 	factory        Factory
 }
 
-func (i *isolatedChatModule) HandleUpdate(context Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+func (i *isolatedChatModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	// Registered chat.
 	chat := update.Message.Chat
 	newCtx := context.SubContext(fmt.Sprint(chat.ID))
 	if module, ok := i.registeredMods[chat.ID]; ok {
-		module.HandleUpdate(newCtx, update, bot)
-		return
+		return module.HandleUpdate(newCtx, update, bot)
 	}
 
 	// not yet registered, register now!
 	module := i.factory(update)
 	i.registeredMods[chat.ID] = module
-	module.HandleUpdate(newCtx, update, bot)
+	return module.HandleUpdate(newCtx, update, bot)
 }
 
 // IsolatedChat returns a Module that will, for each incoming update, split it by chatID.

@@ -11,7 +11,7 @@ services:
     links:
       - redis
     environment:
-      DEBUG: "false"
+      DEBUG: ${CSUST_BOT_DEBUG}
       TOKEN: ${CSUST_BOT_TOKEN}
       REDIS_ADDR: "redis:6379"
       REDIS_PASSWORD: "csust-bot-redis-password"
