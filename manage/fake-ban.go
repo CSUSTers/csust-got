@@ -76,7 +76,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 
 func genericBan(spec BanSpec) (string, bool) {
 	if spec.BanTarget == nil {
-		return "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他；即便他是群主也义不容辞。", false
+		return "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是群主也义不容辞。", false
 	} else if spec.BanTime <= 0 || spec.BanTime > 1*time.Hour {
 		return "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。", false
 	} else if ok := spec.Ban(); !ok {

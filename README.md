@@ -48,7 +48,7 @@ Then run it.
 docker-compose up -d
 ``` 
 
-Also, you may use `docker-run.sh` to upgrade.
+Of course, you can also run script `docker-run.sh` to complete the upgrade.
 
 ```bash
 ./docker-run.sh
@@ -58,6 +58,6 @@ Also, you may use `docker-run.sh` to upgrade.
 
 Please change configuration in `docker-compose.yml`.
 
-Change `TOKEN` to your bot token, or just set environment `CSUST_BOT_TOKEN` to your bot token.
+Modify the `TOKEN` to your bot's token, or just set environment variable `CSUST_BOT_TOKEN`.
 
-Please change `REDIS_PASSWORD` in `docker-compose.yml`,and you should also change `requirepass` in `config/redis.conf`.
+Please modify `REDIS_PASSWORD` in `docker-compose.yml`,and also please modify `requirepass` in `config/redis.conf`.
