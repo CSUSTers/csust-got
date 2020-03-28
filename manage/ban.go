@@ -57,8 +57,13 @@ func BanCommand(update tgbotapi.Update, bot *tgbotapi.BotAPI, hard bool) {
 			if banTarget.ID == bigBrother.ID {
 				text = "我可能没有办法帮你完成你要我做的事情……只好……对不起！"
 			} else {
-				text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会沉默 %d 秒。只不过……你真的希望事情变这样吗？",
-					util.GetName(*banTarget), int64(banTime.Seconds()))
+				if hard {
+					text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会沉默 %d 秒，只不过……你真的希望事情变这样吗？",
+						util.GetName(*banTarget), int64(banTime.Seconds()))
+				} else {
+					text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会失落 %d 秒，希望他再次振作起来。",
+						util.GetName(*banTarget), int64(banTime.Seconds()))
+				}
 			}
 		}
 	} else {
