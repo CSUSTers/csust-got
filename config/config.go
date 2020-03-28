@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/go-redis/redis/v7"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"io/ioutil"
 	"log"
 	"os"
@@ -33,7 +34,12 @@ type Config struct {
 	RedisAddr string
 	RedisPass string
 	DebugMode bool
-	BotID	int
+	Bot       *tgbotapi.User
+}
+
+// BotID returns the BotID of this config.
+func (c Config) BotID() int {
+	return c.Bot.ID
 }
 
 // FromFolder creates a config from a config folder.
