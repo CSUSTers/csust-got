@@ -30,10 +30,10 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	chatID := message.Chat.ID
 
 	text := "大家好!"
-	if !message.Chat.IsGroup() {
+	if message.Chat.IsPrivate() {
 		text = "你好!"
 	}
-	text += "我是大五，大五的大，大五的wu"
+	text += "我是大五，大五的大，大五的wu，wuwuwuwuwuwuwuwu~"
 
 	messageReply := tgbotapi.NewMessage(chatID, text)
 	util.SendMessage(bot, messageReply)
@@ -71,21 +71,21 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		if preds.IsCommand("shutdown").
 			Or(preds.IsCommand("halt")).
 			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩。晚安。")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩，晚安:)")
 			if shutdown {
-				msg.Text = "我已经睡了，还请不要再找我了……"
+				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
 			} else if err := util.WriteBool(ctx, key, true); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
-				msg.Text = "睡不着……"
+				msg.Text = "睡不着……:("
 			}
 			util.SendMessage(bot, msg)
 			return module.NoMore
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！:)")
 			if err := util.WriteBool(ctx, key, false); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
-				msg.Text = "我不愿面对这苦涩的一天……"
+				msg.Text = "我不愿面对这苦涩的一天……:("
 			}
 			util.SendMessage(bot, msg)
 			return module.NextOfChain
