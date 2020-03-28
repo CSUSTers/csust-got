@@ -23,6 +23,8 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
+	config.BotConfig.BotID = bot.Self.ID
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 

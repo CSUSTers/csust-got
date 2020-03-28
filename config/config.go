@@ -33,6 +33,7 @@ type Config struct {
 	RedisAddr string
 	RedisPass string
 	DebugMode bool
+	BotID	int
 }
 
 // FromFolder creates a config from a config folder.
