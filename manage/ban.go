@@ -115,15 +115,16 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, hard bool, durat
 // only allow text or media message
 func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {
 
-	flag := false
+	flagFalse := false
+	flagTrue := true
 
 	restrictConfig := tgbotapi.RestrictChatMemberConfig{
 		ChatMemberConfig:      chatMember,
 		UntilDate:             time.Now().Add(duration).UTC().Unix(),
-		CanSendMessages:       nil,
-		CanSendMediaMessages:  nil,
-		CanSendOtherMessages:  &flag,
-		CanAddWebPagePreviews: &flag,
+		CanSendMessages:       &flagTrue,
+		CanSendMediaMessages:  &flagTrue,
+		CanSendOtherMessages:  &flagFalse,
+		CanAddWebPagePreviews: &flagFalse,
 	}
 
 	return ban(bot, restrictConfig)
