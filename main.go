@@ -8,6 +8,7 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
+	"csust-got/search"
 	"csust-got/timer"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -42,6 +43,7 @@ func main() {
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
+		module.Stateless(search.Google, preds.IsCommand("google")),
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
@@ -49,6 +51,7 @@ func main() {
 		module.IsolatedChat(base.Shutdown),
 		handles,
 	})
+
 	for update := range updates {
 		go handles.HandleUpdate(ctx, update, bot)
 	}
