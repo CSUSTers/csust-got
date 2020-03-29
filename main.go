@@ -45,6 +45,8 @@ func main() {
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
 		search.Google,
 		search.Bing,
+		search.Bilibili,
+		search.Github,
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
