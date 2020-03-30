@@ -47,6 +47,7 @@ func main() {
 		search.Bing,
 		search.Bilibili,
 		search.Github,
+		search.Repeat,
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
