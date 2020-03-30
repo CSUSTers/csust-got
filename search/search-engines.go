@@ -6,6 +6,7 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"net/url"
+	"strings"
 )
 
 type htmlMapper func(message *tgbotapi.Message) string
@@ -28,7 +29,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 		if cmd := message.CommandArguments(); cmd != "" {
 			return engineFunc(cmd)
 		}
-		if rep := message.ReplyToMessage; rep != nil {
+		if rep := message.ReplyToMessage; rep != nil && strings.Trim(rep.Text, " \t\n") != "" {
 			return engineFunc(rep.Text)
 		}
 		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦！或者至少回复你想要搜索的内容哦！"
