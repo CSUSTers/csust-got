@@ -12,6 +12,8 @@ import (
 	"csust-got/timer"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -23,6 +25,15 @@ func main() {
 	bot.Debug = config.BotConfig.DebugMode
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
+
+	if bot.Debug {
+		go func() {
+			err := http.ListenAndServe(":8080", nil)
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}()
+	}
 
 	config.BotConfig.Bot = &bot.Self
 
