@@ -64,7 +64,12 @@ func github(cmd string) string {
 	return fmt.Sprintf("🐙🐱 Github：<a href=\"%s\">%s</a>", website, cmd)
 }
 
+func repeat(cmd string) string {
+	return cmd
+}
+
 var Google = module.WithPredicate(wrap(google), preds.IsCommand("google"))
 var Bing = module.WithPredicate(wrap(bing), preds.IsCommand("bing"))
 var Bilibili = module.WithPredicate(wrap(bilibili), preds.IsCommand("bilibili"))
 var Github = module.WithPredicate(wrap(github), preds.IsCommand("github"))
+var Repeat = module.WithPredicate(wrap(repeat), preds.IsCommand("recorder"))
