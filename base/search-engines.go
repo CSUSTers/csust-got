@@ -1,10 +1,12 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"log"
 	"net/url"
 	"strings"
 )
@@ -34,7 +36,13 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 				return engineFunc(rep.Text)
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
-				return engineFunc(stickerSetName)
+				stickerSet, err := config.BotConfig.Bot.GetStickerSet(
+					tgbotapi.GetStickerSetConfig{Name:stickerSetName})
+				if err != nil {
+					log.Println(err.Error())
+				} else {
+					return engineFunc(stickerSet.Title)
+				}
 			}
 		}
 		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦！或者至少回复你想要搜索的内容哦！"
