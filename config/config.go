@@ -34,12 +34,12 @@ type Config struct {
 	RedisAddr string
 	RedisPass string
 	DebugMode bool
-	Bot       *tgbotapi.User
+	Bot       *tgbotapi.BotAPI
 }
 
 // BotID returns the BotID of this config.
 func (c Config) BotID() int {
-	return c.Bot.ID
+	return c.Bot.Self.ID
 }
 
 // FromFolder creates a config from a config folder.

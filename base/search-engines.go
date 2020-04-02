@@ -1,4 +1,4 @@
-package search
+package base
 
 import (
 	"csust-got/module"
@@ -29,8 +29,13 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 		if cmd := message.CommandArguments(); cmd != "" {
 			return engineFunc(cmd)
 		}
-		if rep := message.ReplyToMessage; rep != nil && strings.Trim(rep.Text, " \t\n") != "" {
-			return engineFunc(rep.Text)
+		if rep := message.ReplyToMessage; rep != nil {
+			if strings.Trim(rep.Text, " \t\n") != "" {
+				return engineFunc(rep.Text)
+			} else if rep.Sticker != nil {
+				stickerSetName := message.Sticker.SetName
+				return engineFunc(stickerSetName)
+			}
 		}
 		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦！或者至少回复你想要搜索的内容哦！"
 	}

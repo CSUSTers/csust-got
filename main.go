@@ -8,7 +8,6 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
-	"csust-got/search"
 	"csust-got/timer"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -35,7 +34,7 @@ func main() {
 		}()
 	}
 
-	config.BotConfig.Bot = &bot.Self
+	config.BotConfig.Bot = bot
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -54,11 +53,11 @@ func main() {
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
-		search.Google,
-		search.Bing,
-		search.Bilibili,
-		search.Github,
-		search.Repeat,
+		base.Google,
+		base.Bing,
+		base.Bilibili,
+		base.Github,
+		base.Repeat,
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{

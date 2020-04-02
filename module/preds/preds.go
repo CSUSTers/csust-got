@@ -79,7 +79,7 @@ func IsCommand(command string) Predicate {
 		if len(cmdAndName) == 1 {
 			return cmdAndName[0] == command
 		} else if len(cmdAndName) == 2 {
-			bot := config.BotConfig.Bot.UserName
+			bot := config.BotConfig.Bot.Self.UserName
 			return cmdAndName[0] == command && cmdAndName[1] == bot
 		}
 		return false
