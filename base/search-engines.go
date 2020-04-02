@@ -33,7 +33,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 			if strings.Trim(rep.Text, " \t\n") != "" {
 				return engineFunc(rep.Text)
 			} else if rep.Sticker != nil {
-				stickerSetName := message.Sticker.SetName
+				stickerSetName := rep.Sticker.SetName
 				return engineFunc(stickerSetName)
 			}
 		}
