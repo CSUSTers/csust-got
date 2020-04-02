@@ -61,6 +61,7 @@ func main() {
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
+		module.IsolatedChat(base.MessageCount),
 		module.IsolatedChat(manage.FakeBan),
 		module.IsolatedChat(base.Shutdown),
 		handles,

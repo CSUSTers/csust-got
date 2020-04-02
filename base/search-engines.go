@@ -37,7 +37,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
 				stickerSet, err := config.BotConfig.Bot.GetStickerSet(
-					tgbotapi.GetStickerSetConfig{Name:stickerSetName})
+					tgbotapi.GetStickerSetConfig{Name: stickerSetName})
 				if err != nil {
 					log.Println(err.Error())
 				} else {
