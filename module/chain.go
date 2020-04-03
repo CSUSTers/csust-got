@@ -11,7 +11,11 @@ type chainedModules []Module
 
 func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	for i, module := range c {
-		ctx := context.SubContext(fmt.Sprint(i))
+		name := fmt.Sprint(i)
+		if n, ok := module.(namedModule); ok {
+			name = n.Name()
+		}
+		ctx := context.SubContext(name)
 		if module.HandleUpdate(ctx, update, bot) == NoMore {
 			return NoMore
 		}
@@ -24,7 +28,11 @@ type parallelModules []Module
 func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	resultChan := make(chan HandleResult, len(p))
 	for i, module := range p {
-		ctx := context.SubContext(fmt.Sprint(i))
+		name := fmt.Sprint(i)
+		if n, ok := module.(namedModule); ok {
+			name = n.Name()
+		}
+		ctx := context.SubContext(name)
 		m := module
 		go func() {
 			resultChan <- m.HandleUpdate(ctx, update, bot)
@@ -77,4 +85,33 @@ func BlockWhen(predicate preds.Predicate) Module {
 // Filter crates a Module that can block next of chain by its return value.
 func Filter(f ChainedHandleFunc) Module {
 	return trivialModule{f}
+}
+
+type namedModule interface {
+	Module
+	Name() string
+}
+
+type trivialNamedModule struct {
+	module Module
+	name   string
+}
+
+// HandleUpdate implements Module.
+func (t trivialNamedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	return t.module.HandleUpdate(context, update, bot)
+}
+
+// Name implements namedModule.
+func (t trivialNamedModule) Name() string {
+	return t.name
+}
+
+// NewNamedModule creates a module that will has specified name in its context when using
+// Sequential or Parallel.
+func NewNamedModule(module Module, name string) Module {
+	return trivialNamedModule{
+		module: module,
+		name:   name,
+	}
 }

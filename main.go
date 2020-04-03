@@ -46,9 +46,6 @@ func main() {
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
-		module.SharedContext([]module.Module{
-			module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
-			module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)}),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
@@ -60,16 +57,21 @@ func main() {
 		base.Repeat,
 		timer.RunTask(),
 	})
+	messageCounterModule := module.IsolatedChat(func(update tgbotapi.Update) module.Module {
+		return module.SharedContext([]module.Module{
+			module.WithPredicate(base.MC(), preds.IsCommand("mc")),
+			base.MessageCount(),
+		})
+	})
+	noStcikerModule := module.SharedContext([]module.Module{
+		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
+		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
-		module.IsolatedChat(func(update tgbotapi.Update) module.Module {
-			return module.SharedContext([]module.Module{
-				module.WithPredicate(base.MC(), preds.IsCommand("mc")),
-				base.MessageCount(),
-			})
-		}),
-		module.IsolatedChat(manage.FakeBan),
-		module.IsolatedChat(base.Shutdown),
-		handles,
+		module.NewNamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
+		module.NewNamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
+		module.NewNamedModule(noStcikerModule, "no_sticker"),
+		module.NewNamedModule(messageCounterModule, "long_wang"),
+		module.NewNamedModule(handles, "generic_modules"),
 	})
 
 	for update := range updates {
