@@ -53,7 +53,6 @@ func main() {
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
-		module.WithPredicate(module.IsolatedChat(base.MC), preds.IsCommand("mc")),
 		base.Google,
 		base.Bing,
 		base.Bilibili,
@@ -62,7 +61,12 @@ func main() {
 		timer.RunTask(),
 	})
 	handles = module.Sequential([]module.Module{
-		module.IsolatedChat(base.MessageCount),
+		module.IsolatedChat(func(update tgbotapi.Update) module.Module {
+			return module.SharedContext([]module.Module{
+				module.WithPredicate(base.MC(), preds.IsCommand("mc")),
+				base.MessageCount(),
+			})
+		}),
 		module.IsolatedChat(manage.FakeBan),
 		module.IsolatedChat(base.Shutdown),
 		handles,
