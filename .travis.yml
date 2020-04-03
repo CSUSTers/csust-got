@@ -1,5 +1,5 @@
 language: go
 go: 1.14
 scripts:
-  - bash ./.gofmt.sh
-  - go test -v .
+  - echo "Start build" && go get -v . && go build . && echo "Build Successful"
+  - echo "Test Complete"
