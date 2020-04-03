@@ -1,5 +1,5 @@
 language: go
 go: 1.14
 scripts:
-  - echo "Start build" && go get -v . && go build . && echo "Build Successful"
+  - make build
   - echo "Test Complete"
