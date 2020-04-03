@@ -44,8 +44,7 @@ func MC() module.Module {
 			log.Println(err.Error())
 			return
 		}
-		log.Println(resSticker)
-		log.Println(resTotal)
+		text = wrapText(bot, update.Message.Chat.ID, resSticker, resTotal)
 	}
 	return module.Stateful(handler)
 }
