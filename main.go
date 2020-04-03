@@ -53,6 +53,7 @@ func main() {
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
+		module.WithPredicate(module.IsolatedChat(base.MC), preds.IsCommand("mc")),
 		base.Google,
 		base.Bing,
 		base.Bilibili,
