@@ -51,3 +51,16 @@ func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 	}
 	return false
 }
+
+
+func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.ChatMember {
+	chatMember, err := bot.GetChatMember(tgbotapi.ChatConfigWithUser{
+		ChatID:             chatID,
+		UserID:             userID,
+	})
+	if err != nil {
+		log.Println(err.Error())
+	}
+	return chatMember
+}
+
