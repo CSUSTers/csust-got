@@ -1,7 +1,7 @@
 .PHONY : get build
 
 get :
-  go get -v .
+    go get -v .
   
 build : get
-  go build .
+    go build .
