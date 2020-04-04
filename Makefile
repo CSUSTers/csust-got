@@ -1,4 +1,4 @@
-.PHONY : get build test
+.PHONY : get build test fmt
 
 get :
 	go get -v .
@@ -8,3 +8,6 @@ build : get
 
 test : 
 	go test -v ./...
+
+fmt :
+	gofmt .
