@@ -111,6 +111,10 @@ type trivialExtendedModule struct {
 	deferred bool
 }
 
+func (t trivialExtendedModule) IsDeferred() bool {
+	return t.deferred
+}
+
 // HandleUpdate implements Module.
 func (t trivialExtendedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.module.HandleUpdate(context, update, bot)
