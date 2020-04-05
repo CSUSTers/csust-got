@@ -63,14 +63,14 @@ func main() {
 			base.MessageCount(),
 		})
 	})
-	noStcikerModule := module.SharedContext([]module.Module{
+	noStickerModule := module.SharedContext([]module.Module{
 		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
 		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
 		module.NewNamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
-		module.NewDeferredModule(module.NewNamedModule(module.IsolatedChat(base.Shutdown), "shutdown")),
-		module.NewNamedModule(noStcikerModule, "no_sticker"),
-		module.NewNamedModule(messageCounterModule, "long_wang"),
+		module.NewNamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
+		module.NewNamedModule(noStickerModule, "no_sticker"),
+		module.NewDeferredModule(module.NewNamedModule(messageCounterModule, "long_wang")),
 		module.NewNamedModule(handles, "generic_modules"),
 	})
 
