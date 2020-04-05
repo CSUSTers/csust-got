@@ -11,6 +11,7 @@ type HandleResult int
 const (
 	NextOfChain HandleResult = iota
 	NoMore
+	DoDeferred
 )
 
 type Module interface {

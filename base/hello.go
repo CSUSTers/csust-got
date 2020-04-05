@@ -79,7 +79,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 				msg.Text = "睡不着……:("
 			}
 			util.SendMessage(bot, msg)
-			return module.NoMore
+			return module.DoDeferred
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！:)")

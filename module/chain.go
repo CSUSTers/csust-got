@@ -10,14 +10,26 @@ import (
 type chainedModules []Module
 
 func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	deferredOnly := false
 	for i, module := range c {
+		if deferredOnly {
+			if _, ok := module.(deferredModule); !ok {
+				continue
+			}
+		}
+
 		name := fmt.Sprint(i)
 		if n, ok := module.(namedModule); ok {
 			name = n.Name()
 		}
 		ctx := context.SubContext(name)
-		if module.HandleUpdate(ctx, update, bot) == NoMore {
+		result := module.HandleUpdate(ctx, update, bot)
+		switch result {
+		case NoMore:
 			return NoMore
+		case DoDeferred:
+			deferredOnly = true
+		default:
 		}
 	}
 	return NextOfChain
@@ -97,6 +109,10 @@ type trivialNamedModule struct {
 	name   string
 }
 
+type deferredModule struct {
+	Module
+}
+
 // HandleUpdate implements Module.
 func (t trivialNamedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.module.HandleUpdate(context, update, bot)
@@ -114,4 +130,8 @@ func NewNamedModule(module Module, name string) Module {
 		module: module,
 		name:   name,
 	}
+}
+
+func NewDeferredModule(module Module) Module {
+	return deferredModule{module}
 }
