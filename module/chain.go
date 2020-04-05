@@ -13,13 +13,13 @@ func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Up
 	deferredOnly := false
 	for i, module := range c {
 		if deferredOnly {
-			if _, ok := module.(deferredModule); !ok {
+			if m, ok := module.(extendedModule); !ok || !m.IsDeferred() {
 				continue
 			}
 		}
 
 		name := fmt.Sprint(i)
-		if n, ok := module.(namedModule); ok {
+		if n, ok := module.(extendedModule); ok && n != nil {
 			name = n.Name()
 		}
 		ctx := context.SubContext(name)
@@ -41,7 +41,7 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	resultChan := make(chan HandleResult, len(p))
 	for i, module := range p {
 		name := fmt.Sprint(i)
-		if n, ok := module.(namedModule); ok {
+		if n, ok := module.(extendedModule); ok && n != nil {
 			name = n.Name()
 		}
 		ctx := context.SubContext(name)
@@ -99,39 +99,49 @@ func Filter(f ChainedHandleFunc) Module {
 	return trivialModule{f}
 }
 
-type namedModule interface {
+type extendedModule interface {
 	Module
 	Name() string
+	IsDeferred() bool
 }
 
-type trivialNamedModule struct {
-	module Module
-	name   string
-}
-
-type deferredModule struct {
-	Module
+type trivialExtendedModule struct {
+	module   Module
+	name     string
+	deferred bool
 }
 
 // HandleUpdate implements Module.
-func (t trivialNamedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+func (t trivialExtendedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.module.HandleUpdate(context, update, bot)
 }
 
-// Name implements namedModule.
-func (t trivialNamedModule) Name() string {
+// Name implements extendedModule.
+func (t trivialExtendedModule) Name() string {
 	return t.name
 }
 
 // NamedModule creates a module that will has specified name in its context when using
 // Sequential or Parallel.
 func NamedModule(module Module, name string) Module {
-	return trivialNamedModule{
+	if m, ok := module.(trivialExtendedModule); ok {
+		m.name = name
+		return m
+	}
+	return trivialExtendedModule{
 		module: module,
 		name:   name,
 	}
 }
 
 func DeferredModule(module Module) Module {
-	return deferredModule{module}
+	if m, ok := module.(trivialExtendedModule); ok {
+		m.deferred = true
+		return m
+	}
+	return trivialExtendedModule{
+		module:   module,
+		name:     nil,
+		deferred: true,
+	}
 }
