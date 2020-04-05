@@ -5,6 +5,7 @@ import (
 	"csust-got/module/preds"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"log"
 )
 
 type chainedModules []Module
@@ -28,6 +29,7 @@ func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Up
 		case NoMore:
 			return NoMore
 		case DoDeferred:
+			log.Printf("Doing deferred received from %s.\n", name)
 			deferredOnly = true
 		default:
 		}
