@@ -91,7 +91,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			return module.NextOfChain
 		}
 		if shutdown {
-			return module.NoMore
+			return module.DoDeferred
 		}
 		return module.NextOfChain
 	}
