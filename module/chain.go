@@ -140,6 +140,8 @@ func NamedModule(module Module, name string) Module {
 	}
 }
 
+// DeferredModule create a "deferred module" that will be executed if the a ‘soft break’ happens.
+// e.g. will be executed when blocked by DoDeferred AND normally.
 func DeferredModule(module Module) Module {
 	if m, ok := module.(trivialExtendedModule); ok {
 		m.deferred = true
