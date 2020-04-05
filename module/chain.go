@@ -123,15 +123,15 @@ func (t trivialNamedModule) Name() string {
 	return t.name
 }
 
-// NewNamedModule creates a module that will has specified name in its context when using
+// NamedModule creates a module that will has specified name in its context when using
 // Sequential or Parallel.
-func NewNamedModule(module Module, name string) Module {
+func NamedModule(module Module, name string) Module {
 	return trivialNamedModule{
 		module: module,
 		name:   name,
 	}
 }
 
-func NewDeferredModule(module Module) Module {
+func DeferredModule(module Module) Module {
 	return deferredModule{module}
 }

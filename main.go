@@ -67,11 +67,11 @@ func main() {
 		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
 		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
-		module.NewNamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
-		module.NewNamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
-		module.NewNamedModule(noStickerModule, "no_sticker"),
-		module.NewDeferredModule(module.NewNamedModule(messageCounterModule, "long_wang")),
-		module.NewNamedModule(handles, "generic_modules"),
+		module.NamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
+		module.NamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
+		module.NamedModule(noStickerModule, "no_sticker"),
+		module.NamedModule(module.DeferredModule(messageCounterModule), "long_wang"),
+		module.NamedModule(handles, "generic_modules"),
 	})
 
 	for update := range updates {
