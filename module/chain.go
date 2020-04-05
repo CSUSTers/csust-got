@@ -20,7 +20,7 @@ func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Up
 
 		name := fmt.Sprint(i)
 		if n, ok := module.(extendedModule); ok && n != nil {
-			name = n.Name()
+			name = *n.Name()
 		}
 		ctx := context.SubContext(name)
 		result := module.HandleUpdate(ctx, update, bot)
@@ -42,7 +42,7 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	for i, module := range p {
 		name := fmt.Sprint(i)
 		if n, ok := module.(extendedModule); ok && n != nil {
-			name = n.Name()
+			name = *n.Name()
 		}
 		ctx := context.SubContext(name)
 		m := module
@@ -101,13 +101,13 @@ func Filter(f ChainedHandleFunc) Module {
 
 type extendedModule interface {
 	Module
-	Name() string
+	Name() *string
 	IsDeferred() bool
 }
 
 type trivialExtendedModule struct {
 	module   Module
-	name     string
+	name     *string
 	deferred bool
 }
 
@@ -121,7 +121,7 @@ func (t trivialExtendedModule) HandleUpdate(context context.Context, update tgbo
 }
 
 // Name implements extendedModule.
-func (t trivialExtendedModule) Name() string {
+func (t trivialExtendedModule) Name() *string {
 	return t.name
 }
 
@@ -129,12 +129,12 @@ func (t trivialExtendedModule) Name() string {
 // Sequential or Parallel.
 func NamedModule(module Module, name string) Module {
 	if m, ok := module.(trivialExtendedModule); ok {
-		m.name = name
+		m.name = &name
 		return m
 	}
 	return trivialExtendedModule{
 		module: module,
-		name:   name,
+		name:   &name,
 	}
 }
 
