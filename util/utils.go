@@ -30,17 +30,15 @@ func GetUserNameFromString(s string) (string, bool) {
 	return "", false
 }
 
-
 func GetAdminList(bot *tgbotapi.BotAPI, chatID int64) []tgbotapi.ChatMember {
 	admins, err := bot.GetChatAdministrators(tgbotapi.ChatConfig{
-		ChatID:             chatID,
+		ChatID: chatID,
 	})
 	if err != nil {
 		return []tgbotapi.ChatMember{}
 	}
 	return admins
 }
-
 
 func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 	admins := GetAdminList(bot, chatID)
@@ -52,15 +50,13 @@ func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 	return false
 }
 
-
 func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.ChatMember {
 	chatMember, err := bot.GetChatMember(tgbotapi.ChatConfigWithUser{
-		ChatID:             chatID,
-		UserID:             userID,
+		ChatID: chatID,
+		UserID: userID,
 	})
 	if err != nil {
 		log.Println(err.Error())
 	}
 	return chatMember
 }
-

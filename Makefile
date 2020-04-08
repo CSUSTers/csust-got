@@ -10,7 +10,7 @@ test :
 	go test -v ./...
 
 fmt :
-	gofmt .
+	gofmt -l -w .
 
 ldflag = -s -w
 cgoflag = 0
@@ -19,3 +19,5 @@ deploy: get
 	CGO_ENABLED=$(cgoflag) \
 	go build -o $(output) -ldflags "$(ldflag)" . 
 
+clean:
+	rm -f csust-got got
