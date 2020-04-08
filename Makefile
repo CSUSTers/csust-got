@@ -12,10 +12,10 @@ test :
 fmt :
 	gofmt .
 
-deploy: get
 ldflag = -s -w
 cgoflag = 0
 output = got
+deploy: get
 	CGO_ENABLED=$(cgoflag) \
-	go build -o $(output) -gcflags "$(ldflag)" . 
+	go build -o $(output) -ldflags "$(ldflag)" . 
 
