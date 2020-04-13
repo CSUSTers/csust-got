@@ -5,19 +5,33 @@ import (
 	"csust-got/module/preds"
 	"fmt"
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"log"
 )
 
 type chainedModules []Module
 
 func (c chainedModules) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	deferredOnly := false
 	for i, module := range c {
+		if deferredOnly {
+			if m, ok := module.(extendedModule); !ok || !m.IsDeferred() {
+				continue
+			}
+		}
+
 		name := fmt.Sprint(i)
-		if n, ok := module.(namedModule); ok {
-			name = n.Name()
+		if n, ok := module.(extendedModule); ok && n != nil {
+			name = *n.Name()
 		}
 		ctx := context.SubContext(name)
-		if module.HandleUpdate(ctx, update, bot) == NoMore {
+		result := module.HandleUpdate(ctx, update, bot)
+		switch result {
+		case NoMore:
 			return NoMore
+		case DoDeferred:
+			log.Printf("Doing deferred received from %s.\n", name)
+			deferredOnly = true
+		default:
 		}
 	}
 	return NextOfChain
@@ -29,8 +43,8 @@ func (p parallelModules) HandleUpdate(context context.Context, update tgbotapi.U
 	resultChan := make(chan HandleResult, len(p))
 	for i, module := range p {
 		name := fmt.Sprint(i)
-		if n, ok := module.(namedModule); ok {
-			name = n.Name()
+		if n, ok := module.(extendedModule); ok && n != nil {
+			name = *n.Name()
 		}
 		ctx := context.SubContext(name)
 		m := module
@@ -87,31 +101,55 @@ func Filter(f ChainedHandleFunc) Module {
 	return trivialModule{f}
 }
 
-type namedModule interface {
+type extendedModule interface {
 	Module
-	Name() string
+	Name() *string
+	IsDeferred() bool
 }
 
-type trivialNamedModule struct {
-	module Module
-	name   string
+type trivialExtendedModule struct {
+	module   Module
+	name     *string
+	deferred bool
+}
+
+func (t trivialExtendedModule) IsDeferred() bool {
+	return t.deferred
 }
 
 // HandleUpdate implements Module.
-func (t trivialNamedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+func (t trivialExtendedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.module.HandleUpdate(context, update, bot)
 }
 
-// Name implements namedModule.
-func (t trivialNamedModule) Name() string {
+// Name implements extendedModule.
+func (t trivialExtendedModule) Name() *string {
 	return t.name
 }
 
-// NewNamedModule creates a module that will has specified name in its context when using
+// NamedModule creates a module that will has specified name in its context when using
 // Sequential or Parallel.
-func NewNamedModule(module Module, name string) Module {
-	return trivialNamedModule{
+func NamedModule(module Module, name string) Module {
+	if m, ok := module.(trivialExtendedModule); ok {
+		m.name = &name
+		return m
+	}
+	return trivialExtendedModule{
 		module: module,
-		name:   name,
+		name:   &name,
+	}
+}
+
+// DeferredModule create a "deferred module" that will be executed if the a ‘soft break’ happens.
+// e.g. will be executed when blocked by DoDeferred AND normally.
+func DeferredModule(module Module) Module {
+	if m, ok := module.(trivialExtendedModule); ok {
+		m.deferred = true
+		return m
+	}
+	return trivialExtendedModule{
+		module:   module,
+		name:     nil,
+		deferred: true,
 	}
 }

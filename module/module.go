@@ -9,8 +9,12 @@ import (
 type HandleResult int
 
 const (
+	// NextOfChain indices that the next sequenced module should be executed.
 	NextOfChain HandleResult = iota
+	// NoMore breaks the sequenced module chain immediately, without execute deferred modules.
 	NoMore
+	// DoDeferred like NoMore, break the sequenced module chain, but deferred modules will be executed.
+	DoDeferred
 )
 
 type Module interface {
