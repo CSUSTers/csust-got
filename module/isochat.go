@@ -3,9 +3,11 @@ package module
 import (
 	"csust-got/context"
 	"fmt"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+// Factory is the factory of module.
 type Factory func(update tgbotapi.Update) Module
 
 type isolatedChatModule struct {
