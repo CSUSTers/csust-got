@@ -3,9 +3,10 @@ package context
 import (
 	"csust-got/config"
 	"fmt"
-	"github.com/go-redis/redis/v7"
 	"math/rand"
 	"time"
+
+	"github.com/go-redis/redis/v7"
 )
 
 type Task func()

@@ -3,10 +3,11 @@ package base
 import (
 	"csust-got/manage"
 	"csust-got/util"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"math/rand"
 	"strconv"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // FakeBanMyself is handle for command `fake_ban_myself`.

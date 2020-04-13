@@ -4,9 +4,10 @@ import (
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/util"
+	"log"
+
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"log"
 )
 
 var key = "enabled"

@@ -115,3 +115,5 @@ fabric.properties
 
 .token
 data/
+
+.vscode/

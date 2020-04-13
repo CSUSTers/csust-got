@@ -7,9 +7,11 @@ import (
 	"csust-got/module/preds"
 	"csust-got/util"
 	"fmt"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+// RunTask can run a task
 func RunTask() module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		message := update.Message

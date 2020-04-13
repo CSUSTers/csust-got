@@ -5,10 +5,11 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 	"net/url"
 	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 type htmlMapper func(message *tgbotapi.Message) string
@@ -81,8 +82,11 @@ func repeat(cmd string) string {
 	return cmd
 }
 
-var Google = module.WithPredicate(wrap(google), preds.IsCommand("google"))
-var Bing = module.WithPredicate(wrap(bing), preds.IsCommand("bing"))
-var Bilibili = module.WithPredicate(wrap(bilibili), preds.IsCommand("bilibili"))
-var Github = module.WithPredicate(wrap(github), preds.IsCommand("github"))
-var Repeat = module.WithPredicate(wrap(repeat), preds.IsCommand("recorder"))
+// Search Engine
+var (
+	Google   = module.WithPredicate(wrap(google), preds.IsCommand("google"))
+	Bing     = module.WithPredicate(wrap(bing), preds.IsCommand("bing"))
+	Bilibili = module.WithPredicate(wrap(bilibili), preds.IsCommand("bilibili"))
+	Github   = module.WithPredicate(wrap(github), preds.IsCommand("github"))
+	Repeat   = module.WithPredicate(wrap(repeat), preds.IsCommand("recorder"))
+)

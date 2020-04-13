@@ -9,10 +9,11 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/timer"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 func main() {
@@ -63,13 +64,13 @@ func main() {
 			base.MessageCount(),
 		})
 	})
-	noStcikerModule := module.SharedContext([]module.Module{
+	noStickerModule := module.SharedContext([]module.Module{
 		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
 		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
 		module.NewNamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
 		module.NewNamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
-		module.NewNamedModule(noStcikerModule, "no_sticker"),
+		module.NewNamedModule(noStickerModule, "no_sticker"),
 		module.NewNamedModule(messageCounterModule, "long_wang"),
 		module.NewNamedModule(handles, "generic_modules"),
 	})

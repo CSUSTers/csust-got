@@ -4,11 +4,12 @@ import (
 	"csust-got/command"
 	"csust-got/util"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 	"math/rand"
 	"strconv"
 	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
@@ -34,7 +35,7 @@ func Ban(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	BanCommand(update, bot, true)
 }
 
-// Ban is handle for command `ban`.
+// BanCommand can execute ban.
 func BanCommand(update tgbotapi.Update, bot *tgbotapi.BotAPI, hard bool) {
 	cmd, _ := command.FromMessage(update.Message)
 	banTime, err := time.ParseDuration(cmd.Arg(0))

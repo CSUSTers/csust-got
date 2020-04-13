@@ -1,14 +1,16 @@
 package config
 
 import (
-	"github.com/go-redis/redis/v7"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"io/ioutil"
 	"log"
 	"os"
 	"path"
+
+	"github.com/go-redis/redis/v7"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+// BotConfig can get bot's config globally
 var BotConfig *Config
 
 func init() {
@@ -77,6 +79,7 @@ func FromEnv() *Config {
 	return nil
 }
 
+// NewRedisClient can new a redis client
 func (c Config) NewRedisClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
 		Addr:     c.RedisAddr,

@@ -2,9 +2,11 @@ package base
 
 import (
 	"csust-got/util"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+// WelcomeNewMember is handle for welcome new member.
 func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	memberSlice := message.NewChatMembers

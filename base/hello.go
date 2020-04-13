@@ -5,8 +5,9 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // Hello is handle for command `hello`
@@ -61,6 +62,7 @@ func IsoHello(tgbotapi.Update) module.Module {
 	return module.Stateful(handle)
 }
 
+// Shutdown is handler for command `shutdown`
 func Shutdown(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
 		key := "shutdown"

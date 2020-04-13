@@ -16,9 +16,13 @@ import (
 	"time"
 )
 
+// KeyFunction is function
 type KeyFunction func(*tgbotapi.User) string
 
+// BanExecutor is executor
 type BanExecutor func(context.Context, BanSpec) string
+
+//BanSpec is ban spec
 type BanSpec struct {
 	BanTarget  *tgbotapi.User
 	BigBrother *tgbotapi.User
@@ -26,10 +30,12 @@ type BanSpec struct {
 	BanOther   func(victim int, dur time.Duration) bool
 }
 
+// Ban is ban command
 func (spec BanSpec) Ban() bool {
 	return spec.BanOther(spec.BanTarget.ID, spec.BanTime)
 }
 
+// FakeBanBase is
 func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	kf := func(user int) string {
 		return fmt.Sprintf("%d:banned", user)
@@ -113,6 +119,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	return text
 }
 
+// FakeBan is fake ban 
 func FakeBan(tgbotapi.Update) module.Module {
 	return FakeBanBase(generateTextWithCD, preds.IsCommand("fake_ban"))
 }
