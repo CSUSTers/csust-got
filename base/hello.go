@@ -4,16 +4,10 @@ import (
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/module/preds"
+	"csust-got/orm"
 	"csust-got/util"
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
-	"net/url"
-
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"go.uber.org/zap"
+	"log"
 )
 
 const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
@@ -54,13 +48,13 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 func IsoHello(tgbotapi.Update) module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		key := "enabled"
-		enabled, err := util.GetBool(ctx, key)
+		enabled, err := orm.GetBool(ctx, key)
 		if err != nil {
 			log.Println("ERROR: failed to access redis.", err)
 		}
 
 		if preds.IsCommand("hello").ShouldHandle(update) {
-			if err := util.ToggleBool(ctx, key); err != nil {
+			if err := orm.ToggleBool(ctx, key); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 			}
 		}
@@ -76,7 +70,7 @@ func IsoHello(tgbotapi.Update) module.Module {
 func Shutdown(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
 		key := "shutdown"
-		shutdown, err := util.GetBool(ctx, key)
+		shutdown, err := orm.GetBool(ctx, key)
 		if err != nil {
 			log.Println("ERROR: failed to access redis.", err)
 		}
@@ -86,7 +80,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩，晚安:)")
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
-			} else if err := util.WriteBool(ctx, key, true); err != nil {
+			} else if err := orm.WriteBool(ctx, key, true); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "睡不着……:("
 			}
@@ -95,7 +89,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！:)")
-			if err := util.WriteBool(ctx, key, false); err != nil {
+			if err := orm.WriteBool(ctx, key, false); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "我不愿面对这苦涩的一天……:("
 			}
@@ -109,34 +103,3 @@ func Shutdown(update tgbotapi.Update) module.Module {
 	}
 	return module.Filter(handler)
 }
-
-type Koto struct {
-	ID       int    `json:"id"`
-	Sentence string `json:"hitokoto"`
-	Author   string `json:"from_who"`
-}
-
-var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/")
-var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
-	resp, err := http.Get(OneWordApi.String())
-	if err != nil {
-		zap.L().Error("Err@OneWord [CONNECT TO REMOTE HOST]", zap.Error(err))
-		return errMessage
-	}
-	defer resp.Body.Close()
-	word, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		zap.L().Error("Err@OneWord [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
-		return errMessage
-	}
-	koto := Koto{}
-	err = json.Unmarshal(word, &koto)
-	if err != nil {
-		zap.L().Error("Err@OneWord [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
-		return errMessage
-	}
-	if koto.Author == "" {
-		koto.Author = "佚名"
-	}
-	return fmt.Sprintf("%s by <em>%s</em>", koto.Sentence, koto.Author)
-})
