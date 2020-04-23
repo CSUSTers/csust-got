@@ -13,6 +13,7 @@ import (
 	"net/url"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
@@ -119,19 +120,19 @@ var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/")
 var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	resp, err := http.Get(OneWordApi.String())
 	if err != nil {
-		log.Printf("Err@OneWord [CONNECT TO REMOTE HOST]: %s", err)
+		log.Println("Err@OneWord [CONNECT TO REMOTE HOST]", zap.Error(err))
 		return errMessage
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Err@OneWord [READ FROM HTTP]: %s", err)
+		log.Println("Err@OneWord [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
 		return errMessage
 	}
-	koto := &Koto{}
-	err = json.Unmarshal(word, koto)
+	koto := Koto{}
+	err = json.Unmarshal(word, &koto)
 	if err != nil {
-		log.Printf("Err@OneWord [JSON PARSE]: %s", err)
+		log.Println("Err@OneWord [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
 		return errMessage
 	}
 	if koto.Author == "" {
