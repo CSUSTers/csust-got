@@ -5,6 +5,8 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
+	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -15,7 +17,7 @@ import (
 
 const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
 忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。
-去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见。`
+去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见辣。`
 
 // Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
@@ -107,7 +109,13 @@ func Shutdown(update tgbotapi.Update) module.Module {
 	return module.Filter(handler)
 }
 
-var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/?encode=text")
+type Koto struct {
+	ID       int    `json:"id"`
+	Sentence string `json:"hitokoto"`
+	Author   string `json:"from_who"`
+}
+
+var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/")
 var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	resp, err := http.Get(OneWordApi.String())
 	if err != nil {
@@ -118,5 +126,13 @@ var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	if err != nil {
 		return errMessage
 	}
-	return string(word)
+	koto := &Koto{}
+	err = json.Unmarshal(word, koto)
+	if err != nil {
+		return errMessage
+	}
+	if koto.Author == "" {
+		koto.Author = "佚名"
+	}
+	return fmt.Sprintf("<p>%s</p> by <em>%s</em>", koto.Sentence, koto.Author)
 })
