@@ -119,16 +119,19 @@ var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/")
 var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	resp, err := http.Get(OneWordApi.String())
 	if err != nil {
+		log.Printf("Err@OneWord [CONNECT TO REMOTE HOST]: %s", err)
 		return errMessage
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("Err@OneWord [READ FROM HTTP]: %s", err)
 		return errMessage
 	}
 	koto := &Koto{}
 	err = json.Unmarshal(word, koto)
 	if err != nil {
+		log.Printf("Err@OneWord [JSON PARSE]: %s", err)
 		return errMessage
 	}
 	if koto.Author == "" {
