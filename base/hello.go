@@ -134,5 +134,5 @@ var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	if koto.Author == "" {
 		koto.Author = "佚名"
 	}
-	return fmt.Sprintf("<p>%s</p> by <em>%s</em>", koto.Sentence, koto.Author)
+	return fmt.Sprintf("%s by <em>%s</em>", koto.Sentence, koto.Author)
 })
