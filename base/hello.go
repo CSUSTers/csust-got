@@ -5,10 +5,17 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
+	"io/ioutil"
 	"log"
+	"net/http"
+	"net/url"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
+
+const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
+忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。
+去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见。`
 
 // Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
@@ -99,3 +106,17 @@ func Shutdown(update tgbotapi.Update) module.Module {
 	}
 	return module.Filter(handler)
 }
+
+var OneWordApi, _ = url.Parse("https://v1.hitokoto.cn/?encode=text")
+var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
+	resp, err := http.Get(OneWordApi.String())
+	if err != nil {
+		return errMessage
+	}
+	defer resp.Body.Close()
+	word, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return errMessage
+	}
+	return string(word)
+})
