@@ -132,7 +132,7 @@ var OneWord = mapToHTML(func(message *tgbotapi.Message) string {
 	koto := Koto{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
-		log.Println("Err@OneWord [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
+		log.Println("Err@OneWord [JSON PARSE]", zap.Error(err), zap.String("json", string(word)))
 		return errMessage
 	}
 	if koto.Author == "" {
