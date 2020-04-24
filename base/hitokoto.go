@@ -1,6 +1,7 @@
 package base
 
 import (
+    "csust-got/command"
     "csust-got/orm"
     "encoding/json"
     "fmt"
@@ -9,6 +10,7 @@ import (
     "io/ioutil"
     "net/http"
     "net/url"
+    "strings"
 )
 
 type HitokotoResponse struct {
@@ -20,8 +22,54 @@ type HitokotoResponse struct {
 
 var HitokotoApi, _ = url.Parse("https://v1.hitokoto.cn/")
 
+/*
+get args from message,
+pass args to api to get the specified type of sentence
+a -> cartoon
+b -> caricature
+c -> games
+d -> literature
+e -> original
+f -> from the web
+g -> unknown
+h -> video
+i -> poetry
+j -> Netease Music
+k -> philosophy
+l -> joke
+if arg not in above, we will ignore it.
+if there is no args, api will randomly choice from above.
+if there is multiple args, api will randomly choice from them.
+*/
+func parseApi(message *tgbotapi.Message) *url.URL {
+    cmd, _ := command.FromMessage(message)
+    cmdSlice := cmd.MultiArgsFrom(0)
+    if len(cmdSlice) > 15 {
+        return HitokotoApi
+    }
+    query := strings.Builder{}
+    for _, arg := range cmdSlice {
+        if len(arg) > 15 {
+            continue
+        }
+        for _, c := range arg {
+            if c >= 'a' && c <= 'l' {
+                if query.Len() == 0 {
+                    query.WriteRune('?')
+                } else {
+                    query.WriteRune('&')
+                }
+                query.WriteString("c=")
+                query.WriteRune(c)
+            }
+        }
+    }
+    api, _ := url.Parse("https://v1.hitokoto.cn" + query.String())
+    return api
+}
+
 var Hitokoto = mapToHTML(func(message *tgbotapi.Message) string {
-    resp, err := http.Get(HitokotoApi.String())
+    resp, err := http.Get(parseApi(message).String())
     if err != nil {
         zap.L().Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
         str := loadFromRedis()
@@ -62,7 +110,6 @@ var Hitokoto = mapToHTML(func(message *tgbotapi.Message) string {
     storeToRedis(str)
     return str
 })
-
 
 func storeToRedis(respBody string) {
     _, err := orm.GetClient().SAdd("hitokoto", respBody).Result()
