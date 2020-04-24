@@ -44,28 +44,6 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	util.SendMessage(bot, messageReply)
 }
 
-// IsoHello is handle for auto hello to someone, just for test, we not use it.
-func IsoHello(tgbotapi.Update) module.Module {
-	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		key := "enabled"
-		enabled, err := orm.GetBool(ctx, key)
-		if err != nil {
-			log.Println("ERROR: failed to access redis.", err)
-		}
-
-		if preds.IsCommand("hello").ShouldHandle(update) {
-			if err := orm.ToggleBool(ctx, key); err != nil {
-				log.Println("ERROR: failed to access redis.", err)
-			}
-		}
-
-		if enabled {
-			util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, "hello ……——……"))
-		}
-	}
-	return module.Stateful(handle)
-}
-
 // Shutdown is handler for command `shutdown`
 func Shutdown(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {

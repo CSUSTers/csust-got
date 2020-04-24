@@ -4,6 +4,7 @@ import (
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/util"
+	"go.uber.org/zap"
 	"log"
 
 	"github.com/go-redis/redis/v7"
@@ -64,8 +65,7 @@ func DeleteSticker(tgbotapi.Update) module.Module {
 func isNoStickerMode(ctx context.Context) bool {
 	isNoStickerMode, err := ctx.GlobalClient().Get(ctx.WrapKey(key)).Int()
 	if err != nil && err != redis.Nil {
-		log.Println("ERROR: Can't get no-sticker mode from context")
-		log.Println(err.Error())
+		zap.L().Error("ERROR: Can't get no-sticker mode from context", zap.Error(err))
 		return false
 	}
 
