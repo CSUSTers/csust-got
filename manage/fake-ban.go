@@ -71,7 +71,9 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	interrupter := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
 		target := update.Message.From
 		_, err := ctx.GlobalClient().Get(ctx.WrapKey(kf(target.ID))).Result()
-		if err != redis.Nil {
+		// We can get this key, so it would be sure that the target is banned.
+		// Otherwise, maybe redis is died, we should do nothing.
+		if err == nil {
 			_, _ = bot.DeleteMessage(tgbotapi.NewDeleteMessage(update.Message.Chat.ID, update.Message.MessageID))
 			return module.NoMore
 		}
@@ -119,7 +121,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	return text
 }
 
-// FakeBan is fake ban 
+// FakeBan is fake ban
 func FakeBan(tgbotapi.Update) module.Module {
 	return FakeBanBase(generateTextWithCD, preds.IsCommand("fake_ban"))
 }
