@@ -80,46 +80,34 @@ func parseAPI(message *tgbotapi.Message) HitokotoArg {
 // Hitokoto is command `hitokoto`
 var Hitokoto = mapToHTML(func(message *tgbotapi.Message) string {
 	arg := parseAPI(message)
-	return GetHitokoto(arg)
+	return GetHitokoto(arg, true)
 })
 
 // HitDawu is command alias `hitokoto -i`
 var HitDawu = mapToHTML(func(*tgbotapi.Message) string {
-	return GetHitokoto("i")
+	return GetHitokoto("i", true)
 })
 
 // GetHitokoto can get a hitokoto
-func GetHitokoto(arg HitokotoArg) string {
+func GetHitokoto(arg HitokotoArg, from bool) string {
 	u := arg.toURL()
 	zap.L().Debug("getting", zap.Stringer("url", u))
 	resp, err := http.Get(u.String())
 	if err != nil {
 		zap.L().Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
-		str := loadFromRedis()
-		if len(str) == 0 {
-			return errMessage
-		}
-		return str
+		return loadFromRedis(from)
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		zap.L().Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
-		str := loadFromRedis()
-		if len(str) == 0 {
-			return errMessage
-		}
-		return str
+		return loadFromRedis(from)
 	}
 	koto := HitokotoResponse{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
 		zap.L().Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
-		str := loadFromRedis()
-		if len(str) == 0 {
-			return errMessage
-		}
-		return str
+		return loadFromRedis(from)
 	}
 	if koto.Author == "" {
 		koto.Author = "佚名"
@@ -129,8 +117,11 @@ func GetHitokoto(arg HitokotoArg) string {
 	} else {
 		koto.From = "《" + koto.From + "》"
 	}
-	str := fmt.Sprintf("%s by <em>%s %s</em>", koto.Sentence, koto.Author, koto.From)
-	storeToRedis(str)
+	str := fmt.Sprintf("%s ", koto.Sentence)
+	if from {
+		str += fmt.Sprintf("by <em>%s %s</em>", koto.Author, koto.From)
+		storeToRedis(str)
+	}
 	return str
 }
 
@@ -141,11 +132,14 @@ func storeToRedis(respBody string) {
 	}
 }
 
-func loadFromRedis() string {
+func loadFromRedis(from bool) string {
 	res, err := orm.GetClient().SRandMember("hitokoto").Result()
 	if err != nil {
 		zap.L().Error("Err@Hitokoto [STORE]", zap.Error(err))
-		return ""
+		return errMessage
+	}
+	if !from {
+		res = res[:strings.LastIndex(res, " by ")+1]
 	}
 	return res
 }
