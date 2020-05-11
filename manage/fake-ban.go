@@ -8,12 +8,13 @@ import (
 	"csust-got/module/preds"
 	"csust-got/util"
 	"fmt"
-	"github.com/go-redis/redis/v7"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
 	"math/rand"
 	"strconv"
 	"time"
+
+	"github.com/go-redis/redis/v7"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // KeyFunction is function
@@ -43,7 +44,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	banner := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		cmd, _ := command.FromMessage(update.Message)
 		banTime, err := time.ParseDuration(cmd.Arg(0))
-		if err != nil || banTime > 5 * time.Minute{
+		if err != nil {
 			banTime = time.Duration(60+rand.Intn(60)) * time.Second
 		}
 		//chatID := update.Message.Chat.ID
@@ -83,7 +84,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 func genericBan(spec BanSpec) (string, bool) {
 	if spec.BanTarget == nil {
 		return "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是群主也义不容辞。", false
-	} else if spec.BanTime <= 0 || spec.BanTime > 1*time.Hour {
+	} else if spec.BanTime <= 0 || spec.BanTime > 10*time.Minute {
 		return "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。", false
 	} else if ok := spec.Ban(); !ok {
 		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。", false
