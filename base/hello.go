@@ -10,10 +10,6 @@ import (
 	"log"
 )
 
-const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
-忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。
-去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见辣。`
-
 // Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
@@ -55,7 +51,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		if preds.IsCommand("shutdown").
 			Or(preds.IsCommand("halt")).
 			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩，晚安:)")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto(HitokotoEmptyArg()) + " 明天还有明天的苦涩，晚安:)")
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
 			} else if err := orm.WriteBool(ctx, key, true); err != nil {
@@ -66,7 +62,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			return module.DoDeferred
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！:)")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto(HitokotoEmptyArg()) + " 早上好，新的一天加油哦！:)")
 			if err := orm.WriteBool(ctx, key, false); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "我不愿面对这苦涩的一天……:("

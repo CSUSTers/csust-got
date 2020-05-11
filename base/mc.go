@@ -22,7 +22,7 @@ const (
 // MC is handler for command `mc`.
 func MC() module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		text := "啊我脑子坏了..."
+		text := "啊等等，刚才数到多少来着，完了，忘记了QAQ..."
 		defer func() {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
 			util.SendMessage(bot, msg)

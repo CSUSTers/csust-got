@@ -5,14 +5,20 @@ import (
 	"csust-got/orm"
 	"encoding/json"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"go.uber.org/zap"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
+const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
+忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。
+去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见辣。`
+
+// HitokotoResponse is HitokotoResponse
 type HitokotoResponse struct {
 	ID       int    `json:"id"`
 	Sentence string `json:"hitokoto"`
@@ -20,22 +26,25 @@ type HitokotoResponse struct {
 	From     string `json:"from"`
 }
 
-func hitokotoApi() *url.URL {
+func hitokotoAPI() *url.URL {
 	u, _ := url.Parse("https://v1.hitokoto.cn/")
 	return u
 }
 
-type hitokotoArg string
+// HitokotoArg is hitokoto args
+type HitokotoArg string
 
-func emptyArg() hitokotoArg {
+// HitokotoEmptyArg is hitokoto empty args
+func HitokotoEmptyArg() HitokotoArg {
 	return ""
 }
-func (arg hitokotoArg) toURL() *url.URL {
+
+func (arg HitokotoArg) toURL() *url.URL {
 	q := url.Values{}
 	for _, b := range arg {
 		q.Add("c", string(b))
 	}
-	u := hitokotoApi()
+	u := hitokotoAPI()
 	u.RawQuery = q.Encode()
 	return u
 }
@@ -59,25 +68,28 @@ if arg not in above, we will ignore it.
 if there is no args, api will randomly choice from above.
 if there is multiple args, api will randomly choice from them.
 */
-func parseApi(message *tgbotapi.Message) hitokotoArg {
+func parseAPI(message *tgbotapi.Message) HitokotoArg {
 	cmd, _ := command.FromMessage(message)
 	cmdSlice := cmd.MultiArgsFrom(0)
 	if len(cmdSlice) > 15 {
-		return emptyArg()
+		return HitokotoEmptyArg()
 	}
-	return hitokotoArg(strings.Join(cmdSlice, ""))
+	return HitokotoArg(strings.Join(cmdSlice, ""))
 }
 
+// Hitokoto is command `hitokoto`
 var Hitokoto = mapToHTML(func(message *tgbotapi.Message) string {
-	arg := parseApi(message)
-	return hitokoto(arg)
+	arg := parseAPI(message)
+	return GetHitokoto(arg)
 })
 
+// HitDawu is command alias `hitokoto -i`
 var HitDawu = mapToHTML(func(*tgbotapi.Message) string {
-	return hitokoto("i")
+	return GetHitokoto("i")
 })
 
-func hitokoto(arg hitokotoArg) string {
+// GetHitokoto can get a hitokoto
+func GetHitokoto(arg HitokotoArg) string {
 	u := arg.toURL()
 	zap.L().Debug("getting", zap.Stringer("url", u))
 	resp, err := http.Get(u.String())
@@ -125,14 +137,14 @@ func hitokoto(arg hitokotoArg) string {
 func storeToRedis(respBody string) {
 	_, err := orm.GetClient().SAdd("hitokoto", respBody).Result()
 	if err != nil {
-		zap.L().Error("Err@Hotokoto [STORE]", zap.Error(err))
+		zap.L().Error("Err@Hitokoto [STORE]", zap.Error(err))
 	}
 }
 
 func loadFromRedis() string {
 	res, err := orm.GetClient().SRandMember("hitokoto").Result()
 	if err != nil {
-		zap.L().Error("Err@Hotokoto [STORE]", zap.Error(err))
+		zap.L().Error("Err@Hitokoto [STORE]", zap.Error(err))
 		return ""
 	}
 	return res
