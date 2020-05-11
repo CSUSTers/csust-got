@@ -43,8 +43,8 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	banner := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		cmd, _ := command.FromMessage(update.Message)
 		banTime, err := time.ParseDuration(cmd.Arg(0))
-		if err != nil {
-			banTime = time.Duration(rand.Intn(30)+90) * time.Second
+		if err != nil || banTime > 5 * time.Minute{
+			banTime = time.Duration(60+rand.Intn(60)) * time.Second
 		}
 		chatID := update.Message.Chat.ID
 		bigBrother := update.Message.From
