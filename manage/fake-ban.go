@@ -30,12 +30,12 @@ type BanSpec struct {
 	BanOther   func(victim int, dur time.Duration) bool
 }
 
-// Ban is ban command
+// Ban is executor of fake ban.
 func (spec BanSpec) Ban() bool {
 	return spec.BanOther(spec.BanTarget.ID, spec.BanTime)
 }
 
-// FakeBanBase is
+// FakeBanBase is base module of fake ban.
 func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	kf := func(user int) string {
 		return fmt.Sprintf("%d:banned", user)
@@ -46,12 +46,10 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 		if err != nil || banTime > 5 * time.Minute{
 			banTime = time.Duration(60+rand.Intn(60)) * time.Second
 		}
-		chatID := update.Message.Chat.ID
+		//chatID := update.Message.Chat.ID
 		bigBrother := update.Message.From
 		var banTarget *tgbotapi.User = nil
-		if !util.CanRestrictMembers(bot, chatID, bigBrother.ID) {
-			banTarget = bigBrother
-		} else if fwd := update.Message.ReplyToMessage; fwd != nil {
+		if fwd := update.Message.ReplyToMessage; fwd != nil {
 			banTarget = fwd.From
 		}
 		ban := func(v int, banTime time.Duration) bool {
