@@ -88,7 +88,7 @@ func SharedContext(group []Module) Module {
 
 // BlockWhen blocks next of chain when the predicate returns false.
 func BlockWhen(predicate preds.Predicate) Module {
-	return trivialModule{handleUpdate: func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	return &trivialModule{handleUpdate: func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 		if predicate.ShouldHandle(update) {
 			return NextOfChain
 		}
@@ -98,7 +98,7 @@ func BlockWhen(predicate preds.Predicate) Module {
 
 // Filter crates a Module that can block next of chain by its return value.
 func Filter(f ChainedHandleFunc) Module {
-	return trivialModule{f}
+	return &trivialModule{f}
 }
 
 type extendedModule interface {
@@ -113,28 +113,28 @@ type trivialExtendedModule struct {
 	deferred bool
 }
 
-func (t trivialExtendedModule) IsDeferred() bool {
+func (t *trivialExtendedModule) IsDeferred() bool {
 	return t.deferred
 }
 
 // HandleUpdate implements Module.
-func (t trivialExtendedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+func (t *trivialExtendedModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.module.HandleUpdate(context, update, bot)
 }
 
 // Name implements extendedModule.
-func (t trivialExtendedModule) Name() *string {
+func (t *trivialExtendedModule) Name() *string {
 	return t.name
 }
 
 // NamedModule creates a module that will has specified name in its context when using
 // Sequential or Parallel.
 func NamedModule(module Module, name string) Module {
-	if m, ok := module.(trivialExtendedModule); ok {
+	if m, ok := module.(*trivialExtendedModule); ok {
 		m.name = &name
 		return m
 	}
-	return trivialExtendedModule{
+	return &trivialExtendedModule{
 		module: module,
 		name:   &name,
 	}
@@ -143,11 +143,11 @@ func NamedModule(module Module, name string) Module {
 // DeferredModule create a "deferred module" that will be executed if the a ‘soft break’ happens.
 // e.g. will be executed when blocked by DoDeferred AND normally.
 func DeferredModule(module Module) Module {
-	if m, ok := module.(trivialExtendedModule); ok {
+	if m, ok := module.(*trivialExtendedModule); ok {
 		m.deferred = true
 		return m
 	}
-	return trivialExtendedModule{
+	return &trivialExtendedModule{
 		module:   module,
 		name:     nil,
 		deferred: true,

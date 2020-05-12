@@ -46,13 +46,13 @@ type trivialModule struct {
 	handleUpdate ChainedHandleFunc
 }
 
-func (t trivialModule) HandleUpdate(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+func (t *trivialModule) HandleUpdate(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 	return t.handleUpdate(ctx, update, bot)
 }
 
 // Stateful warps a stateful function to a Module.
 func Stateful(f StatefulHandleFunc) Module {
-	return trivialModule{handleUpdate: func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	return &trivialModule{handleUpdate: func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
 		f(ctx, update, bot)
 		return NextOfChain
 	}}
