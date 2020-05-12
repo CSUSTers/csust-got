@@ -18,6 +18,10 @@ type isolatedChatModule struct {
 }
 
 func (i *isolatedChatModule) HandleUpdate(context context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) HandleResult {
+	// If this update don't contain message, ignore it.
+	if update.Message == nil {
+		return NoMore
+	}
 	// Registered chat.
 	chat := update.Message.Chat
 	newCtx := context.SubContext(fmt.Sprint(chat.ID))
