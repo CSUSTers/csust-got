@@ -81,6 +81,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 	return module.SharedContext([]module.Module{module.Filter(interrupter), filteredBanner})
 }
 
+// Execute ban, then return the prompt message and whether the ban is successful.
 func genericBan(spec BanSpec) (string, bool) {
 	if spec.BanTarget == nil {
 		return "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是群主也义不容辞。", false
@@ -93,6 +94,7 @@ func genericBan(spec BanSpec) (string, bool) {
 }
 
 func generateTextWithCD(ctx context.Context, spec BanSpec) string {
+	// check whether this user is in CD.
 	isCD, err := ctx.GlobalClient().Get(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID))).Result()
 	if err != nil && err != redis.Nil {
 		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了：我不确定您是正义，或是邪恶，因此我不会帮你。"
@@ -110,12 +112,16 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	if killSelf {
 		text = "好 的， 我 杀 我 自 己。"
 	}
-	success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
-	if err != nil {
-		text += fmt.Sprintf("世界正在变得躁动不安。。。")
-		log.Println("ERROR: redis access error.", err)
-	} else if !success || !ok {
-		text += fmt.Sprintf("世界正在变得躁动不安。。。")
+	if ok {
+		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
+		// If the CD recording fails, they may use fake_ban unlimited,
+		// so we add some additional information to prompt bot manager.
+		if err != nil {
+			text += fmt.Sprintf("过度使用这样的力量，这个世界正在崩塌......")
+			log.Println("ERROR: redis access error.", err)
+		} else if !success {
+			text += fmt.Sprintf("拥有力量也许不是好事,这个世界正在变得躁动不安......")
+		}
 	}
 	return text
 }
