@@ -109,8 +109,10 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 		killSelf = true
 	}
 	text, ok := genericBan(spec)
-	if killSelf {
+	if killSelf && ok {
 		text = "好 的， 我 杀 我 自 己。"
+		// Bot will ban the people who want to ban bot, so this people won't CD.
+		ok = false
 	}
 	if ok {
 		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
