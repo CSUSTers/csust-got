@@ -3,6 +3,7 @@ package command
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -14,13 +15,17 @@ type Command struct {
 	args []string
 }
 
+var (
+	spaces, _ = regexp.Compile(`\s+`)
+)
+
 // FromMessage - get command in a message
 func FromMessage(msg *tgbotapi.Message) (*Command, error) {
 	name := msg.Command()
 	if name == "" {
 		return nil, errors.New("FromMessage: update isn't a Command")
 	}
-	args := strings.Split(msg.CommandArguments(), " ")
+	args := spaces.Split(msg.CommandArguments(), -1)
 	return &Command{name, args}, nil
 }
 
