@@ -15,6 +15,7 @@ func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	}
 }
 
+// GetName can get user's name
 func GetName(user tgbotapi.User) string {
 	name := user.FirstName
 	if user.LastName != "" {
@@ -23,6 +24,7 @@ func GetName(user tgbotapi.User) string {
 	return name
 }
 
+// GetUserNameFromString can get userName from message text
 func GetUserNameFromString(s string) (string, bool) {
 	if len(s) > 1 && strings.HasPrefix(s, "@") {
 		return strings.Trim(s, "@"), true
@@ -30,10 +32,10 @@ func GetUserNameFromString(s string) (string, bool) {
 	return "", false
 }
 
-
+// GetAdminList can get admin list from chat
 func GetAdminList(bot *tgbotapi.BotAPI, chatID int64) []tgbotapi.ChatMember {
 	admins, err := bot.GetChatAdministrators(tgbotapi.ChatConfig{
-		ChatID:             chatID,
+		ChatID: chatID,
 	})
 	if err != nil {
 		return []tgbotapi.ChatMember{}
@@ -41,7 +43,7 @@ func GetAdminList(bot *tgbotapi.BotAPI, chatID int64) []tgbotapi.ChatMember {
 	return admins
 }
 
-
+// CanRestrictMembers can check if someone can restrict members
 func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 	admins := GetAdminList(bot, chatID)
 	for _, v := range admins {
@@ -50,4 +52,16 @@ func CanRestrictMembers(bot *tgbotapi.BotAPI, chatID int64, userID int) bool {
 		}
 	}
 	return false
+}
+
+// GetChatMember can get chat member from chat.
+func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.ChatMember {
+	chatMember, err := bot.GetChatMember(tgbotapi.ChatConfigWithUser{
+		ChatID: chatID,
+		UserID: userID,
+	})
+	if err != nil {
+		log.Println(err.Error())
+	}
+	return chatMember
 }

@@ -4,6 +4,7 @@ import (
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/module/preds"
+	"csust-got/orm"
 	"csust-got/util"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
@@ -39,51 +40,30 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	util.SendMessage(bot, messageReply)
 }
 
-// IsoHello is handle for auto hello to someone, just for test, we not use it.
-func IsoHello(tgbotapi.Update) module.Module {
-	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		key := "enabled"
-		enabled, err := util.GetBool(ctx, key)
-		if err != nil {
-			log.Println("ERROR: failed to access redis.", err)
-		}
-
-		if preds.IsCommand("hello").ShouldHandle(update) {
-			if err := util.ToggleBool(ctx, key); err != nil {
-				log.Println("ERROR: failed to access redis.", err)
-			}
-		}
-
-		if enabled {
-			util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, "hello ……——……"))
-		}
-	}
-	return module.Stateful(handle)
-}
-
+// Shutdown is handler for command `shutdown`
 func Shutdown(update tgbotapi.Update) module.Module {
 	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
 		key := "shutdown"
-		shutdown, err := util.GetBool(ctx, key)
+		shutdown, err := orm.GetBool(ctx, key)
 		if err != nil {
 			log.Println("ERROR: failed to access redis.", err)
 		}
 		if preds.IsCommand("shutdown").
 			Or(preds.IsCommand("halt")).
 			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "明天还有明天的苦涩，晚安:)")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false) + " 明天还有明天的苦涩，晚安:)")
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
-			} else if err := util.WriteBool(ctx, key, true); err != nil {
+			} else if err := orm.WriteBool(ctx, key, true); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "睡不着……:("
 			}
 			util.SendMessage(bot, msg)
-			return module.NoMore
+			return module.DoDeferred
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "早上好，新的一天加油哦！:)")
-			if err := util.WriteBool(ctx, key, false); err != nil {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)")
+			if err := orm.WriteBool(ctx, key, false); err != nil {
 				log.Println("ERROR: failed to access redis.", err)
 				msg.Text = "我不愿面对这苦涩的一天……:("
 			}
@@ -91,7 +71,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			return module.NextOfChain
 		}
 		if shutdown {
-			return module.NoMore
+			return module.DoDeferred
 		}
 		return module.NextOfChain
 	}

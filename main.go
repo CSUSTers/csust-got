@@ -9,8 +9,11 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/timer"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 func main() {
@@ -23,7 +26,16 @@ func main() {
 
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	config.BotConfig.Bot = &bot.Self
+	if bot.Debug {
+		go func() {
+			err := http.ListenAndServe(":8080", nil)
+			if err != nil {
+				log.Println(err.Error())
+			}
+		}()
+	}
+
+	config.BotConfig.Bot = bot
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -35,20 +47,36 @@ func main() {
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
-		module.SharedContext([]module.Module{
-			module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
-			module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)}),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
 		module.Stateless(manage.Ban, preds.IsCommand("ban")),
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
+		module.WithPredicate(base.Hitokoto, preds.IsCommand("hitokoto")),
+		module.WithPredicate(base.HitDawu, preds.IsCommand("hitowuta").Or(preds.IsCommand("hitdawu"))),
+		base.Google,
+		base.Bing,
+		base.Bilibili,
+		base.Github,
+		base.Repeat,
 		timer.RunTask(),
 	})
-	handles = module.Sequential([]module.Module{
-		module.IsolatedChat(manage.FakeBan),
-		module.IsolatedChat(base.Shutdown),
-		handles,
+	messageCounterModule := module.IsolatedChat(func(update tgbotapi.Update) module.Module {
+		return module.SharedContext([]module.Module{
+			module.WithPredicate(base.MC(), preds.IsCommand("mc")),
+			base.MessageCount(),
+		})
 	})
+	noStickerModule := module.SharedContext([]module.Module{
+		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
+		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
+	handles = module.Sequential([]module.Module{
+		module.NamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
+		module.NamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
+		module.NamedModule(noStickerModule, "no_sticker"),
+		module.NamedModule(module.DeferredModule(messageCounterModule), "long_wang"),
+		module.NamedModule(handles, "generic_modules"),
+	})
+
 	for update := range updates {
 		go handles.HandleUpdate(ctx, update, bot)
 	}

@@ -1,10 +1,11 @@
-// package command provides a abstraction of tg bot command.
+// Package command provides a abstraction of tg bot command.
 package command
 
 import (
 	"errors"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 // Command - command in message

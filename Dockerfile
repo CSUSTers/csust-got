@@ -1,9 +1,17 @@
-FROM golang:1.14
+# __IMPORTENT__ 
+# requires docker 17.3 and above
+
+# build
+FROM golang:1.14 AS buildenv
 
 WORKDIR /go/src/app
 COPY . .
+RUN make deploy
 
-RUN go get -d -v ./...
-RUN go install -v ./...
+# deploy image
+FROM alpine
 
-CMD ["go", "run", "."]
+WORKDIR /app
+COPY --from=buildenv /go/src/app/got .
+
+CMD ["./got"]
