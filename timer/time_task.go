@@ -18,7 +18,7 @@ func RunTask() module.Module {
         newMessage := tgbotapi.NewMessage(message.Chat.ID, "你说啥，我听不太懂欸……")
 
         delay, err := util.EvalDuration(cmd.Arg(0))
-        text := cmd.Arg(1)
+        text := cmd.ArgAllInOneFrom(1)
         if err != nil || delay < 1 {
             util.SendMessage(bot, newMessage)
             return
