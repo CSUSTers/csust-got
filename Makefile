@@ -1,5 +1,9 @@
 .PHONY : get build test fmt deploy
 
+ldflag = -s -w
+cgoflag = 0
+buildoutput = got
+
 get :
 	go get -v .
   
@@ -12,12 +16,9 @@ test :
 fmt :
 	gofmt -l -w .
 
-ldflag = -s -w
-cgoflag = 0
-output = got
 deploy: get
 	CGO_ENABLED=$(cgoflag) \
-	go build -o $(output) -ldflags "$(ldflag)" . 
+	go build -o $(buildoutput) -ldflags "$(ldflag)" . 
 
 clean:
-	rm -f csust-got got
+	rm -f got
