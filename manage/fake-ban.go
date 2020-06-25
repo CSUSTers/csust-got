@@ -62,6 +62,9 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 			BanTime:    banTime,
 			BanOther:   ban,
 		}
+		if cmd.Name() == "kill" {
+			spec.BanTime = 10 * time.Minute
+		}
 		text := exec(ctx, spec)
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
 		util.SendMessage(bot, msg)
@@ -130,5 +133,5 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 
 // FakeBan is fake ban
 func FakeBan(tgbotapi.Update) module.Module {
-	return FakeBanBase(generateTextWithCD, preds.IsCommand("fake_ban"))
+	return FakeBanBase(generateTextWithCD, preds.IsCommand("fake_ban").Or(preds.IsCommand("kill")))
 }
