@@ -88,6 +88,11 @@ var HitDawu = mapToHTML(func(*tgbotapi.Message) string {
 	return GetHitokoto("i", true)
 })
 
+// HitoNetease is command alias `hitokoto -j`
+var HitoNetease = mapToHTML(func(*tgbotapi.Message) string {
+	return GetHitokoto("j", true)
+})
+
 // GetHitokoto can get a hitokoto
 func GetHitokoto(arg HitokotoArg, from bool) string {
 	u := arg.toURL()

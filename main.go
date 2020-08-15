@@ -53,6 +53,7 @@ func main() {
 		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
 		module.WithPredicate(base.Hitokoto, preds.IsCommand("hitokoto")),
 		module.WithPredicate(base.HitDawu, preds.IsCommand("hitowuta").Or(preds.IsCommand("hitdawu"))),
+		module.WithPredicate(base.HitoNetease, preds.IsCommand("hito_netease")),
 		base.Google,
 		base.Bing,
 		base.Bilibili,
