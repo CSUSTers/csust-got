@@ -72,7 +72,7 @@ func wrapText(bot *tgbotapi.BotAPI, chatID int64, resSticker, resTotal []redis.Z
 	text := "本群大水怪名单:\n"
 	userID, _ := strconv.Atoi(resTotal[0].Member.(string))
 	user := util.GetChatMember(bot, chatID, userID).User
-	text += fmt.Sprintf("第一名：'%v'！他的一生，是龙王的一生，他把有限的生命贡献在了无限的发送 message 上，数量高达 %v 条！群友因为他感受到这个群还有活人，我们把最热烈 fake_ban 送给他，让他在新的一天里享受快乐的退休时光吧！\n",
+	text += fmt.Sprintf("第一名：'%v'！他的一生，是龙王的一生，他把有限的生命贡献在了无限的发送 message 上，累计数量高达 %v 条！群友因为他感受到这个群还有活人，我们把最热烈 fake_ban 送给他，让他在新的一天里享受快乐的退休时光吧！\n",
 		user.FirstName+user.LastName, int(resTotal[0].Score))
 	if len(resTotal) > 1 {
 		userID, _ := strconv.Atoi(resTotal[1].Member.(string))
@@ -83,7 +83,7 @@ func wrapText(bot *tgbotapi.BotAPI, chatID int64, resSticker, resTotal []redis.Z
 	if len(resTotal) > 2 {
 		userID, _ := strconv.Atoi(resTotal[2].Member.(string))
 		user := util.GetChatMember(bot, chatID, userID).User
-		text += fmt.Sprintf("第三名：'%v'！这位朋友很努力，在一天的时间内水了 %v 条消息！很棒，再接再厉！\n",
+		text += fmt.Sprintf("第三名：'%v'！这位朋友很努力，累计水了 %v 条消息！很棒，再接再厉！\n",
 			user.FirstName+user.LastName, int(resTotal[2].Score))
 	}
 	return text
