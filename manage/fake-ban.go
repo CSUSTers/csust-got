@@ -97,8 +97,17 @@ func genericBan(spec BanSpec) (string, bool) {
 }
 
 func generateTextWithCD(ctx context.Context, spec BanSpec) string {
+	bbid := strconv.Itoa(spec.BigBrother.ID)
+	rc := ctx.GlobalClient()
+	// check if this user in Blacklist
+	if black, err := rc.SIsMember(ctx.WrapKey("black_black_list"), bbid).Result(); err != nil && err != redis.Nil {
+		return "啊这，好像有点不太对，不过问题不大。"
+	} else if black {
+		return "CNM，你背叛了老嚯阶级。"
+	}
+
 	// check whether this user is in CD.
-	isCD, err := ctx.GlobalClient().Get(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID))).Result()
+	isCD, err := rc.Get(ctx.WrapKey(bbid)).Result()
 	if err != nil && err != redis.Nil {
 		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了：我不确定您是正义，或是邪恶，因此我不会帮你。"
 	}
