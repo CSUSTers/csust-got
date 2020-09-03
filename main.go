@@ -49,7 +49,7 @@ func main() {
 	// check database
 	rc := ctx.GlobalClient()
 	// blacklsit
-	if list, err := rc.SMembers(ctx.WrapKey("blackblacklist")).Result(); err != nil && err != redis.Nil {
+	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil && err != redis.Nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
 		fmt.Printf("Black List has %d people.\n", len(list))
