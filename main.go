@@ -9,10 +9,12 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/timer"
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
@@ -43,6 +45,16 @@ func main() {
 	updates, err := bot.GetUpdatesChan(u)
 
 	ctx := context.Global(orm.GetClient(), config.BotConfig)
+
+	// check database
+	rc := ctx.GlobalClient()
+	// blacklsit
+	if list, err := rc.SMembers(ctx.WrapKey("blackblacklist")).Result(); err != nil && err != redis.Nil {
+		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
+	} else {
+		fmt.Printf("Black List has %d people.\n", len(list))
+	}
+
 	handles := module.Parallel([]module.Module{
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
