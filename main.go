@@ -9,7 +9,6 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/timer"
-	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -52,7 +51,7 @@ func main() {
 	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil && err != redis.Nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
-		fmt.Printf("Black List has %d people.\n", len(list))
+		log.Printf("Black List has %d people.\n", len(list))
 	}
 
 	handles := module.Parallel([]module.Module{
