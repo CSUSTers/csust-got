@@ -5,11 +5,11 @@ import (
 	"csust-got/module"
 	"csust-got/util"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 // message type
@@ -29,7 +29,7 @@ func MC() module.Module {
 		}()
 		resSticker, err := ctx.GlobalClient().ZRevRangeWithScores(ctx.WrapKey(STICKER), 0, 3).Result()
 		if err != nil {
-			log.Println(err.Error())
+			zap.L().Sugar().Error(err.Error())
 			return
 		}
 		err = ctx.GlobalClient().ZUnionStore(ctx.WrapKey(TOTAL), &redis.ZStore{
@@ -38,12 +38,12 @@ func MC() module.Module {
 			Aggregate: "",
 		}).Err()
 		if err != nil {
-			log.Println(err.Error())
+			zap.L().Sugar().Error(err.Error())
 			return
 		}
 		resTotal, err := ctx.GlobalClient().ZRevRangeWithScores(ctx.WrapKey(TOTAL), 0, 3).Result()
 		if err != nil {
-			log.Println(err.Error())
+			zap.L().Sugar().Error(err.Error())
 			return
 		}
 		text = wrapText(bot, update.Message.Chat.ID, resSticker, resTotal)

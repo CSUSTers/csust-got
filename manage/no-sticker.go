@@ -4,8 +4,8 @@ import (
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/util"
+
 	"go.uber.org/zap"
-	"log"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -23,8 +23,8 @@ func NoSticker(tgbotapi.Update) module.Module {
 
 		_, err := ctx.GlobalClient().Set(ctx.WrapKey(key), v, 0).Result()
 		if err != nil {
-			log.Println("ERROR: Can't set NoStickerMode")
-			log.Println(err.Error())
+			zap.L().Error("Can't set NoStickerMode")
+			zap.L().Error(err.Error())
 			return
 		}
 		util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, text))
@@ -49,12 +49,12 @@ func DeleteSticker(tgbotapi.Update) module.Module {
 
 		resp, err := bot.DeleteMessage(deleteMessage)
 		if err != nil {
-			log.Println("ERROR: Can't delete sticker")
-			log.Println(err.Error())
+			zap.L().Error("Can't delete sticker")
+			zap.L().Error(err.Error())
 			return module.NoMore
 		}
 		if !resp.Ok {
-			log.Println("NoSticker Response NOT OK")
+			zap.L().Error("NoSticker Response NOT OK")
 		}
 		return module.NoMore
 	}

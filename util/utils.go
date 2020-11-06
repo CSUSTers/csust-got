@@ -1,17 +1,18 @@
 package util
 
 import (
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"log"
 	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 // SendMessage will use the bot to send a message.
 func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	_, err := bot.Send(message)
 	if err != nil {
-		log.Println("ERROR: Can't send message")
-		log.Println(err.Error())
+		zap.L().Error("Can't send message")
+		zap.L().Error(err.Error())
 	}
 }
 
@@ -61,7 +62,7 @@ func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.Chat
 		UserID: userID,
 	})
 	if err != nil {
-		log.Println(err.Error())
+		zap.L().Error(err.Error())
 	}
 	return chatMember
 }

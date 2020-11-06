@@ -5,11 +5,11 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"fmt"
-	"log"
 	"net/url"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 type htmlMapper func(message *tgbotapi.Message) string
@@ -40,7 +40,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 				stickerSet, err := config.BotConfig.Bot.GetStickerSet(
 					tgbotapi.GetStickerSetConfig{Name: stickerSetName})
 				if err != nil {
-					log.Println(err.Error())
+					zap.L().Sugar().Error(err.Error())
 				} else {
 					return engineFunc(stickerSet.Title)
 				}

@@ -8,13 +8,13 @@ import (
 	"csust-got/module/preds"
 	"csust-got/util"
 	"fmt"
-	"log"
 	"math/rand"
 	"strconv"
 	"time"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 // KeyFunction is function
@@ -132,7 +132,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 		// so we add some additional information to prompt bot manager.
 		if err != nil {
 			text += fmt.Sprintf("过度使用这样的力量，这个世界正在崩塌......")
-			log.Println("ERROR: redis access error.", err)
+			zap.L().Sugar().Error("redis access error.", err)
 		} else if !success {
 			text += fmt.Sprintf("拥有力量也许不是好事,这个世界正在变得躁动不安......")
 		}

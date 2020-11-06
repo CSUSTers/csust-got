@@ -6,8 +6,9 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/util"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"log"
+	"go.uber.org/zap"
 )
 
 // Hello is handle for command `hello`
@@ -46,25 +47,25 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		key := "shutdown"
 		shutdown, err := orm.GetBool(ctx, key)
 		if err != nil {
-			log.Println("ERROR: failed to access redis.", err)
+			zap.L().Sugar().Error("failed to access redis.", err)
 		}
 		if preds.IsCommand("shutdown").
 			Or(preds.IsCommand("halt")).
 			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false) + " 明天还有明天的苦涩，晚安:)")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 明天还有明天的苦涩，晚安:)")
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
 			} else if err := orm.WriteBool(ctx, key, true); err != nil {
-				log.Println("ERROR: failed to access redis.", err)
+				zap.L().Sugar().Error("failed to access redis.", err)
 				msg.Text = "睡不着……:("
 			}
 			util.SendMessage(bot, msg)
 			return module.DoDeferred
 		}
 		if preds.IsCommand("boot").ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)")
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 早上好，新的一天加油哦！:)")
 			if err := orm.WriteBool(ctx, key, false); err != nil {
-				log.Println("ERROR: failed to access redis.", err)
+				zap.L().Sugar().Error("failed to access redis.", err)
 				msg.Text = "我不愿面对这苦涩的一天……:("
 			}
 			util.SendMessage(bot, msg)

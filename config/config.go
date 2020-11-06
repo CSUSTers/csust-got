@@ -2,12 +2,12 @@ package config
 
 import (
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 // BotConfig can get bot's config globally
@@ -21,7 +21,7 @@ func init() {
 		return
 	}
 
-	log.Println("Can not get config from env, try config folder!")
+	zap.L().Info("Can not get config from env, try config folder!")
 	BotConfig, err = FromFolder("../")
 	if err == nil {
 		return

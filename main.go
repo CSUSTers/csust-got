@@ -15,23 +15,24 @@ import (
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"go.uber.org/zap"
 )
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
-		log.Panic(err)
+		zap.L().Panic(err.Error())
 	}
 
 	bot.Debug = config.BotConfig.DebugMode
 
-	log.Printf("Authorized on account %s", bot.Self.UserName)
+	zap.L().Sugar().Infof("Authorized on account %s", bot.Self.UserName)
 
 	if bot.Debug {
 		go func() {
 			err := http.ListenAndServe(":8080", nil)
 			if err != nil {
-				log.Println(err.Error())
+				zap.L().Error(err.Error())
 			}
 		}()
 	}
@@ -51,7 +52,7 @@ func main() {
 	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil && err != redis.Nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
-		log.Printf("Black List has %d people.\n", len(list))
+		zap.L().Sugar().Infof("Black List has %d people.\n", len(list))
 	}
 
 	handles := module.Parallel([]module.Module{
