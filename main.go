@@ -9,7 +9,6 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/timer"
-	"log"
 	"net/http"
 	_ "net/http/pprof"
 
