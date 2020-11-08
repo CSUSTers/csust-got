@@ -100,7 +100,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	bbid := strconv.Itoa(spec.BigBrother.ID)
 	rc := ctx.GlobalClient()
 	// check if this user in Blacklist
-	if black, err := rc.SIsMember(ctx.WrapKey("black_black_list"), bbid).Result(); err != nil && err != redis.Nil {
+	if black, err := rc.SIsMember(ctx.WrapKey("black_black_list"), bbid).Result(); err != nil /*&& err == redis.Nil*/ {
 		return "啊这，好像有点不太对，不过问题不大。"
 	} else if black {
 		return "CNM，你背叛了老嚯阶级。"
