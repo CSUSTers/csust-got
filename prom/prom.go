@@ -27,10 +27,15 @@ func init() {
 // DailUpdate - dail an update
 func DailUpdate(update tgbotapi.Update) {
 	message := update.Message
+	if message == nil {
+		return
+	}
+
 	user := message.From
 	if user == nil || user.IsBot {
 		return
 	}
+
 	isCommand, isSticker := "false", "false"
 
 	if message.Sticker != nil {
