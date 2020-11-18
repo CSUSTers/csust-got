@@ -14,10 +14,13 @@ import (
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
 func main() {
+	http.Handle("/metrics", promhttp.Handler())
+
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
 		zap.L().Panic(err.Error())
