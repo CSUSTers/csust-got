@@ -20,6 +20,12 @@ import (
 
 func main() {
 	http.Handle("/metrics", promhttp.Handler())
+	go func() {
+		err := http.ListenAndServe(":8080", nil)
+		if err != nil {
+			zap.L().Error(err.Error())
+		}
+	}()
 
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
@@ -29,15 +35,6 @@ func main() {
 	bot.Debug = config.BotConfig.DebugMode
 
 	zap.L().Sugar().Infof("Authorized on account %s", bot.Self.UserName)
-
-	if bot.Debug {
-		go func() {
-			err := http.ListenAndServe(":8080", nil)
-			if err != nil {
-				zap.L().Error(err.Error())
-			}
-		}()
-	}
 
 	config.BotConfig.Bot = bot
 
