@@ -8,25 +8,15 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
+	"csust-got/prom"
 	"csust-got/timer"
-	"net/http"
-	_ "net/http/pprof"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
 func main() {
-	http.Handle("/metrics", promhttp.Handler())
-	go func() {
-		err := http.ListenAndServe(":8080", nil)
-		if err != nil {
-			zap.L().Error(err.Error())
-		}
-	}()
-
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
 		zap.L().Panic(err.Error())
@@ -91,5 +81,6 @@ func main() {
 
 	for update := range updates {
 		go handles.HandleUpdate(ctx, update, bot)
+		prom.DailUpdate(update)
 	}
 }
