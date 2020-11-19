@@ -10,11 +10,15 @@ import (
 	"csust-got/orm"
 	"csust-got/prom"
 	"csust-got/timer"
+	"sync"
+	"time"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
+
+var worker = 4
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
@@ -81,8 +85,18 @@ func main() {
 		module.NamedModule(handles, "generic_modules"),
 	})
 
-	for update := range updates {
-		go handles.HandleUpdate(ctx, update, bot)
-		prom.DailUpdate(update)
+	wg := sync.WaitGroup{}
+	wg.Add(worker)
+	for i := 0; i < worker; i++ {
+		go func() {
+			defer wg.Done()
+			for update := range updates {
+				start := time.Now()
+				handles.HandleUpdate(ctx, update, bot)
+				cost := time.Since(start)
+				prom.DailUpdate(update, cost)
+			}
+		}()
 	}
+	wg.Wait()
 }

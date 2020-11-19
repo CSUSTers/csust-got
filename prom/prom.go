@@ -3,6 +3,7 @@ package prom
 import (
 	"csust-got/command"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -14,6 +15,7 @@ import (
 func init() {
 	prometheus.MustRegister(commandTimes)
 	prometheus.MustRegister(messageCount)
+	prometheus.MustRegister(updateCostTime)
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
@@ -25,7 +27,7 @@ func init() {
 }
 
 // DailUpdate - dail an update
-func DailUpdate(update tgbotapi.Update) {
+func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
 	message := update.Message
 	if message == nil {
 		return
@@ -36,6 +38,7 @@ func DailUpdate(update tgbotapi.Update) {
 		// ignore private chat
 		return
 	}
+	updateCostTime.WithLabelValues(chat.Title).Set(float64(costTime.Milliseconds()))
 
 	user := message.From
 	if user == nil || user.IsBot {

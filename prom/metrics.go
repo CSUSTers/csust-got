@@ -15,7 +15,16 @@ var commandTimes = prometheus.NewCounterVec(
 var messageCount = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "bot_message_count",
-		Help: "Times of command has been called.",
+		Help: "How many messages a user has send.",
 	},
 	[]string{"chat_name", "username", "is_command", "is_sticker"},
+)
+
+// update process time
+var updateCostTime = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "bot_update_process_time",
+		Help: "updates process time.",
+	},
+	[]string{"chat_name"},
 )
