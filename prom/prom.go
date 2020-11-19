@@ -41,6 +41,10 @@ func DailUpdate(update tgbotapi.Update) {
 	if user == nil || user.IsBot {
 		return
 	}
+	username := user.UserName
+	if username == "" {
+		username = user.FirstName
+	}
 
 	isCommand, isSticker := "false", "false"
 
@@ -51,8 +55,8 @@ func DailUpdate(update tgbotapi.Update) {
 	command, _ := command.FromMessage(message)
 	if command != nil {
 		isCommand = "true"
-		commandTimes.WithLabelValues(chat.Title, user.UserName, command.Name()).Inc()
+		commandTimes.WithLabelValues(chat.Title, username, command.Name()).Inc()
 	}
 
-	messageCount.WithLabelValues(chat.Title, user.UserName, isCommand, isSticker).Inc()
+	messageCount.WithLabelValues(chat.Title, username, isCommand, isSticker).Inc()
 }
