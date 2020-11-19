@@ -31,6 +31,12 @@ func DailUpdate(update tgbotapi.Update) {
 		return
 	}
 
+	chat := message.Chat
+	if chat.IsPrivate() {
+		// ignore private chat
+		return
+	}
+
 	user := message.From
 	if user == nil || user.IsBot {
 		return
@@ -45,8 +51,8 @@ func DailUpdate(update tgbotapi.Update) {
 	command, _ := command.FromMessage(message)
 	if command != nil {
 		isCommand = "true"
-		commandTimes.WithLabelValues(user.UserName, command.Name()).Inc()
+		commandTimes.WithLabelValues(chat.Title, user.UserName, command.Name()).Inc()
 	}
 
-	messageCount.WithLabelValues(user.UserName, isCommand, isSticker).Inc()
+	messageCount.WithLabelValues(chat.Title, user.UserName, isCommand, isSticker).Inc()
 }

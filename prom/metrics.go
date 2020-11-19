@@ -8,7 +8,7 @@ var commandTimes = prometheus.NewCounterVec(
 		Name: "bot_command_times",
 		Help: "Times of command has been called.",
 	},
-	[]string{"username", "command_name"},
+	[]string{"chat_name", "username", "command_name"},
 )
 
 // Record how many messages a user has send.
@@ -17,5 +17,5 @@ var messageCount = prometheus.NewCounterVec(
 		Name: "bot_message_count",
 		Help: "Times of command has been called.",
 	},
-	[]string{"username", "is_command", "is_sticker"},
+	[]string{"chat_name", "username", "is_command", "is_sticker"},
 )
