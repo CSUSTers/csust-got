@@ -46,6 +46,8 @@ func main() {
 
 	handles := module.Parallel([]module.Module{
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
+		module.Stateless(base.GetUserID, preds.IsCommand("id")),
+		module.Stateless(base.GetChatID, preds.IsCommand("cid")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
