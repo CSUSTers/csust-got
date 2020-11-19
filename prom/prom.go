@@ -38,7 +38,7 @@ func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
 		// ignore private chat
 		return
 	}
-	updateCostTime.WithLabelValues(chat.Title).Set(float64(costTime.Milliseconds()))
+	updateCostTime.WithLabelValues(chat.Title).Set(float64(costTime.Nanoseconds()) / 1e6)
 
 	user := message.From
 	if user == nil || user.IsBot {
