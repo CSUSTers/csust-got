@@ -1,6 +1,7 @@
 package util
 
 import (
+	"math/rand"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -65,4 +66,13 @@ func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.Chat
 		zap.L().Error(err.Error())
 	}
 	return chatMember
+}
+
+// RandomChoice - rand one from slice
+func RandomChoice(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	idx := rand.Intn(len(s))
+	return s[idx]
 }

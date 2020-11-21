@@ -12,12 +12,18 @@ import (
 	"go.uber.org/zap"
 )
 
+var helloText = []string{
+	"",
+	"我是大五，大五的大，大五的wu，wuwuwuwuwuwuwuwu~",
+	"我是一只只会嗦hello的咸鱼.",
+}
+
 // Hello is handle for command `hello`
 func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
 
-	messageReply := tgbotapi.NewMessage(chatID, "hello ^_^")
+	messageReply := tgbotapi.NewMessage(chatID, "hello ^_^"+util.RandomChoice(helloText))
 
 	// 如果消息来自群里，但并不是由命令触发的，就以reply的形式发送
 	if message.Chat.IsGroup() && !message.IsCommand() {
@@ -36,7 +42,7 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	if message.Chat.IsPrivate() {
 		text = "你好!"
 	}
-	text += "我是大五，大五的大，大五的wu，wuwuwuwuwuwuwuwu~"
+	text += util.RandomChoice(helloText)
 
 	messageReply := tgbotapi.NewMessage(chatID, text)
 	util.SendMessage(bot, messageReply)
@@ -93,4 +99,22 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		return module.NextOfChain
 	}
 	return module.Filter(handler)
+}
+
+// Sleep is handle for command `sleep`
+func Sleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	chatID := message.Chat.ID
+
+	messageReply := tgbotapi.NewMessage(chatID, "晚安，明天醒来就能看到我哦！")
+	util.SendMessage(bot, messageReply)
+}
+
+// NoSleep is handle for command `no_sleep`
+func NoSleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	chatID := message.Chat.ID
+
+	messageReply := tgbotapi.NewMessage(chatID, "睡你麻痹起来嗨！")
+	util.SendMessage(bot, messageReply)
 }
