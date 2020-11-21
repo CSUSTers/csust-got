@@ -12,7 +12,7 @@ func GetUserID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
 
-	msg := "Private chat, please"
+	msg := "这条命令会返回你的UserID，请不要在群里使用"
 	if message.Chat.IsPrivate() {
 		msg = fmt.Sprintf("Your userID is %d", message.From.ID)
 	}
