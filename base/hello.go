@@ -54,7 +54,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 明天还有明天的苦涩，晚安:)")
 			if shutdown {
-				msg.Text = "我已经睡了，还请不要再找我了……晚安:)"
+				msg.Text = "我已经睡了，还请不要再找我了，可以使用/boot命令叫醒我……晚安:)"
 			} else if err := orm.WriteBool(ctx, key, true); err != nil {
 				zap.L().Sugar().Error("failed to access redis.", err)
 				msg.Text = "睡不着……:("

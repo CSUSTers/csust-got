@@ -2,7 +2,7 @@
 # requires docker 17.3 and above
 
 # build
-FROM golang:1.14 AS buildenv
+FROM golang AS buildenv
 
 WORKDIR /go/src/app
 COPY . .
