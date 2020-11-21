@@ -8,12 +8,16 @@ import (
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
+	"csust-got/prom"
 	"csust-got/timer"
-	"net/http"
+	"sync"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
+
+var worker = 4
 
 func main() {
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
@@ -24,15 +28,6 @@ func main() {
 	bot.Debug = config.BotConfig.DebugMode
 
 	zap.L().Sugar().Infof("Authorized on account %s", bot.Self.UserName)
-
-	if bot.Debug {
-		go func() {
-			err := http.ListenAndServe(":8080", nil)
-			if err != nil {
-				zap.L().Error(err.Error())
-			}
-		}()
-	}
 
 	config.BotConfig.Bot = bot
 
@@ -54,6 +49,8 @@ func main() {
 
 	handles := module.Parallel([]module.Module{
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
+		module.Stateless(base.GetUserID, preds.IsCommand("id")),
+		module.Stateless(base.GetChatID, preds.IsCommand("cid")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
 		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
@@ -87,7 +84,18 @@ func main() {
 		module.NamedModule(handles, "generic_modules"),
 	})
 
-	for update := range updates {
-		go handles.HandleUpdate(ctx, update, bot)
+	wg := sync.WaitGroup{}
+	wg.Add(worker)
+	for i := 0; i < worker; i++ {
+		go func() {
+			defer wg.Done()
+			for update := range updates {
+				start := time.Now()
+				handles.HandleUpdate(ctx, update, bot)
+				cost := time.Since(start)
+				prom.DailUpdate(update, cost)
+			}
+		}()
 	}
+	wg.Wait()
 }
