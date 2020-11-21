@@ -6,6 +6,7 @@ import (
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/util"
+	"fmt"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
@@ -38,6 +39,21 @@ func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	text += "我是大五，大五的大，大五的wu，wuwuwuwuwuwuwuwu~"
 
 	messageReply := tgbotapi.NewMessage(chatID, text)
+	util.SendMessage(bot, messageReply)
+}
+
+// Links is handle for command `links`
+func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	chatID := message.Chat.ID
+
+	txt := fmt.Sprintf("以下本群友链:  ")
+	txt += fmt.Sprintf("[本校官网](https://csu.st)  ")
+	txt += fmt.Sprintf("[群Github](https://github.com/CSUSTers)  ")
+	txt += fmt.Sprintf("[本群看板](http://47.103.193.47:3000/d/laBgWPTGz)  ")
+
+	messageReply := tgbotapi.NewMessage(chatID, txt)
+	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
 	util.SendMessage(bot, messageReply)
 }
 
