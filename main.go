@@ -12,6 +12,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
@@ -47,7 +48,7 @@ func main() {
 	// check database
 	rc := ctx.GlobalClient()
 	// blacklsit
-	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil {
+	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil && err != redis.Nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
 		zap.L().Sugar().Infof("Black List has %d people.\n", len(list))
