@@ -10,7 +10,6 @@ import (
 	"csust-got/orm"
 	"csust-got/timer"
 	"net/http"
-	_ "net/http/pprof"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
