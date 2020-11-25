@@ -3,7 +3,7 @@ package base
 import (
 	"csust-got/config"
 	"csust-got/module"
-	"csust-got/modu                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        le/preds"
+	"csust-got/module/preds"
 	"fmt"
 	"net/url"
 	"strings"
