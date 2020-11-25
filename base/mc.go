@@ -67,7 +67,7 @@ func MessageCount() module.Module {
 
 func wrapText(bot *tgbotapi.BotAPI, chatID int64, resSticker, resTotal []redis.Z) string {
 	if len(resTotal) == 0 {
-		return "从我记事起。。。。没人说过话呢"
+		return "从我记事起。。。。没人嗦过话呢"
 	}
 	text := "本群大水怪名单:\n"
 	userID, _ := strconv.Atoi(resTotal[0].Member.(string))

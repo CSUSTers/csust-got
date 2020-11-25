@@ -17,7 +17,7 @@ func RunTask() module.Module {
 		message := update.Message
 		cmd, _ := command.FromMessage(message)
 
-		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你说啥，我听不太懂欸……")
+		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你嗦啥，我听不太懂欸……")
 
         delay, err := util.EvalDuration(cmd.Arg(0))
         text := cmd.ArgAllInOneFrom(1)
@@ -26,7 +26,7 @@ func RunTask() module.Module {
             return
         }
 
-		newMessage.Text = fmt.Sprintf("好的，在 %v 后我会来叫你……“%s”，嗯。", delay, text)
+		newMessage.Text = fmt.Sprintf("好的，在 %v 后我会来叫你……“%s”，嗯，不愧是我。", delay, text)
 		newMessage.ReplyToMessageID = message.MessageID
 		task := func() {
 			msg := tgbotapi.NewMessage(message.Chat.ID, "")
