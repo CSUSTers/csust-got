@@ -56,7 +56,7 @@ no_sticker - 启动(反向)流量节省模式
 google - <Key Words> 咕果搜索...
 bing - <Key Words> 巨硬搜索...
 links - 这里有一些链接(加友链at管理)
-ban_myself - 把自己ban掉rand[90,120]秒
+ban_myself - 把自己ban掉rand[60,120]秒
 ban - 我就是要滥权！
 ban_soft - 软禁！
 fake_ban_myself - 虚假的ban自己(也不一定)

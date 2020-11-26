@@ -14,7 +14,7 @@ import (
 
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
 func BanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	sec := time.Duration(rand.Intn(30)+90) * time.Second
+	sec := time.Duration(rand.Intn(60)+60) * time.Second
 	chatID := update.Message.Chat.ID
 	text := "太强了，我居然ban不掉您，您TQL！"
 	if BanSomeone(bot, chatID, update.Message.From.ID, true, sec) {
