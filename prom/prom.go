@@ -3,6 +3,7 @@ package prom
 import (
 	"csust-got/command"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -11,6 +12,8 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
+
+var host, _ = os.Hostname()
 
 func init() {
 	prometheus.MustRegister(commandTimes)
@@ -26,19 +29,28 @@ func init() {
 	}()
 }
 
+func newLabels(base, labels prometheus.Labels) prometheus.Labels {
+	for k, v := range base {
+		labels[k] = v
+	}
+	return labels
+}
+
 // DailUpdate - dail an update
 func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
+	labels := prometheus.Labels{"host": host}
+
 	message := update.Message
 	if message == nil {
 		return
 	}
 
 	chat := message.Chat
+	labels["chat_name"] = chat.Title
 	if chat.IsPrivate() {
 		// ignore private chat
 		return
 	}
-	updateCostTime.WithLabelValues(chat.Title).Set(float64(costTime.Nanoseconds()) / 1e6)
 
 	user := message.From
 	if user == nil || user.IsBot {
@@ -48,6 +60,7 @@ func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
 	if username == "" {
 		username = user.FirstName
 	}
+	labels["username"] = username
 
 	isCommand, isSticker := "false", "false"
 
@@ -58,8 +71,15 @@ func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
 	command, _ := command.FromMessage(message)
 	if command != nil {
 		isCommand = "true"
-		commandTimes.WithLabelValues(chat.Title, username, command.Name()).Inc()
+		commandTimes.With(newLabels(labels, prometheus.Labels{
+			"command_name": command.Name(),
+		})).Inc()
 	}
 
-	messageCount.WithLabelValues(chat.Title, username, isCommand, isSticker).Inc()
+	updateCostTime.With(labels).Set(float64(costTime.Nanoseconds()) / 1e6)
+
+	messageCount.With(newLabels(labels, prometheus.Labels{
+		"is_command": isCommand,
+		"is_sticker": isSticker,
+	})).Inc()
 }

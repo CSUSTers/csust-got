@@ -2,13 +2,15 @@ package prom
 
 import "github.com/prometheus/client_golang/prometheus"
 
+var baseLabels = []string{"host", "chat_name", "username"}
+
 // Record how many times a command has been called.
 var commandTimes = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "bot_command_times",
 		Help: "Times of command has been called.",
 	},
-	[]string{"chat_name", "username", "command_name"},
+	append([]string{"command_name"}, baseLabels...),
 )
 
 // Record how many messages a user has send.
@@ -17,7 +19,7 @@ var messageCount = prometheus.NewCounterVec(
 		Name: "bot_message_count",
 		Help: "How many messages a user has send.",
 	},
-	[]string{"chat_name", "username", "is_command", "is_sticker"},
+	append([]string{"is_command", "is_sticker"}, baseLabels...),
 )
 
 // update process time
@@ -26,5 +28,5 @@ var updateCostTime = prometheus.NewGaugeVec(
 		Name: "bot_update_process_time",
 		Help: "updates process time.",
 	},
-	[]string{"chat_name"},
+	baseLabels,
 )
