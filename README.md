@@ -68,4 +68,5 @@ shutdown - 拔掉bot的电源
 boot - 将bot开机
 sleep - 该睡觉了
 no_sleep - 别睡了
+run_after - <duration> <msg> 提醒自己什么时间做什么事
 ```

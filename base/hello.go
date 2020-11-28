@@ -7,10 +7,14 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
+	"math/rand"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
+
+var timeZoneCST, _ = time.LoadLocation("Asia/Shanghai")
 
 var helloText = []string{
 	"",
@@ -53,10 +57,10 @@ func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
 
-	txt := fmt.Sprintf("以下本群友链:  ")
-	txt += fmt.Sprintf("[本校官网](https://csu.st)  ")
-	txt += fmt.Sprintf("[群Github](https://github.com/CSUSTers)  ")
-	txt += fmt.Sprintf("[本群看板](http://47.103.193.47:3000/d/laBgWPTGz)  ")
+	txt := fmt.Sprintf("以下本群友链:<br/>")
+	txt += fmt.Sprintf("[本校官网](https://csu.st)<br/>")
+	txt += fmt.Sprintf("[群Github](https://github.com/CSUSTers)<br/>")
+	txt += fmt.Sprintf("[本群看板](http://47.103.193.47:3000/d/laBgWPTGz)<br/>")
 
 	messageReply := tgbotapi.NewMessage(chatID, txt)
 	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
@@ -103,10 +107,26 @@ func Shutdown(update tgbotapi.Update) module.Module {
 
 // Sleep is handle for command `sleep`
 func Sleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	if rand.Intn(100) < 2 {
+		NoSleep(update, bot)
+		return
+	}
+
 	message := update.Message
 	chatID := message.Chat.ID
 
-	messageReply := tgbotapi.NewMessage(chatID, "晚安，明天醒来就能看到我哦！")
+	msg := ""
+
+	t := time.Now().In(timeZoneCST)
+	if t.Hour() < 6 || t.Hour() >= 18 {
+		msg = "晚安, 明天醒来就能看到我哦！"
+	} else if t.Hour() >= 11 || t.Hour() < 2 {
+		msg = "wu安, 醒来就能看到我哦！"
+	} else {
+		msg = "醒来就能看到我哦！"
+	}
+
+	messageReply := tgbotapi.NewMessage(chatID, msg)
 	util.SendMessage(bot, messageReply)
 }
 
