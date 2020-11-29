@@ -114,6 +114,12 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	if isCD == "true" {
 		return "您在过去的24h里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。"
 	}
+
+	// check ban target is nil
+	if spec.BanTarget == nil {
+		return "ban谁呀，咋ban呀，你到底会不会ban呀"
+	}
+
 	killSelf := false
 	if spec.BanTarget.ID == config.BotConfig.BotID() {
 		// ban those people who want to ban this bot
