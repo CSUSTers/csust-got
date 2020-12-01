@@ -4,11 +4,12 @@
 # build
 FROM golang:alpine AS buildenv
 
-RUN apk add make
-
 WORKDIR /go/src/app
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN make deploy
+RUN CGO_ENABLED=0 \
+    go build -o got -ldflags "-s -w" .
 
 # deploy image
 FROM alpine
