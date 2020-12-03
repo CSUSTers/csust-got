@@ -29,11 +29,6 @@ func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	messageReply := tgbotapi.NewMessage(chatID, "hello ^_^"+util.RandomChoice(helloText))
 
-	// 如果消息来自群里，但并不是由命令触发的，就以reply的形式发送
-	if message.Chat.IsGroup() && !message.IsCommand() {
-		messageReply.ReplyToMessageID = message.MessageID
-	}
-
 	util.SendMessage(bot, messageReply)
 }
 
@@ -59,8 +54,8 @@ func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	txt := fmt.Sprintf("以下本群友链:\n")
 	txt += fmt.Sprintf("[本校官网](https://csu.st)\n")
-	txt += fmt.Sprintf("[群Github](https://github.com/CSUSTers)\n")
-	txt += fmt.Sprintf("[本群看板](http://47.103.193.47:3000/d/laBgWPTGz)\n")
+	txt += fmt.Sprintf("[Github](https://github.com/CSUSTers)\n")
+	txt += fmt.Sprintf("[Dashboard](http://47.103.193.47:3000/d/laBgWPTGz)\n")
 
 	messageReply := tgbotapi.NewMessage(chatID, txt)
 	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
@@ -120,7 +115,7 @@ func Sleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	t := time.Now().In(timeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
 		msg = "晚安, 明天醒来就能看到我哦！"
-	} else if t.Hour() >= 11 || t.Hour() < 2 {
+	} else if t.Hour() >= 11 && t.Hour() < 15 {
 		msg = "wu安, 醒来就能看到我哦！"
 	} else {
 		msg = "醒来就能看到我哦！"

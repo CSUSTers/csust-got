@@ -55,18 +55,21 @@ recorder - <msg> 人类的本质就是复读机，Bot也是一样的
 no_sticker - 启动(反向)流量节省模式
 google - <Key Words> 咕果搜索...
 bing - <Key Words> 巨硬搜索...
+bilibili - <Key Words> 在B站搜索...
+github - <Key Words> 在github搜索...
 links - 这里有一些链接(加友链at管理)
 ban_myself - 把自己ban掉rand[60,120]秒
 ban - 我就是要滥权！
 ban_soft - 软禁！
+fake_ban - [duration] 虚假(真实)的ban
 fake_ban_myself - 虚假的ban自己(也不一定)
+kill - 虚假(真实)的kill
 hitokoto - [type] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
-fake_ban - [duration] 虚假(真实)的ban
 shutdown - 拔掉bot的电源
 boot - 将bot开机
 sleep - 该睡觉了
 no_sleep - 别睡了
-run_after - <duration> <msg> 提醒自己什么时间做什么事
+run_after - <duration> <msg> 提醒自己多久之后做什么事
 ```
