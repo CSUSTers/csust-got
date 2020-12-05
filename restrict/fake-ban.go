@@ -1,9 +1,9 @@
 package restrict
 
 import (
-	"csust-got/entities"
 	"csust-got/config"
 	"csust-got/context"
+	"csust-got/entities"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"

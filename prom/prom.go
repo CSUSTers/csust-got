@@ -1,10 +1,10 @@
 package prom
 
 import (
+	"csust-got/entities"
 	"net/http"
 	"os"
 	"time"
-	"csust-got/entities"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -37,7 +37,10 @@ func newLabels(base, labels prometheus.Labels) prometheus.Labels {
 }
 
 // DailUpdate - dail an update
-func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
+func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
+	if !valied {
+		return
+	}
 	labels := prometheus.Labels{"host": host}
 
 	message := update.Message

@@ -4,11 +4,11 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/context"
-	"csust-got/restrict"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/prom"
+	"csust-got/restrict"
 	"sync"
 	"time"
 
@@ -80,6 +80,7 @@ func main() {
 		module.WithPredicate(module.IsolatedChat(restrict.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
 		module.NamedModule(module.IsolatedChat(restrict.FakeBan), "fake_ban"),
+		module.NamedModule(module.IsolatedChat(restrict.RateLimit), "rate_limit"),
 		module.NamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
 		module.NamedModule(noStickerModule, "no_sticker"),
 		module.NamedModule(module.DeferredModule(messageCounterModule), "long_wang"),
@@ -93,9 +94,9 @@ func main() {
 			defer wg.Done()
 			for update := range updates {
 				start := time.Now()
-				handles.HandleUpdate(ctx, update, bot)
+				result := handles.HandleUpdate(ctx, update, bot)
 				cost := time.Since(start)
-				prom.DailUpdate(update, cost)
+				prom.DailUpdate(update, result == module.NextOfChain, cost)
 			}
 		}()
 	}

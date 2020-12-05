@@ -1,8 +1,8 @@
 package base
 
 import (
-	"csust-got/entities"
 	"csust-got/context"
+	"csust-got/entities"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/util"
@@ -19,12 +19,12 @@ func RunTask() module.Module {
 
 		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你嗦啥，我听不太懂欸……")
 
-        delay, err := util.EvalDuration(cmd.Arg(0))
-        text := cmd.ArgAllInOneFrom(1)
-        if err != nil || delay < 1 {
-            util.SendMessage(bot, newMessage)
-            return
-        }
+		delay, err := util.EvalDuration(cmd.Arg(0))
+		text := cmd.ArgAllInOneFrom(1)
+		if err != nil || delay < 1 {
+			util.SendMessage(bot, newMessage)
+			return
+		}
 
 		newMessage.Text = fmt.Sprintf("好的，在 %v 后我会来叫你……“%s”，嗯，不愧是我。", delay, text)
 		newMessage.ReplyToMessageID = message.MessageID
