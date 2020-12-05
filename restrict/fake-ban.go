@@ -1,7 +1,7 @@
-package manage
+package restrict
 
 import (
-	"csust-got/command"
+	"csust-got/entities"
 	"csust-got/config"
 	"csust-got/context"
 	"csust-got/module"
@@ -42,7 +42,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 		return fmt.Sprintf("%d:banned", user)
 	}
 	banner := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		cmd, _ := command.FromMessage(update.Message)
+		cmd, _ := entities.FromMessage(update.Message)
 		banTime, err := time.ParseDuration(cmd.Arg(0))
 		if err != nil {
 			banTime = time.Duration(60+rand.Intn(60)) * time.Second

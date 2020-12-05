@@ -1,7 +1,7 @@
 package base
 
 import (
-	"csust-got/command"
+	"csust-got/entities"
 	"csust-got/orm"
 	"encoding/json"
 	"fmt"
@@ -69,7 +69,7 @@ if there is no args, api will randomly choice from above.
 if there is multiple args, api will randomly choice from them.
 */
 func parseAPI(message *tgbotapi.Message) HitokotoArg {
-	cmd, _ := command.FromMessage(message)
+	cmd, _ := entities.FromMessage(message)
 	cmdSlice := cmd.MultiArgsFrom(0)
 	if len(cmdSlice) > 15 {
 		return HitokotoEmptyArg()

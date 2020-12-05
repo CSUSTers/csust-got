@@ -1,4 +1,4 @@
-package manage
+package restrict
 
 import (
 	"csust-got/context"

@@ -1,5 +1,5 @@
-// Package command provides a abstraction of tg bot command.
-package command
+// Package entities provides a abstraction of tg bot entities.
+package entities
 
 import (
 	"errors"

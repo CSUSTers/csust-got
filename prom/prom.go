@@ -1,10 +1,10 @@
 package prom
 
 import (
-	"csust-got/command"
 	"net/http"
 	"os"
 	"time"
+	"csust-got/entities"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -68,7 +68,7 @@ func DailUpdate(update tgbotapi.Update, costTime time.Duration) {
 		isSticker = "true"
 	}
 
-	command, _ := command.FromMessage(message)
+	command, _ := entities.FromMessage(message)
 	if command != nil {
 		isCommand = "true"
 		commandTimes.With(newLabels(labels, prometheus.Labels{

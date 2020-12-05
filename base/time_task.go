@@ -1,7 +1,7 @@
-package timer
+package base
 
 import (
-	"csust-got/command"
+	"csust-got/entities"
 	"csust-got/context"
 	"csust-got/module"
 	"csust-got/module/preds"
@@ -15,7 +15,7 @@ import (
 func RunTask() module.Module {
 	handle := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		message := update.Message
-		cmd, _ := command.FromMessage(message)
+		cmd, _ := entities.FromMessage(message)
 
 		newMessage := tgbotapi.NewMessage(message.Chat.ID, "你嗦啥，我听不太懂欸……")
 

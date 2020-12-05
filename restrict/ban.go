@@ -1,7 +1,7 @@
-package manage
+package restrict
 
 import (
-	"csust-got/command"
+	"csust-got/entities"
 	"csust-got/util"
 	"fmt"
 	"math/rand"
@@ -37,7 +37,7 @@ func Ban(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 // BanCommand can execute ban.
 func BanCommand(update tgbotapi.Update, bot *tgbotapi.BotAPI, hard bool) {
-	cmd, _ := command.FromMessage(update.Message)
+	cmd, _ := entities.FromMessage(update.Message)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
 		banTime = time.Duration(rand.Intn(30)+90) * time.Second

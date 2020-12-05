@@ -1,7 +1,7 @@
 package base
 
 import (
-	"csust-got/manage"
+	"csust-got/restrict"
 	"csust-got/util"
 	"math/rand"
 	"strconv"
@@ -13,6 +13,12 @@ import (
 // FakeBanMyself is handle for command `fake_ban_myself`.
 // Use it to just get a reply like command `ban_myself`.
 // It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
+// Use it to just get a reply like command `ban_myself`.
+// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
+// Use it to just get a reply like command `ban_myself`.
+// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
+// Use it to just get a reply like command `ban_myself`.
+// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
 func FakeBanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	sec := time.Duration(rand.Intn(60)+60) * time.Second
 	chatID := update.Message.Chat.ID
@@ -21,6 +27,6 @@ func FakeBanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message.ReplyToMessageID = update.Message.MessageID
 	util.SendMessage(bot, message)
 	if rand.Intn(100) < 2 {
-		manage.BanSomeone(bot, chatID, update.Message.From.ID, true, sec)
+		restrict.BanSomeone(bot, chatID, update.Message.From.ID, true, sec)
 	}
 }

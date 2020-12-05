@@ -4,12 +4,11 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/context"
-	"csust-got/manage"
+	"csust-got/restrict"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/prom"
-	"csust-got/timer"
 	"sync"
 	"time"
 
@@ -56,10 +55,10 @@ func main() {
 		module.Stateless(base.NoSleep, preds.IsCommand("no_sleep")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
-		module.Stateless(manage.BanMyself, preds.IsCommand("ban_myself")),
+		module.Stateless(restrict.BanMyself, preds.IsCommand("ban_myself")),
 		module.Stateless(base.FakeBanMyself, preds.IsCommand("fake_ban_myself")),
-		module.Stateless(manage.Ban, preds.IsCommand("ban")),
-		module.Stateless(manage.SoftBan, preds.IsCommand("ban_soft")),
+		module.Stateless(restrict.Ban, preds.IsCommand("ban")),
+		module.Stateless(restrict.SoftBan, preds.IsCommand("ban_soft")),
 		module.WithPredicate(base.Hitokoto, preds.IsCommand("hitokoto")),
 		module.WithPredicate(base.HitDawu, preds.IsCommand("hitowuta").Or(preds.IsCommand("hitdawu"))),
 		module.WithPredicate(base.HitoNetease, preds.IsCommand("hito_netease")),
@@ -68,7 +67,7 @@ func main() {
 		base.Bilibili,
 		base.Github,
 		base.Repeat,
-		timer.RunTask(),
+		base.RunTask(),
 	})
 	messageCounterModule := module.IsolatedChat(func(update tgbotapi.Update) module.Module {
 		return module.SharedContext([]module.Module{
@@ -77,10 +76,10 @@ func main() {
 		})
 	})
 	noStickerModule := module.SharedContext([]module.Module{
-		module.WithPredicate(module.IsolatedChat(manage.NoSticker), preds.IsCommand("no_sticker")),
-		module.WithPredicate(module.IsolatedChat(manage.DeleteSticker), preds.HasSticker)})
+		module.WithPredicate(module.IsolatedChat(restrict.NoSticker), preds.IsCommand("no_sticker")),
+		module.WithPredicate(module.IsolatedChat(restrict.DeleteSticker), preds.HasSticker)})
 	handles = module.Sequential([]module.Module{
-		module.NamedModule(module.IsolatedChat(manage.FakeBan), "fake_ban"),
+		module.NamedModule(module.IsolatedChat(restrict.FakeBan), "fake_ban"),
 		module.NamedModule(module.IsolatedChat(base.Shutdown), "shutdown"),
 		module.NamedModule(noStickerModule, "no_sticker"),
 		module.NamedModule(module.DeferredModule(messageCounterModule), "long_wang"),
