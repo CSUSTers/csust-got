@@ -1,13 +1,15 @@
 .PHONY: get build test fmt deploy run clean
 
+PROJECT := csust-got
 VERSION := $(shell git rev-parse --short HEAD)
 BRANCH := $(shell git branch --show-current)
 BUILDTIME := $(shell TZ="Asia/Shanghai" date '+%Y/%m/%d-%H:%M:%S')
 
+FLAGPKG = $(PROJECT)/base
 LDFLAGS = -s -w
-LDFLAGS += -X base.version=$(VERSION)
-LDFLAGS += -X base.branch=$(BRANCH)
-LDFLAGS += -X base.buildTime=$(BUILDTIME)
+LDFLAGS += -X $(FLAGPKG).version=$(VERSION)
+LDFLAGS += -X $(FLAGPKG).branch=$(BRANCH)
+LDFLAGS += -X $(FLAGPKG).buildTime=$(BUILDTIME)
 
 CGOFLAG = 0
 OUTPUT = got

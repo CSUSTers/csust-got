@@ -4,7 +4,7 @@
 # build
 FROM golang:alpine AS buildenv
 
-RUN apk add make
+RUN apk add make git tzdata
 
 WORKDIR /go/src/app
 COPY . .

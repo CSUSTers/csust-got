@@ -117,3 +117,9 @@ fabric.properties
 data/
 
 .vscode/
+
+# output
+got
+csust-got
+got.exe
+csust-got.exe
