@@ -50,6 +50,7 @@ func main() {
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
 		module.Stateless(base.GetUserID, preds.IsCommand("id")),
 		module.Stateless(base.GetChatID, preds.IsCommand("cid")),
+		module.Stateless(base.Info, preds.IsCommand("info")),
 		module.Stateless(base.Links, preds.IsCommand("links")),
 		module.Stateless(base.Sleep, preds.IsCommand("sleep")),
 		module.Stateless(base.NoSleep, preds.IsCommand("no_sleep")),
