@@ -28,8 +28,8 @@ func RateLimit(tgbotapi.Update) module.Module {
 			if message.Sticker == nil && limiter.Allow() {
 				return module.NextOfChain
 			}
-			// Sticker消耗两个令牌
-			if message.Sticker != nil && limiter.AllowN(time.Now(), 2) {
+			// Sticker消耗三个令牌
+			if message.Sticker != nil && limiter.AllowN(time.Now(), 3) {
 				return module.NextOfChain
 			}
 			// 令牌不足撤回消息
