@@ -59,14 +59,16 @@ bilibili - <Key Words> 在B站搜索...
 github - <Key Words> 在github搜索...
 links - 这里有一些链接(加友链at管理)
 ban_myself - 把自己ban掉rand[60,120]秒
-ban - 我就是要滥权！
-ban_soft - 软禁！
+ban - 我就是要滥权！【Admin】
+ban_soft - 软禁！使某人失去快乐~【Admin】
 fake_ban - [duration] 虚假(真实)的ban
 fake_ban_myself - 虚假的ban自己(也不一定)
 kill - 虚假(真实)的kill
 hitokoto - [type] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
+history - [msgID] 获取一条历史消息的链接
+forward - [msgID] 让bot转发一条历史消息
 shutdown - 拔掉bot的电源
 boot - 将bot开机
 sleep - 该睡觉了
