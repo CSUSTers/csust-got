@@ -1,0 +1,39 @@
+name: Test
+
+on:
+  push:
+    branches: [ dev, master ]
+  pull_request:
+    branches: [ dev, master ]
+
+jobs:
+
+  setup_env:
+    name: "Setup Env"
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: "Setup Go 1.15"
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.15
+
+  test:
+    name: "Test"
+    runs-on: ubuntu-latest
+    needs: [ setup_env ]
+    defaults:
+      run:
+        working-directory: ./
+    steps:
+
+      - name: "Get source"
+        uses: actions/checkout@v2
+
+      - name: "Get dependences"
+        run: |
+          make get
+
+      - name: "Run Test"
+        run: |
+          make test
