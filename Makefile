@@ -21,7 +21,8 @@ build: get
 	go build .
 
 test: 
-	go test -v ./...
+	go build .
+	#go test -v ./...
 
 fmt:
 	gofmt -l -w .
