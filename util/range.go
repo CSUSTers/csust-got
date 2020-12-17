@@ -11,6 +11,7 @@ func (r RangeInt) Cover(x int) bool {
 	return x > r.min && x < r.max
 }
 
+// IsEmpty tells if the range is available
 func (r RangeInt) IsEmpty() bool {
 	return r.max <= r.min
 }

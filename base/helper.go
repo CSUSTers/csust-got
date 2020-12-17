@@ -59,4 +59,3 @@ func GetChatID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	util.SendMessage(bot, messageReply)
 }
- 
