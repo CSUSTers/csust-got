@@ -144,20 +144,11 @@ func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	command, _ := entities.FromMessage(message)
 	historyID := rand.Intn(message.MessageID) + 1
 	if command.Argc() > 0 {
-		// message id is a int-type number
-		id, err := strconv.Atoi(command.Arg(0))
-		if err != nil {
-			msg := tgbotapi.NewMessage(chatID, "您这数字有点不太对劲啊。要不您回去再瞅瞅？")
-			msg.ReplyToMessageID = message.MessageID
-			util.SendMessage(bot, msg)
-			return
-		} else if id < 0 || id > message.MessageID {
-			msg := tgbotapi.NewMessage(chatID, "太大或是太小，都不太行。适合的，才是坠吼的。")
-			msg.ReplyToMessageID = message.MessageID
-			util.SendMessage(bot, msg)
-			return
-		} else {
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), 0, message.MessageID)
+		if ok {
 			historyID = id
+		} else {
+			return
 		}
 	}
 
@@ -174,20 +165,11 @@ func History(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	command, _ := entities.FromMessage(message)
 	historyID := rand.Intn(message.MessageID) + 1
 	if command.Argc() > 0 {
-		// message id is a int-type number
-		id, err := strconv.Atoi(command.Arg(0))
-		if err != nil {
-			msg := tgbotapi.NewMessage(chatID, "您这数字有点不太对劲啊。要不您回去再瞅瞅？")
-			msg.ReplyToMessageID = message.MessageID
-			util.SendMessage(bot, msg)
-			return
-		} else if id < 0 || id > message.MessageID {
-			msg := tgbotapi.NewMessage(chatID, "太大或是太小，都不太行。适合的，才是坠吼的。")
-			msg.ReplyToMessageID = message.MessageID
-			util.SendMessage(bot, msg)
-			return
-		} else {
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), 0, message.MessageID)
+		if ok {
 			historyID = id
+		} else {
+			return
 		}
 	}
 

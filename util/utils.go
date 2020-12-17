@@ -2,11 +2,33 @@ package util
 
 import (
 	"math/rand"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
+
+// ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error
+func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
+	ns string, min int, max int) (number int, ok bool) {
+	chatID := message.Chat.ID
+
+	// message id is a int-type number
+	id, err := strconv.Atoi(ns)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "您这数字有点不太对劲啊。要不您回去再瞅瞅？")
+		msg.ReplyToMessageID = message.MessageID
+		SendMessage(bot, msg)
+		ok = false
+	} else if max > min && (id < min || id > max) {
+		msg := tgbotapi.NewMessage(chatID, "太大或是太小，都不太行。适合的，才是坠吼的。")
+		msg.ReplyToMessageID = message.MessageID
+		SendMessage(bot, msg)
+		ok = false
+	}
+	return id, true
+}
 
 // SendMessage will use the bot to send a message.
 func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
