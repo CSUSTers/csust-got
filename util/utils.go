@@ -41,6 +41,16 @@ func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	}
 }
 
+// SendMessageGiveMeError is the same as no give me error on but give you an error
+func SendMessageGiveMeError(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) (tgbotapi.Message, error) {
+	msg, err := bot.Send(message)
+	if err != nil {
+		zap.L().Error("Can't send message")
+		zap.L().Error(err.Error())
+	}
+	return msg, err
+}
+
 // GetName can get user's name
 func GetName(user tgbotapi.User) string {
 	name := user.FirstName

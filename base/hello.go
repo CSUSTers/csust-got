@@ -153,7 +153,12 @@ func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	}
 
 	messageReply := tgbotapi.NewForward(chatID, chatID, historyID)
-	util.SendMessage(bot, messageReply)
+	if _, err := util.SendMessageGiveMeError(bot, messageReply); err != nil {
+		const text = "[Bot] 我们试图找到那条消息，但是它已经永远的消失在了历史记录的长河里，对此我们深表遗憾。诀别来的总是那么自然，在你注意到时发现已经消失，希望你能珍惜现在的热爱。"
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyToMessageID = message.MessageID
+		util.SendMessage(bot, msg)
+	}
 }
 
 // History is handle for command `history`
