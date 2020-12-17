@@ -26,8 +26,10 @@ func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
 		msg.ReplyToMessageID = message.MessageID
 		SendMessage(bot, msg)
 		ok = false
+	} else {
+		return id, true
 	}
-	return id, true
+	return
 }
 
 // SendMessage will use the bot to send a message.
