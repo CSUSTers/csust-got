@@ -19,6 +19,11 @@ import (
 var worker = 4
 
 func main() {
+
+	config.InitConfig()
+	prom.InitPrometheus()
+	orm.InitRedis()
+
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
 		zap.L().Panic(err.Error())
