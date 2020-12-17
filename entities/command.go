@@ -25,8 +25,18 @@ func FromMessage(msg *tgbotapi.Message) (*Command, error) {
 	if name == "" {
 		return nil, errors.New("FromMessage: update isn't a Command")
 	}
-	args := spaces.Split(strings.TrimSpace(msg.CommandArguments()), -1)
+
+	args := splitText(strings.TrimSpace(msg.CommandArguments()))
+
 	return &Command{name, args}, nil
+}
+
+func splitText(txt string) []string {
+	ts := []string{}
+	if len(txt) > 0 {
+		ts = spaces.Split(txt, -1)
+	}
+	return ts
 }
 
 // Name - command name
