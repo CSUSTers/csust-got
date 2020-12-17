@@ -11,7 +11,7 @@ import (
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error
 func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
-	ns string, min int, max int) (number int, ok bool) {
+	ns string, rng RangeInt) (number int, ok bool) {
 	chatID := message.Chat.ID
 
 	// message id is a int-type number
@@ -21,7 +21,7 @@ func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
 		msg.ReplyToMessageID = message.MessageID
 		SendMessage(bot, msg)
 		ok = false
-	} else if max > min && (id < min || id > max) {
+	} else if !rng.IsEmpty() && !rng.Cover(id) {
 		msg := tgbotapi.NewMessage(chatID, "太大或是太小，都不太行。适合的，才是坠吼的。")
 		msg.ReplyToMessageID = message.MessageID
 		SendMessage(bot, msg)

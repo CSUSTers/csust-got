@@ -144,7 +144,7 @@ func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	command, _ := entities.FromMessage(message)
 	historyID := rand.Intn(message.MessageID) + 1
 	if command.Argc() > 0 {
-		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), 0, message.MessageID)
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
 		if ok {
 			historyID = id
 		} else {
@@ -165,7 +165,7 @@ func History(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	command, _ := entities.FromMessage(message)
 	historyID := rand.Intn(message.MessageID) + 1
 	if command.Argc() > 0 {
-		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), 0, message.MessageID)
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
 		if ok {
 			historyID = id
 		} else {
