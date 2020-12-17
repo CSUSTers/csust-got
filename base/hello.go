@@ -2,12 +2,14 @@ package base
 
 import (
 	"csust-got/context"
+	"csust-got/entities"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -132,4 +134,66 @@ func NoSleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	messageReply := tgbotapi.NewMessage(chatID, "睡你麻痹起来嗨！")
 	util.SendMessage(bot, messageReply)
+}
+
+// Forward is handle for command `forward`
+func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	chatID := message.Chat.ID
+
+	command, _ := entities.FromMessage(message)
+	historyID := rand.Intn(message.MessageID) + 1
+	if command.Argc() > 0 {
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
+		if ok {
+			historyID = id
+		} else {
+			return
+		}
+	}
+
+	messageReply := tgbotapi.NewForward(chatID, chatID, historyID)
+	if _, err := util.SendMessageGiveMeError(bot, messageReply); err != nil {
+		const text = "[Bot] 我们试图找到那条消息，但是它已经永远的消失在了历史记录的长河里，对此我们深表遗憾。诀别来的总是那么自然，在你注意到时发现已经消失，希望你能珍惜现在的热爱。"
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyToMessageID = message.MessageID
+		util.SendMessage(bot, msg)
+	}
+}
+
+// History is handle for command `history`
+func History(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	chatID := message.Chat.ID
+
+	chatIDStr := chatIDToStr(chatID)
+	command, _ := entities.FromMessage(message)
+	historyID := rand.Intn(message.MessageID) + 1
+	if command.Argc() > 0 {
+		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
+		if ok {
+			historyID = id
+		} else {
+			return
+		}
+	}
+
+	messageReply := tgbotapi.NewMessage(chatID, "https://t.me/c/"+chatIDStr+"/"+strconv.Itoa(historyID))
+	messageReply.ReplyToMessageID = message.MessageID
+	util.SendMessage(bot, messageReply)
+}
+
+func chatIDToStr(chatID int64) string {
+	chatNum := chatID
+	if chatNum < 0 {
+		chatNum *= -1
+	}
+	chatStr := strconv.FormatInt(chatNum, 10)
+	if chatStr[0] == '1' {
+		chatStr = chatStr[1:]
+	}
+	for chatStr[0] == '0' {
+		chatStr = chatStr[1:]
+	}
+	return chatStr
 }

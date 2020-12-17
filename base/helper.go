@@ -16,7 +16,7 @@ var (
 	buildTime string
 )
 
-var lastBoot = time.Now().Format("2006/01/02-15:04:05")
+var lastBoot = time.Now().In(timeZoneCST).Format("2006/01/02-15:04:05")
 
 // Info - build info
 func Info(update tgbotapi.Update, bot *tgbotapi.BotAPI) {

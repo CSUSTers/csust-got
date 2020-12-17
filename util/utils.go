@@ -2,11 +2,35 @@ package util
 
 import (
 	"math/rand"
+	"strconv"
 	"strings"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
+
+// ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error
+func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
+	ns string, rng RangeInt) (number int, ok bool) {
+	chatID := message.Chat.ID
+
+	// message id is a int-type number
+	id, err := strconv.Atoi(ns)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "您这数字有点不太对劲啊。要不您回去再瞅瞅？")
+		msg.ReplyToMessageID = message.MessageID
+		SendMessage(bot, msg)
+		ok = false
+	} else if !rng.IsEmpty() && !rng.Cover(id) {
+		msg := tgbotapi.NewMessage(chatID, "太大或是太小，都不太行。适合的，才是坠吼的。")
+		msg.ReplyToMessageID = message.MessageID
+		SendMessage(bot, msg)
+		ok = false
+	} else {
+		return id, true
+	}
+	return
+}
 
 // SendMessage will use the bot to send a message.
 func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
@@ -15,6 +39,16 @@ func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 		zap.L().Error("Can't send message")
 		zap.L().Error(err.Error())
 	}
+}
+
+// SendMessageGiveMeError is the same as no give me error on but give you an error
+func SendMessageGiveMeError(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) (tgbotapi.Message, error) {
+	msg, err := bot.Send(message)
+	if err != nil {
+		zap.L().Error("Can't send message")
+		zap.L().Error(err.Error())
+	}
+	return msg, err
 }
 
 // GetName can get user's name

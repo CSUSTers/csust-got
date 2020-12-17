@@ -18,7 +18,8 @@ get:
 	go get -v .
   
 build: get
-	go build .
+	CGO_ENABLED=$(CGOFLAG) \
+	go build -o $(OUTPUT) .
 
 test: 
 	go test -v ./...

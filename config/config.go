@@ -13,7 +13,7 @@ import (
 // BotConfig can get bot's config globally
 var BotConfig *Config
 
-func init() {
+func InitConfig() {
 	var err error
 
 	BotConfig = FromEnv()

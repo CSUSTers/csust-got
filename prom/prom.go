@@ -15,7 +15,7 @@ import (
 
 var host, _ = os.Hostname()
 
-func init() {
+func InitPrometheus() {
 	prometheus.MustRegister(commandTimes)
 	prometheus.MustRegister(messageCount)
 	prometheus.MustRegister(updateCostTime)
