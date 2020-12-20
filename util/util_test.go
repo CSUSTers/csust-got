@@ -15,6 +15,6 @@ func TestEvalDate(t *testing.T) {
 
 	t.Run("Plain Number Error", func(t *testing.T) {
 		evalDuration, err := EvalDuration("1")
-		assert.NoErrorf(t, err, "EvalDuration(\"1\") should get error, but it's ok and result is %v", evalDuration)
+		assert.Errorf(t, err, "EvalDuration(\"1\") should get error, but it's ok and result is %v", evalDuration)
 	})
 }
