@@ -1,0 +1,10 @@
+# debug mode
+debug: false
+
+# bot token
+token: ""
+
+# redis config
+redis:
+  addr: "redis:6379"
+  pass: "csust-bot-redis-password"

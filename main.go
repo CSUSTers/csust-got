@@ -20,7 +20,7 @@ var worker = 4
 
 func main() {
 
-	config.InitConfig()
+	config.InitConfig("config.yaml", "BOT")
 	prom.InitPrometheus()
 	orm.InitRedis()
 

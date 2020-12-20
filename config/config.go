@@ -1,33 +1,28 @@
 package config
 
 import (
-	"io/ioutil"
-	"os"
-	"path"
-
+	"fmt"
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"strings"
 )
 
 // BotConfig can get bot's config globally
 var BotConfig *Config
 
-func InitConfig() {
-	var err error
+var (
+	noTokenMsg = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
+	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+)
 
-	BotConfig = FromEnv()
-	if BotConfig != nil {
-		return
-	}
-
-	zap.L().Info("Can not get config from env, try config folder!")
-	BotConfig, err = FromFolder("../")
-	if err == nil {
-		return
-	}
-
-	panic("Can not get config from all way!")
+// InitConfig - init bot config
+func InitConfig(configFile, envPrefix string) {
+	BotConfig = new(Config)
+	initViper(configFile, envPrefix)
+	readConfig()
+	checkConfig()
 }
 
 // Config the interface for common configs.
@@ -44,39 +39,49 @@ func (c Config) BotID() int {
 	return c.Bot.Self.ID
 }
 
-// FromFolder creates a config from a config folder.
-func FromFolder(folder string) (*Config, error) {
-	tokenName := path.Join(folder, ".token")
-	tokenFile, err := os.Open(tokenName)
-	if err != nil {
-		return nil, err
-	}
-	tokenBytes, err := ioutil.ReadAll(tokenFile)
-	if err != nil {
-		return nil, err
-	}
-	conf := &Config{
-		Token: string(tokenBytes),
-	}
-	return conf, nil
-}
-
-// FromEnv load config from environment
-// and you may config them in docker compose file
-func FromEnv() *Config {
-	token, tokenExist := os.LookupEnv("TOKEN")
-	redisAddr, addrExist := os.LookupEnv("REDIS_ADDR")
-	redisPass, passExist := os.LookupEnv("REDIS_PASSWORD")
-	debug, _ := os.LookupEnv("DEBUG")
-	if tokenExist && addrExist && passExist {
-		return &Config{
-			Token:     token,
-			RedisAddr: redisAddr,
-			RedisPass: redisPass,
-			DebugMode: debug == "true",
+func initViper(configFile, envPrefix string) {
+	if configFile != "" {
+		viper.SetConfigFile(configFile)
+		if err := viper.ReadInConfig(); err != nil {
+			if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+				// Config file not found
+				zap.S().Warnf("config file %s not found! err:%v", configFile, err)
+			} else {
+				// Config file was found but another error was produced
+				zap.S().Warnf("config file %s has found, but another error was produced when reading config! err: %v", configFile, err)
+			}
+			zap.S().Warnf("%s is not avaliable... err: %v", configFile, err)
+			return
 		}
 	}
-	return nil
+	viper.SetEnvPrefix(envPrefix)
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AutomaticEnv()
+
+	noTokenMsg = fmt.Sprintf("bot token is not set! Please set config file %s or env %s_TOKEN!", configFile, envPrefix)
+	noRedisMsg = fmt.Sprintf("redis address is not set! Please set config file %s or env %s_REDIS_ADDR!", configFile, envPrefix)
+}
+
+func readConfig() {
+	// base config
+	BotConfig.DebugMode = viper.GetBool("debug")
+	BotConfig.Token = viper.GetString("token")
+
+	// redis config
+	BotConfig.RedisAddr = viper.GetString("redis.addr")
+	BotConfig.RedisPass = viper.GetString("redis.pass")
+}
+
+func checkConfig() {
+	if BotConfig.Token == "" {
+		zap.L().Panic(noTokenMsg)
+	}
+	if BotConfig.RedisAddr == "" {
+		zap.L().Panic(noRedisMsg)
+	}
+	if BotConfig.DebugMode {
+		zap.L().Warn("DEBUG MODE IS ON")
+	}
 }
 
 // NewRedisClient can new a redis client

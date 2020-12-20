@@ -16,11 +16,6 @@ services:
       - redis
     ports:
       - "8080:8080"
-    environment:
-      DEBUG: ${CSUST_BOT_DEBUG}
-      TOKEN: ${CSUST_BOT_TOKEN}
-      REDIS_ADDR: "redis:6379"
-      REDIS_PASSWORD: "csust-bot-redis-password"
 
   redis:
     image: "redis:alpine"
