@@ -1,10 +1,11 @@
 package config
 
 import (
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/require"
 	"os"
 	"testing"
+
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -16,7 +17,7 @@ func TestReadConfigFile(t *testing.T) {
 	req := require.New(t)
 
 	// init config
-	BotConfig = new(Config)
+	BotConfig = NewBotConfig()
 	initViper(testConfigFile, "")
 	readConfig()
 	defer viper.Reset()
@@ -44,7 +45,7 @@ func TestReadEnv(t *testing.T) {
 	}()
 
 	// init config
-	BotConfig = new(Config)
+	BotConfig = NewBotConfig()
 	initViper("", testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
@@ -70,7 +71,7 @@ func TestEnvOverrideFile(t *testing.T) {
 	}()
 
 	// init config
-	BotConfig = new(Config)
+	BotConfig = NewBotConfig()
 	initViper(testConfigFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
@@ -96,7 +97,7 @@ func TestMustConfig(t *testing.T) {
 	}()
 
 	// all set should not panic
-	BotConfig = new(Config)
+	BotConfig = NewBotConfig()
 	initViper("", testEnvPrefix)
 	readConfig()
 	require.NotPanics(t, func() { checkConfig() })
@@ -108,7 +109,7 @@ func TestMustConfig(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			os.Unsetenv(testEnvPrefix + "_" + "" + v)
 			// init config
-			BotConfig = new(Config)
+			BotConfig = NewBotConfig()
 			initViper("", testEnvPrefix)
 			readConfig()
 			defer viper.Reset()
@@ -117,5 +118,50 @@ func TestMustConfig(t *testing.T) {
 			os.Setenv(testEnvPrefix+"_"+""+v, v)
 		})
 	}
+
+}
+
+func TestRateLimitConfig(t *testing.T) {
+	req := require.New(t)
+
+	// init config
+	BotConfig = NewBotConfig()
+	initViper(testConfigFile, testEnvPrefix)
+	readConfig()
+	defer viper.Reset()
+
+	config := BotConfig.RateLimitConfig
+	req.Equal(20, config.MaxToken)
+	req.Equal(1.0, config.Limit)
+	req.Equal(1, config.Cost)
+	req.Equal(3, config.StickerCost)
+
+	// set some env
+	os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_MAX_TOKEN", "0")
+	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
+	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
+	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
+	defer func() {
+		os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_MAX_TOKEN")
+		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_LIMIT")
+		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST")
+		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_STICKER")
+	}()
+
+	// should override by env
+	readConfig()
+	req.Equal(0, config.MaxToken)
+	req.Equal(0.0, config.Limit)
+	req.Equal(-1, config.Cost)
+	req.Equal(-1, config.StickerCost)
+
+	// should check to default
+	checkConfig()
+	req.Equal(1, config.MaxToken)
+	req.Equal(1.0, config.Limit)
+	req.Equal(1, config.Cost)
+	req.Equal(1, config.StickerCost)
 
 }

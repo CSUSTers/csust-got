@@ -2,11 +2,12 @@ package config
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"strings"
 )
 
 // BotConfig can get bot's config globally
@@ -19,10 +20,17 @@ var (
 
 // InitConfig - init bot config
 func InitConfig(configFile, envPrefix string) {
-	BotConfig = new(Config)
+	BotConfig = NewBotConfig()
 	initViper(configFile, envPrefix)
 	readConfig()
 	checkConfig()
+}
+
+// NewBotConfig - return new bot config
+func NewBotConfig() *Config {
+	config := new(Config)
+	config.RateLimitConfig = new(rateLimitConfig)
+	return config
 }
 
 // Config the interface for common configs.
@@ -32,6 +40,15 @@ type Config struct {
 	RedisPass string
 	DebugMode bool
 	Bot       *tgbotapi.BotAPI
+
+	RateLimitConfig *rateLimitConfig
+}
+
+type rateLimitConfig struct {
+	MaxToken    int
+	Limit       float64
+	Cost        int
+	StickerCost int
 }
 
 // BotID returns the BotID of this config.
@@ -70,6 +87,13 @@ func readConfig() {
 	// redis config
 	BotConfig.RedisAddr = viper.GetString("redis.addr")
 	BotConfig.RedisPass = viper.GetString("redis.pass")
+
+	// rate limit
+	BotConfig.RateLimitConfig.MaxToken = viper.GetInt("rate_limit.max_token")
+	BotConfig.RateLimitConfig.Limit = viper.GetFloat64("rate_limit.limit")
+	BotConfig.RateLimitConfig.Cost = viper.GetInt("rate_limit.cost")
+	BotConfig.RateLimitConfig.StickerCost = viper.GetInt("rate_limit.cost_sticker")
+
 }
 
 func checkConfig() {
@@ -81,6 +105,18 @@ func checkConfig() {
 	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
+	}
+	if BotConfig.RateLimitConfig.MaxToken <= 0 {
+		BotConfig.RateLimitConfig.MaxToken = 1
+	}
+	if BotConfig.RateLimitConfig.Limit <= 0 {
+		BotConfig.RateLimitConfig.Limit = 1
+	}
+	if BotConfig.RateLimitConfig.Cost < 0 {
+		BotConfig.RateLimitConfig.Cost = 1
+	}
+	if BotConfig.RateLimitConfig.StickerCost < 0 {
+		BotConfig.RateLimitConfig.StickerCost = 1
 	}
 }
 

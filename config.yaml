@@ -3,6 +3,15 @@ debug: false
 
 # bot token
 token: ""
+rate_limit:
+  # token bucket size, must [int]
+  max_token: 20
+  # how many tokens get every seconds [float64]
+  limit: 1
+  # default cost every message [int]
+  cost: 1
+  # cost of every sticker, this override default cost [int]
+  cost_sticker: 3
 
 # redis config
 redis:
