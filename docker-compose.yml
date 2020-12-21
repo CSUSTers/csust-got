@@ -1,14 +1,17 @@
 version: '3'
 
+x-log-driver: &log-driver
+logging:
+  driver: loki-driver
+  options:
+    loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
+
 services:
 
   bot:
     build: .
     container_name: bot
-    logging:
-      driver: loki-driver
-      options:
-        loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
+    <<: *log-driver
     restart: always
     depends_on:
       - redis
@@ -20,6 +23,7 @@ services:
   redis:
     image: "redis:alpine"
     container_name: bot-redis
+    <<: *log-driver
     logging:
       driver: loki-driver
       options:
