@@ -33,15 +33,15 @@ func TestReadEnv(t *testing.T) {
 	req := require.New(t)
 
 	// set some env
-	os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
-	os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
-	os.Setenv(testEnvPrefix+"_"+"REDIS_PASS", "some-env-password")
+	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
+	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
+	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_PASS", "some-env-password")
 	defer func() {
-		os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
-		os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
-		os.Unsetenv(testEnvPrefix + "_" + "REDIS_PASS")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_PASS")
 	}()
 
 	// init config
@@ -51,7 +51,7 @@ func TestReadEnv(t *testing.T) {
 	defer viper.Reset()
 
 	// some config should read
-	//req.True(BotConfig.DebugMode)
+	req.True(BotConfig.DebugMode)
 	req.Equal("some-bot-token", BotConfig.Token)
 	req.Equal("some-env-address", BotConfig.RedisConfig.RedisAddr)
 	req.Equal("some-env-password", BotConfig.RedisConfig.RedisPass)
@@ -61,13 +61,13 @@ func TestEnvOverrideFile(t *testing.T) {
 	req := require.New(t)
 
 	// set some env
-	os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
-	os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
+	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
+	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 	defer func() {
-		os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
-		os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
 	}()
 
 	// init config
@@ -88,11 +88,11 @@ func TestMustConfig(t *testing.T) {
 
 	// set must config env
 	for _, v := range mustConfigs {
-		os.Setenv(testEnvPrefix+"_"+""+v, v)
+		_ = os.Setenv(testEnvPrefix+"_"+""+v, v)
 	}
 	defer func() {
 		for _, v := range mustConfigs {
-			os.Unsetenv(testEnvPrefix + "_" + "" + v)
+			_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)
 		}
 	}()
 
@@ -107,17 +107,10 @@ func TestMustConfig(t *testing.T) {
 	errMsgs := []string{noTokenMsg, noRedisMsg}
 	for i, v := range mustConfigs {
 		t.Run(v, func(t *testing.T) {
-			// unset env
-			os.Unsetenv(testEnvPrefix + "_" + "" + v)
-
-			// read config
-			readConfig()
-
-			// should panic
-			require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() })
-
-			// set env
-			os.Setenv(testEnvPrefix+"_"+""+v, v)
+			_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)                    // unset env
+			readConfig()                                                     // read config
+			require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() }) // should panic
+			_ = os.Setenv(testEnvPrefix+"_"+""+v, v)                         // set env
 		})
 	}
 }
@@ -139,19 +132,19 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(2, config.CommandCost)
 
 	// set some env
-	os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_MAX_TOKEN", "0")
-	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
-	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
-	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
-	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_COMMAND", "-1")
+	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_MAX_TOKEN", "0")
+	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
+	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
+	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
+	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_COMMAND", "-1")
 	defer func() {
-		os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_MAX_TOKEN")
-		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_LIMIT")
-		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST")
-		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_STICKER")
-		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_COMMAND")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_MAX_TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_LIMIT")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_STICKER")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_COMMAND")
 	}()
 
 	// should override by env

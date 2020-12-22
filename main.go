@@ -41,7 +41,7 @@ func main() {
 
 	// check database
 	rc := ctx.GlobalClient()
-	// blacklsit
+	// blacklist
 	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
