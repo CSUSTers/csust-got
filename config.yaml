@@ -1,0 +1,22 @@
+# global config
+debug: false
+worker: 4
+
+# bot config
+token: ""
+rate_limit:
+  # token bucket size, must [int]
+  max_token: 20
+  # how many tokens get every seconds [float64]
+  limit: 0.5
+  # default cost every message [int]
+  cost: 1
+  # cost of every sticker, sticker message use this cost [int]
+  cost_sticker: 3
+  # cost of every command, command message use this cost [int]
+  cost_command: 2
+
+# redis config
+redis:
+  addr: "redis:6379"
+  pass: "csust-bot-redis-password"

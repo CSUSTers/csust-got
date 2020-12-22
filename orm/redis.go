@@ -21,8 +21,8 @@ func GetClient() *redis.Client {
 // NewClient new redis client
 func NewClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
-		Addr:     config.BotConfig.RedisAddr,
-		Password: config.BotConfig.RedisPass,
+		Addr:     config.BotConfig.RedisConfig.RedisAddr,
+		Password: config.BotConfig.RedisConfig.RedisPass,
 	})
 }
 

@@ -92,7 +92,7 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, hard bool, durat
 
 // BanSomeoneByUsername Use to ban someone by username, return true if success.
 // Not Work
-//func BanSomeoneByUsername(bot *tgbotapi.BotAPI, chatID int64, username string, hard bool, duration time.Duration) bool {
+// func BanSomeoneByUsername(bot *tgbotapi.BotAPI, chatID int64, username string, hard bool, duration time.Duration) bool {
 //
 //    chatMember := tgbotapi.ChatMemberConfig{
 //        ChatID:             chatID,
@@ -103,11 +103,11 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, hard bool, durat
 //		return hardBan(bot, chatMember, duration)
 //	}
 //	return softBan(bot, chatMember, duration)
-//}
+// }
 
 // BanMultiByUsername Use to ban by slice of username, return true if success.
 // Not Work
-//func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, hard bool, duration time.Duration) []string {
+// func BanMultiByUsername(bot *tgbotapi.BotAPI, chatID int64, username []string, hard bool, duration time.Duration) []string {
 //
 //	success := make([]string, 0)
 //	for i := range username {
@@ -116,7 +116,7 @@ func BanSomeone(bot *tgbotapi.BotAPI, chatID int64, userID int, hard bool, durat
 //		}
 //	}
 //	return success
-//}
+// }
 
 // only allow text or media message
 func softBan(bot *tgbotapi.BotAPI, chatMember tgbotapi.ChatMemberConfig, duration time.Duration) bool {

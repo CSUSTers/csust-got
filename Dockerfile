@@ -17,5 +17,6 @@ RUN apk add tzdata
 
 WORKDIR /app
 COPY --from=buildenv /go/src/app/got .
+COPY --from=buildenv /go/src/app/config.yaml .
 
 CMD ["./got"]

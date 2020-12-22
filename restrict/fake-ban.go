@@ -23,7 +23,7 @@ type KeyFunction func(*tgbotapi.User) string
 // BanExecutor is executor
 type BanExecutor func(context.Context, BanSpec) string
 
-//BanSpec is ban spec
+// BanSpec is ban spec
 type BanSpec struct {
 	BanTarget  *tgbotapi.User
 	BigBrother *tgbotapi.User
@@ -47,7 +47,7 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 		if err != nil {
 			banTime = time.Duration(60+rand.Intn(60)) * time.Second
 		}
-		//chatID := update.Message.Chat.ID
+		// chatID := update.Message.Chat.ID
 		bigBrother := update.Message.From
 		var banTarget *tgbotapi.User = nil
 		if fwd := update.Message.ReplyToMessage; fwd != nil {

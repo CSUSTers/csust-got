@@ -16,11 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
-var worker = 4
-
 func main() {
-
-	config.InitConfig()
+	config.InitConfig("config.yaml", "BOT")
 	prom.InitPrometheus()
 	orm.InitRedis()
 
@@ -44,7 +41,7 @@ func main() {
 
 	// check database
 	rc := ctx.GlobalClient()
-	// blacklsit
+	// blacklist
 	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
@@ -96,8 +93,8 @@ func main() {
 	})
 
 	wg := sync.WaitGroup{}
-	wg.Add(worker)
-	for i := 0; i < worker; i++ {
+	wg.Add(config.BotConfig.Worker)
+	for i := 0; i < config.BotConfig.Worker; i++ {
 		go func() {
 			defer wg.Done()
 			for update := range updates {

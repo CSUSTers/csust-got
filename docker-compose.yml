@@ -1,14 +1,18 @@
-version: '3'
+version: '3.8'
+
+x-common: &common
+  logging:
+    driver: loki-driver
+    options:
+      loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
+  restart: always
 
 services:
 
   bot:
     build: .
     container_name: bot
-    logging:
-      driver: loki-driver
-      options:
-        loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
+    <<: *common
     restart: always
     depends_on:
       - redis
@@ -16,20 +20,11 @@ services:
       - redis
     ports:
       - "8080:8080"
-    environment:
-      DEBUG: ${CSUST_BOT_DEBUG}
-      TOKEN: ${CSUST_BOT_TOKEN}
-      REDIS_ADDR: "redis:6379"
-      REDIS_PASSWORD: "csust-bot-redis-password"
 
   redis:
     image: "redis:alpine"
     container_name: bot-redis
-    logging:
-      driver: loki-driver
-      options:
-        loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
-    restart: always
+    <<: *common
     expose:
       - "6379"
     volumes:
