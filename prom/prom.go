@@ -2,15 +2,15 @@ package prom
 
 import (
 	"csust-got/entities"
+	"csust-got/log"
+	"go.uber.org/zap"
 	"net/http"
 	"os"
 	"time"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 var host, _ = os.Hostname()
@@ -24,7 +24,7 @@ func InitPrometheus() {
 	go func() {
 		err := http.ListenAndServe(":8080", nil)
 		if err != nil {
-			zap.L().Error(err.Error())
+			log.Error("InitPrometheus: Serve http failed", zap.Error(err))
 		}
 	}()
 }

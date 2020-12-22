@@ -2,14 +2,15 @@ package restrict
 
 import (
 	"csust-got/entities"
+	"csust-got/log"
 	"csust-got/util"
 	"fmt"
+	"go.uber.org/zap"
 	"math/rand"
 	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"go.uber.org/zap"
 )
 
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
@@ -157,13 +158,11 @@ func ban(bot *tgbotapi.BotAPI, restrictConfig tgbotapi.RestrictChatMemberConfig)
 
 	resp, err := bot.RestrictChatMember(restrictConfig)
 	if err != nil {
-		zap.L().Error("Can't restrict chat member.")
-		zap.L().Error(err.Error())
+		log.Error("Can't restrict chat member.", zap.Error(err))
 		return false
 	}
 	if !resp.Ok {
-		zap.L().Error("Can't restrict chat member.")
-		zap.L().Error(resp.Description)
+		log.Error("Can't restrict chat member.", zap.String("resp", resp.Description))
 		return false
 	}
 	return true

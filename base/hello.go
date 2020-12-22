@@ -3,6 +3,7 @@ package base
 import (
 	"csust-got/context"
 	"csust-got/entities"
+	"csust-got/log"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
@@ -70,7 +71,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		key := "shutdown"
 		shutdown, err := orm.GetBool(ctx, key)
 		if err != nil {
-			zap.L().Sugar().Error("failed to access redis.", err)
+			log.Error("failed to access redis.", zap.Error(err))
 		}
 		if preds.IsCommand("shutdown").
 			Or(preds.IsCommand("halt")).
@@ -79,7 +80,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			if shutdown {
 				msg.Text = "我已经睡了，还请不要再找我了，可以使用/boot命令叫醒我……晚安:)"
 			} else if err := orm.WriteBool(ctx, key, true); err != nil {
-				zap.L().Sugar().Error("failed to access redis.", err)
+				log.Error("failed to access redis.", zap.Error(err))
 				msg.Text = "睡不着……:("
 			}
 			util.SendMessage(bot, msg)
@@ -88,7 +89,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 		if preds.IsCommand("boot").ShouldHandle(update) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 早上好，新的一天加油哦！:)")
 			if err := orm.WriteBool(ctx, key, false); err != nil {
-				zap.L().Sugar().Error("failed to access redis.", err)
+				log.Error("failed to access redis.", zap.Error(err))
 				msg.Text = "我不愿面对这苦涩的一天……:("
 			}
 			util.SendMessage(bot, msg)

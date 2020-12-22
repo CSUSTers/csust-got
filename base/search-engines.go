@@ -2,6 +2,7 @@ package base
 
 import (
 	"csust-got/config"
+	"csust-got/log"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"fmt"
@@ -40,7 +41,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 				stickerSet, err := config.BotConfig.Bot.GetStickerSet(
 					tgbotapi.GetStickerSetConfig{Name: stickerSetName})
 				if err != nil {
-					zap.L().Sugar().Error(err.Error())
+					log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
 				} else {
 					return engineFunc(stickerSet.Title)
 				}

@@ -69,13 +69,12 @@ func initViper(configFile, envPrefix string) {
 		viper.SetConfigFile(configFile)
 		if err := viper.ReadInConfig(); err != nil {
 			if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-				// Config file not found
-				zap.S().Warnf("config file %s not found! err:%v", configFile, err)
+				zap.L().Warn("config file not found!", zap.String("configFile", configFile), zap.Error(err))
 			} else {
-				// Config file was found but another error was produced
-				zap.S().Warnf("config file %s has found, but another error was produced when reading config! err: %v", configFile, err)
+				zap.L().Warn("config file has found, but another error was produced when reading config!",
+					zap.String("configFile", configFile), zap.Error(err))
 			}
-			zap.S().Warnf("%s is not avaliable... err: %v", configFile, err)
+			zap.L().Warn("config file is not available...", zap.String("configFile", configFile), zap.Error(err))
 			return
 		}
 	}

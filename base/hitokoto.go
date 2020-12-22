@@ -2,6 +2,7 @@ package base
 
 import (
 	"csust-got/entities"
+	"csust-got/log"
 	"csust-got/orm"
 	"encoding/json"
 	"fmt"
@@ -96,22 +97,22 @@ var HitoNetease = mapToHTML(func(*tgbotapi.Message) string {
 // GetHitokoto can get a hitokoto
 func GetHitokoto(arg HitokotoArg, from bool) string {
 	u := arg.toURL()
-	zap.L().Debug("getting", zap.Stringer("url", u))
+	log.Debug("getting", zap.Stringer("url", u))
 	resp, err := http.Get(u.String())
 	if err != nil {
-		zap.L().Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
+		log.Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
 		return loadFromRedis(from)
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		zap.L().Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
+		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
 		return loadFromRedis(from)
 	}
 	koto := HitokotoResponse{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
-		zap.L().Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
+		log.Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
 		return loadFromRedis(from)
 	}
 	if koto.Author == "" {
@@ -133,14 +134,14 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 func storeToRedis(respBody string) {
 	_, err := orm.GetClient().SAdd("hitokoto", respBody).Result()
 	if err != nil {
-		zap.L().Error("Err@Hitokoto [STORE]", zap.Error(err))
+		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
 	}
 }
 
 func loadFromRedis(from bool) string {
 	res, err := orm.GetClient().SRandMember("hitokoto").Result()
 	if err != nil {
-		zap.L().Error("Err@Hitokoto [STORE]", zap.Error(err))
+		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
 		return errMessage
 	}
 	if !from {

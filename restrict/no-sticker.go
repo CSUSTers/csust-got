@@ -2,6 +2,7 @@ package restrict
 
 import (
 	"csust-got/context"
+	"csust-got/log"
 	"csust-got/module"
 	"csust-got/util"
 
@@ -23,8 +24,7 @@ func NoSticker(tgbotapi.Update) module.Module {
 
 		_, err := ctx.GlobalClient().Set(ctx.WrapKey(key), v, 0).Result()
 		if err != nil {
-			zap.L().Error("Can't set NoStickerMode")
-			zap.L().Error(err.Error())
+			log.Error("Can't set NoStickerMode", zap.Error(err))
 			return
 		}
 		util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, text))
@@ -49,12 +49,11 @@ func DeleteSticker(tgbotapi.Update) module.Module {
 
 		resp, err := bot.DeleteMessage(deleteMessage)
 		if err != nil {
-			zap.L().Error("Can't delete sticker")
-			zap.L().Error(err.Error())
+			log.Error("Can't delete sticker", zap.Error(err))
 			return module.NoMore
 		}
 		if !resp.Ok {
-			zap.L().Error("NoSticker Response NOT OK")
+			log.Error("NoSticker Response NOT OK")
 		}
 		return module.NoMore
 	}
@@ -65,7 +64,7 @@ func DeleteSticker(tgbotapi.Update) module.Module {
 func isNoStickerMode(ctx context.Context) bool {
 	isNoStickerMode, err := ctx.GlobalClient().Get(ctx.WrapKey(key)).Int()
 	if err != nil && err != redis.Nil {
-		zap.L().Error("ERROR: Can't get no-sticker mode from context", zap.Error(err))
+		log.Error("ERROR: Can't get no-sticker mode from context", zap.Error(err))
 		return false
 	}
 
