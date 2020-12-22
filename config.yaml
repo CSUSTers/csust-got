@@ -8,7 +8,7 @@ rate_limit:
   # token bucket size, must [int]
   max_token: 20
   # how many tokens get every seconds [float64]
-  limit: 1
+  limit: 0.5
   # default cost every message [int]
   cost: 1
   # cost of every sticker, sticker message use this cost [int]

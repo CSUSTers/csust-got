@@ -126,7 +126,7 @@ func TestRateLimitConfig(t *testing.T) {
 
 	config := BotConfig.RateLimitConfig
 	req.Equal(20, config.MaxToken)
-	req.Equal(1.0, config.Limit)
+	req.Equal(0.5, config.Limit)
 	req.Equal(1, config.Cost)
 	req.Equal(3, config.StickerCost)
 	req.Equal(2, config.CommandCost)
