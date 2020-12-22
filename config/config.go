@@ -56,6 +56,7 @@ type rateLimitConfig struct {
 	Limit       float64
 	Cost        int
 	StickerCost int
+	CommandCost int
 }
 
 // BotID returns the BotID of this config.
@@ -104,8 +105,8 @@ func readConfig() {
 		Limit:       viper.GetFloat64("rate_limit.limit"),
 		Cost:        viper.GetInt("rate_limit.cost"),
 		StickerCost: viper.GetInt("rate_limit.cost_sticker"),
+		CommandCost: viper.GetInt("rate_limit.cost_command"),
 	}
-
 }
 
 func checkConfig() {
@@ -132,6 +133,9 @@ func checkConfig() {
 	}
 	if BotConfig.RateLimitConfig.StickerCost < 0 {
 		BotConfig.RateLimitConfig.StickerCost = 1
+	}
+	if BotConfig.RateLimitConfig.CommandCost < 0 {
+		BotConfig.RateLimitConfig.CommandCost = 1
 	}
 }
 

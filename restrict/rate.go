@@ -21,14 +21,10 @@ func RateLimit(tgbotapi.Update) module.Module {
 			return module.NextOfChain
 		}
 		rateConfig := ctx.GlobalConfig().RateLimitConfig
-		userID := message.From.ID
-		chatID := message.Chat.ID
+		userID, chatID := message.From.ID, message.Chat.ID
 		key := strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(userID)
 		if limiter, ok := limitMap[key]; ok {
-			if message.Sticker == nil && limiter.AllowN(time.Now(), rateConfig.Cost) {
-				return module.NextOfChain
-			}
-			if message.Sticker != nil && limiter.AllowN(time.Now(), rateConfig.StickerCost) {
+			if checkRate(ctx, message, limiter) {
 				return module.NextOfChain
 			}
 			// 令牌不足撤回消息
@@ -39,4 +35,16 @@ func RateLimit(tgbotapi.Update) module.Module {
 		return module.NextOfChain
 	}
 	return module.Filter(limitHandler)
+}
+
+// return false if message should be limit
+func checkRate(ctx context.Context, msg *tgbotapi.Message, limiter *rate.Limiter) bool {
+	rateConfig := ctx.GlobalConfig().RateLimitConfig
+	if msg.Sticker != nil {
+		return limiter.AllowN(time.Now(), rateConfig.StickerCost)
+	}
+	if msg.Command() != "" {
+		return limiter.AllowN(time.Now(), rateConfig.CommandCost)
+	}
+	return limiter.AllowN(time.Now(), rateConfig.Cost)
 }

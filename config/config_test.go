@@ -136,6 +136,7 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(1.0, config.Limit)
 	req.Equal(1, config.Cost)
 	req.Equal(3, config.StickerCost)
+	req.Equal(2, config.CommandCost)
 
 	// set some env
 	os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
@@ -143,12 +144,14 @@ func TestRateLimitConfig(t *testing.T) {
 	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
 	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
 	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
+	os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_COMMAND", "-1")
 	defer func() {
 		os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
 		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_MAX_TOKEN")
 		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_LIMIT")
 		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST")
 		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_STICKER")
+		os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_COMMAND")
 	}()
 
 	// should override by env
@@ -159,6 +162,7 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(0.0, config.Limit)
 	req.Equal(-1, config.Cost)
 	req.Equal(-1, config.StickerCost)
+	req.Equal(-1, config.CommandCost)
 
 	// should check to default
 	checkConfig()
@@ -166,5 +170,5 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(1.0, config.Limit)
 	req.Equal(1, config.Cost)
 	req.Equal(1, config.StickerCost)
-
+	req.Equal(1, config.CommandCost)
 }
