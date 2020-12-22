@@ -36,9 +36,11 @@ func NewBotConfig() *Config {
 
 // Config the interface for common configs.
 type Config struct {
+	Bot *tgbotapi.BotAPI
+
 	Token     string
 	DebugMode bool
-	Bot       *tgbotapi.BotAPI
+	Worker    int
 
 	RedisConfig     *redisConfig
 	RateLimitConfig *rateLimitConfig
@@ -88,6 +90,7 @@ func readConfig() {
 	// base config
 	BotConfig.DebugMode = viper.GetBool("debug")
 	BotConfig.Token = viper.GetString("token")
+	BotConfig.Worker = viper.GetInt("worker")
 
 	// redis config
 	BotConfig.RedisConfig = &redisConfig{
@@ -114,6 +117,9 @@ func checkConfig() {
 	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
+	}
+	if BotConfig.Worker <= 0 {
+		BotConfig.Worker = 1
 	}
 	if BotConfig.RateLimitConfig.MaxToken <= 0 {
 		BotConfig.RateLimitConfig.MaxToken = 1
