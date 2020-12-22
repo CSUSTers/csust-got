@@ -25,8 +25,8 @@ func TestReadConfigFile(t *testing.T) {
 	// some config should read
 	req.False(BotConfig.DebugMode)
 	req.Empty(BotConfig.Token)
-	req.Equal("redis:6379", BotConfig.RedisAddr)
-	req.Equal("csust-bot-redis-password", BotConfig.RedisPass)
+	req.Equal("redis:6379", BotConfig.RedisConfig.RedisAddr)
+	req.Equal("csust-bot-redis-password", BotConfig.RedisConfig.RedisPass)
 }
 
 func TestReadEnv(t *testing.T) {
@@ -53,8 +53,8 @@ func TestReadEnv(t *testing.T) {
 	// some config should read
 	//req.True(BotConfig.DebugMode)
 	req.Equal("some-bot-token", BotConfig.Token)
-	req.Equal("some-env-address", BotConfig.RedisAddr)
-	req.Equal("some-env-password", BotConfig.RedisPass)
+	req.Equal("some-env-address", BotConfig.RedisConfig.RedisAddr)
+	req.Equal("some-env-password", BotConfig.RedisConfig.RedisPass)
 }
 
 func TestEnvOverrideFile(t *testing.T) {
@@ -79,8 +79,8 @@ func TestEnvOverrideFile(t *testing.T) {
 	// some config should read
 	req.True(BotConfig.DebugMode)
 	req.Equal("some-bot-token", BotConfig.Token)
-	req.Equal("some-env-address", BotConfig.RedisAddr)
-	req.Equal("csust-bot-redis-password", BotConfig.RedisPass)
+	req.Equal("some-env-address", BotConfig.RedisConfig.RedisAddr)
+	req.Equal("csust-bot-redis-password", BotConfig.RedisConfig.RedisPass)
 }
 
 func TestMustConfig(t *testing.T) {
@@ -101,24 +101,25 @@ func TestMustConfig(t *testing.T) {
 	initViper("", testEnvPrefix)
 	readConfig()
 	require.NotPanics(t, func() { checkConfig() })
-	viper.Reset()
+	defer viper.Reset()
 
 	// every missing request should panic
 	errMsgs := []string{noTokenMsg, noRedisMsg}
 	for i, v := range mustConfigs {
 		t.Run(v, func(t *testing.T) {
+			// unset env
 			os.Unsetenv(testEnvPrefix + "_" + "" + v)
-			// init config
-			BotConfig = NewBotConfig()
-			initViper("", testEnvPrefix)
-			readConfig()
-			defer viper.Reset()
 
+			// read config
+			readConfig()
+
+			// should panic
 			require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() })
+
+			// set env
 			os.Setenv(testEnvPrefix+"_"+""+v, v)
 		})
 	}
-
 }
 
 func TestRateLimitConfig(t *testing.T) {
@@ -152,6 +153,8 @@ func TestRateLimitConfig(t *testing.T) {
 
 	// should override by env
 	readConfig()
+
+	config = BotConfig.RateLimitConfig
 	req.Equal(0, config.MaxToken)
 	req.Equal(0.0, config.Limit)
 	req.Equal(-1, config.Cost)

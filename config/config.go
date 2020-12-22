@@ -30,18 +30,23 @@ func InitConfig(configFile, envPrefix string) {
 func NewBotConfig() *Config {
 	config := new(Config)
 	config.RateLimitConfig = new(rateLimitConfig)
+	config.RedisConfig = new(redisConfig)
 	return config
 }
 
 // Config the interface for common configs.
 type Config struct {
 	Token     string
-	RedisAddr string
-	RedisPass string
 	DebugMode bool
 	Bot       *tgbotapi.BotAPI
 
+	RedisConfig     *redisConfig
 	RateLimitConfig *rateLimitConfig
+}
+
+type redisConfig struct {
+	RedisAddr string
+	RedisPass string
 }
 
 type rateLimitConfig struct {
@@ -85,14 +90,18 @@ func readConfig() {
 	BotConfig.Token = viper.GetString("token")
 
 	// redis config
-	BotConfig.RedisAddr = viper.GetString("redis.addr")
-	BotConfig.RedisPass = viper.GetString("redis.pass")
+	BotConfig.RedisConfig = &redisConfig{
+		RedisAddr: viper.GetString("redis.addr"),
+		RedisPass: viper.GetString("redis.pass"),
+	}
 
 	// rate limit
-	BotConfig.RateLimitConfig.MaxToken = viper.GetInt("rate_limit.max_token")
-	BotConfig.RateLimitConfig.Limit = viper.GetFloat64("rate_limit.limit")
-	BotConfig.RateLimitConfig.Cost = viper.GetInt("rate_limit.cost")
-	BotConfig.RateLimitConfig.StickerCost = viper.GetInt("rate_limit.cost_sticker")
+	BotConfig.RateLimitConfig = &rateLimitConfig{
+		MaxToken:    viper.GetInt("rate_limit.max_token"),
+		Limit:       viper.GetFloat64("rate_limit.limit"),
+		Cost:        viper.GetInt("rate_limit.cost"),
+		StickerCost: viper.GetInt("rate_limit.cost_sticker"),
+	}
 
 }
 
@@ -100,7 +109,7 @@ func checkConfig() {
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)
 	}
-	if BotConfig.RedisAddr == "" {
+	if BotConfig.RedisConfig.RedisAddr == "" {
 		zap.L().Panic(noRedisMsg)
 	}
 	if BotConfig.DebugMode {
@@ -123,7 +132,7 @@ func checkConfig() {
 // NewRedisClient can new a redis client
 func (c Config) NewRedisClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
-		Addr:     c.RedisAddr,
-		Password: c.RedisPass,
+		Addr:     c.RedisConfig.RedisAddr,
+		Password: c.RedisConfig.RedisPass,
 	})
 }
