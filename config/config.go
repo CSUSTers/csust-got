@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -120,12 +119,4 @@ func checkConfig() {
 	BotConfig.RestrictConfig.checkConfig()
 	BotConfig.RateLimitConfig.checkConfig()
 	BotConfig.MessageConfig.checkConfig()
-}
-
-// NewRedisClient can new a redis client
-func (c Config) NewRedisClient() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr:     c.RedisConfig.RedisAddr,
-		Password: c.RedisConfig.RedisPass,
-	})
 }

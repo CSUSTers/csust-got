@@ -115,8 +115,9 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	if err != nil && err != redis.Nil {
 		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了：我不确定您是正义，或是邪恶，因此我不会帮你。"
 	}
+	banCD := time.Duration(restrictConfig.FakeBanCDMinutes) * time.Minute
 	if isCD == "true" {
-		return fmt.Sprintf("您在过去的%v分钟里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。", restrictConfig.FakeBanCDMinutes)
+		return fmt.Sprintf("您在过去%v的时间里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。", banCD)
 	}
 
 	// check ban target is nil
@@ -137,8 +138,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 		ok = false
 	}
 	if ok {
-		banMinutes := time.Duration(restrictConfig.FakeBanCDMinutes) * time.Minute
-		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", banMinutes).Result()
+		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", banCD).Result()
 		// If the CD recording fails, they may use fake_ban unlimited,
 		// so we add some additional information to prompt bot manager.
 		if err != nil {

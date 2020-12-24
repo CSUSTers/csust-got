@@ -20,13 +20,23 @@ func TestReadConfigFile(t *testing.T) {
 	BotConfig = NewBotConfig()
 	initViper(testConfigFile, "")
 	readConfig()
-	defer viper.Reset()
+	viper.Reset()
 
 	// some config should read
 	req.False(BotConfig.DebugMode)
 	req.Empty(BotConfig.Token)
 	req.Equal("redis:6379", BotConfig.RedisConfig.RedisAddr)
 	req.Equal("csust-bot-redis-password", BotConfig.RedisConfig.RedisPass)
+
+	initViper("not_exist", "")
+	readConfig()
+	defer viper.Reset()
+
+	// some config should empty
+	req.False(BotConfig.DebugMode)
+	req.Empty(BotConfig.Token)
+	req.Empty(BotConfig.RedisConfig.RedisAddr)
+	req.Empty(BotConfig.RedisConfig.RedisPass)
 }
 
 func TestReadEnv(t *testing.T) {
@@ -55,6 +65,7 @@ func TestReadEnv(t *testing.T) {
 	req.Equal("some-bot-token", BotConfig.Token)
 	req.Equal("some-env-address", BotConfig.RedisConfig.RedisAddr)
 	req.Equal("some-env-password", BotConfig.RedisConfig.RedisPass)
+	checkConfig()
 }
 
 func TestEnvOverrideFile(t *testing.T) {
