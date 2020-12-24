@@ -2,6 +2,7 @@ package log
 
 import (
 	"csust-got/config"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -11,6 +12,7 @@ var logger *zap.Logger
 func InitLogger() {
 	logger = NewLogger()
 	zap.ReplaceGlobals(logger)
+	_ = tgbotapi.SetLogger(botLogger{})
 }
 
 func NewLogger() *zap.Logger {
