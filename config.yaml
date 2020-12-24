@@ -6,6 +6,7 @@ worker: 4               # number of goroutine to recv update [int]
 token: ""
 restrict:
   kill_duration: 600    # restrict duration for command `kill` [second]
+  fake_ban_cd: 1440     # restrict CD for command `kill` or `fake ban xxx` [minutes]
 rate_limit:
   max_token: 20         # token bucket size, must [int]
   limit: 0.5            # how many tokens get every seconds [float64]
@@ -17,3 +18,9 @@ rate_limit:
 redis:
   addr: "redis:6379"
   pass: "csust-bot-redis-password"
+
+# message config
+message:
+  links: "NO LINKS"
+  restrict_bot: "好 的， 我 杀 我 自 己。"
+  fake_ban_in_cd: ""

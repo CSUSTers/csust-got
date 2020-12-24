@@ -99,6 +99,8 @@ func genericBan(spec BanSpec) (string, bool) {
 }
 
 func generateTextWithCD(ctx context.Context, spec BanSpec) string {
+	restrictConfig := ctx.GlobalConfig().RestrictConfig
+	msgConfig := ctx.GlobalConfig().MessageConfig
 	bbid := strconv.Itoa(spec.BigBrother.ID)
 	rc := ctx.GlobalClient()
 	// check if this user in Blacklist
@@ -114,7 +116,7 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了：我不确定您是正义，或是邪恶，因此我不会帮你。"
 	}
 	if isCD == "true" {
-		return "您在过去的24h里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。"
+		return fmt.Sprintf("您在过去的%v分钟里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。", restrictConfig.FakeBanCDMinutes)
 	}
 
 	// check ban target is nil
@@ -130,12 +132,13 @@ func generateTextWithCD(ctx context.Context, spec BanSpec) string {
 	}
 	text, ok := genericBan(spec)
 	if killSelf && ok {
-		text = "好 的， 我 杀 我 自 己。"
+		text = msgConfig.RestrictBot
 		// Bot will ban the people who want to ban bot, so this people won't CD.
 		ok = false
 	}
 	if ok {
-		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", 24*time.Hour).Result()
+		banMinutes := time.Duration(restrictConfig.FakeBanCDMinutes) * time.Minute
+		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", banMinutes).Result()
 		// If the CD recording fails, they may use fake_ban unlimited,
 		// so we add some additional information to prompt bot manager.
 		if err != nil {

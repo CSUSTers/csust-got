@@ -17,6 +17,11 @@ var (
 	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 )
 
+type config interface {
+	readConfig()
+	checkConfig()
+}
+
 // InitConfig - init bot config
 func InitConfig(configFile, envPrefix string) {
 	BotConfig = NewBotConfig()
@@ -31,6 +36,7 @@ func NewBotConfig() *Config {
 	config.RateLimitConfig = new(rateLimitConfig)
 	config.RedisConfig = new(redisConfig)
 	config.RestrictConfig = new(restrictConfig)
+	config.MessageConfig = new(messageConfig)
 	return config
 }
 
@@ -45,23 +51,12 @@ type Config struct {
 	RedisConfig     *redisConfig
 	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
-}
-
-type restrictConfig struct {
-	KillSeconds int
+	MessageConfig   *messageConfig
 }
 
 type redisConfig struct {
 	RedisAddr string
 	RedisPass string
-}
-
-type rateLimitConfig struct {
-	MaxToken    int
-	Limit       float64
-	Cost        int
-	StickerCost int
-	CommandCost int
 }
 
 // BotID returns the BotID of this config.
@@ -85,6 +80,7 @@ func initViper(configFile, envPrefix string) {
 	}
 	viper.SetEnvPrefix(envPrefix)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	viper.AllowEmptyEnv(true)
 	viper.AutomaticEnv()
 
 	noTokenMsg = fmt.Sprintf("bot token is not set! Please set config file %s or env %s_TOKEN!", configFile, envPrefix)
@@ -103,19 +99,9 @@ func readConfig() {
 		RedisPass: viper.GetString("redis.pass"),
 	}
 
-	// restrict config
-	BotConfig.RestrictConfig = &restrictConfig{
-		KillSeconds: viper.GetInt("restrict.kill_duration"),
-	}
-
-	// rate limit
-	BotConfig.RateLimitConfig = &rateLimitConfig{
-		MaxToken:    viper.GetInt("rate_limit.max_token"),
-		Limit:       viper.GetFloat64("rate_limit.limit"),
-		Cost:        viper.GetInt("rate_limit.cost"),
-		StickerCost: viper.GetInt("rate_limit.cost_sticker"),
-		CommandCost: viper.GetInt("rate_limit.cost_command"),
-	}
+	BotConfig.RestrictConfig.readConfig()
+	BotConfig.RateLimitConfig.readConfig()
+	BotConfig.MessageConfig.readConfig()
 }
 
 func checkConfig() {
@@ -131,24 +117,9 @@ func checkConfig() {
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1
 	}
-	if BotConfig.RestrictConfig.KillSeconds <= 0 {
-		BotConfig.RestrictConfig.KillSeconds = 30
-	}
-	if BotConfig.RateLimitConfig.MaxToken <= 0 {
-		BotConfig.RateLimitConfig.MaxToken = 1
-	}
-	if BotConfig.RateLimitConfig.Limit <= 0 {
-		BotConfig.RateLimitConfig.Limit = 1
-	}
-	if BotConfig.RateLimitConfig.Cost < 0 {
-		BotConfig.RateLimitConfig.Cost = 1
-	}
-	if BotConfig.RateLimitConfig.StickerCost < 0 {
-		BotConfig.RateLimitConfig.StickerCost = 1
-	}
-	if BotConfig.RateLimitConfig.CommandCost < 0 {
-		BotConfig.RateLimitConfig.CommandCost = 1
-	}
+	BotConfig.RestrictConfig.checkConfig()
+	BotConfig.RateLimitConfig.checkConfig()
+	BotConfig.MessageConfig.checkConfig()
 }
 
 // NewRedisClient can new a redis client

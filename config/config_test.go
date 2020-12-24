@@ -165,3 +165,34 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(1, config.StickerCost)
 	req.Equal(1, config.CommandCost)
 }
+
+func TestMessageConfig(t *testing.T) {
+	req := require.New(t)
+
+	// set some env
+	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
+	defer func() {
+		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
+	}()
+
+	// init config
+	BotConfig = NewBotConfig()
+	initViper(testConfigFile, testEnvPrefix)
+	readConfig()
+	defer viper.Reset()
+
+	req.Equal("好 的， 我 杀 我 自 己。", BotConfig.MessageConfig.RestrictBot)
+
+	// set some env
+	_ = os.Setenv(testEnvPrefix+"_"+"MESSAGE_RESTRICT_BOT", "")
+	defer func() {
+		_ = os.Unsetenv(testEnvPrefix + "_" + "MESSAGE_RESTRICT_BOT")
+	}()
+	readConfig()
+	req.Equal("", BotConfig.MessageConfig.RestrictBot)
+
+	checkConfig()
+	req.Equal(missMsg, BotConfig.MessageConfig.RestrictBot)
+}

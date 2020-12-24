@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/context"
 	"csust-got/entities"
 	"csust-got/log"
@@ -55,10 +56,7 @@ func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
 
-	txt := fmt.Sprintf("以下本群友链:\n")
-	txt += fmt.Sprintf("[本校官网](https://csu.st)\n")
-	txt += fmt.Sprintf("[Github](https://github.com/CSUSTers)\n")
-	txt += fmt.Sprintf("[Dashboard](http://47.103.193.47:3000/d/laBgWPTGz)\n")
+	txt := config.BotConfig.MessageConfig.Links
 
 	messageReply := tgbotapi.NewMessage(chatID, txt)
 	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
