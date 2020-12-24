@@ -13,6 +13,11 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
+/*
+If user is restricted for more than 366 days or less than 30 seconds from the current time,
+they are considered to be restricted forever.
+*/
+
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
 func BanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	sec := time.Duration(rand.Intn(60)+60) * time.Second

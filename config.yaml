@@ -1,20 +1,17 @@
 # global config
 debug: false
-worker: 4
+worker: 4               # number of goroutine to recv update [int]
 
 # bot config
 token: ""
+restrict:
+  kill_duration: 600    # restrict duration for command `kill` [second]
 rate_limit:
-  # token bucket size, must [int]
-  max_token: 20
-  # how many tokens get every seconds [float64]
-  limit: 0.5
-  # default cost every message [int]
-  cost: 1
-  # cost of every sticker, sticker message use this cost [int]
-  cost_sticker: 3
-  # cost of every command, command message use this cost [int]
-  cost_command: 2
+  max_token: 20         # token bucket size, must [int]
+  limit: 0.5            # how many tokens get every seconds [float64]
+  cost: 1               # default cost every message [int]
+  cost_sticker: 3       # cost of every sticker, sticker message use this cost [int]
+  cost_command: 2       # cost of every command, command message use this cost [int]
 
 # redis config
 redis:

@@ -2,12 +2,11 @@ package config
 
 import (
 	"fmt"
-	"strings"
-
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"strings"
 )
 
 // BotConfig can get bot's config globally
@@ -31,6 +30,7 @@ func NewBotConfig() *Config {
 	config := new(Config)
 	config.RateLimitConfig = new(rateLimitConfig)
 	config.RedisConfig = new(redisConfig)
+	config.RestrictConfig = new(restrictConfig)
 	return config
 }
 
@@ -43,7 +43,12 @@ type Config struct {
 	Worker    int
 
 	RedisConfig     *redisConfig
+	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
+}
+
+type restrictConfig struct {
+	KillSeconds int
 }
 
 type redisConfig struct {
@@ -98,6 +103,11 @@ func readConfig() {
 		RedisPass: viper.GetString("redis.pass"),
 	}
 
+	// restrict config
+	BotConfig.RestrictConfig = &restrictConfig{
+		KillSeconds: viper.GetInt("restrict.kill_duration"),
+	}
+
 	// rate limit
 	BotConfig.RateLimitConfig = &rateLimitConfig{
 		MaxToken:    viper.GetInt("rate_limit.max_token"),
@@ -120,6 +130,9 @@ func checkConfig() {
 	}
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1
+	}
+	if BotConfig.RestrictConfig.KillSeconds <= 0 {
+		BotConfig.RestrictConfig.KillSeconds = 30
 	}
 	if BotConfig.RateLimitConfig.MaxToken <= 0 {
 		BotConfig.RateLimitConfig.MaxToken = 1

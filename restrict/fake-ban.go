@@ -64,7 +64,8 @@ func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
 			BanOther:   ban,
 		}
 		if cmd.Name() == "kill" {
-			spec.BanTime = 10 * time.Minute
+			seconds := ctx.GlobalConfig().RestrictConfig.KillSeconds
+			spec.BanTime = time.Duration(seconds) * time.Second
 		}
 		text := exec(ctx, spec)
 		msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
