@@ -20,14 +20,15 @@ var lastBoot = time.Now().In(timeZoneCST).Format("2006/01/02-15:04:05")
 
 // Info - build info
 func Info(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	msg := "--- Bot Info ---\n"
+	msg := "----- Bot Info -----\n"
 	msg += fmt.Sprintf("Bot Version: %s\n", version)
-	msg += fmt.Sprintf("Branch: %s\n", branch)
-	msg += fmt.Sprintf("Build Time: %s\n", buildTime)
-	msg += fmt.Sprintf("Last Boot: %s\n", lastBoot)
-	msg += fmt.Sprintf("Go Version: %s\n", runtime.Version())
+	msg += fmt.Sprintf("Branch:      %s\n", branch)
+	msg += fmt.Sprintf("Build Time:  %s\n", buildTime)
+	msg += fmt.Sprintf("Last Boot:   %s\n", lastBoot)
+	msg += fmt.Sprintf("Go Version:  %s\n", runtime.Version())
 
 	messageReply := tgbotapi.NewMessage(update.Message.Chat.ID, msg)
+	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
 	util.SendMessage(bot, messageReply)
 }
 
