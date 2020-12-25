@@ -34,14 +34,13 @@ func Info(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 // GetUserID is handle for command `/id`
 func GetUserID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
-	chatID := message.Chat.ID
+	chatID := message.From.ID
 
-	msg := "这条命令会返回你的UserID，请不要在群里使用"
-	if message.Chat.IsPrivate() {
-		msg = fmt.Sprintf("Your userID is %d", message.From.ID)
-	}
+	// chatID of private chat is userID
+	msg := fmt.Sprintf("Your userID is %d", chatID)
 
-	messageReply := tgbotapi.NewMessage(chatID, msg)
+	// send to user in private chat
+	messageReply := tgbotapi.NewMessage(int64(chatID), msg)
 	messageReply.ReplyToMessageID = message.MessageID
 
 	util.SendMessage(bot, messageReply)
