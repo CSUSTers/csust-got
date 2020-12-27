@@ -3,13 +3,10 @@ package entities
 
 import (
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
 	"testing"
 )
 
 func Test_splitText(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	tests := []struct {
 		name string
 		txt  string

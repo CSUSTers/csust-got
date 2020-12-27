@@ -1,8 +1,6 @@
 package util
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
 	"testing"
 	"time"
 
@@ -10,7 +8,6 @@ import (
 )
 
 func TestEvalDate(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	t.Run("Hour and Minute", func(t *testing.T) {
 		duration, _ := EvalDuration("2h11m")
 		assert.Equal(t, duration, 2*time.Hour+11*time.Minute)

@@ -22,7 +22,7 @@ func NewLogger() *zap.Logger {
 	} else {
 		logConfig = prodConfig()
 	}
-	if tmpLogger, err := logConfig.Build(); err == nil {
+	if tmpLogger, err := logConfig.Build(zap.AddCallerSkip(1)); err == nil {
 		return tmpLogger
 	} else {
 		zap.L().Error("NewLogger failed, using default logger", zap.Error(err))

@@ -15,9 +15,13 @@ var (
 	testEnvPrefix  = "BOT_TEST"
 )
 
+func testInit(t *testing.T) *require.Assertions {
+	zap.ReplaceGlobals(zaptest.NewLogger(t, zaptest.WrapOptions(zap.AddCaller())))
+	return require.New(t)
+}
+
 func TestReadConfigFile(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// init config
 	BotConfig = NewBotConfig()
@@ -43,8 +47,7 @@ func TestReadConfigFile(t *testing.T) {
 }
 
 func TestReadEnv(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// set some env
 	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
@@ -73,8 +76,7 @@ func TestReadEnv(t *testing.T) {
 }
 
 func TestEnvOverrideFile(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// set some env
 	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
@@ -100,7 +102,7 @@ func TestEnvOverrideFile(t *testing.T) {
 }
 
 func TestMustConfig(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
+	testInit(t)
 	mustConfigs := []string{"TOKEN", "REDIS_ADDR"}
 
 	// set must config env
@@ -133,8 +135,7 @@ func TestMustConfig(t *testing.T) {
 }
 
 func TestRateLimitConfig(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// init config
 	BotConfig = NewBotConfig()
@@ -185,8 +186,7 @@ func TestRateLimitConfig(t *testing.T) {
 }
 
 func TestMessageConfig(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// set some env
 	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
@@ -217,8 +217,7 @@ func TestMessageConfig(t *testing.T) {
 }
 
 func TestSpecialListConfig(t *testing.T) {
-	zap.ReplaceGlobals(zaptest.NewLogger(t))
-	req := require.New(t)
+	req := testInit(t)
 
 	// set some env
 	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
