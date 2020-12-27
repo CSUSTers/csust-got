@@ -2,11 +2,14 @@
 package entities
 
 import (
-	"reflect"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"testing"
 )
 
 func Test_splitText(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	tests := []struct {
 		name string
 		txt  string
@@ -52,9 +55,8 @@ func Test_splitText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := splitText(tt.txt); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("splitText() = %v, want %v", got, tt.want)
-			}
+			got := splitText(tt.txt)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

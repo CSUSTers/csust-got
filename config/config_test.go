@@ -1,6 +1,8 @@
 package config
 
 import (
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"os"
 	"testing"
 
@@ -14,6 +16,7 @@ var (
 )
 
 func TestReadConfigFile(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// init config
@@ -40,6 +43,7 @@ func TestReadConfigFile(t *testing.T) {
 }
 
 func TestReadEnv(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// set some env
@@ -69,6 +73,7 @@ func TestReadEnv(t *testing.T) {
 }
 
 func TestEnvOverrideFile(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// set some env
@@ -95,6 +100,7 @@ func TestEnvOverrideFile(t *testing.T) {
 }
 
 func TestMustConfig(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	mustConfigs := []string{"TOKEN", "REDIS_ADDR"}
 
 	// set must config env
@@ -127,6 +133,7 @@ func TestMustConfig(t *testing.T) {
 }
 
 func TestRateLimitConfig(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// init config
@@ -178,6 +185,7 @@ func TestRateLimitConfig(t *testing.T) {
 }
 
 func TestMessageConfig(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// set some env
@@ -209,6 +217,7 @@ func TestMessageConfig(t *testing.T) {
 }
 
 func TestSpecialListConfig(t *testing.T) {
+	zap.ReplaceGlobals(zaptest.NewLogger(t))
 	req := require.New(t)
 
 	// set some env
