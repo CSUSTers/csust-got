@@ -207,3 +207,24 @@ func TestMessageConfig(t *testing.T) {
 	checkConfig()
 	req.Equal(missMsg, BotConfig.MessageConfig.RestrictBot)
 }
+
+func TestSpecialListConfig(t *testing.T) {
+	req := require.New(t)
+
+	// set some env
+	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
+	defer func() {
+		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
+		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
+	}()
+
+	// init config
+	BotConfig = NewBotConfig()
+	initViper(testConfigFile, testEnvPrefix)
+	readConfig()
+	defer viper.Reset()
+
+	req.True(BotConfig.BlackListConfig.Enabled)
+	req.True(BotConfig.WhiteListConfig.Enabled)
+}

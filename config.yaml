@@ -4,8 +4,12 @@ worker: 4               # number of goroutine to recv update [int]
 
 # bot config
 token: ""
+black_list:
+  enabled: true
+white_list:
+  enabled: true
 restrict:
-  kill_duration: 600    # restrict duration for command `kill` [second]
+  kill_duration: 300    # restrict duration for command `kill` [second]
   fake_ban_cd: 1440     # restrict CD for command `kill` or `fake ban xxx` [minutes]
 rate_limit:
   max_token: 20         # token bucket size, must [int]

@@ -36,6 +36,8 @@ func NewBotConfig() *Config {
 	config.RedisConfig = new(redisConfig)
 	config.RestrictConfig = new(restrictConfig)
 	config.MessageConfig = new(messageConfig)
+	config.WhiteListConfig = new(whiteListConfig)
+	config.BlackListConfig = new(blackListConfig)
 	return config
 }
 
@@ -51,6 +53,8 @@ type Config struct {
 	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
 	MessageConfig   *messageConfig
+	BlackListConfig *blackListConfig
+	WhiteListConfig *whiteListConfig
 }
 
 type redisConfig struct {
@@ -101,6 +105,8 @@ func readConfig() {
 	BotConfig.RestrictConfig.readConfig()
 	BotConfig.RateLimitConfig.readConfig()
 	BotConfig.MessageConfig.readConfig()
+	BotConfig.WhiteListConfig.readConfig()
+	BotConfig.BlackListConfig.readConfig()
 }
 
 func checkConfig() {
@@ -119,4 +125,6 @@ func checkConfig() {
 	BotConfig.RestrictConfig.checkConfig()
 	BotConfig.RateLimitConfig.checkConfig()
 	BotConfig.MessageConfig.checkConfig()
+	BotConfig.BlackListConfig.checkConfig()
+	BotConfig.WhiteListConfig.checkConfig()
 }
