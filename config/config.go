@@ -57,11 +57,6 @@ type Config struct {
 	WhiteListConfig *whiteListConfig
 }
 
-type redisConfig struct {
-	RedisAddr string
-	RedisPass string
-}
-
 // BotID returns the BotID of this config.
 func (c Config) BotID() int {
 	return c.Bot.Self.ID
@@ -96,12 +91,8 @@ func readConfig() {
 	BotConfig.Token = viper.GetString("token")
 	BotConfig.Worker = viper.GetInt("worker")
 
-	// redis config
-	BotConfig.RedisConfig = &redisConfig{
-		RedisAddr: viper.GetString("redis.addr"),
-		RedisPass: viper.GetString("redis.pass"),
-	}
-
+	// other
+	BotConfig.RedisConfig.readConfig()
 	BotConfig.RestrictConfig.readConfig()
 	BotConfig.RateLimitConfig.readConfig()
 	BotConfig.MessageConfig.readConfig()
@@ -113,15 +104,14 @@ func checkConfig() {
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)
 	}
-	if BotConfig.RedisConfig.RedisAddr == "" {
-		zap.L().Panic(noRedisMsg)
-	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
 	}
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1
 	}
+
+	BotConfig.RedisConfig.checkConfig()
 	BotConfig.RestrictConfig.checkConfig()
 	BotConfig.RateLimitConfig.checkConfig()
 	BotConfig.MessageConfig.checkConfig()
