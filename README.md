@@ -26,7 +26,7 @@ Clone the project.
 git clone git@github.com:CSUSTers/csust-got.git
 ```
 
-Then run it with docker compose.
+Then run it with docker-compose.
 
 ```bash
 docker-compose up -d
@@ -43,11 +43,11 @@ docker-compose up -d --build
 
 ## Configuration
 
-Please change configuration in `docker-compose.yml`.
+Please change configuration in `config.yaml`.
 
-Modify the `TOKEN` to your bot's token, or just set environment variable `CSUST_BOT_TOKEN`.
+Modify the `token` to your bot's token.
 
-Please modify `REDIS_PASSWORD` in `docker-compose.yml`,and also please modify `requirepass` in `config/redis.conf`.
+Please modify `redis.pass` in `config.yaml`,and also please modify `requirepass` in `redis.conf`.
 
 ## Commands
 
@@ -71,7 +71,7 @@ hitokoto - [type] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
 history - [msgID] 获取一条历史消息的链接
-forward - [msgID] 让bot转发一条历史消息
+forward - [msgID] 让bot转发一条历史消息(可能消息已经被删了)
 shutdown - 拔掉bot的电源
 boot - 将bot开机
 sleep - 该睡觉了
