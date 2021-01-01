@@ -44,7 +44,10 @@ func GetUserID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	// send to user in private chat
 	messageReply := tgbotapi.NewMessage(int64(chatID), msg)
-	messageReply.ReplyToMessageID = message.MessageID
+
+	if update.Message.Chat.IsPrivate() {
+		messageReply.ReplyToMessageID = message.MessageID
+	}
 
 	util.SendMessage(bot, messageReply)
 }
