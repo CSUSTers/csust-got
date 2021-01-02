@@ -60,6 +60,7 @@ func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	messageReply := tgbotapi.NewMessage(chatID, txt)
 	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
+	messageReply.DisableWebPagePreview = true
 	util.SendMessage(bot, messageReply)
 }
 
