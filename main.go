@@ -4,6 +4,7 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/context"
+	"csust-got/log"
 	"csust-got/module"
 	"csust-got/module/preds"
 	"csust-got/orm"
@@ -18,17 +19,19 @@ import (
 
 func main() {
 	config.InitConfig("config.yaml", "BOT")
+	log.InitLogger()
+	defer log.Sync()
 	prom.InitPrometheus()
 	orm.InitRedis()
 
 	bot, err := tgbotapi.NewBotAPI(config.BotConfig.Token)
 	if err != nil {
-		zap.L().Panic(err.Error())
+		log.Panic(err.Error())
 	}
 
 	bot.Debug = config.BotConfig.DebugMode
 
-	zap.L().Sugar().Infof("Authorized on account %s", bot.Self.UserName)
+	log.Info("Success Authorized", zap.String("botUserName", bot.Self.UserName))
 
 	config.BotConfig.Bot = bot
 
@@ -45,7 +48,7 @@ func main() {
 	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil {
 		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
 	} else {
-		zap.L().Sugar().Infof("Black List has %d people.\n", len(list))
+		log.Info("Black List has load.", zap.Int("blackListLength", len(list)))
 	}
 
 	handles := module.Parallel([]module.Module{

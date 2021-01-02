@@ -20,29 +20,34 @@ var lastBoot = time.Now().In(timeZoneCST).Format("2006/01/02-15:04:05")
 
 // Info - build info
 func Info(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	msg := "--- Bot Info ---\n"
-	msg += fmt.Sprintf("Bot Version: %s\n", version)
-	msg += fmt.Sprintf("Branch: %s\n", branch)
-	msg += fmt.Sprintf("Build Time: %s\n", buildTime)
-	msg += fmt.Sprintf("Last Boot: %s\n", lastBoot)
-	msg += fmt.Sprintf("Go Version: %s\n", runtime.Version())
+	msg := "```\n----- Bot Info -----\n"
+	msg += fmt.Sprintf("UserName:    %s\n", bot.Self.UserName)
+	msg += fmt.Sprintf("Version:     %s\n", version)
+	msg += fmt.Sprintf("Branch:      %s\n", branch)
+	msg += fmt.Sprintf("Build Time:  %s\n", buildTime)
+	msg += fmt.Sprintf("Last Boot:   %s\n", lastBoot)
+	msg += fmt.Sprintf("Go Version:  %s\n", runtime.Version())
+	msg += "```"
 
 	messageReply := tgbotapi.NewMessage(update.Message.Chat.ID, msg)
+	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
 	util.SendMessage(bot, messageReply)
 }
 
 // GetUserID is handle for command `/id`
 func GetUserID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
-	chatID := message.Chat.ID
+	chatID := message.From.ID
 
-	msg := "这条命令会返回你的UserID，请不要在群里使用"
-	if message.Chat.IsPrivate() {
-		msg = fmt.Sprintf("Your userID is %d", message.From.ID)
+	// chatID of private chat is userID
+	msg := fmt.Sprintf("Your userID is %d", chatID)
+
+	// send to user in private chat
+	messageReply := tgbotapi.NewMessage(int64(chatID), msg)
+
+	if update.Message.Chat.IsPrivate() {
+		messageReply.ReplyToMessageID = message.MessageID
 	}
-
-	messageReply := tgbotapi.NewMessage(chatID, msg)
-	messageReply.ReplyToMessageID = message.MessageID
 
 	util.SendMessage(bot, messageReply)
 }

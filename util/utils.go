@@ -1,6 +1,7 @@
 package util
 
 import (
+	"csust-got/log"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -36,8 +37,7 @@ func ParseNumberAndHandleError(bot *tgbotapi.BotAPI, message *tgbotapi.Message,
 func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 	_, err := bot.Send(message)
 	if err != nil {
-		zap.L().Error("Can't send message")
-		zap.L().Error(err.Error())
+		log.Error("Can't send message", zap.Error(err))
 	}
 }
 
@@ -45,8 +45,7 @@ func SendMessage(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) {
 func SendMessageGiveMeError(bot *tgbotapi.BotAPI, message tgbotapi.Chattable) (tgbotapi.Message, error) {
 	msg, err := bot.Send(message)
 	if err != nil {
-		zap.L().Error("Can't send message")
-		zap.L().Error(err.Error())
+		log.Error("Can't send message", zap.Error(err))
 	}
 	return msg, err
 }
@@ -97,7 +96,7 @@ func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) tgbotapi.Chat
 		UserID: userID,
 	})
 	if err != nil {
-		zap.L().Error(err.Error())
+		log.Error("GetChatMember failed", zap.Error(err))
 	}
 	return chatMember
 }

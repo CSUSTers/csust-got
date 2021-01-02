@@ -2,14 +2,15 @@ package base
 
 import (
 	"csust-got/context"
+	"csust-got/log"
 	"csust-got/module"
 	"csust-got/util"
 	"fmt"
+	"go.uber.org/zap"
 	"strconv"
 
 	"github.com/go-redis/redis/v7"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"go.uber.org/zap"
 )
 
 // message type
@@ -29,7 +30,7 @@ func MC() module.Module {
 		}()
 		resSticker, err := ctx.GlobalClient().ZRevRangeWithScores(ctx.WrapKey(STICKER), 0, 3).Result()
 		if err != nil {
-			zap.L().Sugar().Error(err.Error())
+			log.Error("Get Sticker count in redis ZRevRangeWithScores failed", zap.Error(err))
 			return
 		}
 		err = ctx.GlobalClient().ZUnionStore(ctx.WrapKey(TOTAL), &redis.ZStore{
@@ -38,12 +39,12 @@ func MC() module.Module {
 			Aggregate: "",
 		}).Err()
 		if err != nil {
-			zap.L().Sugar().Error(err.Error())
+			log.Error("Redis ZUnionStore failed", zap.Error(err))
 			return
 		}
 		resTotal, err := ctx.GlobalClient().ZRevRangeWithScores(ctx.WrapKey(TOTAL), 0, 3).Result()
 		if err != nil {
-			zap.L().Sugar().Error(err.Error())
+			log.Error("Get total message count in redis ZRevRangeWithScores failed", zap.Error(err))
 			return
 		}
 		text = wrapText(bot, update.Message.Chat.ID, resSticker, resTotal)

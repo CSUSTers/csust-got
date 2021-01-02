@@ -2,9 +2,10 @@ package orm
 
 import (
 	"csust-got/config"
+	"csust-got/log"
+	"go.uber.org/zap"
 
 	"github.com/go-redis/redis/v7"
-	"go.uber.org/zap"
 )
 
 var client *redis.Client
@@ -31,7 +32,7 @@ func NewClient() *redis.Client {
 func Ping(c *redis.Client) bool {
 	_, err := c.Ping().Result()
 	if err != nil {
-		zap.L().Error(err.Error())
+		log.Error("ping redis failed", zap.Error(err))
 		return false
 	}
 	return true

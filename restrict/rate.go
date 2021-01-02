@@ -20,21 +20,25 @@ func RateLimit(tgbotapi.Update) module.Module {
 		if message == nil || message.Chat.IsPrivate() {
 			return module.NextOfChain
 		}
-		rateConfig := ctx.GlobalConfig().RateLimitConfig
-		userID, chatID := message.From.ID, message.Chat.ID
-		key := strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(userID)
-		if limiter, ok := limitMap[key]; ok {
-			if checkRate(ctx, message, limiter) {
-				return module.NextOfChain
-			}
-			// 令牌不足撤回消息
-			_, _ = bot.DeleteMessage(tgbotapi.NewDeleteMessage(chatID, message.MessageID))
-			return module.NoMore
-		}
-		limitMap[key] = rate.NewLimiter(rate.Limit(rateConfig.Limit), rateConfig.MaxToken)
-		return module.NextOfChain
+		return checkLimit(bot, ctx, message)
 	}
 	return module.Filter(limitHandler)
+}
+
+func checkLimit(bot *tgbotapi.BotAPI, ctx context.Context, msg *tgbotapi.Message) module.HandleResult {
+	rateConfig := ctx.GlobalConfig().RateLimitConfig
+	userID, chatID := msg.From.ID, msg.Chat.ID
+	key := strconv.FormatInt(chatID, 10) + ":" + strconv.Itoa(userID)
+	if limiter, ok := limitMap[key]; ok {
+		if checkRate(ctx, msg, limiter) {
+			return module.NextOfChain
+		}
+		// 令牌不足撤回消息
+		_, _ = bot.DeleteMessage(tgbotapi.NewDeleteMessage(chatID, msg.MessageID))
+		return module.NoMore
+	}
+	limitMap[key] = rate.NewLimiter(rate.Limit(rateConfig.Limit), rateConfig.MaxToken)
+	return module.NextOfChain
 }
 
 // return false if message should be limit
