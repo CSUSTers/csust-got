@@ -27,9 +27,6 @@ jobs:
         with:
           push: true
           tags: csust/csust-got:latest-test
-          build-args: |
-            arg1=value1
-            arg2=value2
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
