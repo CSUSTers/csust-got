@@ -1,7 +1,7 @@
 .PHONY: get build test fmt deploy run clean
 
 PROJECT := csust-got
-VERSION ?= $(shell git rev-parse --short HEAD)
+VERSION ?= $(if $(TAG),$(TAG),$(shell git rev-parse --short HEAD))
 BRANCH ?= $(shell git branch --show-current)
 BUILDTIME := $(shell TZ="Asia/Shanghai" date '+%Y/%m/%d-%H:%M:%S')
 
