@@ -10,6 +10,8 @@ import (
 	"csust-got/orm"
 	"csust-got/prom"
 	"csust-got/restrict"
+	"github.com/go-redis/redis/v7"
+	"strconv"
 	"sync"
 	"time"
 
@@ -30,26 +32,16 @@ func main() {
 	}
 
 	bot.Debug = config.BotConfig.DebugMode
-
-	log.Info("Success Authorized", zap.String("botUserName", bot.Self.UserName))
-
 	config.BotConfig.Bot = bot
+	log.Info("Success Authorized", zap.String("botUserName", bot.Self.UserName))
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-
 	updates, err := bot.GetUpdatesChan(u)
 
 	ctx := context.Global(orm.GetClient(), config.BotConfig)
-
-	// check database
-	rc := ctx.GlobalClient()
-	// blacklist
-	if list, err := rc.SMembers(ctx.WrapKey("black_black_list")).Result(); err != nil {
-		// dont do anything, maybe. (΄◞ิ౪◟ิ‵)
-	} else {
-		log.Info("Black List has load.", zap.Int("blackListLength", len(list)))
-	}
+	loadBlackList(ctx)
+	loadWhiteList(ctx)
 
 	handles := module.Parallel([]module.Module{
 		module.Stateless(base.Hello, preds.IsCommand("say_hello")),
@@ -101,6 +93,9 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for update := range updates {
+				if update.Message != nil && ctx.GlobalConfig().BlackListConfig.Check(update.Message.Chat.ID) {
+					continue
+				}
 				start := time.Now()
 				result := handles.HandleUpdate(ctx, update, bot)
 				cost := time.Since(start)
@@ -109,4 +104,48 @@ func main() {
 		}()
 	}
 	wg.Wait()
+}
+
+func loadWhiteList(ctx context.Context) {
+	list, err := ctx.GlobalClient().SMembers(ctx.WrapKey("white_list")).Result()
+	if err != nil {
+		if err != redis.Nil {
+			log.Error("load white list failed", zap.Error(err))
+			return
+		}
+		list = make([]string, 0)
+	}
+	log.Info("White List has load.", zap.Int("length", len(list)))
+	chats := make([]int64, 0)
+	for _, v := range list {
+		cID, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			log.Error("white list has invalid value", zap.String("value", v))
+			continue
+		}
+		chats = append(chats, cID)
+	}
+	ctx.GlobalConfig().WhiteListConfig.Chats = chats
+}
+
+func loadBlackList(ctx context.Context) {
+	list, err := ctx.GlobalClient().SMembers(ctx.WrapKey("black_list")).Result()
+	if err != nil {
+		if err != redis.Nil {
+			log.Error("load black list failed", zap.Error(err))
+			return
+		}
+		list = make([]string, 0)
+	}
+	log.Info("Black List has load.", zap.Int("length", len(list)))
+	chats := make([]int64, 0)
+	for _, v := range list {
+		cID, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			log.Error("black list has invalid value", zap.String("value", v))
+			continue
+		}
+		chats = append(chats, cID)
+	}
+	ctx.GlobalConfig().BlackListConfig.Chats = chats
 }

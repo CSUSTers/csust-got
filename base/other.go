@@ -13,12 +13,6 @@ import (
 // FakeBanMyself is handle for command `fake_ban_myself`.
 // Use it to just get a reply like command `ban_myself`.
 // It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
-// Use it to just get a reply like command `ban_myself`.
-// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
-// Use it to just get a reply like command `ban_myself`.
-// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
-// Use it to just get a reply like command `ban_myself`.
-// It looks like you've been banned, but in fact you have a 2% chance that it will actually be banned。
 func FakeBanMyself(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	sec := time.Duration(rand.Intn(60)+60) * time.Second
 	chatID := update.Message.Chat.ID

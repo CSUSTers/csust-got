@@ -2,30 +2,30 @@ package config
 
 import "github.com/spf13/viper"
 
-type blackListConfig struct {
+type specialListConfig struct {
+	Name    string
 	Enabled bool
-	Users   []int
+	Chats   []int64
 }
 
-func (c *blackListConfig) readConfig() {
-	c.Users = make([]int, 0)
-	c.Enabled = viper.GetBool("black_list.enabled")
+func (c *specialListConfig) readConfig() {
+	c.Chats = make([]int64, 0)
+	c.Enabled = viper.GetBool(c.Name + ".enabled")
 }
 
-func (c *blackListConfig) checkConfig() {
+func (c *specialListConfig) checkConfig() {
 
 }
 
-type whiteListConfig struct {
-	Enabled bool
-	Users   []int
+func (c *specialListConfig) SetName(name string) {
+	c.Name = name
 }
 
-func (c *whiteListConfig) readConfig() {
-	c.Users = make([]int, 0)
-	c.Enabled = viper.GetBool("white_list.enabled")
-}
-
-func (c *whiteListConfig) checkConfig() {
-
+func (c *specialListConfig) Check(chatID int64) bool {
+	for _, v := range c.Chats {
+		if v == chatID {
+			return true
+		}
+	}
+	return false
 }

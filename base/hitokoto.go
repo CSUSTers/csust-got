@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
@@ -14,10 +15,6 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
-
-const errMessage = `过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。
-忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。
-去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见辣。`
 
 // HitokotoResponse is HitokotoResponse
 type HitokotoResponse struct {
@@ -142,7 +139,7 @@ func loadFromRedis(from bool) string {
 	res, err := orm.GetClient().SRandMember("hitokoto").Result()
 	if err != nil {
 		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
-		return errMessage
+		return config.BotConfig.MessageConfig.HitokotoNotFound
 	}
 	if !from {
 		res = res[:strings.LastIndex(res, " by ")+1]

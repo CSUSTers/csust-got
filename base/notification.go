@@ -7,6 +7,7 @@ import (
 )
 
 // WelcomeNewMember is handle for welcome new member.
+// when someone new join group, bot will send welcome message.
 func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	memberSlice := message.NewChatMembers
@@ -15,11 +16,7 @@ func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	}
 	for _, member := range *memberSlice {
 		text := "Welcome to this group!" + util.GetName(member)
-		go sendNotificationTo(bot, message.Chat.ID, text)
+		message := tgbotapi.NewMessage(message.Chat.ID, text)
+		util.SendMessage(bot, message)
 	}
-}
-
-func sendNotificationTo(bot *tgbotapi.BotAPI, chatID int64, text string) {
-	message := tgbotapi.NewMessage(chatID, text)
-	util.SendMessage(bot, message)
 }
