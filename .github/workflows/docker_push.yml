@@ -18,9 +18,14 @@ jobs:
       - name: "Print Version"
         id: "version"
         run: |
+<<<<<<< HEAD
           echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
           echo "::set-output name=branch::$(git branch --show-current)"
 
+=======
+          echo 'Version:' $(git branch --show-current)-$(git rev-parse --short HEAD)
+          
+>>>>>>> 50e6b58 (fix: checkout)
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
