@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/prom"
 	"csust-got/util"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
@@ -16,7 +17,18 @@ func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	}
 	for _, member := range *memberSlice {
 		text := "Welcome to this group!" + util.GetName(member)
-		message := tgbotapi.NewMessage(message.Chat.ID, text)
-		util.SendMessage(bot, message)
+		messageR := tgbotapi.NewMessage(message.Chat.ID, text)
+		util.SendMessage(bot, messageR)
+		prom.NewMember(message.Chat.Title)
 	}
+}
+
+// LeftMember is handle for some member left.
+func LeftMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	message := update.Message
+	member := message.LeftChatMember
+	if member == nil {
+		return
+	}
+	prom.MemberLeft(message.Chat.Title)
 }

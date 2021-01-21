@@ -30,3 +30,21 @@ var updateCostTime = prometheus.NewGaugeVec(
 	},
 	baseLabels,
 )
+
+// chatMemberCount chatMemberCount
+var chatMemberCount = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "bot_chat_members_count",
+		Help: "how many members in a chat",
+	},
+	[]string{"host", "chat_name"},
+)
+
+// newMemberCount chatMemberCount
+var newMemberCount = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "bot_new_members_count",
+		Help: "how many new members in a chat",
+	},
+	[]string{"host", "chat_name"},
+)

@@ -86,3 +86,28 @@ func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
 		"is_sticker": isSticker,
 	})).Inc()
 }
+
+func NewMember(chatName string) {
+	chatMemberCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+	}).Inc()
+	newMemberCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+	}).Inc()
+}
+
+func MemberLeft(chatName string) {
+	chatMemberCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+	}).Desc()
+}
+
+func GetMember(chatName string, num int) {
+	chatMemberCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+	}).Set(float64(num))
+}
