@@ -29,10 +29,15 @@ jobs:
 
       - name: "Get source"
         uses: actions/checkout@v2
+      
+      - name: "Print Version"
+        run: |
+          echo 'Version:' $(git branch --show-current)-$(git rev-parse --short HEAD)
 
       - name: "Get dependences"
         run: |
           make get
+          
       - name: "Run Test"
         run: |
           make test
