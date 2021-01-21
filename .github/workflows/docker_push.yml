@@ -34,6 +34,7 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v2
         with:
+          context: .
           push: true
           tags: csust/csust-got:latest-dev
 
