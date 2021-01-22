@@ -1,6 +1,7 @@
 package config
 
 import (
+	"csust-got/prom"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
@@ -77,6 +78,8 @@ func initViper(configFile, envPrefix string) {
 					zap.String("configFile", configFile), zap.Error(err))
 			}
 			zap.L().Warn("config file is not available...", zap.String("configFile", configFile), zap.Error(err))
+			prom.Log(zap.WarnLevel.String())
+			prom.Log(zap.WarnLevel.String())
 			return
 		}
 	}
@@ -108,9 +111,11 @@ func readConfig() {
 func checkConfig() {
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)
+		prom.Log(zap.PanicLevel.String())
 	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
+		prom.Log(zap.WarnLevel.String())
 	}
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1

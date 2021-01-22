@@ -1,6 +1,7 @@
 package config
 
 import (
+	"csust-got/prom"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"reflect"
@@ -33,6 +34,7 @@ func (c *messageConfig) checkConfig() {
 		if s == "" {
 			zap.L().Warn("message config not set, use default value",
 				zap.String("key", v.Type().Field(i).Name))
+			prom.Log(zap.WarnLevel.String())
 			v.Field(i).SetString(missMsg)
 		}
 	}

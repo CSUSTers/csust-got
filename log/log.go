@@ -27,6 +27,7 @@ func NewLogger() *zap.Logger {
 		return tmpLogger
 	} else {
 		zap.L().Error("NewLogger failed, using default logger", zap.Error(err))
+		prom.Log(zap.ErrorLevel.String())
 	}
 	return zap.L()
 }

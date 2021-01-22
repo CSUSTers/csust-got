@@ -27,6 +27,7 @@ func InitPrometheus() {
 		err := http.ListenAndServe(":8080", nil)
 		if err != nil {
 			zap.L().Error("InitPrometheus: Serve http failed", zap.Error(err))
+			Log(zap.ErrorLevel.String())
 		}
 	}()
 }
