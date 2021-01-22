@@ -40,11 +40,20 @@ var chatMemberCount = prometheus.NewGaugeVec(
 	[]string{"host", "chat_name"},
 )
 
-// newMemberCount chatMemberCount
+// newMemberCount newMemberCount
 var newMemberCount = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "bot_new_members_count",
 		Help: "how many new members in a chat",
 	},
 	[]string{"host", "chat_name"},
+)
+
+// logCount logCount
+var logCount = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "bot_log_count",
+		Help: "how many logs",
+	},
+	[]string{"host", "level"},
 )

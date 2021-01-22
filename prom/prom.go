@@ -2,7 +2,6 @@ package prom
 
 import (
 	"csust-got/entities"
-	"csust-got/log"
 	"go.uber.org/zap"
 	"net/http"
 	"os"
@@ -19,12 +18,15 @@ func InitPrometheus() {
 	prometheus.MustRegister(commandTimes)
 	prometheus.MustRegister(messageCount)
 	prometheus.MustRegister(updateCostTime)
+	prometheus.MustRegister(chatMemberCount)
+	prometheus.MustRegister(newMemberCount)
+	prometheus.MustRegister(logCount)
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
 		err := http.ListenAndServe(":8080", nil)
 		if err != nil {
-			log.Error("InitPrometheus: Serve http failed", zap.Error(err))
+			zap.L().Error("InitPrometheus: Serve http failed", zap.Error(err))
 		}
 	}()
 }
@@ -110,4 +112,11 @@ func GetMember(chatName string, num int) {
 		"host":      host,
 		"chat_name": chatName,
 	}).Set(float64(num))
+}
+
+func Log(level string) {
+	logCount.With(prometheus.Labels{
+		"host":  host,
+		"level": level,
+	}).Inc()
 }

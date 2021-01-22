@@ -2,6 +2,7 @@ package config
 
 import (
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 	"reflect"
 )
 
@@ -30,6 +31,8 @@ func (c *messageConfig) checkConfig() {
 	for i := 0; i < v.NumField(); i++ {
 		s := v.Field(i).String()
 		if s == "" {
+			zap.L().Warn("message config not set, use default value",
+				zap.String("key", v.Type().Field(i).Name))
 			v.Field(i).SetString(missMsg)
 		}
 	}

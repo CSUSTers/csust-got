@@ -2,6 +2,7 @@ package log
 
 import (
 	"csust-got/config"
+	"csust-got/prom"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -84,26 +85,32 @@ func prodConfig() zap.Config {
 
 func Debug(msg string, fields ...zap.Field) {
 	logger.Debug(msg, fields...)
+	prom.Log(zap.DebugLevel.String())
 }
 
 func Info(msg string, fields ...zap.Field) {
 	logger.Info(msg, fields...)
+	prom.Log(zap.InfoLevel.String())
 }
 
 func Warn(msg string, fields ...zap.Field) {
 	logger.Warn(msg, fields...)
+	prom.Log(zap.WarnLevel.String())
 }
 
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
+	prom.Log(zap.ErrorLevel.String())
 }
 
 func Fatal(msg string, fields ...zap.Field) {
 	logger.Fatal(msg, fields...)
+	prom.Log(zap.FatalLevel.String())
 }
 
 func Panic(msg string, fields ...zap.Field) {
 	logger.Panic(msg, fields...)
+	prom.Log(zap.PanicLevel.String())
 }
 
 func Sync() {
