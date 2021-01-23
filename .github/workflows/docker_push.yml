@@ -3,6 +3,7 @@ name: Docker Image Push
 on:
   push:
     branches: [ dev ]
+    
 
 jobs:
           
@@ -30,13 +31,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push when push to 
         id: docker_build
         uses: docker/build-push-action@v2
         with:
           context: .
           push: true
-          tags: csust/csust-got:latest-dev
+          repository: csust/csust-got
+          tags: |
+            latest-dev
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
