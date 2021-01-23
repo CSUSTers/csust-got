@@ -37,9 +37,8 @@ jobs:
         with:
           context: .
           push: true
-          repository: csust/csust-got
           tags: |
-            latest-dev
+            csust/csust-got:latest-dev
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
