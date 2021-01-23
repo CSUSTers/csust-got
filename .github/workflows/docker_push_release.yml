@@ -1,0 +1,48 @@
+name: Docker Image Push
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+          
+  docker_build:
+    name: "build and push docker image when release"
+    runs-on: ubuntu-latest
+    steps:
+      
+      - name: "Get source"
+        uses: actions/checkout@v2
+      
+      - name: "Print Version"
+        id: version
+        run: |
+          echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
+          echo "::set-output name=tag:: ${GITHUB_REF/refs\/tags\//}"
+          
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push when push to 
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: |
+            csust/csust-got:latest
+            csust/csust-got:${{ steps.version.outputs.tag }}
+          args: |
+            TAG=${{ steps.version.outputs.tag}}
+
+      - name: Image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
