@@ -1,6 +1,7 @@
 package config
 
 import (
+	"csust-got/prom"
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
@@ -16,12 +17,13 @@ var (
 	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 )
 
+// interface for module config
 type config interface {
 	readConfig()
 	checkConfig()
 }
 
-// InitConfig - init bot config
+// InitConfig - init bot config.
 func InitConfig(configFile, envPrefix string) {
 	BotConfig = NewBotConfig()
 	initViper(configFile, envPrefix)
@@ -29,15 +31,18 @@ func InitConfig(configFile, envPrefix string) {
 	checkConfig()
 }
 
-// NewBotConfig - return new bot config
+// NewBotConfig - return new bot config with all zero value.
+// In general, you don't need to NewBotConfig, global BotConfig should be used.
 func NewBotConfig() *Config {
 	config := new(Config)
 	config.RateLimitConfig = new(rateLimitConfig)
 	config.RedisConfig = new(redisConfig)
 	config.RestrictConfig = new(restrictConfig)
 	config.MessageConfig = new(messageConfig)
-	config.WhiteListConfig = new(whiteListConfig)
-	config.BlackListConfig = new(blackListConfig)
+	config.WhiteListConfig = new(specialListConfig)
+	config.BlackListConfig = new(specialListConfig)
+	config.WhiteListConfig.SetName("white_list")
+	config.BlackListConfig.SetName("black_list")
 	return config
 }
 
@@ -53,8 +58,8 @@ type Config struct {
 	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
 	MessageConfig   *messageConfig
-	BlackListConfig *blackListConfig
-	WhiteListConfig *whiteListConfig
+	BlackListConfig *specialListConfig
+	WhiteListConfig *specialListConfig
 }
 
 // BotID returns the BotID of this config.
@@ -73,6 +78,8 @@ func initViper(configFile, envPrefix string) {
 					zap.String("configFile", configFile), zap.Error(err))
 			}
 			zap.L().Warn("config file is not available...", zap.String("configFile", configFile), zap.Error(err))
+			prom.Log(zap.WarnLevel.String())
+			prom.Log(zap.WarnLevel.String())
 			return
 		}
 	}
@@ -100,12 +107,15 @@ func readConfig() {
 	BotConfig.BlackListConfig.readConfig()
 }
 
+// check some config value is reasonable, otherwise set to default value.
 func checkConfig() {
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)
+		prom.Log(zap.PanicLevel.String())
 	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
+		prom.Log(zap.WarnLevel.String())
 	}
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1

@@ -20,6 +20,7 @@ func mapToHTML(mapper htmlMapper) module.Module {
 		resultMedia := tgbotapi.NewMessage(msg.Chat.ID, mapper(msg))
 		resultMedia.ParseMode = tgbotapi.ModeHTML
 		resultMedia.ReplyToMessageID = msg.MessageID
+		resultMedia.DisableWebPagePreview = true
 		return resultMedia
 	})
 }

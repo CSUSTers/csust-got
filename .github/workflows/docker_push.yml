@@ -6,17 +6,6 @@ on:
     
 
 jobs:
-  get-source:
-    name: "Checkout HEAD"
-    runs-on: ubuntu-latest
-    steps:
-      
-      - name: "Get source"
-        uses: actions/checkout@v2
-      
-      - name: "Print Version"
-        run: |
-          echo 'Version:' $(git branch --show-current)-$(git rev-parse --short HEAD)
           
   docker_build:
     name: "build and push docker image"

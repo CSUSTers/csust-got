@@ -1,8 +1,11 @@
 package base
 
 import (
+	"csust-got/log"
+	"csust-got/prom"
 	"csust-got/util"
 	"fmt"
+	"go.uber.org/zap"
 	"runtime"
 	"time"
 
@@ -63,4 +66,18 @@ func GetChatID(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	messageReply.ReplyToMessageID = message.MessageID
 
 	util.SendMessage(bot, messageReply)
+}
+
+// GetGroupMember get how many members in group
+func GetGroupMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	chat := update.Message.Chat
+	if chat.IsPrivate() {
+		return
+	}
+	num, err := bot.GetChatMembersCount(chat.ChatConfig())
+	if err != nil {
+		log.Error("GetChatMembersCount failed", zap.Int64("chatID", chat.ID), zap.Error(err))
+		return
+	}
+	prom.GetMember(chat.Title, num)
 }

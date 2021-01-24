@@ -16,13 +16,15 @@ services:
     restart: always
     depends_on:
       - redis
+    volumes:
+      - ./config.yaml:/app/config.yaml
     links:
       - redis
     ports:
       - "8080:8080"
 
   redis:
-    image: "redis:alpine"
+    image: redis:alpine
     container_name: bot-redis
     <<: *common
     expose:
