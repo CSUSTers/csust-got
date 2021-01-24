@@ -42,7 +42,8 @@ jobs:
             csust/csust-got:latest
             csust/csust-got:${{ steps.version.outputs.tag }}
           build-args: |
-            TAG=${{ steps.version.outputs.tag}}
+            TAG=${{ steps.version.outputs.tag }}
+            BRANCH=release
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}
