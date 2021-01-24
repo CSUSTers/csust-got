@@ -18,7 +18,7 @@ jobs:
         id: version
         run: |
           echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
-          echo "::set-output name=tag:: ${GITHUB_REF/refs\/tags\//}"
+          echo "::set-output name=tag::${GITHUB_REF/refs\/tags\//}"
           
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
@@ -41,7 +41,7 @@ jobs:
           tags: |
             csust/csust-got:latest
             csust/csust-got:${{ steps.version.outputs.tag }}
-          args: |
+          build-args: |
             TAG=${{ steps.version.outputs.tag}}
 
       - name: Image digest
