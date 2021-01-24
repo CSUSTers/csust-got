@@ -60,6 +60,7 @@ func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 
 	messageReply := tgbotapi.NewMessage(chatID, txt)
 	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
+	messageReply.DisableWebPagePreview = true
 	util.SendMessage(bot, messageReply)
 }
 
@@ -88,7 +89,7 @@ func Shutdown(update tgbotapi.Update) module.Module {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 早上好，新的一天加油哦！:)")
 			if err := orm.WriteBool(ctx, key, false); err != nil {
 				log.Error("failed to access redis.", zap.Error(err))
-				msg.Text = "我不愿面对这苦涩的一天……:("
+				msg.Text = config.BotConfig.MessageConfig.BootFailed
 			}
 			util.SendMessage(bot, msg)
 			return module.NextOfChain
@@ -131,7 +132,7 @@ func NoSleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	message := update.Message
 	chatID := message.Chat.ID
 
-	messageReply := tgbotapi.NewMessage(chatID, "睡你麻痹起来嗨！")
+	messageReply := tgbotapi.NewMessage(chatID, config.BotConfig.MessageConfig.NoSleep)
 	util.SendMessage(bot, messageReply)
 }
 
