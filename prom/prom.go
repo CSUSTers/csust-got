@@ -91,10 +91,6 @@ func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
 }
 
 func NewMember(chatName string) {
-	chatMemberCount.With(prometheus.Labels{
-		"host":      host,
-		"chat_name": chatName,
-	}).Inc()
 	newMemberCount.With(prometheus.Labels{
 		"host":      host,
 		"chat_name": chatName,

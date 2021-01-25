@@ -54,7 +54,7 @@ func main() {
 		module.Stateless(base.Sleep, preds.IsCommand("sleep")),
 		module.Stateless(base.NoSleep, preds.IsCommand("no_sleep")),
 		module.Stateless(base.WelcomeNewMember, preds.NonEmpty),
-		module.Stateless(base.LeftMember, preds.NonEmpty),
+		// module.Stateless(base.LeftMember, preds.NonEmpty),
 		module.Stateless(base.GetGroupMember, preds.NonEmpty),
 		module.Stateless(base.HelloToAll, preds.IsCommand("hello_to_all")),
 		module.Stateless(restrict.BanMyself, preds.IsCommand("ban_myself")),
