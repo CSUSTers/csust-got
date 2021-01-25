@@ -20,6 +20,11 @@ func RateLimit(tgbotapi.Update) module.Module {
 		if message == nil || message.Chat.IsPrivate() {
 			return module.NextOfChain
 		}
+		// 仅对白名单提供限流
+		whiteListConfig := ctx.GlobalConfig().WhiteListConfig
+		if !whiteListConfig.Enabled || whiteListConfig.Check(message.Chat.ID) {
+			return module.NextOfChain
+		}
 		return checkLimit(bot, ctx, message)
 	}
 	return module.Filter(limitHandler)
