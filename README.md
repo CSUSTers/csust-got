@@ -3,7 +3,6 @@
 [![Go Report](https://goreportcard.com/badge/github.com/csusters/csust-got)](https://goreportcard.com/report/github.com/csusters/csust-got)
 [![codebeat badge](https://codebeat.co/badges/4d134b7f-e345-4378-b00d-7ab2177b94bc)](https://codebeat.co/projects/github-com-csusters-csust-got-master)
 
-[![Branch test Build Status](https://travis-ci.org/CSUSTers/csust-got.svg?branch=test)](https://travis-ci.org/CSUSTers/csust-got)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/master?label=master%20test)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/dev?label=dev%20test)
 
