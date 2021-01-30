@@ -29,7 +29,7 @@ func Info(m *Message) {
 	msg += fmt.Sprintf("Go Version:  %s\n", runtime.Version())
 	msg += "```"
 
-	util.SendMessage(m.Chat, msg)
+	util.SendMessage(m.Chat, msg, ModeMarkdownV2)
 }
 
 // GetUserID is handle for command `/id`

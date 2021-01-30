@@ -37,7 +37,7 @@ func HelloToAll(m *Message) {
 
 // Links is handle for command `links`
 func Links(m *Message) {
-	util.SendMessage(m.Chat, config.BotConfig.MessageConfig.Links, NoPreview)
+	util.SendMessage(m.Chat, config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
 }
 
 // Shutdown is handler for command `shutdown`

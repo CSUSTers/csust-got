@@ -35,7 +35,7 @@ func SendMessage(to Recipient, what interface{}, ops ...interface{}) *Message {
 
 // SendReply will use the bot to reply a message.
 func SendReply(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) *Message {
-	ops = append(ops, SendOptions{ReplyTo: replyMsg})
+	ops = append(ops, &SendOptions{ReplyTo: replyMsg})
 	return SendMessage(to, what, ops...)
 }
 
@@ -50,7 +50,7 @@ func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*
 
 // SendReplyWithError is same as SendReply but return error
 func SendReplyWithError(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) (*Message, error) {
-	ops = append(ops, SendOptions{ReplyTo: replyMsg})
+	ops = append(ops, &SendOptions{ReplyTo: replyMsg})
 	return SendMessageWithError(to, what, ops...)
 }
 

@@ -85,7 +85,7 @@ func initBot() (*Bot, error) {
 	bot, err := NewBot(Settings{
 		Token:     config.BotConfig.Token,
 		Updates:   1024,
-		ParseMode: ModeMarkdownV2,
+		ParseMode: ModeDefault,
 		Reporter:  panicReporter,
 		Poller:    initPoller(),
 	})
