@@ -22,7 +22,7 @@ var helloText = []string{
 
 // Hello is handle for command `hello`
 func Hello(m *Message) {
-	util.SendReply(m.Chat, "hello ^_^"+util.RandomChoice(helloText), m)
+	util.SendReply(m.Chat, "hello ^_^ "+util.RandomChoice(helloText), m)
 }
 
 // HelloToAll is handle for command `hello_to_all`

@@ -106,7 +106,8 @@ func initPoller() *MiddlewarePoller {
 	rateLimitPoller := NewMiddlewarePoller(fakeBanPoller, rateLimitFilter)
 	shutdownPoller := NewMiddlewarePoller(rateLimitPoller, shutdownFilter)
 	noStickerPoller := NewMiddlewarePoller(shutdownPoller, noStickerFilter)
-	return noStickerPoller
+	finalPoller := NewMiddlewarePoller(noStickerPoller, promFilter)
+	return finalPoller
 }
 
 func blackListFilter(update *Update) bool {
@@ -149,14 +150,13 @@ func shutdownFilter(update *Update) bool {
 	if update.Message == nil {
 		return true
 	}
-	text := update.Message.Text
-	if text == "" {
-		return true
+	if update.Message.Text != "" {
+		cmd := entities.FromMessage(update.Message)
+		if cmd.Name() == "boot" {
+			return true
+		}
 	}
-	cmd := entities.FromMessage(update.Message)
-	if cmd.Name() == "boot" {
-		return true
-	}
+
 	if orm.IsShutdown(update.Message.Chat.ID) {
 		return false
 	}
@@ -171,5 +171,10 @@ func noStickerFilter(update *Update) bool {
 		util.DeleteMessage(update.Message)
 		return false
 	}
+	return true
+}
+
+func promFilter(update *Update) bool {
+	prom.DailUpdate(update)
 	return true
 }

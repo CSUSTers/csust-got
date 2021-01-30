@@ -78,17 +78,17 @@ func parseAPI(m *Message) HitokotoArg {
 
 // Hitokoto is command `hitokoto`
 func Hitokoto(m *Message) {
-	util.SendMessage(m.Chat, GetHitokoto(parseAPI(m), true))
+	util.SendReply(m.Chat, GetHitokoto(parseAPI(m), true), m, ModeHTML)
 }
 
 // HitDawu is command alias `hitokoto -i`
 func HitDawu(m *Message) {
-	util.SendMessage(m.Chat, GetHitokoto("i", true))
+	util.SendReply(m.Chat, GetHitokoto("i", true), m, ModeHTML)
 }
 
 // HitoNetease is command alias `hitokoto -j`
 func HitoNetease(m *Message) {
-	util.SendMessage(m.Chat, GetHitokoto("j", true))
+	util.SendReply(m.Chat, GetHitokoto("j", true), m, ModeHTML)
 }
 
 // GetHitokoto can get a hitokoto

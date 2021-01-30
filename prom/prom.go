@@ -2,14 +2,12 @@ package prom
 
 import (
 	"csust-got/entities"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v2"
 	"net/http"
 	"os"
-	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var host, _ = os.Hostname()
@@ -40,8 +38,12 @@ func newLabels(base, labels prometheus.Labels) prometheus.Labels {
 }
 
 // DailUpdate - dail an update
-func DailUpdate(m *Message, valied bool, costTime time.Duration) {
-	if !valied || m.Private() {
+func DailUpdate(update *Update) {
+	if update.Message == nil {
+		return
+	}
+	m := update.Message
+	if m.Private() {
 		return
 	}
 	labels := prometheus.Labels{"host": host}
@@ -73,7 +75,7 @@ func DailUpdate(m *Message, valied bool, costTime time.Duration) {
 		})).Inc()
 	}
 
-	updateCostTime.With(labels).Set(float64(costTime.Nanoseconds()) / 1e6)
+	// updateCostTime.With(labels).Set(float64(costTime.Nanoseconds()) / 1e6)
 
 	messageCount.With(newLabels(labels, prometheus.Labels{
 		"is_command": isCommand,
