@@ -3,32 +3,24 @@ package base
 import (
 	"csust-got/prom"
 	"csust-got/util"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // WelcomeNewMember is handle for welcome new member.
 // when someone new join group, bot will send welcome message.
-func WelcomeNewMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	memberSlice := message.NewChatMembers
-	if memberSlice == nil {
-		return
-	}
-	for _, member := range *memberSlice {
-		text := "Welcome to this group!" + util.GetName(member)
-		messageR := tgbotapi.NewMessage(message.Chat.ID, text)
-		util.SendMessage(bot, messageR)
-		prom.NewMember(message.Chat.Title)
+func WelcomeNewMember(m *Message) {
+	for _, member := range m.UsersJoined {
+		text := "Welcome to this group!" + util.GetName(&member)
+		util.SendMessage(m.Chat, text)
+		prom.NewMember(m.Chat.Title)
 	}
 }
 
 // LeftMember is handle for some member left.
-func LeftMember(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	member := message.LeftChatMember
+func LeftMember(m *Message) {
+	member := m.UserLeft
 	if member == nil {
 		return
 	}
-	prom.MemberLeft(message.Chat.Title)
+	prom.MemberLeft(m.Chat.Title)
 }

@@ -22,6 +22,7 @@ rate_limit:
 redis:
   addr: "redis:6379"
   pass: "csust-bot-redis-password"
+  key_prefix: "csust-got:"
 
 # message config
 message:

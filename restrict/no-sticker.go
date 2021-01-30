@@ -1,77 +1,32 @@
 package restrict
 
 import (
-	"csust-got/context"
 	"csust-got/log"
-	"csust-got/module"
+	"csust-got/orm"
 	"csust-got/util"
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
-
-	"github.com/go-redis/redis/v7"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 var key = "enabled"
 
 // NoSticker is a switch for NoStickerMode
-func NoSticker(tgbotapi.Update) module.Module {
-	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		v, text := 0, "NoStickerMode is off."
-		if !isNoStickerMode(ctx) {
-			v, text = 1, "Do NOT send Sticker!"
-		}
-
-		_, err := ctx.GlobalClient().Set(ctx.WrapKey(key), v, 0).Result()
-		if err != nil {
-			log.Error("Can't set NoStickerMode", zap.Error(err))
-			return
-		}
-		util.SendMessage(bot, tgbotapi.NewMessage(update.Message.Chat.ID, text))
+func NoSticker(m *Message) {
+	orm.ToggleNoStickerMode(m.Chat.ID)
+	text := "NoStickerMode is off."
+	if orm.IsNoStickerMode(m.Chat.ID) {
+		text = "Do NOT send Sticker!"
 	}
-	return module.Stateful(handler)
+	util.SendMessage(m.Chat, text)
 }
 
-// DeleteSticker is a handle, if a message has Sticker, the message will arrive this function.
+// NoStickerModeHandler is a handle, if a message has Sticker, the message will arrive this function.
 // If this chat in NoStickerMode, Sticker may be deleted.
-func DeleteSticker(tgbotapi.Update) module.Module {
-	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
-		message := update.Message
-
-		if !isNoStickerMode(ctx) {
-			return module.NextOfChain
-		}
-
-		deleteMessage := tgbotapi.DeleteMessageConfig{
-			ChatID:    message.Chat.ID,
-			MessageID: message.MessageID,
-		}
-
-		resp, err := bot.DeleteMessage(deleteMessage)
-		if err != nil {
-			log.Error("Can't delete sticker", zap.Error(err))
-			return module.NoMore
-		}
-		if !resp.Ok {
-			log.Error("NoSticker Response NOT OK")
-		}
-		return module.NoMore
+func NoStickerModeHandler(m *Message) {
+	if !orm.IsNoStickerMode(m.Chat.ID) {
+		return
 	}
-	return module.Filter(handler)
-}
-
-// check if this chat in NoStickerMode
-func isNoStickerMode(ctx context.Context) bool {
-	isNoStickerMode, err := ctx.GlobalClient().Get(ctx.WrapKey(key)).Int()
-	if err != nil && err != redis.Nil {
-		log.Error("ERROR: Can't get no-sticker mode from context", zap.Error(err))
-		return false
-	}
-
-	// No Sticker Mode is off
-	if isNoStickerMode == 0 || err == redis.Nil {
-		return false
-	}
-
-	return true
+	log.Info("Chat is in no sticker mode, delete message", zap.Int64("chatID", m.Chat.ID))
+	util.DeleteMessage(m)
 }

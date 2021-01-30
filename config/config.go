@@ -3,9 +3,9 @@ package config
 import (
 	"csust-got/prom"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v2"
 	"strings"
 )
 
@@ -48,7 +48,7 @@ func NewBotConfig() *Config {
 
 // Config the interface for common configs.
 type Config struct {
-	Bot *tgbotapi.BotAPI
+	Bot *Bot
 
 	Token     string
 	DebugMode bool
@@ -62,9 +62,14 @@ type Config struct {
 	WhiteListConfig *specialListConfig
 }
 
+// GetBot returns Bot
+func GetBot() *Bot {
+	return BotConfig.Bot
+}
+
 // BotID returns the BotID of this config.
 func (c Config) BotID() int {
-	return c.Bot.Self.ID
+	return c.Bot.Me.ID
 }
 
 func initViper(configFile, envPrefix string) {

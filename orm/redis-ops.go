@@ -1,37 +1,36 @@
 package orm
 
 import (
-	"csust-got/context"
 	"github.com/go-redis/redis/v7"
+	"time"
 )
 
 // GetBool gets a bool type value to a key in the redis storage.
 // This function will call WrapKey, so you needn't warp your key.
-func GetBool(ctx context.Context, key string) (bool, error) {
-	enable, err := ctx.GlobalClient().Get(ctx.WrapKey(key)).Int()
+func GetBool(key string) (bool, error) {
+	enable, err := client.Get(key).Int()
 	if err == redis.Nil {
 		return false, nil
 	}
-	enabled := enable > 0
-	return enabled, err
+	return enable > 0, err
 }
 
 // WriteBool writes a bool type value to a key in the redis storage.
 // This function will call WrapKey, so you needn't warp your key.
-func WriteBool(ctx context.Context, key string, value bool) error {
+func WriteBool(key string, value bool, expiration time.Duration) error {
 	newI := 0
 	if value {
 		newI = 1
 	}
-	return ctx.GlobalClient().Set(ctx.WrapKey(key), newI, 0).Err()
+	return client.Set(key, newI, expiration).Err()
 }
 
 // ToggleBool toggles(negative) a bool type value to a key in the redis storage.
 // This function will call WrapKey, so you needn't warp your key.
-func ToggleBool(ctx context.Context, key string) error {
-	b, err := GetBool(ctx, key)
+func ToggleBool(key string) error {
+	b, err := GetBool(key)
 	if err != nil {
 		return err
 	}
-	return WriteBool(ctx, key, !b)
+	return WriteBool(key, !b, 0)
 }

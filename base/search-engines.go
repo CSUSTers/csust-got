@@ -2,27 +2,23 @@ package base
 
 import (
 	"csust-got/config"
+	"csust-got/entities"
 	"csust-got/log"
-	"csust-got/module"
-	"csust-got/module/preds"
+	"csust-got/util"
 	"fmt"
+	. "gopkg.in/tucnak/telebot.v2"
 	"net/url"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"go.uber.org/zap"
 )
 
-type htmlMapper func(message *tgbotapi.Message) string
+type htmlMapper func(m *Message) string
 
-func mapToHTML(mapper htmlMapper) module.Module {
-	return module.InteractModule(func(msg *tgbotapi.Message) tgbotapi.Chattable {
-		resultMedia := tgbotapi.NewMessage(msg.Chat.ID, mapper(msg))
-		resultMedia.ParseMode = tgbotapi.ModeHTML
-		resultMedia.ReplyToMessageID = msg.MessageID
-		resultMedia.DisableWebPagePreview = true
-		return resultMedia
-	})
+func mapToHTML(mapper htmlMapper) func(*Message) {
+	return func(m *Message) {
+		util.SendReply(m.Chat, mapper(m), m, ModeHTML)
+	}
 }
 
 type searchEngineFunc func(string) string
@@ -30,17 +26,17 @@ type searchEngineFunc func(string) string
 // searchEngine makes a 'search engine' by a searchEngine function.
 // a searchEngine function get a string as "term", and returns a HTML formatted string message.
 func searchEngine(engineFunc searchEngineFunc) htmlMapper {
-	return func(message *tgbotapi.Message) string {
-		if cmd := message.CommandArguments(); cmd != "" {
-			return engineFunc(cmd)
+	return func(m *Message) string {
+		cmd := entities.FromMessage(m)
+		if keyWord := cmd.ArgAllInOneFrom(0); keyWord != "" {
+			return engineFunc(keyWord)
 		}
-		if rep := message.ReplyToMessage; rep != nil {
+		if rep := m.ReplyTo; rep != nil {
 			if strings.Trim(rep.Text, " \t\n") != "" {
 				return engineFunc(rep.Text)
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
-				stickerSet, err := config.BotConfig.Bot.GetStickerSet(
-					tgbotapi.GetStickerSetConfig{Name: stickerSetName})
+				stickerSet, err := config.BotConfig.Bot.GetStickerSet(stickerSetName)
 				if err != nil {
 					log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
 				} else {
@@ -50,10 +46,6 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 		}
 		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦！或者至少回复你想要搜索的内容哦！"
 	}
-}
-
-func wrap(engineFunc searchEngineFunc) module.Module {
-	return mapToHTML(searchEngine(engineFunc))
 }
 
 func google(cmd string) string {
@@ -86,9 +78,9 @@ func repeat(cmd string) string {
 
 // Search Engine
 var (
-	Google   = module.WithPredicate(wrap(google), preds.IsCommand("google"))
-	Bing     = module.WithPredicate(wrap(bing), preds.IsCommand("bing"))
-	Bilibili = module.WithPredicate(wrap(bilibili), preds.IsCommand("bilibili"))
-	Github   = module.WithPredicate(wrap(github), preds.IsCommand("github"))
-	Repeat   = module.WithPredicate(wrap(repeat), preds.IsCommand("recorder"))
+	Google   = mapToHTML(searchEngine(google))
+	Bing     = mapToHTML(searchEngine(bing))
+	Bilibili = mapToHTML(searchEngine(bilibili))
+	Github   = mapToHTML(searchEngine(github))
+	Repeat   = mapToHTML(searchEngine(repeat))
 )

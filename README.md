@@ -69,7 +69,6 @@ kill - 虚假(真实)的kill
 hitokoto - [type] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
-history - [msgID] 获取一条历史消息的链接
 forward - [msgID] 让bot转发一条历史消息(可能消息已经被删了)
 shutdown - 拔掉bot的电源
 boot - 将bot开机
