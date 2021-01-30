@@ -22,7 +22,7 @@ var helloText = []string{
 
 // Hello is handle for command `hello`
 func Hello(m *Message) {
-	util.SendMessage(m.Chat, "hello ^_^"+util.RandomChoice(helloText))
+	util.SendReply(m.Chat, "hello ^_^"+util.RandomChoice(helloText), m)
 }
 
 // HelloToAll is handle for command `hello_to_all`
@@ -32,7 +32,7 @@ func HelloToAll(m *Message) {
 		text = "你好!"
 	}
 	text += util.RandomChoice(helloText)
-	util.SendReply(m.Chat, text, m)
+	util.SendMessage(m.Chat, text)
 }
 
 // Links is handle for command `links`
@@ -59,7 +59,7 @@ func Boot(m *Message) {
 	text := GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)"
 	orm.Boot(m.Chat.ID)
 	if orm.IsShutdown(m.Chat.ID) {
-		text = "不想起:("
+		text = config.BotConfig.MessageConfig.BootFailed
 	}
 	util.SendReply(m.Chat, text, m)
 }

@@ -31,6 +31,7 @@ func main() {
 		return
 	}
 
+	bot.Handle("/hello", base.Hello)
 	bot.Handle("/say_hello", base.Hello)
 	bot.Handle("/hello_to_all", base.HelloToAll)
 
@@ -124,6 +125,7 @@ func fakeBanFilter(update *Update) bool {
 	}
 	m := update.Message
 	if orm.IsBanned(m.Chat.ID, m.Sender.ID) {
+		util.DeleteMessage(m)
 		return false
 	}
 	return true
@@ -166,6 +168,7 @@ func noStickerFilter(update *Update) bool {
 		return true
 	}
 	if orm.IsNoStickerMode(update.Message.Chat.ID) {
+		util.DeleteMessage(update.Message)
 		return false
 	}
 	return true

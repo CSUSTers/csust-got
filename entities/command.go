@@ -25,9 +25,9 @@ func FromMessage(msg *Message) *BotCommand {
 	}
 	name := args[0]
 	if idx := strings.IndexRune(name, '@'); idx != -1 {
-		name = name[1:idx]
+		name = name[:idx]
 	}
-	return &BotCommand{name, args[1:]}
+	return &BotCommand{name[1:], args[1:]}
 }
 
 func splitText(txt string) []string {

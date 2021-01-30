@@ -35,7 +35,7 @@ func SendMessage(to Recipient, what interface{}, ops ...interface{}) *Message {
 
 // SendReply will use the bot to reply a message.
 func SendReply(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) *Message {
-	ops = append(ops, &SendOptions{ReplyTo: replyMsg})
+	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessage(to, what, ops...)
 }
 
@@ -50,7 +50,7 @@ func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*
 
 // SendReplyWithError is same as SendReply but return error
 func SendReplyWithError(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) (*Message, error) {
-	ops = append(ops, &SendOptions{ReplyTo: replyMsg})
+	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessageWithError(to, what, ops...)
 }
 
@@ -139,7 +139,7 @@ func StringsToInts(s []string) []int64 {
 func PrivateCommand(fn func(m *Message)) func(m *Message) {
 	return func(m *Message) {
 		if m.FromGroup() {
-			SendReply(m.Chat, "命令不支持群里使用哦", m)
+			SendReply(m.Chat, "这个命令不支持群里使用哦", m)
 			return
 		}
 		fn(m)
@@ -149,7 +149,7 @@ func PrivateCommand(fn func(m *Message)) func(m *Message) {
 func GroupCommand(fn func(m *Message)) func(m *Message) {
 	return func(m *Message) {
 		if m.Private() {
-			SendReply(m.Chat, "命令不支持私聊使用哦", m)
+			SendReply(m.Chat, "这个命令不支持私聊使用哦", m)
 			return
 		}
 		fn(m)
