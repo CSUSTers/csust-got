@@ -36,8 +36,8 @@ docker-compose up -d
 Clone the newest version.
 
 ```bash
-git pull
-docker-compose up -d --build
+docker-compose pull
+docker-compose up -d
 ```
 
 ## Configuration
@@ -60,7 +60,7 @@ bing - <Key Words> 巨硬搜索...
 bilibili - <Key Words> 在B站搜索...
 github - <Key Words> 在github搜索...
 links - 这里有一些链接(加友链at管理)
-ban_myself - 把自己ban掉rand[60,120]秒
+ban_myself - 把自己ban掉rand[40,160]秒
 ban - 我就是要滥权！【Admin】
 ban_soft - 软禁！使某人失去快乐~【Admin】
 fake_ban - [duration] 虚假(真实)的ban
