@@ -2,14 +2,13 @@ package prom
 
 import (
 	"csust-got/entities"
-	"go.uber.org/zap"
 	"net/http"
 	"os"
-	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 var host, _ = os.Hostname()
@@ -40,29 +39,24 @@ func newLabels(base, labels prometheus.Labels) prometheus.Labels {
 }
 
 // DailUpdate - dail an update
-func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
-	if !valied {
+func DailUpdate(update *Update) {
+	if update.Message == nil {
+		return
+	}
+	m := update.Message
+	if m.Private() {
 		return
 	}
 	labels := prometheus.Labels{"host": host}
 
-	message := update.Message
-	if message == nil {
-		return
-	}
-
-	chat := message.Chat
+	chat := m.Chat
 	labels["chat_name"] = chat.Title
-	if chat.IsPrivate() {
-		// ignore private chat
-		return
-	}
 
-	user := message.From
+	user := m.Sender
 	if user == nil || user.IsBot {
 		return
 	}
-	username := user.UserName
+	username := user.Username
 	if username == "" {
 		username = user.FirstName
 	}
@@ -70,11 +64,11 @@ func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
 
 	isCommand, isSticker := "false", "false"
 
-	if message.Sticker != nil {
+	if m.Sticker != nil {
 		isSticker = "true"
 	}
 
-	command, _ := entities.FromMessage(message)
+	command := entities.FromMessage(m)
 	if command != nil {
 		isCommand = "true"
 		commandTimes.With(newLabels(labels, prometheus.Labels{
@@ -82,7 +76,7 @@ func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
 		})).Inc()
 	}
 
-	updateCostTime.With(labels).Set(float64(costTime.Nanoseconds()) / 1e6)
+	// updateCostTime.With(labels).Set(float64(costTime.Nanoseconds()) / 1e6)
 
 	messageCount.With(newLabels(labels, prometheus.Labels{
 		"is_command": isCommand,
@@ -91,10 +85,6 @@ func DailUpdate(update tgbotapi.Update, valied bool, costTime time.Duration) {
 }
 
 func NewMember(chatName string) {
-	chatMemberCount.With(prometheus.Labels{
-		"host":      host,
-		"chat_name": chatName,
-	}).Inc()
 	newMemberCount.With(prometheus.Labels{
 		"host":      host,
 		"chat_name": chatName,

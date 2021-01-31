@@ -3,10 +3,11 @@ package config
 import (
 	"csust-got/prom"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"strings"
+
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"strings"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // BotConfig can get bot's config globally
@@ -48,7 +49,7 @@ func NewBotConfig() *Config {
 
 // Config the interface for common configs.
 type Config struct {
-	Bot *tgbotapi.BotAPI
+	Bot *Bot
 
 	Token     string
 	DebugMode bool
@@ -60,11 +61,18 @@ type Config struct {
 	MessageConfig   *messageConfig
 	BlackListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
+
+	YibanApi string
+}
+
+// GetBot returns Bot
+func GetBot() *Bot {
+	return BotConfig.Bot
 }
 
 // BotID returns the BotID of this config.
 func (c Config) BotID() int {
-	return c.Bot.Self.ID
+	return c.Bot.Me.ID
 }
 
 func initViper(configFile, envPrefix string) {
@@ -105,6 +113,8 @@ func readConfig() {
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlackListConfig.readConfig()
+
+	BotConfig.YibanApi = viper.GetString("yiban_api")
 }
 
 // check some config value is reasonable, otherwise set to default value.

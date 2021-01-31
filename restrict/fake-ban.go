@@ -2,156 +2,69 @@ package restrict
 
 import (
 	"csust-got/config"
-	"csust-got/context"
 	"csust-got/entities"
-	"csust-got/log"
-	"csust-got/module"
-	"csust-got/module/preds"
+	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
-	"go.uber.org/zap"
 	"math/rand"
-	"strconv"
 	"time"
 
-	"github.com/go-redis/redis/v7"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
-// KeyFunction is function
-type KeyFunction func(*tgbotapi.User) string
-
-// BanExecutor is executor
-type BanExecutor func(context.Context, BanSpec) string
-
-// BanSpec is ban spec
-type BanSpec struct {
-	BanTarget  *tgbotapi.User
-	BigBrother *tgbotapi.User
-	BanTime    time.Duration
-	BanOther   func(victim int, dur time.Duration) bool
+// FakeBan
+func FakeBan(m *Message) {
+	cmd := entities.FromMessage(m)
+	banTime, err := time.ParseDuration(cmd.Arg(0))
+	if err != nil {
+		banTime = time.Duration(60+rand.Intn(60)) * time.Second
+	}
+	ExecFakeBan(m, banTime)
 }
 
-// Ban is executor of fake ban.
-func (spec BanSpec) Ban() bool {
-	return spec.BanOther(spec.BanTarget.ID, spec.BanTime)
+// Kill
+func Kill(m *Message) {
+	seconds := config.BotConfig.RestrictConfig.KillSeconds
+	banTime := time.Duration(seconds) * time.Second
+	ExecFakeBan(m, banTime)
 }
 
-// FakeBanBase is base module of fake ban.
-func FakeBanBase(exec BanExecutor, pred preds.Predicate) module.Module {
-	kf := func(user int) string {
-		return fmt.Sprintf("%d:banned", user)
+func fakeBanCheck(m *Message, d time.Duration) bool {
+	conf := config.BotConfig.RestrictConfig
+	if m.ReplyTo == nil {
+		util.SendReply(m.Chat, "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是苟管理也义不容辞。", m)
+		return false
 	}
-	banner := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-		cmd, _ := entities.FromMessage(update.Message)
-		banTime, err := time.ParseDuration(cmd.Arg(0))
-		if err != nil {
-			banTime = time.Duration(60+rand.Intn(60)) * time.Second
-		}
-		// chatID := update.Message.Chat.ID
-		bigBrother := update.Message.From
-		var banTarget *tgbotapi.User = nil
-		if fwd := update.Message.ReplyToMessage; fwd != nil {
-			banTarget = fwd.From
-		}
-		ban := func(v int, banTime time.Duration) bool {
-			return ctx.GlobalClient().Set(ctx.WrapKey(kf(v)), "banned", banTime).Err() == nil
-		}
-		spec := BanSpec{
-			BanTarget:  banTarget,
-			BigBrother: bigBrother,
-			BanTime:    banTime,
-			BanOther:   ban,
-		}
-		if cmd.Name() == "kill" {
-			seconds := ctx.GlobalConfig().RestrictConfig.KillSeconds
-			spec.BanTime = time.Duration(seconds) * time.Second
-		}
-		text := exec(ctx, spec)
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
-		util.SendMessage(bot, msg)
+	if d <= 0 || d > time.Duration(conf.KillSeconds)*time.Second {
+		util.SendReply(m.Chat, "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。", m)
+		return false
 	}
-	filteredBanner := module.WithPredicate(module.Stateful(banner), pred)
-	interrupter := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
-		target := update.Message.From
-		_, err := ctx.GlobalClient().Get(ctx.WrapKey(kf(target.ID))).Result()
-		// We can get this key, so it would be sure that the target is banned.
-		// Otherwise, maybe redis is died, we should do nothing.
-		if err == nil {
-			_, _ = bot.DeleteMessage(tgbotapi.NewDeleteMessage(update.Message.Chat.ID, update.Message.MessageID))
-			return module.NoMore
-		}
-		return module.NextOfChain
+	if orm.IsFakeBanInCD(m.Chat.ID, m.Sender.ID) {
+		banCD := time.Duration(conf.FakeBanCDMinutes) * time.Minute
+		msg := fmt.Sprintf("您在过去%v的时间里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。", banCD)
+		util.SendReply(m.Chat, msg, m)
+		return false
 	}
-	return module.SharedContext([]module.Module{module.Filter(interrupter), filteredBanner})
+	return true
 }
 
-// Execute ban, then return the prompt message and whether the ban is successful.
-func genericBan(spec BanSpec) (string, bool) {
-	if spec.BanTarget == nil {
-		return "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是Admin阶级也义不容辞。", false
-	} else if spec.BanTime <= 0 || spec.BanTime > 10*time.Minute {
-		return "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。", false
-	} else if ok := spec.Ban(); !ok {
-		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。", false
+func ExecFakeBan(m *Message, d time.Duration) {
+	if !fakeBanCheck(m, d) {
+		return
 	}
-	return fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", util.GetName(*spec.BanTarget), spec.BanTime), true
-}
-
-func generateTextWithCD(ctx context.Context, spec BanSpec) string {
-	restrictConfig := ctx.GlobalConfig().RestrictConfig
-	msgConfig := ctx.GlobalConfig().MessageConfig
-	bbid := strconv.Itoa(spec.BigBrother.ID)
-	rc := ctx.GlobalClient()
-	// check if this user in Blacklist
-	if black, err := rc.SIsMember(ctx.WrapKey("black_list"), bbid).Result(); err != nil /*&& err == redis.Nil*/ {
-		return "啊这，好像有点不太对，不过问题不大。"
-	} else if black {
-		return "CNM，你背叛了老嚯阶级。"
+	conf := config.BotConfig.MessageConfig
+	banned := m.ReplyTo.Sender
+	text := fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", util.GetName(banned), d)
+	if banned.ID == config.GetBot().Me.ID {
+		// ban who want to ban bot
+		text = conf.RestrictBot
+		banned = m.Sender
+	} else if banned.ID == m.Sender.ID {
+		// they want to ban themself
+		text = fmt.Sprintf("那我就不客气了，我将会追杀你，直到时间过去所谓“%v”。", d)
 	}
-
-	// check whether this user is in CD.
-	isCD, err := rc.Get(ctx.WrapKey(bbid)).Result()
-	if err != nil && err != redis.Nil {
-		return "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了：我不确定您是正义，或是邪恶，因此我不会帮你。"
+	if !orm.Ban(m.Chat.ID, m.Sender.ID, banned.ID, d) {
+		text = "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。"
 	}
-	banCD := time.Duration(restrictConfig.FakeBanCDMinutes) * time.Minute
-	if isCD == "true" {
-		return fmt.Sprintf("您在过去%v的时间里已经下过一道追杀令了，现在您应当保持沉默，如果他罪不可赦，请寻求其他人的帮助。", banCD)
-	}
-
-	// check ban target is nil
-	if spec.BanTarget == nil {
-		return "ban谁呀，咋ban呀，你到底会不会ban呀"
-	}
-
-	killSelf := false
-	if spec.BanTarget.ID == config.BotConfig.BotID() {
-		// ban those people who want to ban this bot
-		spec.BanTarget = spec.BigBrother
-		killSelf = true
-	}
-	text, ok := genericBan(spec)
-	if killSelf && ok {
-		text = msgConfig.RestrictBot
-		// Bot will ban the people who want to ban bot, so this people won't CD.
-		ok = false
-	}
-	if ok {
-		success, err := ctx.GlobalClient().SetNX(ctx.WrapKey(strconv.Itoa(spec.BigBrother.ID)), "true", banCD).Result()
-		// If the CD recording fails, they may use fake_ban unlimited,
-		// so we add some additional information to prompt bot manager.
-		if err != nil {
-			text += fmt.Sprintf("过度使用这样的力量，这个世界正在崩塌......")
-			log.Error("redis access error.", zap.Error(err))
-		} else if !success {
-			text += fmt.Sprintf("拥有力量也许不是好事,这个世界正在变得躁动不安......")
-		}
-	}
-	return text
-}
-
-// FakeBan is fake ban
-func FakeBan(tgbotapi.Update) module.Module {
-	return FakeBanBase(generateTextWithCD, preds.IsCommand("fake_ban").Or(preds.IsCommand("kill")))
+	util.SendReply(m.Chat, text, m)
 }

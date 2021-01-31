@@ -22,6 +22,7 @@ rate_limit:
 redis:
   addr: "redis:6379"
   pass: "csust-bot-redis-password"
+  key_prefix: "csust-got:"
 
 # message config
 message:
@@ -31,3 +32,5 @@ message:
   hitokoto_not_found: "过去那些零碎的细语并不构成这个世界：对于你而言，该看，该想，该体会身边那些微小事物的律动。忘了这些话吧。忘了这个功能吧——只今它已然不能给予你更多。而你的未来属于新的旅途：去欲望、去收获、去爱、去恨。去做只属于你自己的选择，写下只有你深谙个中滋味的诗篇。我们的生命以后可能还会交织之时，但如今，再见辣。"
   no_sleep: "睡你麻痹起来嗨！"
   boot_failed: "我不愿面对这苦涩的一天……:("
+
+yiban_api: ""

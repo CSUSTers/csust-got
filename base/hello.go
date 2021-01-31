@@ -2,11 +2,7 @@ package base
 
 import (
 	"csust-got/config"
-	"csust-got/context"
 	"csust-got/entities"
-	"csust-got/log"
-	"csust-got/module"
-	"csust-got/module/preds"
 	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
@@ -14,8 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 var timeZoneCST, _ = time.LoadLocation("Asia/Shanghai")
@@ -27,93 +22,52 @@ var helloText = []string{
 }
 
 // Hello is handle for command `hello`
-func Hello(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
-
-	messageReply := tgbotapi.NewMessage(chatID, "hello ^_^"+util.RandomChoice(helloText))
-
-	util.SendMessage(bot, messageReply)
+func Hello(m *Message) {
+	util.SendReply(m.Chat, "hello ^_^ "+util.RandomChoice(helloText), m)
 }
 
 // HelloToAll is handle for command `hello_to_all`
-func HelloToAll(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
-
+func HelloToAll(m *Message) {
 	text := "大家好!"
-	if message.Chat.IsPrivate() {
+	if m.Private() {
 		text = "你好!"
 	}
 	text += util.RandomChoice(helloText)
-
-	messageReply := tgbotapi.NewMessage(chatID, text)
-	util.SendMessage(bot, messageReply)
+	util.SendMessage(m.Chat, text)
 }
 
 // Links is handle for command `links`
-func Links(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
-
-	txt := config.BotConfig.MessageConfig.Links
-
-	messageReply := tgbotapi.NewMessage(chatID, txt)
-	messageReply.ParseMode = tgbotapi.ModeMarkdownV2
-	messageReply.DisableWebPagePreview = true
-	util.SendMessage(bot, messageReply)
+func Links(m *Message) {
+	util.SendMessage(m.Chat, config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
 }
 
 // Shutdown is handler for command `shutdown`
-func Shutdown(update tgbotapi.Update) module.Module {
-	handler := func(ctx context.Context, update tgbotapi.Update, bot *tgbotapi.BotAPI) module.HandleResult {
-		key := "shutdown"
-		shutdown, err := orm.GetBool(ctx, key)
-		if err != nil {
-			log.Error("failed to access redis.", zap.Error(err))
-		}
-		if preds.IsCommand("shutdown").
-			Or(preds.IsCommand("halt")).
-			Or(preds.IsCommand("poweroff")).ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 明天还有明天的苦涩，晚安:)")
-			if shutdown {
-				msg.Text = "我已经睡了，还请不要再找我了，可以使用/boot命令叫醒我……晚安:)"
-			} else if err := orm.WriteBool(ctx, key, true); err != nil {
-				log.Error("failed to access redis.", zap.Error(err))
-				msg.Text = "睡不着……:("
-			}
-			util.SendMessage(bot, msg)
-			return module.DoDeferred
-		}
-		if preds.IsCommand("boot").ShouldHandle(update) {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, GetHitokoto("i", false)+" 早上好，新的一天加油哦！:)")
-			if err := orm.WriteBool(ctx, key, false); err != nil {
-				log.Error("failed to access redis.", zap.Error(err))
-				msg.Text = config.BotConfig.MessageConfig.BootFailed
-			}
-			util.SendMessage(bot, msg)
-			return module.NextOfChain
-		}
-		if shutdown {
-			return module.DoDeferred
-		}
-		return module.NextOfChain
+func Shutdown(m *Message) {
+	if orm.IsShutdown(m.Chat.ID) {
+		util.SendReply(m.Chat, "我已经睡了，还请不要再找我了，可以使用/boot命令叫醒我……晚安:)", m)
+		return
 	}
-	return module.Filter(handler)
+	orm.Shutdown(m.Chat.ID)
+	text := GetHitokoto("i", false) + " 明天还有明天的苦涩，晚安:)"
+	if !orm.IsShutdown(m.Chat.ID) {
+		text = "睡不着……:("
+	}
+	util.SendReply(m.Chat, text, m)
+}
+
+// Boot is handler for command `boot`
+func Boot(m *Message) {
+	text := GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)"
+	orm.Boot(m.Chat.ID)
+	if orm.IsShutdown(m.Chat.ID) {
+		text = config.BotConfig.MessageConfig.BootFailed
+	}
+	util.SendReply(m.Chat, text, m)
 }
 
 // Sleep is handle for command `sleep`
-func Sleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	if rand.Intn(100) < 2 {
-		NoSleep(update, bot)
-		return
-	}
-
-	message := update.Message
-	chatID := message.Chat.ID
-
+func Sleep(m *Message) {
 	msg := ""
-
 	t := time.Now().In(timeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
 		msg = "晚安, 明天醒来就能看到我哦！"
@@ -122,29 +76,20 @@ func Sleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 	} else {
 		msg = "醒来就能看到我哦！"
 	}
-
-	messageReply := tgbotapi.NewMessage(chatID, msg)
-	util.SendMessage(bot, messageReply)
+	util.SendReply(m.Chat, msg, m)
 }
 
 // NoSleep is handle for command `no_sleep`
-func NoSleep(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
-
-	messageReply := tgbotapi.NewMessage(chatID, config.BotConfig.MessageConfig.NoSleep)
-	util.SendMessage(bot, messageReply)
+func NoSleep(m *Message) {
+	util.SendReply(m.Chat, config.BotConfig.MessageConfig.NoSleep, m)
 }
 
 // Forward is handle for command `forward`
-func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
-
-	command, _ := entities.FromMessage(message)
-	historyID := rand.Intn(message.MessageID) + 1
+func Forward(m *Message) {
+	command := entities.FromMessage(m)
+	historyID := rand.Intn(m.ID) + 1
 	if command.Argc() > 0 {
-		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
+		id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
 		if ok {
 			historyID = id
 		} else {
@@ -152,48 +97,52 @@ func Forward(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
 		}
 	}
 
-	messageReply := tgbotapi.NewForward(chatID, chatID, historyID)
-	if _, err := util.SendMessageGiveMeError(bot, messageReply); err != nil {
+	forwardMsg := &Message{
+		ID:   historyID,
+		Chat: m.Chat,
+	}
+
+	if _, err := config.GetBot().Forward(m.Chat, forwardMsg); err != nil {
 		const msgFmt = "我们试图找到那条消息[%d]，但是它已经永远的消失在了历史记录的长河里，对此我们深表遗憾。诀别来的总是那么自然，在你注意到时发现已经消失，希望你能珍惜现在的热爱。"
-		msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(msgFmt, historyID))
-		msg.ReplyToMessageID = message.MessageID
-		util.SendMessage(bot, msg)
+		util.SendReply(m.Chat, fmt.Sprintf(msgFmt, historyID), m)
 	}
 }
 
 // History is handle for command `history`
-func History(update tgbotapi.Update, bot *tgbotapi.BotAPI) {
-	message := update.Message
-	chatID := message.Chat.ID
+// func History(m *Message) {
+// 	command, _ := entities.FromMessage(m)
+// 	historyID := rand.Intn(m.ID) + 1
+// 	if command.Argc() > 0 {
+// 		id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
+// 		if ok {
+// 			historyID = id
+// 		} else {
+// 			return
+// 		}
+// 	}
+// 	msg := fmt.Sprintf("https://t.me/c/%v/%v", chatIDToStr(m.Chat.ID), historyID)
+// 	util.SendReply(m.Chat, msg, m)
+// }
 
-	chatIDStr := chatIDToStr(chatID)
-	command, _ := entities.FromMessage(message)
-	historyID := rand.Intn(message.MessageID) + 1
-	if command.Argc() > 0 {
-		id, ok := util.ParseNumberAndHandleError(bot, message, command.Arg(0), util.NewRangeInt(0, message.MessageID))
-		if ok {
-			historyID = id
-		} else {
-			return
-		}
-	}
+// func chatIDToStr(chatID int64) string {
+// 	chatNum := chatID
+// 	if chatNum < 0 {
+// 		chatNum *= -1
+// 	}
+// 	chatStr := strconv.FormatInt(chatNum, 10)
+// 	if chatStr[0] == '1' {
+// 		chatStr = chatStr[1:]
+// 	}
+// 	for chatStr[0] == '0' {
+// 		chatStr = chatStr[1:]
+// 	}
+// 	return chatStr
+// }
 
-	messageReply := tgbotapi.NewMessage(chatID, "https://t.me/c/"+chatIDStr+"/"+strconv.Itoa(historyID))
-	messageReply.ReplyToMessageID = message.MessageID
-	util.SendMessage(bot, messageReply)
-}
-
-func chatIDToStr(chatID int64) string {
-	chatNum := chatID
-	if chatNum < 0 {
-		chatNum *= -1
-	}
-	chatStr := strconv.FormatInt(chatNum, 10)
-	if chatStr[0] == '1' {
-		chatStr = chatStr[1:]
-	}
-	for chatStr[0] == '0' {
-		chatStr = chatStr[1:]
-	}
-	return chatStr
+// FakeBanMyself is handle for command `fake_ban_myself`.
+// Use it to just get a reply like command `ban_myself`.
+func FakeBanMyself(m *Message) {
+	sec := time.Duration(rand.Intn(60)+60) * time.Second
+	text := "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
+	util.SendReply(m.Chat, text, m)
 }

@@ -1,10 +1,10 @@
 package base
 
 import (
-	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -12,7 +12,8 @@ import (
 	"net/url"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	. "gopkg.in/tucnak/telebot.v2"
+
 	"go.uber.org/zap"
 )
 
@@ -66,8 +67,8 @@ if arg not in above, we will ignore it.
 if there is no args, api will randomly choice from above.
 if there is multiple args, api will randomly choice from them.
 */
-func parseAPI(message *tgbotapi.Message) HitokotoArg {
-	cmd, _ := entities.FromMessage(message)
+func parseAPI(m *Message) HitokotoArg {
+	cmd := entities.FromMessage(m)
 	cmdSlice := cmd.MultiArgsFrom(0)
 	if len(cmdSlice) > 15 {
 		return HitokotoEmptyArg()
@@ -76,20 +77,19 @@ func parseAPI(message *tgbotapi.Message) HitokotoArg {
 }
 
 // Hitokoto is command `hitokoto`
-var Hitokoto = mapToHTML(func(message *tgbotapi.Message) string {
-	arg := parseAPI(message)
-	return GetHitokoto(arg, true)
-})
+func Hitokoto(m *Message) {
+	util.SendReply(m.Chat, GetHitokoto(parseAPI(m), true), m, ModeHTML)
+}
 
 // HitDawu is command alias `hitokoto -i`
-var HitDawu = mapToHTML(func(*tgbotapi.Message) string {
-	return GetHitokoto("i", true)
-})
+func HitDawu(m *Message) {
+	util.SendReply(m.Chat, GetHitokoto("i", true), m, ModeHTML)
+}
 
 // HitoNetease is command alias `hitokoto -j`
-var HitoNetease = mapToHTML(func(*tgbotapi.Message) string {
-	return GetHitokoto("j", true)
-})
+func HitoNetease(m *Message) {
+	util.SendReply(m.Chat, GetHitokoto("j", true), m, ModeHTML)
+}
 
 // GetHitokoto can get a hitokoto
 func GetHitokoto(arg HitokotoArg, from bool) string {
@@ -98,19 +98,19 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 	resp, err := http.Get(u.String())
 	if err != nil {
 		log.Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	koto := HitokotoResponse{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
 		log.Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	if koto.Author == "" {
 		koto.Author = "佚名"
@@ -123,26 +123,7 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 	str := fmt.Sprintf("%s ", koto.Sentence)
 	if from {
 		str += fmt.Sprintf("by <em>%s %s</em>", koto.Author, koto.From)
-		storeToRedis(str)
+		orm.StoreHitokoto(str)
 	}
 	return str
-}
-
-func storeToRedis(respBody string) {
-	_, err := orm.GetClient().SAdd("hitokoto", respBody).Result()
-	if err != nil {
-		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
-	}
-}
-
-func loadFromRedis(from bool) string {
-	res, err := orm.GetClient().SRandMember("hitokoto").Result()
-	if err != nil {
-		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
-		return config.BotConfig.MessageConfig.HitokotoNotFound
-	}
-	if !from {
-		res = res[:strings.LastIndex(res, " by ")+1]
-	}
-	return res
 }

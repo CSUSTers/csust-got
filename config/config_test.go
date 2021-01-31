@@ -1,10 +1,11 @@
 package config
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
 	"os"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"

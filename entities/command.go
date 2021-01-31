@@ -2,15 +2,14 @@
 package entities
 
 import (
-	"errors"
 	"regexp"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
-// Command - command in message
-type Command struct {
+// BotCommand - command in message
+type BotCommand struct {
 	name string
 	args []string
 }
@@ -20,15 +19,16 @@ var (
 )
 
 // FromMessage - get command in a message
-func FromMessage(msg *tgbotapi.Message) (*Command, error) {
-	name := msg.Command()
-	if name == "" {
-		return nil, errors.New("FromMessage: update isn't a Command")
+func FromMessage(msg *Message) *BotCommand {
+	args := splitText(strings.TrimSpace(msg.Text))
+	if len(args) == 0 {
+		return &BotCommand{"", []string{}}
 	}
-
-	args := splitText(strings.TrimSpace(msg.CommandArguments()))
-
-	return &Command{name, args}, nil
+	name := args[0]
+	if idx := strings.IndexRune(name, '@'); idx != -1 {
+		name = name[:idx]
+	}
+	return &BotCommand{name[1:], args[1:]}
 }
 
 func splitText(txt string) []string {
@@ -40,17 +40,17 @@ func splitText(txt string) []string {
 }
 
 // Name - command name
-func (c Command) Name() string {
+func (c BotCommand) Name() string {
 	return c.name
 }
 
 // Argc - length of args
-func (c Command) Argc() int {
+func (c BotCommand) Argc() int {
 	return len(c.args)
 }
 
 // Arg - get arg at index `idx`
-func (c Command) Arg(idx int) string {
+func (c BotCommand) Arg(idx int) string {
 	if idx >= c.Argc() {
 		return ""
 	}
@@ -58,7 +58,7 @@ func (c Command) Arg(idx int) string {
 }
 
 // MultiArgsFrom - get args from index `idx`
-func (c Command) MultiArgsFrom(idx int) []string {
+func (c BotCommand) MultiArgsFrom(idx int) []string {
 	if idx >= c.Argc() {
 		return []string{}
 	}
@@ -66,7 +66,7 @@ func (c Command) MultiArgsFrom(idx int) []string {
 }
 
 // ArgAllInOneFrom - get all args as one string
-func (c Command) ArgAllInOneFrom(idx int) string {
+func (c BotCommand) ArgAllInOneFrom(idx int) string {
 	arg := strings.Builder{}
 	for _, s := range c.MultiArgsFrom(idx) {
 		arg.WriteString(s)

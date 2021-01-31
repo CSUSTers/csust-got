@@ -3,7 +3,6 @@
 [![Go Report](https://goreportcard.com/badge/github.com/csusters/csust-got)](https://goreportcard.com/report/github.com/csusters/csust-got)
 [![codebeat badge](https://codebeat.co/badges/4d134b7f-e345-4378-b00d-7ab2177b94bc)](https://codebeat.co/projects/github-com-csusters-csust-got-master)
 
-[![Branch test Build Status](https://travis-ci.org/CSUSTers/csust-got.svg?branch=test)](https://travis-ci.org/CSUSTers/csust-got)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/master?label=master%20test)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/dev?label=dev%20test)
 
@@ -65,16 +64,18 @@ ban_myself - 把自己ban掉rand[60,120]秒
 ban - 我就是要滥权！【Admin】
 ban_soft - 软禁！使某人失去快乐~【Admin】
 fake_ban - [duration] 虚假(真实)的ban
-fake_ban_myself - 虚假的ban自己(也不一定)
+fake_ban_myself - 虚假的ban自己
 kill - 虚假(真实)的kill
-hitokoto - [type] 一言
+hitokoto - [type:a-l] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
-history - [msgID] 获取一条历史消息的链接
 forward - [msgID] 让bot转发一条历史消息(可能消息已经被删了)
 shutdown - 拔掉bot的电源
 boot - 将bot开机
 sleep - 该睡觉了
 no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
+yiban - [tel] 查看易班打卡状态
+no_yiban - 让bot忘记自己的手机号
+sub_yiban - <tel> 让bot记住自己的手机号
 ```
