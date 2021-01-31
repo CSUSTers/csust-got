@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,6 +27,12 @@ type yibanResp struct {
 	Data    string `json:"data"`
 	Msg     string `json:"msg"`
 	ErrCode int    `json:"errCode"`
+}
+
+var phoneMatcher *regexp.Regexp
+
+func init() {
+	phoneMatcher = regexp.MustCompile(`^(1\d{10})$`)
 }
 
 func Yiban(m *Message) {
@@ -116,15 +123,7 @@ func YibanService() {
 }
 
 func checkTel(tel string) bool {
-	if len(tel) != 11 {
-		return false
-	}
-	for _, c := range tel {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	return phoneMatcher.MatchString(tel)
 }
 
 func requestAndGetMsg(tel string) string {
