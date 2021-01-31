@@ -10,12 +10,12 @@ ARG BRANCH
 ARG RELEASE
 ARG TAG
 
+ENV BRANCH=${BRANCH}
+ENV TAG=${TAG}
+
 WORKDIR /go/src/app
 COPY . .
-RUN make \ 
-    BRANCH=${BRANCH} \
-    TAG=${TAG} \
-    deploy
+RUN make deploy
 
 # deploy image
 FROM alpine
