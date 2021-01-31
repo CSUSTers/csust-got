@@ -26,7 +26,7 @@ test:
 
 fmt:
 	gofmt -l -w .
-`
+
 deploy: get
 	CGO_ENABLED=$(CGOFLAG) \
 	go build -o $(OUTPUT) -ldflags "$(LDFLAGS)" . 
