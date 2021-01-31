@@ -36,7 +36,7 @@ func Yiban(m *Message) {
 			util.SendMessage(m.Chat, "bot觉得这不是手机号")
 			return
 		}
-		util.SendMessage(m.Chat, requestAndGetMsg(tel))
+		util.SendMessage(m.Chat, requestAndGetMsg(tel), NoPreview)
 		return
 	}
 	tel = orm.GetYiban(m.Sender.ID)
@@ -45,7 +45,7 @@ func Yiban(m *Message) {
 		util.SendMessage(m.Chat, "如果需要bot记住您手机号，请使用 /sub_yiban 命令带上手机号参数，后续查询 /yiban 不再需要填写参数，每日打卡结果bot会推送通知")
 		return
 	}
-	util.SendMessage(m.Chat, requestAndGetMsg(tel))
+	util.SendMessage(m.Chat, requestAndGetMsg(tel), NoPreview)
 	// orm.YibanNotified(m.Sender.ID)
 }
 
@@ -86,7 +86,8 @@ func NoYiban(m *Message) {
 }
 
 func YibanService() {
-	for range time.Tick(30 * time.Minute) {
+	for range time.Tick(10 * time.Minute) {
+		log.Info("start yiban status check")
 		mp := orm.GetAllYiban()
 		for userID, tel := range mp {
 			if orm.IsYibanNotified(userID) {
@@ -102,7 +103,7 @@ func YibanService() {
 				// keep waiting
 			case codeOK:
 				log.Info("yiban service send notify", zap.Int("userID", userID))
-				util.SendMessage(chat, getMsg(resp))
+				util.SendMessage(chat, getMsg(resp), NoPreview)
 				orm.YibanNotified(userID)
 			case codeNotFound:
 				log.Warn("yiban service user not found, try delete")
@@ -137,7 +138,7 @@ func getMsg(resp *yibanResp) string {
 
 	switch resp.ErrCode {
 	case codeWaiting:
-		return "别急，打卡时间还没到呢"
+		return "别急，自动打卡时间还没到呢"
 	case codeOK:
 		return "自动打卡成功\n" + resp.Data
 	case codeNotFound:
