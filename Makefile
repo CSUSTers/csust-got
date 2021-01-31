@@ -2,7 +2,7 @@
 
 PROJECT := csust-got
 VERSION ?= $(if $(TAG),$(TAG),$(shell git rev-parse --short HEAD))
-BRANCH ?= $(if $(RELEASE),$(RELEASE),$(shell git branch --show-current))
+BRANCH ?= $(shell git branch --show-current)
 BUILDTIME := $(shell TZ="Asia/Shanghai" date '+%Y/%m/%d-%H:%M:%S')
 
 FLAGPKG = $(PROJECT)/base
@@ -26,7 +26,7 @@ test:
 
 fmt:
 	gofmt -l -w .
-
+`
 deploy: get
 	CGO_ENABLED=$(CGOFLAG) \
 	go build -o $(OUTPUT) -ldflags "$(LDFLAGS)" . 

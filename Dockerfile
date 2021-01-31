@@ -6,9 +6,16 @@ FROM golang:alpine AS buildenv
 
 RUN apk add make git tzdata
 
+ARG BRANCH
+ARG RELEASE
+ARG TAG
+
 WORKDIR /go/src/app
 COPY . .
-RUN make deploy
+RUN make \ 
+    BRANCH=${BRANCH} \
+    TAG=${TAG} \
+    deploy
 
 # deploy image
 FROM alpine

@@ -43,6 +43,7 @@ jobs:
             csust/csust-got:${{ steps.version.outputs.tag }}
           build-args: |
             TAG=${{ steps.version.outputs.tag }}
+            BRANCH=release
             RELEASE=release
 
       - name: Image digest
