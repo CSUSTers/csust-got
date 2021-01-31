@@ -6,10 +6,11 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"math/rand"
 	"strconv"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 var timeZoneCST, _ = time.LoadLocation("Asia/Shanghai")

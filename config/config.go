@@ -3,10 +3,11 @@ package config
 import (
 	"csust-got/prom"
 	"fmt"
+	"strings"
+
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v2"
-	"strings"
 )
 
 // BotConfig can get bot's config globally

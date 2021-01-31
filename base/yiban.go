@@ -7,11 +7,12 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"encoding/json"
-	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v2"
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 var (

@@ -4,11 +4,12 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/util"
-	"github.com/go-redis/redis/v7"
-	"go.uber.org/zap"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-redis/redis/v7"
+	"go.uber.org/zap"
 )
 
 var client *redis.Client

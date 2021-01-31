@@ -2,12 +2,13 @@ package prom
 
 import (
 	"csust-got/entities"
+	"net/http"
+	"os"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v2"
-	"net/http"
-	"os"
 )
 
 var host, _ = os.Hostname()

@@ -4,9 +4,10 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/util"
-	. "gopkg.in/tucnak/telebot.v2"
 	"strconv"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"golang.org/x/time/rate"
 )

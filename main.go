@@ -9,8 +9,9 @@ import (
 	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
-	. "gopkg.in/tucnak/telebot.v2"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
 )

@@ -6,11 +6,12 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"fmt"
-	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v2"
 	"math/rand"
 	"strconv"
 	"time"
+
+	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 /*

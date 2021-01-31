@@ -4,9 +4,10 @@ import (
 	"csust-got/config"
 	"csust-got/util"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"runtime"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // Makefile variable

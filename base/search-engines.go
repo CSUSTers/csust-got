@@ -6,9 +6,10 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"net/url"
 	"strings"
+
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
 )

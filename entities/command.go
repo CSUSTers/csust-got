@@ -2,9 +2,10 @@
 package entities
 
 import (
-	. "gopkg.in/tucnak/telebot.v2"
 	"regexp"
 	"strings"
+
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // BotCommand - command in message

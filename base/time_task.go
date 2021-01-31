@@ -4,8 +4,9 @@ import (
 	"csust-got/entities"
 	"csust-got/util"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // RunTask can run a task

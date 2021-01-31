@@ -3,10 +3,11 @@ package util
 import (
 	"csust-got/config"
 	"csust-got/log"
-	. "gopkg.in/tucnak/telebot.v2"
 	"math/rand"
 	"strconv"
 	"strings"
+
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
 )

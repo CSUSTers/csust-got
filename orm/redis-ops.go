@@ -1,8 +1,9 @@
 package orm
 
 import (
-	"github.com/go-redis/redis/v7"
 	"time"
+
+	"github.com/go-redis/redis/v7"
 )
 
 // GetBool gets a bool type value to a key in the redis storage.

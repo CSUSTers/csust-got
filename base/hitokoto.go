@@ -7,11 +7,12 @@ import (
 	"csust-got/util"
 	"encoding/json"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
+
+	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
 )

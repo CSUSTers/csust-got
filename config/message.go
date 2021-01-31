@@ -2,9 +2,10 @@ package config
 
 import (
 	"csust-got/prom"
+	"reflect"
+
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	"reflect"
 )
 
 var missMsg = "[this message has eat by bot]"

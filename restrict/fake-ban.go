@@ -6,9 +6,10 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"fmt"
-	. "gopkg.in/tucnak/telebot.v2"
 	"math/rand"
 	"time"
+
+	. "gopkg.in/tucnak/telebot.v2"
 )
 
 // FakeBan

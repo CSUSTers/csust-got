@@ -2,6 +2,7 @@ package base
 
 import (
 	"csust-got/util"
+
 	. "gopkg.in/tucnak/telebot.v2"
 )
 
