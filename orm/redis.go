@@ -170,3 +170,60 @@ func GetHitokoto(from bool) string {
 	}
 	return res
 }
+
+func RegisterYiban(userID int, tel string) bool {
+	err := client.HSet(wrapKey("yiban"), userID, tel).Err()
+	if err != nil {
+		log.Error("save yiban to redis failed", zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func GetYiban(userID int) string {
+	tel, err := client.HGet(wrapKey("yiban"), strconv.Itoa(userID)).Result()
+	if err != nil && err != redis.Nil {
+		log.Error("get yiban from redis failed", zap.Error(err))
+		return ""
+	}
+	return tel
+}
+
+func GetAllYiban() map[int]string {
+	res := make(map[int]string)
+	mp, err := client.HGetAll(wrapKey("yiban")).Result()
+	if err != nil && err != redis.Nil {
+		log.Error("get all yiban from redis failed", zap.Error(err))
+		return res
+	}
+	for k, v := range mp {
+		ki, _ := strconv.Atoi(k)
+		res[ki] = v
+	}
+	return res
+}
+
+func DelYiban(userID int) bool {
+	err := client.HDel(wrapKey("yiban"), strconv.Itoa(userID)).Err()
+	if err != nil && err != redis.Nil {
+		log.Error("delete yiban from redis failed", zap.Error(err))
+		return false
+	}
+	return true
+}
+
+func YibanNotified(userID int) {
+	d := time.Duration(24*60-time.Now().Hour()*60-time.Now().Minute()) * time.Minute
+	err := WriteBool(wrapKeyWithUser("yiban_notified", userID), true, d)
+	if err != nil {
+		log.Error("Set yiban notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+}
+
+func IsYibanNotified(userID int) bool {
+	ok, err := GetBool(wrapKeyWithUser("yiban_notified", userID))
+	if err != nil {
+		log.Error("Get yiban notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+	return ok
+}

@@ -60,6 +60,8 @@ type Config struct {
 	MessageConfig   *messageConfig
 	BlackListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
+
+	YibanApi string
 }
 
 // GetBot returns Bot
@@ -110,6 +112,8 @@ func readConfig() {
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlackListConfig.readConfig()
+
+	BotConfig.YibanApi = viper.GetString("yiban_api")
 }
 
 // check some config value is reasonable, otherwise set to default value.
