@@ -7,6 +7,7 @@ import (
 	"github.com/go-redis/redis/v7"
 	"go.uber.org/zap"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,11 +15,6 @@ var client *redis.Client
 
 func InitRedis() {
 	client = NewClient()
-}
-
-// GetClient return global redis client
-func GetClient() *redis.Client {
-	return client
 }
 
 // NewClient new redis client
@@ -154,4 +150,23 @@ func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
 		return false
 	}
 	return true
+}
+
+func StoreHitokoto(hitokoto string) {
+	err := client.SAdd(wrapKey("hitokoto"), hitokoto).Err()
+	if err != nil {
+		log.Error("save hitokoto to redis failed", zap.Error(err))
+	}
+}
+
+func GetHitokoto(from bool) string {
+	res, err := client.SRandMember(wrapKey("hitokoto")).Result()
+	if err != nil {
+		log.Error("get hitokoto from redis failed", zap.Error(err))
+		return config.BotConfig.MessageConfig.HitokotoNotFound
+	}
+	if !from {
+		res = res[:strings.LastIndex(res, " by ")+1]
+	}
+	return res
 }

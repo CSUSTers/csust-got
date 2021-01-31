@@ -107,7 +107,7 @@ func hardBan(chat *Chat, member *ChatMember) bool {
 func ban(chat *Chat, member *ChatMember) bool {
 	err := config.BotConfig.Bot.Restrict(chat, member)
 	if err != nil {
-		log.Error("Can't restrict chat member.", zap.Error(err))
+		log.Warn("Can't restrict chat member.", zap.Error(err))
 	}
 	return err == nil
 }

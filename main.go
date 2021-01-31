@@ -83,13 +83,18 @@ func initBot() (*Bot, error) {
 		log.Error("bot recover form panic", zap.Error(err))
 	}
 
-	bot, err := NewBot(Settings{
+	settings := Settings{
 		Token:     config.BotConfig.Token,
-		Updates:   1024,
+		Updates:   512,
 		ParseMode: ModeDefault,
 		Reporter:  panicReporter,
 		Poller:    initPoller(),
-	})
+	}
+	if config.BotConfig.DebugMode {
+		settings.Verbose = true
+	}
+
+	bot, err := NewBot(settings)
 	if err != nil {
 		return nil, err
 	}
@@ -103,9 +108,12 @@ func initPoller() *MiddlewarePoller {
 	defaultPoller := &LongPoller{Timeout: 10 * time.Second}
 	blackListPoller := NewMiddlewarePoller(defaultPoller, blackListFilter)
 	fakeBanPoller := NewMiddlewarePoller(blackListPoller, fakeBanFilter)
+	fakeBanPoller.Capacity = 16
 	rateLimitPoller := NewMiddlewarePoller(fakeBanPoller, rateLimitFilter)
 	shutdownPoller := NewMiddlewarePoller(rateLimitPoller, shutdownFilter)
+	shutdownPoller.Capacity = 16
 	noStickerPoller := NewMiddlewarePoller(shutdownPoller, noStickerFilter)
+	noStickerPoller.Capacity = 16
 	finalPoller := NewMiddlewarePoller(noStickerPoller, promFilter)
 	return finalPoller
 }
@@ -127,6 +135,8 @@ func fakeBanFilter(update *Update) bool {
 	m := update.Message
 	if orm.IsBanned(m.Chat.ID, m.Sender.ID) {
 		util.DeleteMessage(m)
+		log.Info("message deleted by fake ban", zap.String("chat", m.Chat.Title),
+			zap.String("user", m.Sender.Username))
 		return false
 	}
 	return true
@@ -136,11 +146,14 @@ func rateLimitFilter(update *Update) bool {
 	if update.Message == nil || update.Message.Private() {
 		return true
 	}
+	m := update.Message
 	whiteListConfig := config.BotConfig.WhiteListConfig
-	if !whiteListConfig.Enabled || whiteListConfig.Check(update.Message.Chat.ID) {
+	if !whiteListConfig.Enabled || whiteListConfig.Check(m.Chat.ID) {
 		return true
 	}
-	if !restrict.CheckLimit(update.Message) {
+	if !restrict.CheckLimit(m) {
+		log.Info("message deleted by rate limit", zap.String("chat", m.Chat.Title),
+			zap.String("user", m.Sender.Username))
 		return false
 	}
 	return true
@@ -167,8 +180,11 @@ func noStickerFilter(update *Update) bool {
 	if update.Message == nil || update.Message.Sticker == nil {
 		return true
 	}
-	if orm.IsNoStickerMode(update.Message.Chat.ID) {
-		util.DeleteMessage(update.Message)
+	m := update.Message
+	if orm.IsNoStickerMode(m.Chat.ID) {
+		util.DeleteMessage(m)
+		log.Info("message deleted by no sticker", zap.String("chat", m.Chat.Title),
+			zap.String("user", m.Sender.Username))
 		return false
 	}
 	return true

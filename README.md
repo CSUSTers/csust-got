@@ -64,9 +64,9 @@ ban_myself - 把自己ban掉rand[60,120]秒
 ban - 我就是要滥权！【Admin】
 ban_soft - 软禁！使某人失去快乐~【Admin】
 fake_ban - [duration] 虚假(真实)的ban
-fake_ban_myself - 虚假的ban自己(也不一定)
+fake_ban_myself - 虚假的ban自己
 kill - 虚假(真实)的kill
-hitokoto - [type] 一言
+hitokoto - [type:a-l] 一言
 hitowuta - 一诗
 hito_netease - 一键网抑
 forward - [msgID] 让bot转发一条历史消息(可能消息已经被删了)

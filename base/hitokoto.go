@@ -1,7 +1,6 @@
 package base
 
 import (
-	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
@@ -98,19 +97,19 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 	resp, err := http.Get(u.String())
 	if err != nil {
 		log.Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	defer resp.Body.Close()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	koto := HitokotoResponse{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
 		log.Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
-		return loadFromRedis(from)
+		return orm.GetHitokoto(from)
 	}
 	if koto.Author == "" {
 		koto.Author = "佚名"
@@ -123,26 +122,7 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 	str := fmt.Sprintf("%s ", koto.Sentence)
 	if from {
 		str += fmt.Sprintf("by <em>%s %s</em>", koto.Author, koto.From)
-		storeToRedis(str)
+		orm.StoreHitokoto(str)
 	}
 	return str
-}
-
-func storeToRedis(respBody string) {
-	_, err := orm.GetClient().SAdd("hitokoto", respBody).Result()
-	if err != nil {
-		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
-	}
-}
-
-func loadFromRedis(from bool) string {
-	res, err := orm.GetClient().SRandMember("hitokoto").Result()
-	if err != nil {
-		log.Error("Err@Hitokoto [STORE]", zap.Error(err))
-		return config.BotConfig.MessageConfig.HitokotoNotFound
-	}
-	if !from {
-		res = res[:strings.LastIndex(res, " by ")+1]
-	}
-	return res
 }
