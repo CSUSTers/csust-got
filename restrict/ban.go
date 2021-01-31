@@ -44,7 +44,7 @@ func BanCommand(m *Message, hard bool) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
-		banTime = time.Duration(rand.Intn(60)+60) * time.Second
+		banTime = time.Duration(rand.Intn(120)+40) * time.Second
 	}
 	var banTarget *User = nil
 	if !util.CanRestrictMembers(m.Chat, m.Sender) {

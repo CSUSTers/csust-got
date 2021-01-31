@@ -48,7 +48,7 @@ func Yiban(m *Message) {
 	}
 	tel = orm.GetYiban(m.Sender.ID)
 	if tel == "" {
-		util.SendMessage(m.Chat, "不知道你的易班手机号是什么呢~\n命令带上手机号参数可以进行一次性查询，bot不保存您的手机号")
+		util.SendMessage(m.Chat, "亦之的群友特供版自动打卡推送\n不知道你的易班手机号是什么呢~\n命令带上手机号参数可以进行一次性查询，bot不保存您的手机号")
 		util.SendMessage(m.Chat, "如果需要bot记住您手机号，请使用 /sub_yiban 命令带上手机号参数，后续查询 /yiban 不再需要填写参数，每日打卡结果bot会推送通知")
 		return
 	}

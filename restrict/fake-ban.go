@@ -17,7 +17,7 @@ func FakeBan(m *Message) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
-		banTime = time.Duration(60+rand.Intn(60)) * time.Second
+		banTime = time.Duration(40+rand.Intn(120)) * time.Second
 	}
 	ExecFakeBan(m, banTime)
 }
