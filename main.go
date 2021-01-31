@@ -72,9 +72,9 @@ func main() {
 	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
 	bot.Handle("/boot", util.GroupCommand(base.Boot))
 
-	bot.Handle("/yiban", util.GroupCommand(base.Yiban))
-	bot.Handle("/sub_yiban", util.GroupCommand(base.SubYiban))
-	bot.Handle("/no_yiban", util.GroupCommand(base.NoYiban))
+	bot.Handle("/yiban", util.PrivateCommand(base.Yiban))
+	bot.Handle("/sub_yiban", util.PrivateCommand(base.SubYiban))
+	bot.Handle("/no_yiban", util.PrivateCommand(base.NoYiban))
 
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)

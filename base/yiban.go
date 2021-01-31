@@ -74,7 +74,7 @@ func SubYiban(m *Message) {
 func NoYiban(m *Message) {
 	tel := orm.GetYiban(m.Sender.ID)
 	if tel == "" {
-		util.SendMessage(m.Chat, "bot不知道您的手机号哦，")
+		util.SendMessage(m.Chat, "bot不知道您的手机号哦")
 		return
 	}
 	if orm.DelYiban(m.Sender.ID) {
