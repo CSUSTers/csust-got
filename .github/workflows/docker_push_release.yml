@@ -44,6 +44,7 @@ jobs:
           build-args: |
             TAG=${{ steps.version.outputs.tag }}
             BRANCH=release
+            RELEASE=release
 
       - name: Image digest
         run: echo ${{ steps.docker_build.outputs.digest }}

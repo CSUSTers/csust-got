@@ -64,7 +64,7 @@ func main() {
 
 	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
 	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
-	bot.Handle("/kill", util.GroupCommand(restrict.FakeBan))
+	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
 	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
 	bot.Handle("/ban", util.GroupCommand(restrict.Ban))
 	bot.Handle("/ban_soft", util.GroupCommand(restrict.SoftBan))
@@ -172,7 +172,7 @@ func shutdownFilter(update *Update) bool {
 	}
 	if update.Message.Text != "" {
 		cmd := entities.FromMessage(update.Message)
-		if cmd.Name() == "boot" {
+		if cmd != nil && cmd.Name() == "boot" {
 			return true
 		}
 	}

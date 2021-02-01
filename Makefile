@@ -1,8 +1,14 @@
 .PHONY: get build test fmt deploy run clean
 
 PROJECT := csust-got
-VERSION ?= $(if $(TAG),$(TAG),$(shell git rev-parse --short HEAD))
-BRANCH ?= $(shell git branch --show-current)
+ifeq ($(VERSION),) 
+	VERSION := $(if $(TAG),$(TAG),$(shell git rev-parse --short HEAD))
+endif
+
+ifeq ($(BRANCH),)
+	BRANCH := $(shell git branch --show-current)
+endif
+
 BUILDTIME := $(shell TZ="Asia/Shanghai" date '+%Y/%m/%d-%H:%M:%S')
 
 FLAGPKG = $(PROJECT)/base
