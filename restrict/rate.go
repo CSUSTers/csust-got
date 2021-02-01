@@ -37,7 +37,7 @@ func checkRate(m *Message, limiter *rate.Limiter) bool {
 		return limiter.AllowN(time.Now(), rateConfig.StickerCost)
 	}
 	cmd := entities.FromMessage(m)
-	if cmd.Name() != "" {
+	if cmd != nil {
 		return limiter.AllowN(time.Now(), rateConfig.CommandCost)
 	}
 	return limiter.AllowN(time.Now(), rateConfig.Cost)

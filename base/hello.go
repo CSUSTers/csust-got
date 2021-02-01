@@ -108,37 +108,6 @@ func Forward(m *Message) {
 	}
 }
 
-// History is handle for command `history`
-// func History(m *Message) {
-// 	command, _ := entities.FromMessage(m)
-// 	historyID := rand.Intn(m.ID) + 1
-// 	if command.Argc() > 0 {
-// 		id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
-// 		if ok {
-// 			historyID = id
-// 		} else {
-// 			return
-// 		}
-// 	}
-// 	msg := fmt.Sprintf("https://t.me/c/%v/%v", chatIDToStr(m.Chat.ID), historyID)
-// 	util.SendReply(m.Chat, msg, m)
-// }
-
-// func chatIDToStr(chatID int64) string {
-// 	chatNum := chatID
-// 	if chatNum < 0 {
-// 		chatNum *= -1
-// 	}
-// 	chatStr := strconv.FormatInt(chatNum, 10)
-// 	if chatStr[0] == '1' {
-// 		chatStr = chatStr[1:]
-// 	}
-// 	for chatStr[0] == '0' {
-// 		chatStr = chatStr[1:]
-// 	}
-// 	return chatStr
-// }
-
 // FakeBanMyself is handle for command `fake_ban_myself`.
 // Use it to just get a reply like command `ban_myself`.
 func FakeBanMyself(m *Message) {

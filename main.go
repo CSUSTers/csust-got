@@ -172,7 +172,7 @@ func shutdownFilter(update *Update) bool {
 	}
 	if update.Message.Text != "" {
 		cmd := entities.FromMessage(update.Message)
-		if cmd.Name() == "boot" {
+		if cmd != nil && cmd.Name() == "boot" {
 			return true
 		}
 	}
