@@ -21,7 +21,7 @@ they are considered to be restricted forever.
 
 // BanMyself is a handle for command `ban_myself`, which can ban yourself
 func BanMyself(m *Message) {
-	sec := time.Duration(rand.Intn(60)+60) * time.Second
+	sec := time.Duration(rand.Intn(80)+40) * time.Second
 	text := "太强了，我居然ban不掉您，您TQL！"
 	if BanSomeone(m.Chat, m.Sender, true, sec) {
 		text = "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
@@ -44,7 +44,7 @@ func BanCommand(m *Message, hard bool) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
-		banTime = time.Duration(rand.Intn(120)+40) * time.Second
+		banTime = time.Duration(rand.Intn(80)+40) * time.Second
 	}
 	var banTarget *User = nil
 	if !util.CanRestrictMembers(m.Chat, m.Sender) {

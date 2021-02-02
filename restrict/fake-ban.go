@@ -17,7 +17,7 @@ func FakeBan(m *Message) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
-		banTime = time.Duration(40+rand.Intn(120)) * time.Second
+		banTime = time.Duration(40+rand.Intn(80)) * time.Second
 	}
 	ExecFakeBan(m, banTime)
 }
@@ -71,7 +71,7 @@ func ExecFakeBan(m *Message, d time.Duration) {
 	// check if user 'banned' already banned
 	if ad := orm.GetBannedDuration(m.Chat.ID, banned.ID); ad > 0 {
 		if orm.ResetBannedDuration(m.Chat.ID, m.Sender.ID, banned.ID, d+ad) {
-			text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, bannedName, d)
+			text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, d, bannedName)
 			util.SendReply(m.Chat, text, m)
 			return
 		}
