@@ -13,8 +13,6 @@ import (
 	. "gopkg.in/tucnak/telebot.v2"
 )
 
-var timeZoneCST, _ = time.LoadLocation("Asia/Shanghai")
-
 var helloText = []string{
 	"",
 	"我是大五，大五的大，大五的wu，wuwuwuwuwuwuwuwu~",
@@ -68,7 +66,7 @@ func Boot(m *Message) {
 // Sleep is handle for command `sleep`
 func Sleep(m *Message) {
 	msg := ""
-	t := time.Now().In(timeZoneCST)
+	t := time.Now().In(util.TimeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
 		msg = "晚安, 明天醒来就能看到我哦！"
 	} else if t.Hour() >= 11 && t.Hour() < 15 {

@@ -16,7 +16,7 @@ type BotCommand struct {
 
 var (
 	spaces, _   = regexp.Compile(`\s+`)
-	cmdRegex, _ = regexp.Compile(`/[0-9a-zA-Z_]+`)
+	cmdRegex, _ = regexp.Compile(`^/[0-9a-zA-Z_]+$`)
 )
 
 // FromMessage - get command in a message

@@ -3,21 +3,21 @@ package config
 import "github.com/spf13/viper"
 
 type restrictConfig struct {
-	KillSeconds      int
-	FakeBanCDMinutes int
+	KillSeconds          int
+	FakeBanMaxAddSeconds int
 }
 
 func (c *restrictConfig) readConfig() {
 	c.KillSeconds = viper.GetInt("restrict.kill_duration")
-	c.FakeBanCDMinutes = viper.GetInt("restrict.fake_ban_cd")
+	c.FakeBanMaxAddSeconds = viper.GetInt("restrict.fake_ban_max_add")
 }
 
 func (c *restrictConfig) checkConfig() {
 	if c.KillSeconds <= 0 {
 		c.KillSeconds = 30
 	}
-	if c.FakeBanCDMinutes <= 0 {
-		c.FakeBanCDMinutes = c.KillSeconds / 60 * 100
+	if c.FakeBanMaxAddSeconds <= 0 {
+		c.FakeBanMaxAddSeconds = c.KillSeconds / 5
 	}
 }
 

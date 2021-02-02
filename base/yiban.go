@@ -93,7 +93,7 @@ func NoYiban(m *Message) {
 }
 
 func YibanService() {
-	for range time.Tick(10 * time.Minute) {
+	for range time.Tick(30 * time.Minute) {
 		log.Info("start yiban status check")
 		mp := orm.GetAllYiban()
 		for userID, tel := range mp {
@@ -143,7 +143,7 @@ func getMsg(resp *yibanResp) string {
 	case codeNotFound:
 		return "您尚未注册群友特供版"
 	case codeServerError:
-		return "打卡异常，请联系亦之"
+		return "打卡失败，可能是表单有变动或服务器异常"
 	}
 
 	return "bot也不知道发生了什么"
