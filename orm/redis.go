@@ -155,7 +155,7 @@ func GetBannerDuration(chatID int64, userID int) time.Duration {
 }
 
 func ResetBannedDuration(chatID int64, bannerID, bannedID int, d time.Duration) bool {
-	MakeBannerCD(chatID, bannerID)
+	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	ok, err := client.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
 		log.Error("ResetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int("userID", bannedID), zap.Error(err))
@@ -165,7 +165,7 @@ func ResetBannedDuration(chatID int64, bannerID, bannedID int, d time.Duration) 
 }
 
 func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
-	MakeBannerCD(chatID, bannerID)
+	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
 	if err != nil {
 		log.Error("Ban failed", zap.Int64("chatID", chatID), zap.Int("userID", bannedID), zap.Error(err))
@@ -174,9 +174,8 @@ func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
 	return true
 }
 
-func MakeBannerCD(chatID int64, bannerID int) bool {
-	conf := config.BotConfig.RestrictConfig
-	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, time.Duration(conf.FakeBanCDMinutes)*time.Minute)
+func MakeBannerCD(chatID int64, bannerID int, d time.Duration) bool {
+	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
 		log.Error("Ban set CD failed", zap.Int64("chatID", chatID), zap.Int("userID", bannerID), zap.Error(err))
 		return false

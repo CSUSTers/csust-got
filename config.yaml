@@ -9,8 +9,8 @@ black_list:
 white_list:
   enabled: true
 restrict:
-  kill_duration: 300    # restrict duration for command `kill` [second]
-  fake_ban_cd: 840      # restrict CD for command `kill` or `fake ban xxx` [minutes]
+  kill_duration: 300       # restrict duration for command `kill` [second]
+  fake_ban_max_add: 120    # max add ban time for command `kill` or `fake ban xxx` [second]
 rate_limit:
   max_token: 20         # token bucket size, must [int]
   limit: 0.5            # how many tokens get every seconds [float64]
