@@ -35,3 +35,12 @@ func ToggleBool(key string) error {
 	}
 	return WriteBool(key, !b, 0)
 }
+
+// GetTTL get key expire duration
+func GetTTL(key string) (time.Duration, error) {
+	sec, err := client.TTL(key).Result()
+	if err != nil || sec < 0 {
+		return 0, err
+	}
+	return sec, nil
+}

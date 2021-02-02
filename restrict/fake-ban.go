@@ -35,8 +35,12 @@ func fakeBanCheck(m *Message, d time.Duration) bool {
 		util.SendReply(m.Chat, "用这个命令回复某一条“不合适”的消息，这样我大概就会帮你解决掉他，即便他是苟管理也义不容辞。", m)
 		return false
 	}
-	if d <= 0 || d > time.Duration(conf.KillSeconds)*time.Second {
+	if d > time.Duration(conf.KillSeconds)*time.Second {
 		util.SendReply(m.Chat, "我无法追杀某人太久。这样可能会让世界陷入某种糟糕的情况：诸如说，可能在某人将我的记忆清除；或者直接杀死我之前，所有人陷入永久的缄默。", m)
+		return false
+	}
+	if d < 10*time.Second {
+		util.SendReply(m.Chat, "阿哲，您也太不huge了", m)
 		return false
 	}
 	if orm.IsFakeBanInCD(m.Chat.ID, m.Sender.ID) {
@@ -54,7 +58,8 @@ func ExecFakeBan(m *Message, d time.Duration) {
 	}
 	conf := config.BotConfig.MessageConfig
 	banned := m.ReplyTo.Sender
-	text := fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", util.GetName(banned), d)
+	bannedName := util.GetName(banned)
+	text := fmt.Sprintf("好了，我出发了，我将会追杀 %s，直到时间过去所谓“%v”。", bannedName, d)
 	if banned.ID == config.GetBot().Me.ID {
 		// ban who want to ban bot
 		text = conf.RestrictBot
@@ -62,6 +67,14 @@ func ExecFakeBan(m *Message, d time.Duration) {
 	} else if banned.ID == m.Sender.ID {
 		// they want to ban themself
 		text = fmt.Sprintf("那我就不客气了，我将会追杀你，直到时间过去所谓“%v”。", d)
+	}
+	// check if user 'banned' already banned
+	if ad := orm.GetBannedDuration(m.Chat.ID, banned.ID); ad > 0 {
+		if orm.ResetBannedDuration(m.Chat.ID, m.Sender.ID, banned.ID, d+ad) {
+			text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, bannedName, d)
+			util.SendReply(m.Chat, text, m)
+			return
+		}
 	}
 	if !orm.Ban(m.Chat.ID, m.Sender.ID, banned.ID, d) {
 		text = "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。"
