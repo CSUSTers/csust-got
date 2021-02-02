@@ -154,14 +154,19 @@ func GetBannerDuration(chatID int64, userID int) time.Duration {
 	return sec
 }
 
-func ResetBannedDuration(chatID int64, bannerID, bannedID int, d time.Duration) bool {
-	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
+func ResetBannedDuration(chatID int64, bannedID int, d time.Duration) bool {
 	ok, err := client.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
 		log.Error("ResetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int("userID", bannedID), zap.Error(err))
 		return false
 	}
 	return ok
+}
+
+func AddBanDuration(chatID int64, bannerID, bannedID int, ad time.Duration) bool {
+	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
+	d := GetBannedDuration(chatID, bannedID)
+	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
 func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {

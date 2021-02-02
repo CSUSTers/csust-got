@@ -68,16 +68,15 @@ func ExecFakeBan(m *Message, d time.Duration) {
 		text = fmt.Sprintf("那我就不客气了，我将会追杀你，直到时间过去所谓“%v”。", d)
 	}
 	// check if user 'banned' already banned
-	if ad := orm.GetBannedDuration(m.Chat.ID, banned.ID); ad > 0 {
-		maxAdd := time.Duration(config.BotConfig.RestrictConfig.FakeBanMaxAddSeconds) * time.Second
-		if d > maxAdd {
-			d = maxAdd
-		}
-		if orm.ResetBannedDuration(m.Chat.ID, m.Sender.ID, banned.ID, d+ad) {
-			text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, d, bannedName)
-			util.SendReply(m.Chat, text, m)
-			return
-		}
+	maxAdd := time.Duration(config.BotConfig.RestrictConfig.FakeBanMaxAddSeconds) * time.Second
+	ad := d
+	if ad > maxAdd {
+		ad = maxAdd
+	}
+	if orm.AddBanDuration(m.Chat.ID, m.Sender.ID, banned.ID, ad) {
+		text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, ad, bannedName)
+		util.SendReply(m.Chat, text, m)
+		return
 	}
 	if !orm.Ban(m.Chat.ID, m.Sender.ID, banned.ID, d) {
 		text = "对不起，我没办法完成想让我做的事情——我的记忆似乎失灵了。但这也是一件好事……至少我能有短暂的安宁。"
