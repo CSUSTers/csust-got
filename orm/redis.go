@@ -214,7 +214,8 @@ func DelYiban(userID int) bool {
 }
 
 func YibanNotified(userID int) {
-	d := time.Duration(24*60-time.Now().Hour()*60-time.Now().Minute()) * time.Minute
+	now := time.Now().In(util.TimeZoneCST)
+	d := time.Duration(24*60-now.Hour()*60-now.Minute()) * time.Minute
 	err := WriteBool(wrapKeyWithUser("yiban_notified", userID), true, d)
 	if err != nil {
 		log.Error("Set yiban notified failed", zap.Int("userID", userID), zap.Error(err))
