@@ -22,12 +22,15 @@ var (
 // FromMessage - get command in a message
 func FromMessage(msg *Message) *BotCommand {
 	args := splitText(strings.TrimSpace(msg.Text))
-	if len(args) == 0 || !cmdRegex.MatchString(args[0]) {
+	if len(args) == 0 {
 		return nil
 	}
 	name := args[0]
 	if idx := strings.IndexRune(name, '@'); idx != -1 {
 		name = name[:idx]
+	}
+	if !cmdRegex.MatchString(name) {
+		return nil
 	}
 	return &BotCommand{name[1:], args[1:]}
 }

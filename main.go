@@ -117,12 +117,12 @@ func initPoller() *MiddlewarePoller {
 	fakeBanPoller := NewMiddlewarePoller(blackListPoller, fakeBanFilter)
 	fakeBanPoller.Capacity = 16
 	rateLimitPoller := NewMiddlewarePoller(fakeBanPoller, rateLimitFilter)
-	shutdownPoller := NewMiddlewarePoller(rateLimitPoller, shutdownFilter)
-	shutdownPoller.Capacity = 16
-	noStickerPoller := NewMiddlewarePoller(shutdownPoller, noStickerFilter)
+	noStickerPoller := NewMiddlewarePoller(rateLimitPoller, noStickerFilter)
 	noStickerPoller.Capacity = 16
-	finalPoller := NewMiddlewarePoller(noStickerPoller, promFilter)
-	return finalPoller
+	promPoller := NewMiddlewarePoller(noStickerPoller, promFilter)
+	shutdownPoller := NewMiddlewarePoller(promPoller, shutdownFilter)
+	shutdownPoller.Capacity = 16
+	return shutdownPoller
 }
 
 func blackListFilter(update *Update) bool {
@@ -155,7 +155,7 @@ func rateLimitFilter(update *Update) bool {
 	}
 	m := update.Message
 	whiteListConfig := config.BotConfig.WhiteListConfig
-	if !whiteListConfig.Enabled || whiteListConfig.Check(m.Chat.ID) {
+	if !whiteListConfig.Enabled || !whiteListConfig.Check(m.Chat.ID) {
 		return true
 	}
 	if !restrict.CheckLimit(m) {
@@ -188,7 +188,7 @@ func noStickerFilter(update *Update) bool {
 		return true
 	}
 	m := update.Message
-	if orm.IsNoStickerMode(m.Chat.ID) {
+	if !orm.IsShutdown(update.Message.Chat.ID) && orm.IsNoStickerMode(m.Chat.ID) {
 		util.DeleteMessage(m)
 		log.Info("message deleted by no sticker", zap.String("chat", m.Chat.Title),
 			zap.String("user", m.Sender.Username))
