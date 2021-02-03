@@ -155,7 +155,7 @@ func rateLimitFilter(update *Update) bool {
 	}
 	m := update.Message
 	whiteListConfig := config.BotConfig.WhiteListConfig
-	if !whiteListConfig.Enabled || whiteListConfig.Check(m.Chat.ID) {
+	if !whiteListConfig.Enabled || !whiteListConfig.Check(m.Chat.ID) {
 		return true
 	}
 	if !restrict.CheckLimit(m) {
