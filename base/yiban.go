@@ -68,6 +68,10 @@ func SubYiban(m *Message) {
 		return
 	}
 	resp := requestYiban(tel)
+	if resp == nil {
+		util.SendMessage(m.Chat, "bot请求易班失败 x_x")
+		return
+	}
 	if resp.ErrCode == codeWaiting || resp.ErrCode == codeOK {
 		if orm.RegisterYiban(m.Sender.ID, tel) {
 			util.SendMessage(m.Chat, "bot记下了，以后查询 /yiban 不再需要填写参数，每日打卡结果bot会推送通知，如需bot忘记手机号请使用 /no_yiban")
@@ -94,7 +98,6 @@ func NoYiban(m *Message) {
 
 func YibanService() {
 	for range time.Tick(30 * time.Minute) {
-		log.Info("start yiban status check")
 		mp := orm.GetAllYiban()
 		for userID, tel := range mp {
 			if orm.IsYibanNotified(userID) {
@@ -116,6 +119,7 @@ func YibanService() {
 				log.Warn("yiban service user not found, try delete")
 				orm.DelYiban(userID)
 			case codeServerError:
+				log.Warn("yiban service error", zap.Any("response", *resp))
 				util.SendMessage(chat, getMsg(resp))
 			}
 		}
@@ -152,21 +156,21 @@ func getMsg(resp *yibanResp) string {
 func requestYiban(tel string) *yibanResp {
 	rsp, err := http.Get(config.BotConfig.YibanApi + tel)
 	if err != nil {
-		log.Error("request yiban failed.")
+		log.Error("request yiban failed.", zap.Error(err))
 		return nil
 	}
 	defer rsp.Body.Close()
 
 	bytes, err := ioutil.ReadAll(rsp.Body)
 	if err != nil {
-		log.Error("request yiban read yibanResp failed.")
+		log.Error("request yiban read yibanResp failed.", zap.Error(err))
 		return nil
 	}
 
 	resp := new(yibanResp)
 	err = json.Unmarshal(bytes, resp)
 	if err != nil {
-		log.Error("request yiban unmarshal yibanResp failed.")
+		log.Error("request yiban unmarshal yibanResp failed.", zap.Error(err))
 		return nil
 	}
 	return resp
