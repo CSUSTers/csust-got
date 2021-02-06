@@ -1,7 +1,10 @@
 package prom
 
 import (
+	"csust-got/config"
 	"csust-got/entities"
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"net/http"
 	"os"
 
@@ -12,6 +15,7 @@ import (
 )
 
 var host, _ = os.Hostname()
+var client v1.API
 
 func InitPrometheus() {
 	prometheus.MustRegister(commandTimes)
@@ -20,6 +24,18 @@ func InitPrometheus() {
 	prometheus.MustRegister(chatMemberCount)
 	prometheus.MustRegister(newMemberCount)
 	prometheus.MustRegister(logCount)
+
+	if !config.BotConfig.PromConfig.Enabled {
+		return
+	}
+
+	apiClient, err := api.NewClient(api.Config{
+		Address: config.BotConfig.PromConfig.Address,
+	})
+	if err != nil {
+		zap.L().Fatal("init prometheus client failed", zap.Error(err))
+	}
+	client = v1.NewAPI(apiClient)
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {

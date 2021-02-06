@@ -1,7 +1,6 @@
 package config
 
 import (
-	"csust-got/prom"
 	"fmt"
 	"strings"
 
@@ -42,6 +41,7 @@ func NewBotConfig() *Config {
 	config.MessageConfig = new(messageConfig)
 	config.WhiteListConfig = new(specialListConfig)
 	config.BlackListConfig = new(specialListConfig)
+	config.PromConfig = new(promConfig)
 	config.WhiteListConfig.SetName("white_list")
 	config.BlackListConfig.SetName("black_list")
 	return config
@@ -61,6 +61,7 @@ type Config struct {
 	MessageConfig   *messageConfig
 	BlackListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
+	PromConfig      *promConfig
 
 	YibanApi string
 }
@@ -86,8 +87,6 @@ func initViper(configFile, envPrefix string) {
 					zap.String("configFile", configFile), zap.Error(err))
 			}
 			zap.L().Warn("config file is not available...", zap.String("configFile", configFile), zap.Error(err))
-			prom.Log(zap.WarnLevel.String())
-			prom.Log(zap.WarnLevel.String())
 			return
 		}
 	}
@@ -113,6 +112,7 @@ func readConfig() {
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlackListConfig.readConfig()
+	BotConfig.PromConfig.readConfig()
 
 	BotConfig.YibanApi = viper.GetString("yiban_api")
 }
@@ -121,11 +121,9 @@ func readConfig() {
 func checkConfig() {
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)
-		prom.Log(zap.PanicLevel.String())
 	}
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
-		prom.Log(zap.WarnLevel.String())
 	}
 	if BotConfig.Worker <= 0 {
 		BotConfig.Worker = 1
@@ -137,4 +135,5 @@ func checkConfig() {
 	BotConfig.MessageConfig.checkConfig()
 	BotConfig.BlackListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
+	BotConfig.PromConfig.checkConfig()
 }

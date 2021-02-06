@@ -49,6 +49,21 @@ func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*
 	return msg, err
 }
 
+// EditMessage edit bot's message
+func EditMessage(m *Message, what interface{}, ops ...interface{}) *Message {
+	msg, _ := EditMessageWithError(m, what, ops...)
+	return msg
+}
+
+// EditMessageWithError is same as EditMessage but return error
+func EditMessageWithError(m *Message, what interface{}, ops ...interface{}) (*Message, error) {
+	msg, err := config.GetBot().Edit(m, what, ops...)
+	if err != nil {
+		log.Error("Can't edit message", zap.Error(err))
+	}
+	return msg, err
+}
+
 // SendReplyWithError is same as SendReply but return error
 func SendReplyWithError(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) (*Message, error) {
 	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)

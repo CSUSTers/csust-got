@@ -43,7 +43,7 @@ func main() {
 
 	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", base.Forward)
-	bot.Handle("/mc", base.MC)
+	bot.Handle("/mc", util.GroupCommand(base.MC))
 
 	bot.Handle("/sleep", base.Sleep)
 	bot.Handle("/no_sleep", base.NoSleep)
@@ -129,7 +129,13 @@ func blackListFilter(update *Update) bool {
 	if update.Message == nil {
 		return true
 	}
-	if config.BotConfig.BlackListConfig.Check(update.Message.Chat.ID) {
+	m := update.Message
+	if config.BotConfig.BlackListConfig.Check(m.Chat.ID) {
+		log.Info("message ignore by black list", zap.String("chat", m.Chat.Title))
+		return false
+	}
+	if config.BotConfig.BlackListConfig.Check(int64(m.Sender.ID)) {
+		log.Info("message ignore by black list", zap.String("user", m.Sender.Username))
 		return false
 	}
 	return true
@@ -170,14 +176,16 @@ func shutdownFilter(update *Update) bool {
 	if update.Message == nil {
 		return true
 	}
-	if update.Message.Text != "" {
-		cmd := entities.FromMessage(update.Message)
+	m := update.Message
+	if m.Text != "" {
+		cmd := entities.FromMessage(m)
 		if cmd != nil && cmd.Name() == "boot" {
 			return true
 		}
 	}
-
-	if orm.IsShutdown(update.Message.Chat.ID) {
+	if orm.IsShutdown(m.Chat.ID) {
+		log.Info("message ignore by shutdown", zap.String("chat", m.Chat.Title),
+			zap.String("user", m.Sender.Username))
 		return false
 	}
 	return true
@@ -188,7 +196,7 @@ func noStickerFilter(update *Update) bool {
 		return true
 	}
 	m := update.Message
-	if !orm.IsShutdown(update.Message.Chat.ID) && orm.IsNoStickerMode(m.Chat.ID) {
+	if !orm.IsShutdown(m.Chat.ID) && orm.IsNoStickerMode(m.Chat.ID) {
 		util.DeleteMessage(m)
 		log.Info("message deleted by no sticker", zap.String("chat", m.Chat.Title),
 			zap.String("user", m.Sender.Username))
@@ -199,5 +207,14 @@ func noStickerFilter(update *Update) bool {
 
 func promFilter(update *Update) bool {
 	prom.DailUpdate(update)
+	if update.Message == nil {
+		return true
+	}
+	m := update.Message
+	command := entities.FromMessage(m)
+	if command != nil {
+		log.Info("bot receive command", zap.String("chat", m.Chat.Title),
+			zap.String("user", m.Sender.Username), zap.String("command", m.Text))
+	}
 	return true
 }
