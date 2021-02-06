@@ -40,7 +40,7 @@ func fakeBanCheck(m *Message, d time.Duration) bool {
 		return false
 	}
 	if d < 10*time.Second {
-		util.SendReply(m.Chat, "阿哲，您也太不huge了", m)
+		util.SendReply(m.Chat, "阿哲，您也太不huge了，建议make a huge ban", m)
 		return false
 	}
 	if orm.IsFakeBanInCD(m.Chat.ID, m.Sender.ID) {

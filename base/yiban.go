@@ -141,11 +141,11 @@ func getMsg(resp *yibanResp) string {
 
 	switch resp.ErrCode {
 	case codeWaiting:
-		return "别急，自动打卡时间还没到呢"
+		return "别急，自动打卡时间还没到呐~"
 	case codeOK:
-		return "自动打卡成功\n" + resp.Data
+		return "好耶，自动打卡成功辣~\n" + resp.Data
 	case codeNotFound:
-		return "您尚未注册群友特供版"
+		return "您尚未注册群友特供版~"
 	case codeServerError:
 		return "打卡失败，可能是表单有变动或服务器异常"
 	}

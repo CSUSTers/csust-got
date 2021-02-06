@@ -16,7 +16,7 @@ func RunTask(m *Message) {
 	cmd := entities.FromMessage(m)
 	delay, err := util.EvalDuration(cmd.Arg(0))
 	info := cmd.ArgAllInOneFrom(1)
-	if err != nil || delay < 1 {
+	if err != nil || delay < time.Second {
 		util.SendReply(m.Chat, text, m)
 		return
 	}
