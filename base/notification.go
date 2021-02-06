@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/prom"
 	"csust-got/util"
 
@@ -11,7 +12,7 @@ import (
 // when someone new join group, bot will send welcome message.
 func WelcomeNewMember(m *Message) {
 	for _, member := range m.UsersJoined {
-		text := "Welcome to this group!" + util.GetName(&member)
+		text := config.BotConfig.MessageConfig.WelcomeMessage + util.GetName(&member)
 		util.SendMessage(m.Chat, text)
 		prom.NewMember(m.Chat.Title)
 	}
