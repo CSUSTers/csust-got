@@ -31,7 +31,7 @@ func QueryMessageCount(chat string) ([]msgCount, error) {
 		cnt, _ := strconv.ParseFloat(v.Value.String(), 64)
 		res = append(res, msgCount{
 			Name:  name[11 : len(name)-2],
-			Value: int(cnt),
+			Value: int(cnt) + 1,
 		})
 	}
 	return res, err
