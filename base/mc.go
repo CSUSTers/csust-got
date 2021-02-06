@@ -16,14 +16,15 @@ func MC(m *Message) {
 		util.SendReply(m.Chat, "再mc自杀", m)
 		return
 	}
+	msgR := util.SendMessage(m.Chat, "稍等。。。")
 	data, err := prom.QueryMessageCount(m.Chat.Title)
 	if err != nil {
 		log.Error("MC error", zap.Error(err))
-		util.SendReply(m.Chat, "再mc自杀！！！", m)
+		util.EditMessage(msgR, "再mc自杀！！！")
 		return
 	}
 	if len(data) == 0 {
-		util.SendReply(m.Chat, "再mc自杀！", m)
+		util.EditMessage(msgR, "再mc自杀！")
 		return
 	}
 	text := "本群大水怪名单(数据有半分钟延迟):\n"
@@ -38,5 +39,5 @@ func MC(m *Message) {
 		text += fmt.Sprintf("第三名：'%v'！这位朋友很努力，在24h内水了 %v 条消息！很棒，再接再厉！\n",
 			data[2].Name, data[2].Value)
 	}
-	util.SendMessage(m.Chat, text)
+	util.EditMessage(msgR, text)
 }
