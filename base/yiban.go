@@ -74,7 +74,7 @@ func SubYiban(m *Message) {
 	}
 	if resp.ErrCode == codeWaiting || resp.ErrCode == codeOK {
 		if orm.RegisterYiban(m.Sender.ID, tel) {
-			util.SendMessage(m.Chat, "bot记下了，以后查询 /yiban 不再需要填写参数，每日打卡结果bot会推送通知，如需bot忘记手机号请使用 /no_yiban")
+			util.SendMessage(m.Chat, "bot记下了~以后查询 /yiban 不再需要填写参数，每日打卡结果bot会推送通知，如需bot忘记手机号请使用 /no_yiban")
 			return
 		}
 		util.SendMessage(m.Chat, "bot出了点问题，没能记住您的手机号")
@@ -119,8 +119,11 @@ func YibanService() {
 				log.Warn("yiban service user not found, try delete")
 				orm.DelYiban(userID)
 			case codeServerError:
-				log.Warn("yiban service error", zap.Any("response", *resp))
-				util.SendMessage(chat, getMsg(resp))
+				if !orm.IsYibanFailedNotified(userID) {
+					log.Warn("yiban service error", zap.Any("response", *resp))
+					util.SendMessage(chat, getMsg(resp))
+					orm.YibanFailedNotified(userID)
+				}
 			}
 		}
 	}

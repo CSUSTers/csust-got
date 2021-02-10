@@ -264,3 +264,20 @@ func IsYibanNotified(userID int) bool {
 	}
 	return ok
 }
+
+func YibanFailedNotified(userID int) {
+	now := time.Now().In(util.TimeZoneCST)
+	d := time.Duration(24*60-now.Hour()*60-now.Minute()) * time.Minute
+	err := WriteBool(wrapKeyWithUser("yiban_failed_notified", userID), true, d)
+	if err != nil {
+		log.Error("Set yiban failed notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+}
+
+func IsYibanFailedNotified(userID int) bool {
+	ok, err := GetBool(wrapKeyWithUser("yiban_failed_notified", userID))
+	if err != nil {
+		log.Error("Get yiban failed notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+	return ok
+}
