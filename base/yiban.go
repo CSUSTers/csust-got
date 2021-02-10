@@ -150,6 +150,9 @@ func getMsg(resp *yibanResp) string {
 	case codeNotFound:
 		return "您尚未注册群友特供版~"
 	case codeServerError:
+		if len(resp.Msg) > 0 {
+			return resp.Msg
+		}
 		return "打卡失败，可能是表单有变动或服务器异常"
 	}
 
