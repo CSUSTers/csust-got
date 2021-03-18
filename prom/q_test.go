@@ -2,14 +2,15 @@ package prom
 
 import (
 	"context"
-	"github.com/prometheus/client_golang/api"
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
-	"github.com/prometheus/common/model"
-	"github.com/stretchr/testify/require"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	"github.com/prometheus/common/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestA(t *testing.T) {
@@ -29,11 +30,11 @@ func TestA(t *testing.T) {
 		t.Logf(e)
 	}
 	vec := value.(model.Vector)
-	res := make([]msgCount, 0)
+	res := make([]MsgCount, 0)
 	for _, v := range vec {
 		name := v.Metric.String()
 		cnt, _ := strconv.ParseFloat(v.Value.String(), 64)
-		res = append(res, msgCount{
+		res = append(res, MsgCount{
 			Name:  name[11 : len(name)-2],
 			Value: int(cnt),
 		})

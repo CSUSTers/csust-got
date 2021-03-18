@@ -10,8 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var key = "enabled"
-
 // NoSticker is a switch for NoStickerMode
 func NoSticker(m *Message) {
 	orm.ToggleNoStickerMode(m.Chat.ID)

@@ -100,7 +100,11 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 		log.Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
 		return orm.GetHitokoto(from)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err = resp.Body.Close(); err != nil {
+			log.Error("close response body failed", zap.Error(err))
+		}
+	}()
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))

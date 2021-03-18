@@ -152,6 +152,7 @@ func StringsToInts(s []string) []int64 {
 	return res
 }
 
+// PrivateCommand warp command to private call only
 func PrivateCommand(fn func(m *Message)) func(m *Message) {
 	return func(m *Message) {
 		if m.FromGroup() {
@@ -162,6 +163,7 @@ func PrivateCommand(fn func(m *Message)) func(m *Message) {
 	}
 }
 
+// GroupCommand warp command to group call only
 func GroupCommand(fn func(m *Message)) func(m *Message) {
 	return func(m *Message) {
 		if m.Private() {

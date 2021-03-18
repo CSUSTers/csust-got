@@ -12,7 +12,7 @@ import (
 	. "gopkg.in/tucnak/telebot.v2"
 )
 
-// FakeBan
+// FakeBan fake ban some one
 func FakeBan(m *Message) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
@@ -22,7 +22,7 @@ func FakeBan(m *Message) {
 	ExecFakeBan(m, banTime)
 }
 
-// Kill
+// Kill kill some one
 func Kill(m *Message) {
 	seconds := config.BotConfig.RestrictConfig.KillSeconds
 	banTime := time.Duration(seconds) * time.Second
@@ -52,6 +52,7 @@ func fakeBanCheck(m *Message, d time.Duration) bool {
 	return true
 }
 
+// ExecFakeBan exec fake ban
 func ExecFakeBan(m *Message, d time.Duration) {
 	if !fakeBanCheck(m, d) {
 		return

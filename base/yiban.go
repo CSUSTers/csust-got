@@ -35,6 +35,7 @@ func init() {
 	phoneMatcher = regexp.MustCompile(`^(1\d{10})$`)
 }
 
+// Yiban is handler for command `/yiban`
 func Yiban(m *Message) {
 	cmd := entities.FromMessage(m)
 	tel := cmd.Arg(0)
@@ -56,6 +57,7 @@ func Yiban(m *Message) {
 	// orm.YibanNotified(m.Sender.ID)
 }
 
+// SubYiban is handler for command `/sub_yiban`
 func SubYiban(m *Message) {
 	cmd := entities.FromMessage(m)
 	tel := cmd.Arg(0)
@@ -83,6 +85,7 @@ func SubYiban(m *Message) {
 	util.SendMessage(m.Chat, getMsg(resp))
 }
 
+// NoYiban is handler for command `/no_yiban`
 func NoYiban(m *Message) {
 	tel := orm.GetYiban(m.Sender.ID)
 	if tel == "" {
@@ -96,6 +99,7 @@ func NoYiban(m *Message) {
 	}
 }
 
+// YibanService is yiban service
 func YibanService() {
 	for range time.Tick(30 * time.Minute) {
 		mp := orm.GetAllYiban()
@@ -160,12 +164,16 @@ func getMsg(resp *yibanResp) string {
 }
 
 func requestYiban(tel string) *yibanResp {
-	rsp, err := http.Get(config.BotConfig.YibanApi + tel)
+	rsp, err := http.Get(config.BotConfig.YibanAPI + tel)
 	if err != nil {
 		log.Error("request yiban failed.", zap.Error(err))
 		return nil
 	}
-	defer rsp.Body.Close()
+	defer func() {
+		if err = rsp.Body.Close(); err != nil {
+			log.Error("close response body failed", zap.Error(err))
+		}
+	}()
 
 	bytes, err := ioutil.ReadAll(rsp.Body)
 	if err != nil {

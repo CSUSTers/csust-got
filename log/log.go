@@ -10,11 +10,13 @@ import (
 
 var logger *zap.Logger
 
+// InitLogger init logger
 func InitLogger() {
 	logger = NewLogger()
 	zap.ReplaceGlobals(logger)
 }
 
+// NewLogger new logger
 func NewLogger() *zap.Logger {
 	var logConfig zap.Config
 	if config.BotConfig.DebugMode {
@@ -22,12 +24,12 @@ func NewLogger() *zap.Logger {
 	} else {
 		logConfig = prodConfig()
 	}
-	if tmpLogger, err := logConfig.Build(zap.AddCallerSkip(1)); err == nil {
+	tmpLogger, err := logConfig.Build(zap.AddCallerSkip(1))
+	if err == nil {
 		return tmpLogger
-	} else {
-		zap.L().Error("NewLogger failed, using default logger", zap.Error(err))
-		prom.Log(zap.ErrorLevel.String())
 	}
+	zap.L().Error("NewLogger failed, using default logger", zap.Error(err))
+	prom.Log(zap.ErrorLevel.String())
 	return zap.L()
 }
 
@@ -83,36 +85,43 @@ func prodConfig() zap.Config {
 	}
 }
 
+// Debug print log at debug level
 func Debug(msg string, fields ...zap.Field) {
 	logger.Debug(msg, fields...)
 	prom.Log(zap.DebugLevel.String())
 }
 
+// Info print log at info level
 func Info(msg string, fields ...zap.Field) {
 	logger.Info(msg, fields...)
 	prom.Log(zap.InfoLevel.String())
 }
 
+// Warn print log at warning level
 func Warn(msg string, fields ...zap.Field) {
 	logger.Warn(msg, fields...)
 	prom.Log(zap.WarnLevel.String())
 }
 
+// Error print log at error level
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
 	prom.Log(zap.ErrorLevel.String())
 }
 
+// Fatal print log at fatal level, then calls os.Exit(1)
 func Fatal(msg string, fields ...zap.Field) {
 	logger.Fatal(msg, fields...)
 	prom.Log(zap.FatalLevel.String())
 }
 
+// Panic print log at panic level, then panic
 func Panic(msg string, fields ...zap.Field) {
 	logger.Panic(msg, fields...)
 	prom.Log(zap.PanicLevel.String())
 }
 
+// Sync sync logger
 func Sync() {
 	if err := logger.Sync(); err != nil {
 		logger.Error("Logger Sync failed", zap.Error(err))
