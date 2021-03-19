@@ -3,18 +3,21 @@ package prom
 import (
 	"context"
 	"csust-got/config"
-	"github.com/prometheus/common/model"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/prometheus/common/model"
 )
 
-type msgCount struct {
+// MsgCount model of count message
+type MsgCount struct {
 	Name  string
 	Value int
 }
 
-func QueryMessageCount(chat string) ([]msgCount, error) {
+// QueryMessageCount query message count of prometheus
+func QueryMessageCount(chat string) ([]MsgCount, error) {
 	now := time.Now()
 	query := config.BotConfig.PromConfig.MessageQuery
 	query = strings.Replace(query, "$group", chat, -1)
@@ -25,11 +28,11 @@ func QueryMessageCount(chat string) ([]msgCount, error) {
 		return nil, err
 	}
 	vec := value.(model.Vector)
-	res := make([]msgCount, 0)
+	res := make([]MsgCount, 0)
 	for _, v := range vec {
 		name := v.Metric.String()
 		cnt, _ := strconv.ParseFloat(v.Value.String(), 64)
-		res = append(res, msgCount{
+		res = append(res, MsgCount{
 			Name:  name[11 : len(name)-2],
 			Value: int(cnt) + 1,
 		})

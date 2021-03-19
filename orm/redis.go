@@ -14,6 +14,7 @@ import (
 
 var client *redis.Client
 
+// InitRedis init redis
 func InitRedis() {
 	client = NewClient()
 }
@@ -68,18 +69,21 @@ func loadSpecialList(key string) []string {
 	return list
 }
 
+// LoadWhiteList load white list
 func LoadWhiteList() {
 	chats := util.StringsToInts(loadSpecialList("white_list"))
 	log.Info("White List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.WhiteListConfig.Chats = chats
 }
 
+// LoadBlackList load black list
 func LoadBlackList() {
 	chats := util.StringsToInts(loadSpecialList("black_list"))
 	log.Info("Black List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.BlackListConfig.Chats = chats
 }
 
+// IsNoStickerMode check group in NoSticker mode
 func IsNoStickerMode(chatID int64) bool {
 	ok, err := GetBool(wrapKeyWithChat("no_sticker", chatID))
 	if err != nil {
@@ -89,6 +93,7 @@ func IsNoStickerMode(chatID int64) bool {
 	return ok
 }
 
+//ToggleNoStickerMode toggle NoSticker mode
 func ToggleNoStickerMode(chatID int64) bool {
 	err := ToggleBool(wrapKeyWithChat("no_sticker", chatID))
 	if err != nil {
@@ -97,6 +102,7 @@ func ToggleNoStickerMode(chatID int64) bool {
 	return err == nil
 }
 
+// Shutdown shutdown bot
 func Shutdown(chatID int64) {
 	err := WriteBool(wrapKeyWithChat("shutdown", chatID), true, 0)
 	if err != nil {
@@ -104,6 +110,7 @@ func Shutdown(chatID int64) {
 	}
 }
 
+// Boot boot bot
 func Boot(chatID int64) {
 	err := WriteBool(wrapKeyWithChat("shutdown", chatID), false, 0)
 	if err != nil {
@@ -111,6 +118,7 @@ func Boot(chatID int64) {
 	}
 }
 
+// IsShutdown check bot is shutdown
 func IsShutdown(chatID int64) bool {
 	ok, err := GetBool(wrapKeyWithChat("shutdown", chatID))
 	if err != nil {
@@ -120,6 +128,7 @@ func IsShutdown(chatID int64) bool {
 	return ok
 }
 
+// IsFakeBanInCD check fake ban is in cd
 func IsFakeBanInCD(chatID int64, userID int) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
@@ -129,6 +138,7 @@ func IsFakeBanInCD(chatID int64, userID int) bool {
 	return ok
 }
 
+// IsBanned check some one is banned
 func IsBanned(chatID int64, userID int) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -138,6 +148,7 @@ func IsBanned(chatID int64, userID int) bool {
 	return ok
 }
 
+// GetBannedDuration get some one banned duration
 func GetBannedDuration(chatID int64, userID int) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -146,6 +157,7 @@ func GetBannedDuration(chatID int64, userID int) time.Duration {
 	return sec
 }
 
+// GetBannerDuration get fake ban cd
 func GetBannerDuration(chatID int64, userID int) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
@@ -154,6 +166,7 @@ func GetBannerDuration(chatID int64, userID int) time.Duration {
 	return sec
 }
 
+// ResetBannedDuration reset banned duration
 func ResetBannedDuration(chatID int64, bannedID int, d time.Duration) bool {
 	ok, err := client.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
@@ -163,12 +176,14 @@ func ResetBannedDuration(chatID int64, bannedID int, d time.Duration) bool {
 	return ok
 }
 
+// AddBanDuration add ban duration
 func AddBanDuration(chatID int64, bannerID, bannedID int, ad time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
 	d := GetBannedDuration(chatID, bannedID)
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
+// Ban ban some one
 func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
@@ -179,6 +194,7 @@ func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
 	return true
 }
 
+// MakeBannerCD make banner in cd
 func MakeBannerCD(chatID int64, bannerID int, d time.Duration) bool {
 	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
@@ -188,6 +204,7 @@ func MakeBannerCD(chatID int64, bannerID int, d time.Duration) bool {
 	return true
 }
 
+// StoreHitokoto store hitokoto
 func StoreHitokoto(hitokoto string) {
 	err := client.SAdd(wrapKey("hitokoto"), hitokoto).Err()
 	if err != nil {
@@ -195,6 +212,7 @@ func StoreHitokoto(hitokoto string) {
 	}
 }
 
+// GetHitokoto get hitokoto
 func GetHitokoto(from bool) string {
 	res, err := client.SRandMember(wrapKey("hitokoto")).Result()
 	if err != nil {
@@ -207,6 +225,7 @@ func GetHitokoto(from bool) string {
 	return res
 }
 
+// RegisterYiban register yiban
 func RegisterYiban(userID int, tel string) bool {
 	err := client.HSet(wrapKey("yiban"), userID, tel).Err()
 	if err != nil {
@@ -216,6 +235,7 @@ func RegisterYiban(userID int, tel string) bool {
 	return true
 }
 
+// GetYiban get yiban status
 func GetYiban(userID int) string {
 	tel, err := client.HGet(wrapKey("yiban"), strconv.Itoa(userID)).Result()
 	if err != nil && err != redis.Nil {
@@ -225,6 +245,7 @@ func GetYiban(userID int) string {
 	return tel
 }
 
+// GetAllYiban get all yiban status
 func GetAllYiban() map[int]string {
 	res := make(map[int]string)
 	mp, err := client.HGetAll(wrapKey("yiban")).Result()
@@ -239,6 +260,7 @@ func GetAllYiban() map[int]string {
 	return res
 }
 
+// DelYiban del user from yiban
 func DelYiban(userID int) bool {
 	err := client.HDel(wrapKey("yiban"), strconv.Itoa(userID)).Err()
 	if err != nil && err != redis.Nil {
@@ -248,6 +270,7 @@ func DelYiban(userID int) bool {
 	return true
 }
 
+// YibanNotified mark user is notified
 func YibanNotified(userID int) {
 	now := time.Now().In(util.TimeZoneCST)
 	d := time.Duration(24*60-now.Hour()*60-now.Minute()) * time.Minute
@@ -257,10 +280,30 @@ func YibanNotified(userID int) {
 	}
 }
 
+// IsYibanNotified check user is notified
 func IsYibanNotified(userID int) bool {
 	ok, err := GetBool(wrapKeyWithUser("yiban_notified", userID))
 	if err != nil {
 		log.Error("Get yiban notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+	return ok
+}
+
+// YibanFailedNotified mark yiban notidied failed
+func YibanFailedNotified(userID int) {
+	now := time.Now().In(util.TimeZoneCST)
+	d := time.Duration(24*60-now.Hour()*60-now.Minute()) * time.Minute
+	err := WriteBool(wrapKeyWithUser("yiban_failed_notified", userID), true, d)
+	if err != nil {
+		log.Error("Set yiban failed notified failed", zap.Int("userID", userID), zap.Error(err))
+	}
+}
+
+// IsYibanFailedNotified check user notified failed
+func IsYibanFailedNotified(userID int) bool {
+	ok, err := GetBool(wrapKeyWithUser("yiban_failed_notified", userID))
+	if err != nil {
+		log.Error("Get yiban failed notified failed", zap.Int("userID", userID), zap.Error(err))
 	}
 	return ok
 }

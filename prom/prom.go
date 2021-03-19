@@ -3,10 +3,11 @@ package prom
 import (
 	"csust-got/config"
 	"csust-got/entities"
-	"github.com/prometheus/client_golang/api"
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"net/http"
 	"os"
+
+	"github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -17,6 +18,7 @@ import (
 var host, _ = os.Hostname()
 var client v1.API
 
+// InitPrometheus init prometheus
 func InitPrometheus() {
 	prometheus.MustRegister(commandTimes)
 	prometheus.MustRegister(messageCount)
@@ -100,6 +102,7 @@ func DailUpdate(update *Update) {
 	})).Inc()
 }
 
+// NewMember indicate some new member add to group
 func NewMember(chatName string) {
 	newMemberCount.With(prometheus.Labels{
 		"host":      host,
@@ -107,6 +110,7 @@ func NewMember(chatName string) {
 	}).Inc()
 }
 
+// MemberLeft indicate some member left group
 func MemberLeft(chatName string) {
 	chatMemberCount.With(prometheus.Labels{
 		"host":      host,
@@ -114,6 +118,7 @@ func MemberLeft(chatName string) {
 	}).Desc()
 }
 
+// GetMember get number of group member in a group
 func GetMember(chatName string, num int) {
 	chatMemberCount.With(prometheus.Labels{
 		"host":      host,
@@ -121,6 +126,7 @@ func GetMember(chatName string, num int) {
 	}).Set(float64(num))
 }
 
+// Log record how many log print in specific level
 func Log(level string) {
 	logCount.With(prometheus.Labels{
 		"host":  host,

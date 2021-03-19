@@ -6,6 +6,7 @@ import (
 	"csust-got/prom"
 	"csust-got/util"
 	"fmt"
+
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v2"
 )
@@ -20,7 +21,7 @@ func MC(m *Message) {
 	data, err := prom.QueryMessageCount(m.Chat.Title)
 	if err != nil {
 		log.Error("MC error", zap.Error(err))
-		util.EditMessage(msgR, "再mc自杀！！！")
+		util.EditMessage(msgR, "算了，再mc自杀！！！")
 		return
 	}
 	if len(data) == 0 {
