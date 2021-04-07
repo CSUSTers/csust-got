@@ -24,7 +24,7 @@ services:
       - "8080:8080"
 
   redis:
-    image: redis:alpine
+    image: redis
     container_name: bot-redis
     <<: *common
     expose:
