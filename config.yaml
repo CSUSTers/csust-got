@@ -4,6 +4,7 @@ worker: 4               # number of goroutine to recv update [int]
 
 # bot config
 token: ""
+proxy: "" # host:port 
 black_list:
   enabled: true
 white_list:
@@ -34,7 +35,6 @@ message:
   boot_failed: "我不愿面对这苦涩的一天……:("
   welcome: "Welcome to this group!"
 
-yiban_api: ""
 prometheus:
   enabled: false
   address: "prometheus:9090"

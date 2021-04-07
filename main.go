@@ -9,8 +9,10 @@ import (
 	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
+	"net/http"
 	"time"
 
+	"golang.org/x/net/proxy"
 	. "gopkg.in/tucnak/telebot.v2"
 
 	"go.uber.org/zap"
@@ -90,12 +92,25 @@ func initBot() (*Bot, error) {
 		log.Error("bot recover form panic", zap.Error(err))
 	}
 
+	httpClient := http.DefaultClient
+
+	if config.BotConfig.Proxy != "" {
+		dialer, err := proxy.SOCKS5("tcp", config.BotConfig.Proxy, nil, proxy.Direct)
+		if err != nil {
+			log.Fatal("Error creating dialer, aborting.", zap.Error(err))
+		}
+
+		httpTransport := &http.Transport{Dial: dialer.Dial}
+		httpClient = &http.Client{Transport: httpTransport}
+	}
+
 	settings := Settings{
 		Token:     config.BotConfig.Token,
 		Updates:   512,
 		ParseMode: ModeDefault,
 		Reporter:  panicReporter,
 		Poller:    initPoller(),
+		Client:    httpClient,
 	}
 	if config.BotConfig.DebugMode {
 		settings.Verbose = true

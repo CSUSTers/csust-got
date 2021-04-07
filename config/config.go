@@ -52,6 +52,7 @@ type Config struct {
 	Bot *Bot
 
 	Token     string
+	Proxy     string
 	DebugMode bool
 	Worker    int
 
@@ -62,8 +63,6 @@ type Config struct {
 	BlackListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	PromConfig      *promConfig
-
-	YibanAPI string
 }
 
 // GetBot returns Bot
@@ -104,6 +103,7 @@ func readConfig() {
 	BotConfig.DebugMode = viper.GetBool("debug")
 	BotConfig.Token = viper.GetString("token")
 	BotConfig.Worker = viper.GetInt("worker")
+	BotConfig.Proxy = viper.GetString("proxy")
 
 	// other
 	BotConfig.RedisConfig.readConfig()
@@ -114,7 +114,6 @@ func readConfig() {
 	BotConfig.BlackListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
 
-	BotConfig.YibanAPI = viper.GetString("yiban_api")
 }
 
 // check some config value is reasonable, otherwise set to default value.
