@@ -4,7 +4,7 @@ worker: 4               # number of goroutine to recv update [int]
 
 # bot config
 token: ""
-proxy: "" # host:port 
+proxy: "" # host:port (socks5)
 black_list:
   enabled: true
 white_list:

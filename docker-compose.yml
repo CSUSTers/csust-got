@@ -20,8 +20,8 @@ services:
       - ./config.yaml:/app/config.yaml
     links:
       - redis
-    ports:
-      - "8080:8080"
+    # ports:
+      # - "8080:8080"
 
   redis:
     image: redis
