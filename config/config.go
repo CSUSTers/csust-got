@@ -53,6 +53,7 @@ type Config struct {
 
 	Token     string
 	Proxy     string
+	Listen    string
 	DebugMode bool
 	Worker    int
 
@@ -104,6 +105,7 @@ func readConfig() {
 	BotConfig.Token = viper.GetString("token")
 	BotConfig.Worker = viper.GetInt("worker")
 	BotConfig.Proxy = viper.GetString("proxy")
+	BotConfig.Listen = viper.GetString("listen")
 
 	// other
 	BotConfig.RedisConfig.readConfig()
