@@ -19,11 +19,13 @@ jobs:
         run: |
           echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
           echo "::set-output name=tag::${GITHUB_REF/refs\/tags\//}"
+          echo "::set-output name=platforms::linux/arm/v7,linux/arm/v6,linux/arm64,linux/386,linux/amd64"
           
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
       - name: Set up Docker Buildx
+        id: setup-buildx
         uses: docker/setup-buildx-action@v1
 
       - name: Login to DockerHub
@@ -38,6 +40,7 @@ jobs:
         with:
           context: .
           push: true
+          platforms: ${{ steps.version.outputs.platforms }}
           tags: |
             csust/csust-got:latest
             csust/csust-got:${{ steps.version.outputs.tag }}

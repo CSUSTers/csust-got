@@ -10,7 +10,7 @@ x-common: &common
 services:
 
   bot:
-    image: csust/csust-got:latest-master
+    image: csust/csust-got:latest
     container_name: bot
     <<: *common
     restart: always
