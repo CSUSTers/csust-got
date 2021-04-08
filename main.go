@@ -9,6 +9,8 @@ import (
 	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
+	"net/http"
+	"net/url"
 	"time"
 
 	. "gopkg.in/tucnak/telebot.v2"
@@ -73,14 +75,14 @@ func main() {
 	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
 	bot.Handle("/boot", util.GroupCommand(base.Boot))
 
-	bot.Handle("/yiban", util.PrivateCommand(base.Yiban))
-	bot.Handle("/sub_yiban", util.PrivateCommand(base.SubYiban))
-	bot.Handle("/no_yiban", util.PrivateCommand(base.NoYiban))
+	// bot.Handle("/yiban", util.PrivateCommand(base.Yiban))
+	// bot.Handle("/sub_yiban", util.PrivateCommand(base.SubYiban))
+	// bot.Handle("/no_yiban", util.PrivateCommand(base.NoYiban))
 
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
 
-	go base.YibanService()
+	// go base.YibanService()
 
 	bot.Start()
 }
@@ -90,12 +92,23 @@ func initBot() (*Bot, error) {
 		log.Error("bot recover form panic", zap.Error(err))
 	}
 
+	httpClient := http.DefaultClient
+
+	if config.BotConfig.Proxy != "" {
+		proxyURL, err := url.Parse(config.BotConfig.Proxy)
+		if err != nil {
+			log.Fatal("proxy is wrong!", zap.Error(err))
+		}
+		httpClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	}
+
 	settings := Settings{
 		Token:     config.BotConfig.Token,
 		Updates:   512,
 		ParseMode: ModeDefault,
 		Reporter:  panicReporter,
 		Poller:    initPoller(),
+		Client:    httpClient,
 	}
 	if config.BotConfig.DebugMode {
 		settings.Verbose = true

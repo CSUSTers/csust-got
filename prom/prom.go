@@ -41,7 +41,7 @@ func InitPrometheus() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
-		err := http.ListenAndServe(":8080", nil)
+		err := http.ListenAndServe(config.BotConfig.Listen, nil)
 		if err != nil {
 			zap.L().Error("InitPrometheus: Serve http failed", zap.Error(err))
 			Log(zap.ErrorLevel.String())
