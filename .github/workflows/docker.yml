@@ -97,4 +97,4 @@ jobs:
             RELEASE=release
 
       - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }} && echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.push_build.outputs.digest }}${{ steps.release_build.outputs.digest }}
