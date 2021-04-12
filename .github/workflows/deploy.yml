@@ -1,0 +1,43 @@
+name: Deployment
+
+on:
+  workflow_run:
+    workflows: ["Docker Build And Push"]
+    branches: [ dev ]
+    types: [ completed ]
+  workflow_run:
+    workflows: ["Docker Image Release"]
+    branches: [ master ]
+    types: [ completed ]
+
+jobs:
+
+  deploy-dev:
+    name: "Develop Deployment"
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' && github.ref == 'ref/head/dev'
+    steps:
+
+      - name: Docker Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST_DEV }}
+          port: ${{ secrets.PORT_DEV }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.PRIVATE_KEY }}
+          script: cd survey && docker-compose pull && docker-compose up -d
+  
+  deploy-release:
+    name: "Release Deployment"
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' && contains(github.ref, "release")
+    steps:
+
+      - name: Docker Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          port: ${{ secrets.PORT }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.PRIVATE_KEY }}
+          script: cd survey && docker-compose pull && docker-compose up -d
