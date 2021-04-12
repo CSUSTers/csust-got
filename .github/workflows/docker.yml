@@ -72,7 +72,7 @@ jobs:
       - name: Build and push when push
         id: push_build
         uses: docker/build-push-action@v2
-        if: contains(github.ref, 'release')
+        if: "!contains(github.ref, 'release')"
         with:
           context: .
           push: true
@@ -83,7 +83,7 @@ jobs:
       - name: Build and push when release
         id: release_build
         uses: docker/build-push-action@v2
-        if: "!contains(github.ref, 'release')"
+        if: contains(github.ref, 'release')
         with:
           context: .
           push: true
