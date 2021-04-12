@@ -23,7 +23,7 @@ OUTPUT = got
 get:
 	go get -v .
 
-get:
+deps:
 	go mod download
   
 build: get
