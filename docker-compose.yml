@@ -4,7 +4,7 @@ x-common: &common
   # logging:
   #   driver: loki
   #   options:
-  #     loki-url: http://${LOKI_ADDR}:3100/loki/api/v1/push
+  #     loki-url: http://172.17.0.1:3100/loki/api/v1/push
   restart: always
 
 services:
