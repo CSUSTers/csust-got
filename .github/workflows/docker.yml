@@ -70,7 +70,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push when push
-        id: docker_build
+        id: push_build
         uses: docker/build-push-action@v2
         if: contains(github.ref, 'release')
         with:
@@ -81,7 +81,7 @@ jobs:
             csust/csust-got:latest-${{ steps.version.outputs.branch }}
 
       - name: Build and push when release
-        id: docker_build
+        id: release_build
         uses: docker/build-push-action@v2
         if: "!contains(github.ref, 'release')"
         with:
@@ -97,4 +97,4 @@ jobs:
             RELEASE=release
 
       - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: echo ${{ steps.docker_build.outputs.digest }} && echo ${{ steps.docker_build.outputs.digest }}
