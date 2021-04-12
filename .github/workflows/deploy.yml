@@ -3,11 +3,7 @@ name: Deployment
 on:
   workflow_run:
     workflows: ["Docker Build And Push"]
-    branches: [ dev ]
-    types: [ completed ]
-  workflow_run:
-    workflows: ["Docker Image Release"]
-    branches: [ master ]
+    branches: [ dev, master ]
     types: [ completed ]
 
 jobs:
