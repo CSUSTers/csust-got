@@ -1,0 +1,100 @@
+name: Docker Build And Push
+
+on:
+  push:
+    branches: [ dev, master ]
+  release:
+    types: [ published ]
+
+jobs:
+
+  setup_env:
+    name: "Setup Env"
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.16
+
+  test:
+    name: "Run Test"
+    runs-on: ubuntu-latest
+    needs: [ setup_env ]
+    defaults:
+      run:
+        working-directory: ./
+    steps:
+
+      - name: Get source
+        uses: actions/checkout@v2
+
+      - name: Get deps
+        run: make deps
+
+      - name: Test
+        run: make test
+
+  build:
+    name: "build and push docker image"
+    runs-on: ubuntu-latest
+    needs: [ setup_env, test ]
+    steps:
+
+      - name: "Get source"
+        uses: actions/checkout@v2
+
+      - name: "Print Version"
+        id: "version"
+        run: |
+          echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
+          echo "::set-output name=branch::$(git branch --show-current)"
+          echo "::set-output name=tag::${GITHUB_REF/refs\/tags\//}"
+          echo "::set-output name=platforms::linux/arm/v7,linux/arm64,linux/386,linux/amd64"
+
+      - name: Get deps
+        run: go mod vendor
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Set up Docker Buildx
+        id: setup-buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v1 
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push when push
+        id: push_build
+        uses: docker/build-push-action@v2
+        if: "!contains(github.ref, 'release')"
+        with:
+          context: .
+          push: true
+          platforms: ${{ steps.version.outputs.platforms }}
+          tags: |
+            csust/csust-got:latest-${{ steps.version.outputs.branch }}
+
+      - name: Build and push when release
+        id: release_build
+        uses: docker/build-push-action@v2
+        if: contains(github.ref, 'release')
+        with:
+          context: .
+          push: true
+          platforms: ${{ steps.version.outputs.platforms }}
+          tags: |
+            csust/csust-got:latest
+            csust/csust-got:${{ steps.version.outputs.tag }}
+          build-args: |
+            TAG=${{ steps.version.outputs.tag }}
+            BRANCH=release
+            RELEASE=release
+
+      - name: Image digest
+        run: echo ${{ steps.push_build.outputs.digest }}${{ steps.release_build.outputs.digest }}
