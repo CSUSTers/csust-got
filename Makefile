@@ -22,6 +22,9 @@ OUTPUT = got
 
 get:
 	go get -v .
+
+get:
+	go mod download
   
 build: get
 	CGO_ENABLED=$(CGOFLAG) \
