@@ -85,29 +85,34 @@ func NoSleep(m *Message) {
 // Forward is handle for command `forward`
 func Forward(m *Message) {
 	command := entities.FromMessage(m)
-	historyID := rand.Intn(m.ID) + 1
-	if command.Argc() > 0 {
-		id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
-		if ok {
-			historyID = id
-		} else {
-			return
-		}
-	}
-
 	forwardMsg := &Message{
-		ID:   historyID,
 		Chat: m.Chat,
 	}
 
-	if _, err := config.GetBot().Forward(m.Chat, forwardMsg); err != nil && command.Argc() == 0 {
-		// retry
-		forwardMsg.ID = rand.Intn(m.ID) + 1
-		if _, err := config.GetBot().Forward(m.Chat, forwardMsg); err != nil {
-			const msgFmt = "我们试图找到那条消息[%d]，但是它已经永远的消失在了历史记录的长河里，对此我们深表遗憾。诀别来的总是那么自然，在你注意到时发现已经消失，希望你能珍惜现在的热爱。"
-			util.SendReply(m.Chat, fmt.Sprintf(msgFmt, forwardMsg.ID), m)
+	retry := 1
+	for retry >= 0 {
+		if command.Argc() > 0 {
+			id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
+			retry = 0
+			if ok {
+				forwardMsg.ID = id
+			} else {
+				util.SendReply(m.Chat, "嗦啥呢", m)
+				return
+			}
+		} else {
+			forwardMsg.ID = rand.Intn(m.ID) + 1
 		}
+
+		if _, err := config.GetBot().Forward(m.Chat, forwardMsg); err == nil {
+			return
+		}
+
+		retry--
 	}
+
+	const msgFmt = "我们试图找到那条消息[%d]，但是它已经永远的消失在了历史记录的长河里，对此我们深表遗憾。诀别来的总是那么自然，在你注意到时发现已经消失，希望你能珍惜现在的热爱。"
+	util.SendReply(m.Chat, fmt.Sprintf(msgFmt, forwardMsg.ID), m)
 }
 
 // FakeBanMyself is handle for command `fake_ban_myself`.
