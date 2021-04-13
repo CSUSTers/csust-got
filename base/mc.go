@@ -28,7 +28,7 @@ func MC(m *Message) {
 		util.EditMessage(msgR, "wuuwwu, 再mc自杀！")
 		return
 	}
-	text := "本群大水怪名单(数据有半分钟延迟):\n"
+	text := "本群大水怪名单:\n"
 	// rankCN := []string{"零", "一", "二", "三", "四", "wu", "六", "七", "八", "九", "十"}
 	text += fmt.Sprintf("第一名：'%v'！他的一生，是龙王的一生，他把有限的生命贡献在了无限的发送 message 上，24h内数量高达 %v 条！群友因为他感受到这个群还有活人，我们把最热烈 fake_ban 送给他，让他在新的一天里享受快乐的退休时光吧！\n",
 		data[0].Name, data[0].Value)
