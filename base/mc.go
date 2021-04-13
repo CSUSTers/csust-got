@@ -25,7 +25,7 @@ func MC(m *Message) {
 		return
 	}
 	if len(data) == 0 {
-		util.EditMessage(msgR, "再mc自杀！")
+		util.EditMessage(msgR, "wuuwwu, 再mc自杀！")
 		return
 	}
 	text := "本群大水怪名单(数据有半分钟延迟):\n"

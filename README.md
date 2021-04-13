@@ -75,7 +75,4 @@ boot - 将bot开机
 sleep - 该睡觉了
 no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
-yiban - [tel] 查看易班打卡状态
-no_yiban - 让bot忘记自己的手机号
-sub_yiban - <tel> 让bot记住自己的手机号
 ```
