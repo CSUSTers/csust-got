@@ -8,37 +8,35 @@ on:
 
 jobs:
 
-  print_info:
-    name: "Print Info"
+  deploy:
+    name: "Deployment"
     runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
 
-      - name: Print Info
-        run: echo ${{ github.ref }}
+      - name: "Get source"
+        uses: actions/checkout@v2
+      
+      - name: "Print Version"
+        id: "version"
+        run: |
+          echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
+          echo "::set-output name=branch::$(git branch --show-current)"
+          echo "::set-output name=tag::${GITHUB_REF/refs\/tags\//}"
 
-  deploy-dev:
-    name: "Develop Deployment"
-    runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success' && github.ref == 'refs/heads/dev'
-    steps:
-
-      - name: Docker Deploy
+      - name: Develop Deployment
         uses: appleboy/ssh-action@master
+        if: steps.version.outputs.branch == 'dev'
         with:
           host: ${{ secrets.HOST_DEV }}
           port: ${{ secrets.PORT_DEV }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.PRIVATE_KEY }}
           script: cd survey && docker-compose pull && docker-compose up -d
-  
-  deploy-release:
-    name: "Release Deployment"
-    runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success' && contains(github.ref, 'release')
-    steps:
-
-      - name: Docker Deploy
+      
+      - name: Release Deployment
         uses: appleboy/ssh-action@master
+        if: contains(github.ref, 'release')
         with:
           host: ${{ secrets.HOST }}
           port: ${{ secrets.PORT }}
