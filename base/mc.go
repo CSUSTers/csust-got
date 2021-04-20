@@ -7,6 +7,7 @@ import (
 	"csust-got/prom"
 	"csust-got/util"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v2"
@@ -26,8 +27,9 @@ func MC(m *Message) {
 		err     error
 		msgType string
 	)
-	switch cmd.Arg(0) {
-	case "sticker", "s", "-s":
+	t := strings.TrimLeft(cmd.Arg(0), "-")
+	switch t {
+	case "sticker", "s":
 		data, err = prom.QueryStickerCount(m.Chat.Title)
 		msgType = "sticker"
 	default:
