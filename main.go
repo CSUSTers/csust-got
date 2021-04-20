@@ -44,7 +44,7 @@ func main() {
 	bot.Handle("/links", base.Links)
 
 	// bot.Handle("/history", base.History)
-	bot.Handle("/forward", base.Forward)
+	bot.Handle("/forward", util.GroupCommand(base.Forward))
 	bot.Handle("/mc", util.GroupCommand(base.MC))
 
 	bot.Handle("/sleep", base.Sleep)
