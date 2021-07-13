@@ -8,7 +8,7 @@ require (
 	github.com/prometheus/common v0.26.0
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.7.0
-	go.uber.org/zap v1.17.0
+	go.uber.org/zap v1.18.1
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0
 	gopkg.in/tucnak/telebot.v2 v2.3.5
 )
