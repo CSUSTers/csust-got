@@ -18,10 +18,10 @@ var (
 )
 
 // interface for module config
-type config interface {
-	readConfig()
-	checkConfig()
-}
+// type config interface {
+// 	readConfig()
+// 	checkConfig()
+// }
 
 // InitConfig - init bot config.
 func InitConfig(configFile, envPrefix string) {
