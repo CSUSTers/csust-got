@@ -47,10 +47,12 @@ func wrapKeyWithChat(key string, chatID int64) string {
 	return wrapKey(key + ":c" + cid)
 }
 
-func wrapKeyWithUser(key string, userID int) string {
-	uid := strconv.Itoa(userID)
-	return wrapKey(key + ":u" + uid)
-}
+// unused now
+//
+// func wrapKeyWithUser(key string, userID int) string {
+// 	uid := strconv.Itoa(userID)
+// 	return wrapKey(key + ":u" + uid)
+// }
 
 func wrapKeyWithChatMember(key string, chatID int64, userID int) string {
 	cid := strconv.FormatInt(chatID, 10)
