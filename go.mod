@@ -3,7 +3,7 @@ module csust-got
 go 1.14
 
 require (
-	github.com/go-redis/redis/v7 v7.4.0
+	github.com/go-redis/redis/v7 v7.4.1
 	github.com/prometheus/client_golang v1.11.0
 	github.com/prometheus/common v0.29.0
 	github.com/spf13/viper v1.8.1
