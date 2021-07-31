@@ -25,6 +25,10 @@ func HugeEncoder(m *Message) {
 	for i := range args {
 		// add 'huge' to prefix
 		if !strings.HasPrefix(args[i], "huge") {
+			if args[i][0] == 'e' {
+				args[i] = "hug"+args[i]
+				continue
+			}
 			args[i] = "huge"+args[i]
 		}
 		// add 'er' to suffix
