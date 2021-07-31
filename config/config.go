@@ -64,6 +64,7 @@ type Config struct {
 	BlackListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	PromConfig      *promConfig
+	ThirdAPI        *thirdAPI
 }
 
 // GetBot returns Bot
@@ -115,6 +116,7 @@ func readConfig() {
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlackListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
+	BotConfig.ThirdAPI.readConfig()
 
 }
 

@@ -4,6 +4,7 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/entities"
+	"csust-got/inline"
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/prom"
@@ -80,6 +81,8 @@ func main() {
 
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
+
+	bot.Handle(OnQuery, inline.QueryLocation)
 
 	bot.Start()
 }
