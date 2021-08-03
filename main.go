@@ -62,6 +62,9 @@ func main() {
 	bot.Handle("/hitdawu", base.HitDawu)
 	bot.Handle("/hito_netease", base.HitoNetease)
 
+	bot.Handle("/hugencoder", base.HugeEncoder)
+	bot.Handle("/hugedecoder", base.HugeDecoder)
+
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
