@@ -26,10 +26,10 @@ func HugeEncoder(m *Message) {
 		// add 'huge' to prefix
 		if !strings.HasPrefix(args[i], "huge") {
 			if args[i][0] == 'e' {
-				args[i] = "hug"+args[i]
-				continue
+				args[i] = "hug" + args[i]
+			} else {
+				args[i] = "huge" + args[i]
 			}
-			args[i] = "huge"+args[i]
 		}
 		// add 'er' to suffix
 		if !strings.HasSuffix(args[i], "er") {
@@ -41,10 +41,11 @@ func HugeEncoder(m *Message) {
 				}
 			}
 			// only add 'r' if $args[i] end with 'e'
-			if args[i][len(args[i])-1] != 'e' {
-				args[i] = args[i]+"e"
+			if args[i][len(args[i])-1] == 'e' {
+				args[i] = args[i] + "r"
+			} else {
+				args[i] = args[i] + "er"
 			}
-			args[i] = args[i]+"r"
 		}
 		// if we get 'huger' after encode, we <fork> him.
 		if args[i] == "huger" {
@@ -85,7 +86,7 @@ func HugeDecoder(m *Message) {
 
 	// find end of first consecutive 'huge' and start of last consecutive 'er'
 	hugeEnd, erStart := huge, er
-	for hugeEnd = huge; hugeEnd+4 < len(arg); hugeEnd+=4 {
+	for hugeEnd = huge; hugeEnd+4 < len(arg); hugeEnd += 4 {
 		if arg[hugeEnd:hugeEnd+4] != "huge" {
 			break
 		}
