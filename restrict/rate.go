@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 
 	"golang.org/x/time/rate"
 )
@@ -17,7 +17,7 @@ var limitMap = make(map[string]*rate.Limiter, 16)
 // CheckLimit 限制消息发送的频率，以防止刷屏.
 func CheckLimit(m *Message) bool {
 	rateConfig := config.BotConfig.RateLimitConfig
-	key := strconv.FormatInt(m.Chat.ID, 10) + ":" + strconv.Itoa(m.Sender.ID)
+	key := strconv.FormatInt(m.Chat.ID, 10) + ":" + strconv.FormatInt(m.Sender.ID, 10)
 	if limiter, ok := limitMap[key]; ok {
 		if checkRate(m, limiter) {
 			return true

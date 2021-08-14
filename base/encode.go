@@ -5,7 +5,7 @@ import (
 	"csust-got/util"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // change 'y' to 'i' if end with this
@@ -22,14 +22,26 @@ func HugeEncoder(m *Message) {
 	}
 
 	args := command.MultiArgsFrom(0)
+
+	// tldr
+	if len(args) > 10 {
+		util.SendReply(m.Chat, "hugeTLDRer", m)
+		return
+	}
+
 	for i := range args {
+		// tldr
+		if len(args[i]) > 20 {
+			args[i] = "hugeTLDRer"
+			continue
+		}
 		// add 'huge' to prefix
 		if !strings.HasPrefix(args[i], "huge") {
 			if args[i][0] == 'e' {
-				args[i] = "hug"+args[i]
-				continue
+				args[i] = "hug" + args[i]
+			} else {
+				args[i] = "huge" + args[i]
 			}
-			args[i] = "huge"+args[i]
 		}
 		// add 'er' to suffix
 		if !strings.HasSuffix(args[i], "er") {
@@ -41,10 +53,11 @@ func HugeEncoder(m *Message) {
 				}
 			}
 			// only add 'r' if $args[i] end with 'e'
-			if args[i][len(args[i])-1] != 'e' {
-				args[i] = args[i]+"e"
+			if args[i][len(args[i])-1] == 'e' {
+				args[i] = args[i] + "r"
+			} else {
+				args[i] = args[i] + "er"
 			}
-			args[i] = args[i]+"r"
 		}
 		// if we get 'huger' after encode, we <fork> him.
 		if args[i] == "huger" {
@@ -67,6 +80,12 @@ func HugeDecoder(m *Message) {
 
 	arg := command.ArgAllInOneFrom(0)
 
+	// tldr
+	if len(arg) > 500 {
+		util.SendReply(m.Chat, "hugeTLDRer", m)
+		return
+	}
+
 	// find first 'huge' and last 'er'
 	huge := strings.Index(arg, "huge")
 	er := strings.LastIndex(arg, "er")
@@ -84,8 +103,8 @@ func HugeDecoder(m *Message) {
 	}
 
 	// find end of first consecutive 'huge' and start of last consecutive 'er'
-	hugeEnd, erStart := huge, er
-	for hugeEnd = huge; hugeEnd+4 < len(arg); hugeEnd+=4 {
+	var hugeEnd, erStart int
+	for hugeEnd = huge; hugeEnd+4 < len(arg); hugeEnd += 4 {
 		if arg[hugeEnd:hugeEnd+4] != "huge" {
 			break
 		}

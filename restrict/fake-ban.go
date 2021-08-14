@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // FakeBan fake ban some one
