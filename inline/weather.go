@@ -2,21 +2,22 @@ package inline
 
 import (
 	"csust-got/config"
-	"fmt"
-	tb "gopkg.in/tucnak/telebot.v2"
+
+	tb "gopkg.in/tucnak/telebot.v3"
 )
 
-func QueryLocation(q *tb.Query) {
+func QueryLocation(ctx tb.Context) error {
+	q := ctx.Query()
 	bot := config.BotConfig.Bot
-	lat, lon := q.Location.Lat, q.Location.Lng
+	// lat, lon := q.Location.Lat, q.Location.Lng
 	query := q.Text
 
-	msg := fmt.Sprintf("%s\nYour Location:\n  Lat: %f Lon: %f\n", getLocationFromLatLon(lat, lon), lat, lon)
+	// msg := fmt.Sprintf("%s\nYour Location:\n  Lat: %f Lon: %f\n", getLocationFromLatLon(lat, lon), lat, lon)
 
 	results := tb.Results{
 		&tb.ResultBase{
-			Content: tb.InputTextMessageContent{
-				Text: msg,
+			Content: &tb.InputTextMessageContent{
+				Text: query,
 			},
 		},
 	}
@@ -25,6 +26,7 @@ func QueryLocation(q *tb.Query) {
 		Results:   results,
 		CacheTime: 60,
 	})
+	return nil
 }
 
 func getLocationFromLatLon(lat, lon float32) string {
