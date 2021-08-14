@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 
 	"go.uber.org/zap"
 )
@@ -37,7 +37,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 				return engineFunc(rep.Text)
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
-				stickerSet, err := config.BotConfig.Bot.GetStickerSet(stickerSetName)
+				stickerSet, err := config.BotConfig.Bot.StickerSet(stickerSetName)
 				if err != nil {
 					log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
 				} else {

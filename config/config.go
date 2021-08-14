@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // BotConfig can get bot's config globally
@@ -72,7 +72,7 @@ func GetBot() *Bot {
 }
 
 // BotID returns the BotID of this config.
-func (c Config) BotID() int {
+func (c Config) BotID() int64 {
 	return c.Bot.Me.ID
 }
 

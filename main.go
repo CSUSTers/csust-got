@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 
 	"go.uber.org/zap"
 )
@@ -34,51 +34,51 @@ func main() {
 		return
 	}
 
-	bot.Handle("/hello", base.Hello)
-	bot.Handle("/say_hello", base.Hello)
-	bot.Handle("/hello_to_all", base.HelloToAll)
+	bot.Handle("/hello", util.WrapHandler(base.Hello))
+	bot.Handle("/say_hello", util.WrapHandler(base.Hello))
+	bot.Handle("/hello_to_all", util.WrapHandler(base.HelloToAll))
 
-	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
-	bot.Handle("/cid", base.GetChatID)
-	bot.Handle("/info", base.Info)
-	bot.Handle("/links", base.Links)
+	bot.Handle("/id", util.WrapHandler(util.PrivateCommand(base.GetUserID)))
+	bot.Handle("/cid", util.WrapHandler(base.GetChatID))
+	bot.Handle("/info", util.WrapHandler(base.Info))
+	bot.Handle("/links", util.WrapHandler(base.Links))
 
 	// bot.Handle("/history", base.History)
-	bot.Handle("/forward", util.GroupCommand(base.Forward))
-	bot.Handle("/mc", util.GroupCommand(base.MC))
+	bot.Handle("/forward", util.WrapHandler(util.GroupCommand(base.Forward)))
+	bot.Handle("/mc", util.WrapHandler(util.GroupCommand(base.MC)))
 
-	bot.Handle("/sleep", base.Sleep)
-	bot.Handle("/no_sleep", base.NoSleep)
+	bot.Handle("/sleep", util.WrapHandler(base.Sleep))
+	bot.Handle("/no_sleep", util.WrapHandler(base.NoSleep))
 
-	bot.Handle("/google", base.Google)
-	bot.Handle("/bing", base.Bing)
-	bot.Handle("/bilibili", base.Bilibili)
-	bot.Handle("/github", base.Github)
+	bot.Handle("/google", util.WrapHandler(base.Google))
+	bot.Handle("/bing", util.WrapHandler(base.Bing))
+	bot.Handle("/bilibili", util.WrapHandler(base.Bilibili))
+	bot.Handle("/github", util.WrapHandler(base.Github))
 
-	bot.Handle("/recorder", base.Repeat)
+	bot.Handle("/recorder", util.WrapHandler(base.Repeat))
 
-	bot.Handle("/hitokoto", base.Hitokoto)
-	bot.Handle("/hitowuta", base.HitDawu)
-	bot.Handle("/hitdawu", base.HitDawu)
-	bot.Handle("/hito_netease", base.HitoNetease)
+	bot.Handle("/hitokoto", util.WrapHandler(base.Hitokoto))
+	bot.Handle("/hitowuta", util.WrapHandler(base.HitDawu))
+	bot.Handle("/hitdawu", util.WrapHandler(base.HitDawu))
+	bot.Handle("/hito_netease", util.WrapHandler(base.HitoNetease))
 
-	bot.Handle("/hugencoder", base.HugeEncoder)
-	bot.Handle("/hugedecoder", base.HugeDecoder)
+	bot.Handle("/hugencoder", util.WrapHandler(base.HugeEncoder))
+	bot.Handle("/hugedecoder", util.WrapHandler(base.HugeDecoder))
 
-	bot.Handle("/run_after", base.RunTask)
+	bot.Handle("/run_after", util.WrapHandler(base.RunTask))
 
-	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
-	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
-	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
-	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
-	bot.Handle("/ban", util.GroupCommand(restrict.Ban))
-	bot.Handle("/ban_soft", util.GroupCommand(restrict.SoftBan))
-	bot.Handle("/no_sticker", util.GroupCommand(restrict.NoSticker))
-	bot.Handle("/shutdown", util.GroupCommand(base.Shutdown))
-	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
-	bot.Handle("/boot", util.GroupCommand(base.Boot))
+	bot.Handle("/fake_ban_myself", util.WrapHandler(base.FakeBanMyself))
+	bot.Handle("/fake_ban", util.WrapHandler(util.GroupCommand(restrict.FakeBan)))
+	bot.Handle("/kill", util.WrapHandler(util.GroupCommand(restrict.Kill)))
+	bot.Handle("/ban_myself", util.WrapHandler(util.GroupCommand(restrict.BanMyself)))
+	bot.Handle("/ban", util.WrapHandler(util.GroupCommand(restrict.Ban)))
+	bot.Handle("/ban_soft", util.WrapHandler(util.GroupCommand(restrict.SoftBan)))
+	bot.Handle("/no_sticker", util.WrapHandler(util.GroupCommand(restrict.NoSticker)))
+	bot.Handle("/shutdown", util.WrapHandler(util.GroupCommand(base.Shutdown)))
+	bot.Handle("/halt", util.WrapHandler(util.GroupCommand(base.Shutdown)))
+	bot.Handle("/boot", util.WrapHandler(util.GroupCommand(base.Boot)))
 
-	bot.Handle(OnUserJoined, base.WelcomeNewMember)
+	bot.Handle(OnUserJoined, util.WrapHandler(base.WelcomeNewMember))
 	// bot.Handle(OnUserLeft, base.LeftMember)
 
 	bot.Start()
@@ -103,9 +103,11 @@ func initBot() (*Bot, error) {
 		Token:     config.BotConfig.Token,
 		Updates:   512,
 		ParseMode: ModeDefault,
-		Reporter:  panicReporter,
-		Poller:    initPoller(),
-		Client:    httpClient,
+		OnError: func(e error, c Context) {
+			panicReporter(e)
+		},
+		Poller: initPoller(),
+		Client: httpClient,
 	}
 	if config.BotConfig.DebugMode {
 		settings.Verbose = true
