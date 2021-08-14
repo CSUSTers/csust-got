@@ -54,9 +54,9 @@ func wrapKeyWithChat(key string, chatID int64) string {
 // 	return wrapKey(key + ":u" + uid)
 // }
 
-func wrapKeyWithChatMember(key string, chatID int64, userID int) string {
+func wrapKeyWithChatMember(key string, chatID int64, userID int64) string {
 	cid := strconv.FormatInt(chatID, 10)
-	uid := strconv.Itoa(userID)
+	uid := strconv.FormatInt(userID, 10)
 	return wrapKey(key + ":c" + cid + ":u" + uid)
 }
 
@@ -131,76 +131,76 @@ func IsShutdown(chatID int64) bool {
 }
 
 // IsFakeBanInCD check fake ban is in cd
-func IsFakeBanInCD(chatID int64, userID int) bool {
+func IsFakeBanInCD(chatID int64, userID int64) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
-		log.Error("get IsFakeBanInCD failed", zap.Int64("chatID", chatID), zap.Int("userID", userID), zap.Error(err))
+		log.Error("get IsFakeBanInCD failed", zap.Int64("chatID", chatID), zap.Int64("userID", userID), zap.Error(err))
 		return true
 	}
 	return ok
 }
 
 // IsBanned check some one is banned
-func IsBanned(chatID int64, userID int) bool {
+func IsBanned(chatID int64, userID int64) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
-		log.Error("get IsBanned failed", zap.Int64("chatID", chatID), zap.Int("userID", userID), zap.Error(err))
+		log.Error("get IsBanned failed", zap.Int64("chatID", chatID), zap.Int64("userID", userID), zap.Error(err))
 		return false
 	}
 	return ok
 }
 
 // GetBannedDuration get some one banned duration
-func GetBannedDuration(chatID int64, userID int) time.Duration {
+func GetBannedDuration(chatID int64, userID int64) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
-		log.Error("GetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int("userID", userID), zap.Error(err))
+		log.Error("GetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int64("userID", userID), zap.Error(err))
 	}
 	return sec
 }
 
 // GetBannerDuration get fake ban cd
-func GetBannerDuration(chatID int64, userID int) time.Duration {
+func GetBannerDuration(chatID int64, userID int64) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
-		log.Error("GetBannerDuration failed", zap.Int64("chatID", chatID), zap.Int("userID", userID), zap.Error(err))
+		log.Error("GetBannerDuration failed", zap.Int64("chatID", chatID), zap.Int64("userID", userID), zap.Error(err))
 	}
 	return sec
 }
 
 // ResetBannedDuration reset banned duration
-func ResetBannedDuration(chatID int64, bannedID int, d time.Duration) bool {
+func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
 	ok, err := client.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
-		log.Error("ResetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int("userID", bannedID), zap.Error(err))
+		log.Error("ResetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannedID), zap.Error(err))
 		return false
 	}
 	return ok
 }
 
 // AddBanDuration add ban duration
-func AddBanDuration(chatID int64, bannerID, bannedID int, ad time.Duration) bool {
+func AddBanDuration(chatID int64, bannerID, bannedID int64, ad time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
 	d := GetBannedDuration(chatID, bannedID)
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
 // Ban ban some one
-func Ban(chatID int64, bannerID, bannedID int, d time.Duration) bool {
+func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
 	if err != nil {
-		log.Error("Ban failed", zap.Int64("chatID", chatID), zap.Int("userID", bannedID), zap.Error(err))
+		log.Error("Ban failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannedID), zap.Error(err))
 		return false
 	}
 	return true
 }
 
 // MakeBannerCD make banner in cd
-func MakeBannerCD(chatID int64, bannerID int, d time.Duration) bool {
+func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
 	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
-		log.Error("Ban set CD failed", zap.Int64("chatID", chatID), zap.Int("userID", bannerID), zap.Error(err))
+		log.Error("Ban set CD failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannerID), zap.Error(err))
 		return false
 	}
 	return true

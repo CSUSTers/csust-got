@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // Makefile variable

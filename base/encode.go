@@ -5,7 +5,7 @@ import (
 	"csust-got/util"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // change 'y' to 'i' if end with this

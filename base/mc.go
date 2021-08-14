@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // MC we not use message count anymore

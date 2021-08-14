@@ -10,5 +10,5 @@ require (
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/zap v1.19.0
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
-	gopkg.in/tucnak/telebot.v2 v2.4.0
+	gopkg.in/tucnak/telebot.v3 v3.0.0-20210810122227-c720c43f5600
 )
