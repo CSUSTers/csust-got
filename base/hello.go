@@ -20,18 +20,17 @@ var helloText = []string{
 }
 
 // Hello is handle for command `hello`
-func Hello(m *Message) {
-	util.SendReply(m.Chat, "hello ^_^ "+util.RandomChoice(helloText), m)
+func Hello(c Context) error {
+	return c.Reply("hello ^_^ " + util.RandomChoice(helloText))
 }
 
 // HelloToAll is handle for command `hello_to_all`
-func HelloToAll(m *Message) {
+func HelloToAll(c Context) error {
 	text := "大家好!"
-	if m.Private() {
+	if c.Message().Private() {
 		text = "你好!"
 	}
-	text += util.RandomChoice(helloText)
-	util.SendMessage(m.Chat, text)
+	return c.Send(text + util.RandomChoice(helloText))
 }
 
 // Links is handle for command `links`

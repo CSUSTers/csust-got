@@ -34,9 +34,9 @@ func main() {
 		return
 	}
 
-	bot.Handle("/hello", util.WrapHandler(base.Hello))
-	bot.Handle("/say_hello", util.WrapHandler(base.Hello))
-	bot.Handle("/hello_to_all", util.WrapHandler(base.HelloToAll))
+	bot.Handle("/hello", base.Hello)
+	bot.Handle("/say_hello", base.Hello)
+	bot.Handle("/hello_to_all", base.HelloToAll)
 
 	bot.Handle("/id", util.WrapHandler(util.PrivateCommand(base.GetUserID)))
 	bot.Handle("/cid", util.WrapHandler(base.GetChatID))
@@ -85,7 +85,7 @@ func main() {
 }
 
 func initBot() (*Bot, error) {
-	panicReporter := func(err error) {
+	panicReporter := func(err error, c Context) {
 		log.Error("bot recover form panic", zap.Error(err))
 	}
 
@@ -103,11 +103,9 @@ func initBot() (*Bot, error) {
 		Token:     config.BotConfig.Token,
 		Updates:   512,
 		ParseMode: ModeDefault,
-		OnError: func(e error, c Context) {
-			panicReporter(e)
-		},
-		Poller: initPoller(),
-		Client: httpClient,
+		OnError:   panicReporter,
+		Poller:    initPoller(),
+		Client:    httpClient,
 	}
 	if config.BotConfig.DebugMode {
 		settings.Verbose = true
