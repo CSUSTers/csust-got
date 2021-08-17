@@ -39,16 +39,16 @@ func main() {
 	bot.Handle("/hello_to_all", base.HelloToAll)
 
 	bot.Handle("/id", util.WrapHandler(util.PrivateCommand(base.GetUserID)))
-	bot.Handle("/cid", util.WrapHandler(base.GetChatID))
-	bot.Handle("/info", util.WrapHandler(base.Info))
-	bot.Handle("/links", util.WrapHandler(base.Links))
+	bot.Handle("/cid", base.GetChatID)
+	bot.Handle("/info", base.Info)
+	bot.Handle("/links", base.Links)
 
 	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", util.WrapHandler(util.GroupCommand(base.Forward)))
 	bot.Handle("/mc", util.WrapHandler(util.GroupCommand(base.MC)))
 
-	bot.Handle("/sleep", util.WrapHandler(base.Sleep))
-	bot.Handle("/no_sleep", util.WrapHandler(base.NoSleep))
+	bot.Handle("/sleep", base.Sleep)
+	bot.Handle("/no_sleep", base.NoSleep)
 
 	bot.Handle("/google", util.WrapHandler(base.Google))
 	bot.Handle("/bing", util.WrapHandler(base.Bing))
