@@ -4,7 +4,6 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
-	"csust-got/util"
 	"fmt"
 	"net/url"
 	"strings"
@@ -16,9 +15,9 @@ import (
 
 type htmlMapper func(m *Message) string
 
-func mapToHTML(mapper htmlMapper) func(*Message) {
-	return func(m *Message) {
-		util.SendReply(m.Chat, mapper(m), m, ModeHTML, NoPreview)
+func mapToHTML(mapper htmlMapper) func(Context) error {
+	return func(ctx Context) error {
+		return ctx.Reply(mapper(ctx.Message()), ModeHTML, NoPreview)
 	}
 }
 

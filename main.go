@@ -50,12 +50,12 @@ func main() {
 	bot.Handle("/sleep", base.Sleep)
 	bot.Handle("/no_sleep", base.NoSleep)
 
-	bot.Handle("/google", util.WrapHandler(base.Google))
-	bot.Handle("/bing", util.WrapHandler(base.Bing))
-	bot.Handle("/bilibili", util.WrapHandler(base.Bilibili))
-	bot.Handle("/github", util.WrapHandler(base.Github))
+	bot.Handle("/google", base.Google)
+	bot.Handle("/bing", base.Bing)
+	bot.Handle("/bilibili", base.Bilibili)
+	bot.Handle("/github", base.Github)
 
-	bot.Handle("/recorder", util.WrapHandler(base.Repeat))
+	bot.Handle("/recorder", base.Repeat)
 
 	bot.Handle("/hitokoto", util.WrapHandler(base.Hitokoto))
 	bot.Handle("/hitowuta", util.WrapHandler(base.HitDawu))
