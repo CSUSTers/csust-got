@@ -85,8 +85,8 @@ func main() {
 }
 
 func initBot() (*Bot, error) {
-	panicReporter := func(err error, c Context) {
-		log.Error("bot recover form panic", zap.Error(err))
+	errorHandler := func(err error, c Context) {
+		log.Error("bot has error", zap.Any("context", c), zap.Error(err))
 	}
 
 	httpClient := http.DefaultClient
@@ -103,7 +103,7 @@ func initBot() (*Bot, error) {
 		Token:     config.BotConfig.Token,
 		Updates:   512,
 		ParseMode: ModeDefault,
-		OnError:   panicReporter,
+		OnError:   errorHandler,
 		Poller:    initPoller(),
 		Client:    httpClient,
 	}
