@@ -57,15 +57,15 @@ func main() {
 
 	bot.Handle("/recorder", base.Repeat)
 
-	bot.Handle("/hitokoto", util.WrapHandler(base.Hitokoto))
-	bot.Handle("/hitowuta", util.WrapHandler(base.HitDawu))
-	bot.Handle("/hitdawu", util.WrapHandler(base.HitDawu))
-	bot.Handle("/hito_netease", util.WrapHandler(base.HitoNetease))
+	bot.Handle("/hitokoto", base.Hitokoto)
+	bot.Handle("/hitowuta", base.HitDawu)
+	bot.Handle("/hitdawu", base.HitDawu)
+	bot.Handle("/hito_netease", base.HitoNetease)
 
-	bot.Handle("/hugencoder", util.WrapHandler(base.HugeEncoder))
-	bot.Handle("/hugedecoder", util.WrapHandler(base.HugeDecoder))
+	bot.Handle("/hugencoder", base.HugeEncoder)
+	bot.Handle("/hugedecoder", base.HugeDecoder)
 
-	bot.Handle("/run_after", util.WrapHandler(base.RunTask))
+	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/fake_ban_myself", util.WrapHandler(base.FakeBanMyself))
 	bot.Handle("/fake_ban", util.WrapHandler(util.GroupCommand(restrict.FakeBan)))

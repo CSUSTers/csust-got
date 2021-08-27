@@ -2,7 +2,6 @@ package base
 
 import (
 	"csust-got/entities"
-	"csust-got/util"
 	"strings"
 
 	. "gopkg.in/tucnak/telebot.v3"
@@ -12,21 +11,19 @@ import (
 var xyTable = [...]string{"ty", "ly", "fy", "py", "dy", "by"}
 
 // HugeEncoder encode 'xxx' to 'hugexxxer'
-func HugeEncoder(m *Message) {
-	command := entities.FromMessage(m)
+func HugeEncoder(ctx Context) error {
+	command := entities.FromMessage(ctx.Message())
 
 	// no args
 	if command.Argc() <= 0 {
-		util.SendReply(m.Chat, "HUGEFIVER", m)
-		return
+		return ctx.Reply("HUGEFIVER")
 	}
 
 	args := command.MultiArgsFrom(0)
 
 	// tldr
 	if len(args) > 10 {
-		util.SendReply(m.Chat, "hugeTLDRer", m)
-		return
+		return ctx.Reply("hugeTLDRer")
 	}
 
 	for i := range args {
@@ -65,25 +62,23 @@ func HugeEncoder(m *Message) {
 		}
 	}
 
-	util.SendReply(m.Chat, strings.Join(args, "\n"), m)
+	return ctx.Reply(strings.Join(args, "\n"))
 }
 
 // HugeDecoder decode 'hugehugehugexxxererer' to 'hugexxxer'
-func HugeDecoder(m *Message) {
-	command := entities.FromMessage(m)
+func HugeDecoder(ctx Context) error {
+	command := entities.FromMessage(ctx.Message())
 
 	// no args
 	if command.Argc() <= 0 {
-		util.SendReply(m.Chat, "HUGEFIVER", m)
-		return
+		return ctx.Reply("HUGEFIVER")
 	}
 
 	arg := command.ArgAllInOneFrom(0)
 
 	// tldr
 	if len(arg) > 500 {
-		util.SendReply(m.Chat, "hugeTLDRer", m)
-		return
+		return ctx.Reply("hugeTLDRer")
 	}
 
 	// find first 'huge' and last 'er'
@@ -92,14 +87,12 @@ func HugeDecoder(m *Message) {
 
 	// can't find any 'huge' or 'er'
 	if huge == -1 || er == -1 {
-		util.SendReply(m.Chat, "hugeNOTFOUNDer", m)
-		return
+		return ctx.Reply("hugeNOTFOUNDer")
 	}
 
 	// if first 'huge' after last 'er'
 	if huge > er {
-		util.SendReply(m.Chat, "hugeFAKEr", m)
-		return
+		return ctx.Reply("hugeFAKEr")
 	}
 
 	// find end of first consecutive 'huge' and start of last consecutive 'er'
@@ -117,12 +110,11 @@ func HugeDecoder(m *Message) {
 
 	// if we will get 'huger', we <fork> him.
 	if erStart < hugeEnd {
-		util.SendReply(m.Chat, "hugeF**Ker", m)
-		return
+		return ctx.Reply("hugeF**Ker")
 	}
 
 	// decode
 	arg = arg[0:huge+4] + arg[hugeEnd:erStart] + arg[er:]
 
-	util.SendReply(m.Chat, arg, m)
+	return ctx.Reply(arg)
 }

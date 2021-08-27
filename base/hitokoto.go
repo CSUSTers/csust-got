@@ -4,7 +4,6 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
-	"csust-got/util"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -67,8 +66,8 @@ if arg not in above, we will ignore it.
 if there is no args, api will randomly choice from above.
 if there is multiple args, api will randomly choice from them.
 */
-func parseAPI(m *Message) HitokotoArg {
-	cmd := entities.FromMessage(m)
+func parseAPI(ctx Context) HitokotoArg {
+	cmd := entities.FromMessage(ctx.Message())
 	cmdSlice := cmd.MultiArgsFrom(0)
 	if len(cmdSlice) > 15 {
 		return HitokotoEmptyArg()
@@ -77,18 +76,18 @@ func parseAPI(m *Message) HitokotoArg {
 }
 
 // Hitokoto is command `hitokoto`
-func Hitokoto(m *Message) {
-	util.SendReply(m.Chat, GetHitokoto(parseAPI(m), true), m, ModeHTML)
+func Hitokoto(ctx Context) error {
+	return ctx.Reply(GetHitokoto(parseAPI(ctx), true), ModeHTML)
 }
 
 // HitDawu is command alias `hitokoto -i`
-func HitDawu(m *Message) {
-	util.SendReply(m.Chat, GetHitokoto("i", true), m, ModeHTML)
+func HitDawu(ctx Context) error {
+	return ctx.Reply(GetHitokoto("i", true), ModeHTML)
 }
 
 // HitoNetease is command alias `hitokoto -j`
-func HitoNetease(m *Message) {
-	util.SendReply(m.Chat, GetHitokoto("j", true), m, ModeHTML)
+func HitoNetease(ctx Context) error {
+	return ctx.Reply(GetHitokoto("j", true), ModeHTML)
 }
 
 // GetHitokoto can get a hitokoto

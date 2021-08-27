@@ -10,23 +10,22 @@ import (
 )
 
 // RunTask can run a task
-func RunTask(m *Message) {
+func RunTask(ctx Context) error {
 	text := "你嗦啥，我听不太懂欸……"
 
-	cmd := entities.FromMessage(m)
+	cmd := entities.FromMessage(ctx.Message())
 	delay, err := util.EvalDuration(cmd.Arg(0))
 	info := cmd.ArgAllInOneFrom(1)
 	if err != nil || delay < time.Second {
-		util.SendReply(m.Chat, text, m)
-		return
+		return ctx.Reply(text)
 	}
 
 	text = fmt.Sprintf("好的，在 %v 后我会来叫你……“%s”，嗯，不愧是我。", delay, info)
 	task := func() {
-		uid := m.Sender.Username
+		uid := ctx.Sender().Username
 		hint := fmt.Sprintf("@%s 我来了，你要我提醒你……“%s”，大概没错吧。", uid, info)
-		util.SendMessage(m.Chat, hint)
+		ctx.Send(hint)
 	}
 	time.AfterFunc(delay, task)
-	util.SendReply(m.Chat, text, m)
+	return ctx.Reply(text)
 }
