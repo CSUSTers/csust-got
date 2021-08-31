@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 /*
@@ -81,7 +81,7 @@ func BanSomeone(chat *Chat, user *User, hard bool, duration time.Duration) bool 
 	member, err := config.BotConfig.Bot.ChatMemberOf(chat, user)
 	if err != nil {
 		log.Error("get ChatMemberOf failed", zap.Int64("chatID", chat.ID),
-			zap.Int("userID", user.ID), zap.Error(err))
+			zap.Int64("userID", user.ID), zap.Error(err))
 		return false
 	}
 	member.RestrictedUntil = time.Now().Add(duration).Unix()

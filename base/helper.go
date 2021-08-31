@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 // Makefile variable
@@ -20,7 +20,7 @@ var (
 var lastBoot = time.Now().In(util.TimeZoneCST).Format(util.TimeFormat)
 
 // Info - build info
-func Info(m *Message) {
+func Info(ctx Context) error {
 	msg := "```\n----- Bot Info -----\n"
 	msg += fmt.Sprintf("UserName:    %s\n", config.BotConfig.Bot.Me.Username)
 	msg += fmt.Sprintf("Version:     %s\n", version)
@@ -30,7 +30,7 @@ func Info(m *Message) {
 	msg += fmt.Sprintf("Go Version:  %s\n", runtime.Version())
 	msg += "```"
 
-	util.SendMessage(m.Chat, msg, ModeMarkdownV2)
+	return ctx.Send(msg, ModeMarkdownV2)
 }
 
 // GetUserID is handle for command `/id`
@@ -40,9 +40,9 @@ func GetUserID(m *Message) {
 }
 
 // GetChatID is handle for command `/cid`
-func GetChatID(m *Message) {
-	msg := fmt.Sprintf("Current chatID is %d", m.Chat.ID)
-	util.SendReply(m.Chat, msg, m)
+func GetChatID(ctx Context) error {
+	msg := fmt.Sprintf("Current chatID is %d", ctx.Chat().ID)
+	return ctx.Reply(msg)
 }
 
 // GetGroupMember get how many members in group

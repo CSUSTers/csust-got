@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 var helloText = []string{
@@ -20,23 +20,22 @@ var helloText = []string{
 }
 
 // Hello is handle for command `hello`
-func Hello(m *Message) {
-	util.SendReply(m.Chat, "hello ^_^ "+util.RandomChoice(helloText), m)
+func Hello(ctx Context) error {
+	return ctx.Reply("hello ^_^ " + util.RandomChoice(helloText))
 }
 
 // HelloToAll is handle for command `hello_to_all`
-func HelloToAll(m *Message) {
+func HelloToAll(ctx Context) error {
 	text := "大家好!"
-	if m.Private() {
+	if ctx.Message().Private() {
 		text = "你好!"
 	}
-	text += util.RandomChoice(helloText)
-	util.SendMessage(m.Chat, text)
+	return ctx.Send(text + util.RandomChoice(helloText))
 }
 
 // Links is handle for command `links`
-func Links(m *Message) {
-	util.SendMessage(m.Chat, config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
+func Links(ctx Context) error {
+	return ctx.Send(config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
 }
 
 // Shutdown is handler for command `shutdown`
@@ -64,7 +63,7 @@ func Boot(m *Message) {
 }
 
 // Sleep is handle for command `sleep`
-func Sleep(m *Message) {
+func Sleep(ctx Context) error {
 	msg := ""
 	t := time.Now().In(util.TimeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
@@ -74,12 +73,12 @@ func Sleep(m *Message) {
 	} else {
 		msg = "醒来就能看到我哦！"
 	}
-	util.SendReply(m.Chat, msg, m)
+	return ctx.Reply(msg)
 }
 
 // NoSleep is handle for command `no_sleep`
-func NoSleep(m *Message) {
-	util.SendReply(m.Chat, config.BotConfig.MessageConfig.NoSleep, m)
+func NoSleep(ctx Context) error {
+	return ctx.Reply(config.BotConfig.MessageConfig.NoSleep)
 }
 
 // Forward is handle for command `forward`

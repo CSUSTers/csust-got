@@ -4,21 +4,20 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
-	"csust-got/util"
 	"fmt"
 	"net/url"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 
 	"go.uber.org/zap"
 )
 
 type htmlMapper func(m *Message) string
 
-func mapToHTML(mapper htmlMapper) func(*Message) {
-	return func(m *Message) {
-		util.SendReply(m.Chat, mapper(m), m, ModeHTML, NoPreview)
+func mapToHTML(mapper htmlMapper) func(Context) error {
+	return func(ctx Context) error {
+		return ctx.Reply(mapper(ctx.Message()), ModeHTML, NoPreview)
 	}
 }
 
@@ -37,7 +36,7 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 				return engineFunc(rep.Text)
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
-				stickerSet, err := config.BotConfig.Bot.GetStickerSet(stickerSetName)
+				stickerSet, err := config.BotConfig.Bot.StickerSet(stickerSetName)
 				if err != nil {
 					log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
 				} else {

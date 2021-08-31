@@ -5,7 +5,7 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 
-	. "gopkg.in/tucnak/telebot.v2"
+	. "gopkg.in/tucnak/telebot.v3"
 
 	"go.uber.org/zap"
 )
