@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
@@ -24,7 +25,14 @@ func RunTask(ctx Context) error {
 	task := func() {
 		uid := ctx.Sender().Username
 		hint := fmt.Sprintf("@%s 我来了，你要我提醒你……“%s”，大概没错吧。", uid, info)
-		ctx.Send(hint)
+		err := ctx.Send(hint)
+		if err != nil {
+			zap.L().Error("Run Task send msg to user failed",
+				zap.String("user", uid),
+				zap.String("msg", info),
+				zap.Error(err),
+			)
+		}
 	}
 	time.AfterFunc(delay, task)
 	return ctx.Reply(text)
