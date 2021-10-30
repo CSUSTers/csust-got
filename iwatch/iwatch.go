@@ -1,6 +1,7 @@
 package iwatch
 
 import (
+	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
@@ -37,7 +38,13 @@ func WatchHandler(ctx Context) error {
 		if !productsOK || !storesOK {
 			return ctx.Reply("failed")
 		}
-		return ctx.Reply("Your watching product:\n%s\n\nYour watching store:%s\n", strings.Join(products, "\n"), strings.Join(stores, "\n"))
+		for i, v := range products {
+			products[i] = fmt.Sprintf("[%s] %s", v, orm.GetProductName(v))
+		}
+		for i, v := range stores {
+			stores[i] = fmt.Sprintf("[%s] %s", v, orm.GetStoreName(v))
+		}
+		return ctx.Reply(fmt.Sprintf("Your watching product:\n%s\n\nYour watching store:\n%s\n", strings.Join(products, "\n"), strings.Join(stores, "\n")))
 	}
 
 	// arg >= 2
@@ -47,26 +54,33 @@ func WatchHandler(ctx Context) error {
 	switch cmdType {
 	case "p", "prod", "product":
 		// register product
-		log.Info("register prod", zap.Int64("user", userID), zap.String("list", strings.Join(args, ",")))
+		log.Info("register prod", zap.Int64("user", userID), zap.Any("list", args))
 		if orm.WatchProduct(userID, args) {
 			return ctx.Reply("success")
 		}
 		return ctx.Reply("failed")
 	case "s", "store":
 		// register store
-		log.Info("register store", zap.Int64("user", userID), zap.String("list", strings.Join(args, ",")))
+		log.Info("register store", zap.Int64("user", userID), zap.Any("list", args))
 		if orm.WatchStore(userID, args) {
 			return ctx.Reply("success")
 		}
 		return ctx.Reply("failed")
+	case "r", "rm", "remove":
+		// remove store
+		log.Info("remove", zap.Int64("user", userID), zap.Any("list", args))
+		if orm.RemoveProduct(userID, args) && orm.RemoveStore(userID, args) {
+			return ctx.Reply("success")
+		}
+		return ctx.Reply("failed")
 	default:
-		return ctx.Reply("iwatch <product|store> <prod1|store1> <prod2|store2> ...")
+		return ctx.Reply("iwatch <product|store|remove> <prod1|store1> <prod2|store2> ...")
 	}
 }
 
 // WatchService Apple Store watcher service
 func WatchService() {
-	for range time.Tick(30 * time.Second) {
+	for range time.Tick(60 * time.Second) {
 		go watchApple()
 	}
 }
@@ -87,6 +101,16 @@ func watchApple() {
 			continue
 		}
 		log.Info("getTargetState success", zap.String("product", product), zap.String("store", store), zap.Any("result", r))
+		if r.ProductName != "" {
+			orm.SetProductName(product, r.ProductName)
+		}
+		if r.StoreName != "" {
+			orm.SetStoreName(store, r.StoreName)
+		}
+		if r.Avaliable {
+			msg := fmt.Sprintf("有货啦!\n%s\n%s\n", r.ProductName, r.StoreName)
+			config.BotConfig.Bot.Send(&User{ID: 424901821}, msg)
+		}
 	}
 }
 
@@ -123,6 +147,10 @@ func getTargetState(product, store string) (*result, error) {
 		return nil, err
 	}
 
+	if resp.Body.Content.PickupMessage.ErrorMessage != "" {
+		return nil, errors.New(resp.Body.Content.PickupMessage.ErrorMessage)
+	}
+
 	if len(resp.Body.Content.PickupMessage.Stores) == 0 {
 		return nil, errors.New("no Store")
 	}
@@ -132,19 +160,31 @@ func getTargetState(product, store string) (*result, error) {
 		return nil, errors.New("resp not found product")
 	}
 
-	pd, ok := pdi.(productInfo)
-	if !ok {
-		return nil, errors.New("resp product wrong type")
+	pdb, err := json.Marshal(pdi)
+	if err != nil {
+		return nil, errors.New("resp product marshal failed:" + err.Error())
+	}
+
+	pd := new(productInfo)
+	err = json.Unmarshal(pdb, pd)
+	if err != nil {
+		return nil, errors.New("resp product unmarshal failed:" + err.Error())
 	}
 
 	if len(pd.DeliveryOptions) == 0 {
 		return nil, errors.New("no DeliveryOptions")
 	}
 
+	storeResp := resp.Body.Content.PickupMessage.Stores[0]
+	if _, ok := storeResp.PartsAvailability[product]; !ok {
+		return nil, errors.New("no PartsAvailability")
+	}
+
 	r := &result{
-		Avaliable: false,
-		StoreName: resp.Body.Content.PickupMessage.Stores[0].StoreName,
-		Date:      pd.DeliveryOptions[0].Date,
+		Avaliable:   storeResp.PartsAvailability[product].StoreSelectionEnabled,
+		ProductName: storeResp.PartsAvailability[product].StorePickupProductTitle,
+		StoreName:   fmt.Sprintf("%s/%s/%s", storeResp.State, storeResp.City, storeResp.StoreName),
+		Date:        pd.DeliveryOptions[0].Date,
 	}
 
 	return r, nil
@@ -167,10 +207,25 @@ type targetResp struct {
 type pickupMessage struct {
 	Stores         []storeInfo
 	PickupLocation string `json:"pickupLocation"`
+	ErrorMessage   string `json:"errorMessage"`
 }
 
 type storeInfo struct {
-	StoreName string `json:"storeName"`
+	State             string
+	City              string
+	StoreName         string                       `json:"storeName"`
+	PartsAvailability map[string]partsAvailability `json:"partsAvailability"`
+}
+
+type partsAvailability struct {
+	StorePickEligible       bool   `json:"storePickEligible"`
+	StoreSearchEnabled      bool   `json:"storeSearchEnabled"`
+	StoreSelectionEnabled   bool   `json:"storeSelectionEnabled"`
+	StorePickupQuote        string `json:"storePickupQuote2_0"`
+	PickupSearchQuote       string `json:"pickupSearchQuote"`
+	StorePickupProductTitle string `json:"storePickupProductTitle"`
+	PickupDisplay           string `json:"pickupDisplay"`
+	PickupType              string `json:"pickupType"`
 }
 
 type productInfo struct {
@@ -180,7 +235,8 @@ type productInfo struct {
 }
 
 type result struct {
-	Avaliable bool
-	StoreName string
-	Date      string
+	Avaliable   bool
+	StoreName   string
+	ProductName string
+	Date        string
 }

@@ -4,7 +4,6 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/util"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -236,7 +235,7 @@ func WatchStore(userID int64, stores []string) bool {
 	// add store to user's watching list
 	userStore := make([]interface{}, len(stores))
 	for i, v := range stores {
-		userStore[i] = fmt.Sprintf("%d:%s", userID, v)
+		userStore[i] = v
 	}
 	err := client.SAdd(wrapKeyWithUser("watch_store", userID), userStore...).Err()
 	if err != nil {
@@ -253,6 +252,28 @@ func WatchStore(userID int64, stores []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
+// RemoveStore not watch apple store
+func RemoveStore(userID int64, stores []string) bool {
+	// remove store from user's watching list
+	userStore := make([]interface{}, len(stores))
+	for i, v := range stores {
+		userStore[i] = v
+	}
+	err := client.SRem(wrapKeyWithUser("watch_store", userID), userStore...).Err()
+	if err != nil {
+		log.Error("remove store from redis failed", zap.Int64("user", userID), zap.Any("store", stores), zap.Error(err))
+		return false
+	}
+
+	// get all watching products of user
+	products, ok := GetWatchingProducts(userID)
+	if !ok {
+		return false
+	}
+
+	return AppleTargetRemove(products, stores)
+}
+
 // WatchProduct watch apple product
 func WatchProduct(userID int64, products []string) bool {
 	// add user to watcher
@@ -263,7 +284,7 @@ func WatchProduct(userID int64, products []string) bool {
 	// add products to user's watching list
 	userProduct := make([]interface{}, len(products))
 	for i, v := range products {
-		userProduct[i] = fmt.Sprintf("%d:%s", userID, v)
+		userProduct[i] = v
 	}
 	err := client.SAdd(wrapKeyWithUser("watch_product", userID), userProduct...).Err()
 	if err != nil {
@@ -280,6 +301,28 @@ func WatchProduct(userID int64, products []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
+// RemoveProduct not watch apple product
+func RemoveProduct(userID int64, products []string) bool {
+	// remove products from user's watching list
+	userProduct := make([]interface{}, len(products))
+	for i, v := range products {
+		userProduct[i] = v
+	}
+	err := client.SRem(wrapKeyWithUser("watch_product", userID), userProduct...).Err()
+	if err != nil {
+		log.Error("remove product from redis failed", zap.Int64("user", userID), zap.Any("product", products), zap.Error(err))
+		return false
+	}
+
+	// get all watching stores of user
+	stores, ok := GetWatchingStores(userID)
+	if !ok {
+		return false
+	}
+
+	return AppleTargetRemove(products, stores)
+}
+
 // AppleWatcherRegister apple watcher register
 func AppleWatcherRegister(userID int64) bool {
 	err := client.SAdd(wrapKey("apple_watcher"), userID).Err()
@@ -292,6 +335,9 @@ func AppleWatcherRegister(userID int64) bool {
 
 // AppleTargetRegister apple product and store register
 func AppleTargetRegister(products, stores []string) bool {
+	if len(products) == 0 || len(stores) == 0 {
+		return true
+	}
 	// get all targets
 	targets := make([]interface{}, 0, len(products)*len(stores))
 	for _, store := range stores {
@@ -304,6 +350,29 @@ func AppleTargetRegister(products, stores []string) bool {
 	err := client.SAdd(wrapKey("apple_target"), targets...).Err()
 	if err != nil {
 		log.Error("register target to redis failed", zap.Any("target", targets), zap.Error(err))
+		return false
+	}
+
+	return true
+}
+
+// AppleTargetRemove remove apple product and store
+func AppleTargetRemove(products, stores []string) bool {
+	if len(products) == 0 || len(stores) == 0 {
+		return true
+	}
+	// get all targets
+	targets := make([]interface{}, 0, len(products)*len(stores))
+	for _, store := range stores {
+		for _, product := range products {
+			targets = append(targets, product+":"+store)
+		}
+	}
+
+	// save to redis
+	err := client.SRem(wrapKey("apple_target"), targets...).Err()
+	if err != nil {
+		log.Error("remove target from redis failed", zap.Any("target", targets), zap.Error(err))
 		return false
 	}
 
@@ -342,7 +411,7 @@ func GetTargetList() ([]string, bool) {
 
 // SetProductName set apple product name
 func SetProductName(product, name string) bool {
-	err := client.Set(wrapKey("apple_product_name"), name, 12*time.Hour).Err()
+	err := client.Set(wrapKey("apple_product_name:"+product), name, 24*time.Hour).Err()
 	if err != nil {
 		log.Error("set apple_product_name to redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
 		return false
@@ -352,9 +421,11 @@ func SetProductName(product, name string) bool {
 
 // GetProductName get apple product name
 func GetProductName(product string) string {
-	name, err := client.Get(wrapKey("apple_product_name")).Result()
+	name, err := client.Get(wrapKey("apple_product_name:" + product)).Result()
 	if err != nil {
-		log.Error("get apple_product_name from redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
+		if err != redis.Nil {
+			log.Error("get apple_product_name from redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
+		}
 		return product
 	}
 	return name
@@ -362,9 +433,11 @@ func GetProductName(product string) string {
 
 // SetStoreName set apple store name
 func SetStoreName(store, name string) bool {
-	err := client.Set(wrapKey("apple_store_name"), name, 12*time.Hour).Err()
+	err := client.Set(wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
-		log.Error("set apple_store_name to redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
+		if err != redis.Nil {
+			log.Error("set apple_store_name to redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
+		}
 		return false
 	}
 	return true
@@ -372,7 +445,7 @@ func SetStoreName(store, name string) bool {
 
 // GetStoreName get apple store name
 func GetStoreName(store string) string {
-	name, err := client.Get(wrapKey("apple_store_name")).Result()
+	name, err := client.Get(wrapKey("apple_store_name:" + store)).Result()
 	if err != nil {
 		log.Error("get apple_store_name from redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
 		return store
