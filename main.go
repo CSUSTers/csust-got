@@ -4,6 +4,7 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/entities"
+	"csust-got/iwatch"
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/prom"
@@ -27,6 +28,8 @@ func main() {
 
 	orm.LoadWhiteList()
 	orm.LoadBlackList()
+
+	go iwatch.WatchService()
 
 	bot, err := initBot()
 	if err != nil {
@@ -80,6 +83,8 @@ func main() {
 
 	bot.Handle(OnUserJoined, util.WrapHandler(base.WelcomeNewMember))
 	// bot.Handle(OnUserLeft, base.LeftMember)
+
+	bot.Handle("/iwatch", iwatch.WatchHandler)
 
 	bot.Start()
 }
