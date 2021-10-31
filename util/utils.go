@@ -194,3 +194,27 @@ func GroupCommand(fn func(m *Message)) func(m *Message) {
 		fn(m)
 	}
 }
+
+// IsNumber check rune is number
+func IsNumber(r rune) bool {
+	if r < '0' || r > '9' {
+		return false
+	}
+	return true
+}
+
+// IsUpper check rune is upper
+func IsUpper(r rune) bool {
+	if r < 'A' || r > 'Z' {
+		return false
+	}
+	return true
+}
+
+// IsLower check rune is lower
+func IsLower(r rune) bool {
+	if r < 'a' || r > 'z' {
+		return false
+	}
+	return true
+}

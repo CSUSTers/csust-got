@@ -266,12 +266,12 @@ func RemoveStore(userID int64, stores []string) bool {
 	}
 
 	// get all watching products of user
-	products, ok := GetWatchingProducts(userID)
-	if !ok {
-		return false
-	}
+	// products, ok := GetWatchingProducts(userID)
+	// if !ok {
+	// 	return false
+	// }
 
-	return AppleTargetRemove(products, stores)
+	return true
 }
 
 // WatchProduct watch apple product
@@ -315,12 +315,12 @@ func RemoveProduct(userID int64, products []string) bool {
 	}
 
 	// get all watching stores of user
-	stores, ok := GetWatchingStores(userID)
-	if !ok {
-		return false
-	}
+	// stores, ok := GetWatchingStores(userID)
+	// if !ok {
+	// 	return false
+	// }
 
-	return AppleTargetRemove(products, stores)
+	return true
 }
 
 // AppleWatcherRegister apple watcher register
@@ -331,6 +331,24 @@ func AppleWatcherRegister(userID int64) bool {
 		return false
 	}
 	return true
+}
+
+// GetAppleWatcher get all apple watcher
+func GetAppleWatcher() ([]int64, bool) {
+	users, err := client.SMembers(wrapKey("apple_watcher")).Result()
+	if err != nil {
+		log.Error("get apple user from redis failed", zap.Error(err))
+		return []int64{}, false
+	}
+	userIDs := make([]int64, 0, len(users))
+	for _, v := range users {
+		userID, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+	return userIDs, true
 }
 
 // AppleTargetRegister apple product and store register
@@ -435,9 +453,7 @@ func GetProductName(product string) string {
 func SetStoreName(store, name string) bool {
 	err := client.Set(wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
-		if err != redis.Nil {
-			log.Error("set apple_store_name to redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
-		}
+		log.Error("set apple_store_name to redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
 		return false
 	}
 	return true
@@ -447,8 +463,32 @@ func SetStoreName(store, name string) bool {
 func GetStoreName(store string) string {
 	name, err := client.Get(wrapKey("apple_store_name:" + store)).Result()
 	if err != nil {
-		log.Error("get apple_store_name from redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
+		if err != redis.Nil {
+			log.Error("get apple_store_name from redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
+		}
 		return store
 	}
 	return name
+}
+
+// SetTargetState set apple target last state
+func SetTargetState(target string, avaliable bool) {
+	err := client.Set(wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
+	if err != nil {
+		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
+		return
+	}
+	return
+}
+
+// GetTargetState get apple target last state
+func GetTargetState(target string) bool {
+	r, err := client.Get(wrapKey("apple_target_state:" + target)).Result()
+	if err != nil {
+		if err != redis.Nil {
+			log.Error("get apple_target_state from redis failed", zap.String("target", target), zap.Error(err))
+		}
+		return false
+	}
+	return r == "true"
 }
