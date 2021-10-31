@@ -227,6 +227,9 @@ func GetHitokoto(from bool) string {
 
 // WatchStore watch apple store
 func WatchStore(userID int64, stores []string) bool {
+	if len(stores) == 0 {
+		return true
+	}
 	// add user to watcher
 	if !AppleWatcherRegister(userID) {
 		return false
@@ -254,6 +257,9 @@ func WatchStore(userID int64, stores []string) bool {
 
 // RemoveStore not watch apple store
 func RemoveStore(userID int64, stores []string) bool {
+	if len(stores) == 0 {
+		return true
+	}
 	// remove store from user's watching list
 	userStore := make([]interface{}, len(stores))
 	for i, v := range stores {
@@ -265,17 +271,14 @@ func RemoveStore(userID int64, stores []string) bool {
 		return false
 	}
 
-	// get all watching products of user
-	// products, ok := GetWatchingProducts(userID)
-	// if !ok {
-	// 	return false
-	// }
-
 	return true
 }
 
 // WatchProduct watch apple product
 func WatchProduct(userID int64, products []string) bool {
+	if len(products) == 0 {
+		return true
+	}
 	// add user to watcher
 	if !AppleWatcherRegister(userID) {
 		return false
@@ -303,6 +306,9 @@ func WatchProduct(userID int64, products []string) bool {
 
 // RemoveProduct not watch apple product
 func RemoveProduct(userID int64, products []string) bool {
+	if len(products) == 0 {
+		return true
+	}
 	// remove products from user's watching list
 	userProduct := make([]interface{}, len(products))
 	for i, v := range products {
@@ -313,12 +319,6 @@ func RemoveProduct(userID int64, products []string) bool {
 		log.Error("remove product from redis failed", zap.Int64("user", userID), zap.Any("product", products), zap.Error(err))
 		return false
 	}
-
-	// get all watching stores of user
-	// stores, ok := GetWatchingStores(userID)
-	// if !ok {
-	// 	return false
-	// }
 
 	return true
 }
@@ -374,21 +374,18 @@ func AppleTargetRegister(products, stores []string) bool {
 	return true
 }
 
-// AppleTargetRemove remove apple product and store
-func AppleTargetRemove(products, stores []string) bool {
-	if len(products) == 0 || len(stores) == 0 {
+// AppleTargetRemove remove apple targets
+func AppleTargetRemove(targets ...string) bool {
+	if len(targets) == 0 {
 		return true
 	}
-	// get all targets
-	targets := make([]interface{}, 0, len(products)*len(stores))
-	for _, store := range stores {
-		for _, product := range products {
-			targets = append(targets, product+":"+store)
-		}
+	tar := make([]interface{}, len(targets))
+	for i, v := range targets {
+		tar[i] = v
 	}
 
 	// save to redis
-	err := client.SRem(wrapKey("apple_target"), targets...).Err()
+	err := client.SRem(wrapKey("apple_target"), tar...).Err()
 	if err != nil {
 		log.Error("remove target from redis failed", zap.Any("target", targets), zap.Error(err))
 		return false
@@ -425,6 +422,36 @@ func GetTargetList() ([]string, bool) {
 		return targets, false
 	}
 	return targets, true
+}
+
+// GetTargetMap get and cal target map: target -> userID -> exist
+func GetTargetMap() (map[string]map[int64]struct{}, bool) {
+	userIDs, ok := GetAppleWatcher()
+	if !ok {
+		return nil, false
+	}
+
+	targetMap := make(map[string]map[int64]struct{}, 0)
+	for _, userID := range userIDs {
+		products, productsOK := GetWatchingProducts(userID)
+		stores, storesOK := GetWatchingStores(userID)
+		if !productsOK || !storesOK {
+			log.Warn("get watcher list failed", zap.Int64("user", userID))
+			continue
+		}
+
+		for _, store := range stores {
+			for _, product := range products {
+				target := product + ":" + store
+				if _, ok := targetMap[target]; !ok {
+					targetMap[target] = make(map[int64]struct{})
+				}
+				targetMap[target][userID] = struct{}{}
+			}
+		}
+	}
+
+	return targetMap, true
 }
 
 // SetProductName set apple product name

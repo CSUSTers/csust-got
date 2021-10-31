@@ -56,52 +56,42 @@ func WatchHandler(ctx Context) error {
 	}
 
 	switch cmdType {
-	case "p", "prod", "product":
-		// register product
-		log.Info("register prod", zap.Int64("user", userID), zap.Any("list", args))
+	case "a", "add", "+":
+		// register
+		log.Info("register", zap.Int64("user", userID), zap.Any("list", args))
 		products := make([]string, 0)
-		for _, v := range args {
-			if validProduct(v) {
-				products = append(products, v)
-			}
-		}
-		if len(products) == 0 {
-			return ctx.Reply("no products found")
-		}
-		if orm.WatchProduct(userID, products) {
-			return ctx.Reply("success")
-		}
-		return ctx.Reply("failed")
-	case "s", "store":
-		// register store
-		log.Info("register store", zap.Int64("user", userID), zap.Any("list", args))
 		stores := make([]string, 0)
 		for _, v := range args {
-			if validStore(v) {
+			if isProduct(v) {
+				products = append(products, v)
+			}
+			if isStore(v) {
 				stores = append(stores, v)
 			}
 		}
-		if len(stores) == 0 {
-			return ctx.Reply("no stores found")
+		if len(products) == 0 && len(stores) == 0 {
+			return ctx.Reply("no product/store found")
 		}
-		if orm.WatchStore(userID, stores) {
+		if orm.WatchProduct(userID, products) && orm.WatchStore(userID, stores) {
+			go updateTargets()
 			return ctx.Reply("success")
 		}
 		return ctx.Reply("failed")
-	case "r", "rm", "remove":
+	case "r", "rm", "remove", "d", "del", "delete", "-":
 		// remove store
 		log.Info("remove", zap.Int64("user", userID), zap.Any("list", args))
 		if orm.RemoveProduct(userID, args) && orm.RemoveStore(userID, args) {
+			go removeTargets()
 			return ctx.Reply("success")
 		}
 		return ctx.Reply("failed")
 	default:
-		return ctx.Reply("iwatch <product|store|remove> <prod1|store1> <prod2|store2> ...")
+		return ctx.Reply("iwatch <add|remove> <prod1|store1> <prod2|store2> ...")
 	}
 }
 
 var (
-	watchingMap  = make(map[string]map[int64]struct{}, 0)
+	watchingMap  = make(map[string]map[int64]struct{})
 	watchingLock = sync.RWMutex{}
 )
 
@@ -110,15 +100,8 @@ func WatchService() {
 	resultChan := make(chan *result, 1024)
 	go watchSender(resultChan)
 
-	queryTicker := time.NewTicker(30 * time.Second)
-	updateTicker := time.NewTicker(1 * time.Minute)
-	for {
-		select {
-		case <-queryTicker.C:
-			go watchApple(resultChan)
-		case <-updateTicker.C:
-			go watching()
-		}
+	for range time.Tick(30 * time.Second) {
+		go watchApple(resultChan)
 	}
 }
 
@@ -137,41 +120,12 @@ func watchSender(ch <-chan *result) {
 		}
 		watchingLock.RUnlock()
 		for _, userID := range userList {
-			config.BotConfig.Bot.Send(&User{ID: userID}, msg)
-		}
-	}
-}
-
-// watching watching Apple Store watcher
-func watching() {
-	userIDs, ok := orm.GetAppleWatcher()
-	if !ok {
-		return
-	}
-
-	tmpMap := make(map[string]map[int64]struct{}, 0)
-	for _, userID := range userIDs {
-		products, productsOK := orm.GetWatchingProducts(userID)
-		stores, storesOK := orm.GetWatchingStores(userID)
-		if !productsOK || !storesOK {
-			log.Warn("get watcher list failed", zap.Int64("user", userID))
-			continue
-		}
-
-		for _, store := range stores {
-			for _, product := range products {
-				target := product + ":" + store
-				if _, ok := tmpMap[target]; !ok {
-					tmpMap[target] = make(map[int64]struct{})
-				}
-				tmpMap[target][userID] = struct{}{}
+			_, err := config.BotConfig.Bot.Send(&User{ID: userID}, msg)
+			if err != nil {
+				log.Error("send watching msg failed", zap.Int64("user", userID), zap.String("msg", msg))
 			}
 		}
 	}
-
-	watchingLock.Lock()
-	watchingMap = tmpMap
-	watchingLock.Unlock()
 }
 
 // watchApple Apple Store watcher service
@@ -214,7 +168,7 @@ func getTargetState(product, store string) (*result, error) {
 		return nil, err
 	}
 	req.Header.Set("referer", "https://www.apple.com/shop/buy-iphone")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36")
+	req.Header.Set("user-agent", util.RandUA())
 
 	cli := &http.Client{Timeout: 3 * time.Second}
 	res, err := cli.Do(req)
@@ -342,11 +296,11 @@ type result struct {
 	// Date        string
 }
 
-func validProduct(product string) bool {
+func isProduct(product string) bool {
 	if len(product) != 9 {
 		return false
 	}
-	if product[8] != '/' {
+	if product[7] != '/' {
 		return false
 	}
 	if !util.IsUpper(rune(product[0])) || !util.IsUpper(rune(product[1])) || !util.IsUpper(rune(product[5])) || !util.IsUpper(rune(product[6])) || !util.IsUpper(rune(product[8])) {
@@ -360,7 +314,7 @@ func validProduct(product string) bool {
 	return true
 }
 
-func validStore(store string) bool {
+func isStore(store string) bool {
 	if len(store) != 4 {
 		return false
 	}
@@ -373,4 +327,34 @@ func validStore(store string) bool {
 		}
 	}
 	return true
+}
+
+// watching watching Apple Store watcher
+func updateTargets() {
+	tmpMap, ok := orm.GetTargetMap()
+	if !ok {
+		log.Warn("update watching map failed")
+		return
+	}
+
+	watchingLock.Lock()
+	watchingMap = tmpMap
+	watchingLock.Unlock()
+}
+
+// try remove targets
+func removeTargets() {
+	remTargets := make([]string, 0)
+	if tmpMap, ok := orm.GetTargetMap(); ok {
+		if targetList, ok := orm.GetTargetList(); ok {
+			for _, target := range targetList {
+				if tmpMap[target] != nil {
+					remTargets = append(remTargets, target)
+				}
+			}
+		}
+	}
+	log.Info("remove targets", zap.Any("targets", remTargets))
+	orm.AppleTargetRemove(remTargets...)
+	updateTargets()
 }
