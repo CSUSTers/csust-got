@@ -517,5 +517,5 @@ func GetTargetState(target string) bool {
 		}
 		return false
 	}
-	return r == "true"
+	return r == "1"
 }

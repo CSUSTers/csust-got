@@ -348,7 +348,7 @@ func removeTargets() {
 	if tmpMap, ok := orm.GetTargetMap(); ok {
 		if targetList, ok := orm.GetTargetList(); ok {
 			for _, target := range targetList {
-				if tmpMap[target] != nil {
+				if tmpMap[target] == nil {
 					remTargets = append(remTargets, target)
 				}
 			}
