@@ -100,7 +100,7 @@ func WatchService() {
 	resultChan := make(chan *result, 1024)
 	go watchSender(resultChan)
 
-	for range time.Tick(30 * time.Second) {
+	for range time.Tick(20 * time.Second) {
 		go watchApple(resultChan)
 	}
 }
