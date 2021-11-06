@@ -100,7 +100,7 @@ func WatchService() {
 	resultChan := make(chan *result, 1024)
 	go watchSender(resultChan)
 
-	for range time.Tick(20 * time.Second) {
+	for range time.Tick(30 * time.Second) {
 		go watchApple(resultChan)
 	}
 }
@@ -155,7 +155,7 @@ func watchApple(ch chan<- *result) {
 			ch <- r
 		}
 		orm.SetTargetState(t, r.Avaliable)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(time.Second)
 	}
 }
 
