@@ -321,7 +321,7 @@ func isStore(store string) bool {
 	if store[0] != 'R' {
 		return false
 	}
-	for _, v := range store {
+	for _, v := range store[1:] {
 		if !util.IsNumber(v) {
 			return false
 		}
