@@ -119,8 +119,8 @@ jobs:
         with:
           host: ${{ secrets.HOST_DEV }}
           port: ${{ secrets.PORT_DEV }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.PRIVATE_KEY }}
+          username: ${{ secrets.USERNAME_DEV }}
+          key: ${{ secrets.PRIVATE_KEY_DEV }}
           script: cd csust-got && docker-compose pull && docker-compose up -d
       
       - name: Release Deployment
