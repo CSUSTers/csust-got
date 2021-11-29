@@ -41,14 +41,14 @@ func main() {
 	bot.Handle("/say_hello", base.Hello)
 	bot.Handle("/hello_to_all", base.HelloToAll)
 
-	bot.Handle("/id", util.WrapHandler(util.PrivateCommand(base.GetUserID)))
+	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
 	bot.Handle("/cid", base.GetChatID)
 	bot.Handle("/info", base.Info)
 	bot.Handle("/links", base.Links)
 
 	// bot.Handle("/history", base.History)
-	bot.Handle("/forward", util.WrapHandler(util.GroupCommand(base.Forward)))
-	bot.Handle("/mc", util.WrapHandler(util.GroupCommand(base.MC)))
+	bot.Handle("/forward", util.GroupCommand(base.Forward))
+	bot.Handle("/mc", util.GroupCommand(base.MC))
 
 	bot.Handle("/sleep", base.Sleep)
 	bot.Handle("/no_sleep", base.NoSleep)
@@ -71,20 +71,20 @@ func main() {
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/fake_ban_myself", util.WrapHandler(base.FakeBanMyself))
-	bot.Handle("/fake_ban", util.WrapHandler(util.GroupCommand(restrict.FakeBan)))
-	bot.Handle("/kill", util.WrapHandler(util.GroupCommand(restrict.Kill)))
-	bot.Handle("/ban_myself", util.WrapHandler(util.GroupCommand(restrict.BanMyself)))
-	bot.Handle("/ban", util.WrapHandler(util.GroupCommand(restrict.Ban)))
-	bot.Handle("/ban_soft", util.WrapHandler(util.GroupCommand(restrict.SoftBan)))
-	bot.Handle("/no_sticker", util.WrapHandler(util.GroupCommand(restrict.NoSticker)))
-	bot.Handle("/shutdown", util.WrapHandler(util.GroupCommand(base.Shutdown)))
-	bot.Handle("/halt", util.WrapHandler(util.GroupCommand(base.Shutdown)))
-	bot.Handle("/boot", util.WrapHandler(util.GroupCommand(base.Boot)))
+	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
+	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
+	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
+	bot.Handle("/ban", util.GroupCommand(restrict.Ban))
+	bot.Handle("/ban_soft", util.GroupCommand(restrict.SoftBan))
+	bot.Handle("/no_sticker", util.GroupCommand(restrict.NoSticker))
+	bot.Handle("/shutdown", util.GroupCommand(base.Shutdown))
+	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
+	bot.Handle("/boot", util.GroupCommand(base.Boot))
 
 	bot.Handle(OnUserJoined, util.WrapHandler(base.WelcomeNewMember))
 	// bot.Handle(OnUserLeft, base.LeftMember)
 
-	bot.Handle("/iwatch", iwatch.WatchHandler)
+	bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 
 	bot.Start()
 }

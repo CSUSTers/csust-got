@@ -431,7 +431,7 @@ func GetTargetMap() (map[string]map[int64]struct{}, bool) {
 		return nil, false
 	}
 
-	targetMap := make(map[string]map[int64]struct{}, 0)
+	targetMap := make(map[string]map[int64]struct{})
 	for _, userID := range userIDs {
 		products, productsOK := GetWatchingProducts(userID)
 		stores, storesOK := GetWatchingStores(userID)
