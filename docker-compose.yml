@@ -24,7 +24,7 @@ services:
       - "7777:7777"
 
   redis:
-    image: redis
+    image: redis:6.0
     container_name: bot-redis
     <<: *common
     expose:

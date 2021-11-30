@@ -34,9 +34,9 @@ func Info(ctx Context) error {
 }
 
 // GetUserID is handle for command `/id`
-func GetUserID(m *Message) {
-	msg := fmt.Sprintf("Your userID is %d", m.Sender.ID)
-	util.SendReply(m.Chat, msg, m)
+func GetUserID(ctx Context) error {
+	msg := fmt.Sprintf("Your userID is %d", ctx.Sender().ID)
+	return ctx.Reply(msg)
 }
 
 // GetChatID is handle for command `/cid`

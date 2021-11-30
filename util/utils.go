@@ -174,23 +174,46 @@ func StringsToInts(s []string) []int64 {
 }
 
 // PrivateCommand warp command to private call only
-func PrivateCommand(fn func(m *Message)) func(m *Message) {
-	return func(m *Message) {
-		if m.FromGroup() {
-			SendReply(m.Chat, "这个命令不支持群里使用哦", m)
-			return
+func PrivateCommand(fn HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat().Type != ChatPrivate {
+			return ctx.Reply("这个命令只能私聊使用哦")
 		}
-		fn(m)
+		return fn(ctx)
 	}
 }
 
 // GroupCommand warp command to group call only
-func GroupCommand(fn func(m *Message)) func(m *Message) {
-	return func(m *Message) {
-		if m.Private() {
-			SendReply(m.Chat, "这个命令不支持私聊使用哦", m)
-			return
+func GroupCommand(fn func(m *Message)) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat().Type == ChatPrivate {
+			return ctx.Reply("这个命令不支持私聊使用哦")
 		}
-		fn(m)
+		fn(ctx.Message())
+		return nil
 	}
+}
+
+// IsNumber check rune is number
+func IsNumber(r rune) bool {
+	if r < '0' || r > '9' {
+		return false
+	}
+	return true
+}
+
+// IsUpper check rune is upper
+func IsUpper(r rune) bool {
+	if r < 'A' || r > 'Z' {
+		return false
+	}
+	return true
+}
+
+// IsLower check rune is lower
+func IsLower(r rune) bool {
+	if r < 'a' || r > 'z' {
+		return false
+	}
+	return true
 }
