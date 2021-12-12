@@ -70,7 +70,7 @@ func main() {
 
 	bot.Handle("/run_after", base.RunTask)
 
-	bot.Handle("/fake_ban_myself", util.WrapHandler(base.FakeBanMyself))
+	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
 	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
 	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
 	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
@@ -81,7 +81,7 @@ func main() {
 	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
 	bot.Handle("/boot", util.GroupCommand(base.Boot))
 
-	bot.Handle(OnUserJoined, util.WrapHandler(base.WelcomeNewMember))
+	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
 
 	bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
