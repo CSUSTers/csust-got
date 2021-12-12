@@ -3,10 +3,7 @@ package util
 import (
 	"csust-got/config"
 	"csust-got/log"
-	"fmt"
 	"math/rand"
-	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -14,24 +11,6 @@ import (
 
 	"go.uber.org/zap"
 )
-
-// WrapHandler wrap a handler recv `*telebot.Message` to `telebot.Context`
-func WrapHandler(fn func(*Message)) HandlerFunc {
-	return func(ctx Context) error {
-		var err error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("handler error: %v", r)
-					log.Error("handler error", zap.Error(err),
-						zap.String("Handler", runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()))
-				}
-			}()
-			fn(ctx.Message())
-		}()
-		return err
-	}
-}
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error
 func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int, ok bool) {

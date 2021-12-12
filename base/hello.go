@@ -116,8 +116,8 @@ func Forward(m *Message) {
 
 // FakeBanMyself is handle for command `fake_ban_myself`.
 // Use it to just get a reply like command `ban_myself`.
-func FakeBanMyself(m *Message) {
+func FakeBanMyself(ctx Context) error {
 	sec := time.Duration(rand.Intn(60)+60) * time.Second
 	text := "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
-	util.SendReply(m.Chat, text, m)
+	return ctx.Reply(text)
 }

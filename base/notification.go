@@ -10,12 +10,15 @@ import (
 
 // WelcomeNewMember is handle for welcome new member.
 // when someone new join group, bot will send welcome message.
-func WelcomeNewMember(m *Message) {
-	for _, member := range m.UsersJoined {
+func WelcomeNewMember(ctx Context) error {
+	for _, member := range ctx.Message().UsersJoined {
 		text := config.BotConfig.MessageConfig.WelcomeMessage + util.GetName(&member)
-		util.SendMessage(m.Chat, text)
-		prom.NewMember(m.Chat.Title)
+		prom.NewMember(ctx.Chat().Title)
+		if err := ctx.Send(text); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // LeftMember is handle for some member left.
