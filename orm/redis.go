@@ -80,7 +80,7 @@ func LoadWhiteList() {
 func LoadBlackList() {
 	chats := util.StringsToInts(loadSpecialList("black_list"))
 	log.Info("Black List has load.", zap.Int("length", len(chats)))
-	config.BotConfig.BlackListConfig.Chats = chats
+	config.BotConfig.BlockListConfig.Chats = chats
 }
 
 // IsNoStickerMode check group in NoSticker mode

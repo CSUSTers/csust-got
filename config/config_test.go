@@ -234,6 +234,6 @@ func TestSpecialListConfig(t *testing.T) {
 	readConfig()
 	defer viper.Reset()
 
-	req.True(BotConfig.BlackListConfig.Enabled)
+	req.True(BotConfig.BlockListConfig.Enabled)
 	req.True(BotConfig.WhiteListConfig.Enabled)
 }
