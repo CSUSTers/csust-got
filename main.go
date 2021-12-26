@@ -1,6 +1,10 @@
 package main
 
 import (
+	"net/http"
+	"net/url"
+	"time"
+
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/entities"
@@ -10,13 +14,8 @@ import (
 	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
-	"net/http"
-	"net/url"
-	"time"
-
-	. "gopkg.in/tucnak/telebot.v3"
-
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 func main() {

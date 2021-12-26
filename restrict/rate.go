@@ -1,15 +1,14 @@
 package restrict
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/util"
 	"strconv"
 	"time"
 
-	. "gopkg.in/tucnak/telebot.v3"
-
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/util"
 	"golang.org/x/time/rate"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 var limitMap = make(map[string]*rate.Limiter, 16)
@@ -30,7 +29,7 @@ func CheckLimit(m *Message) bool {
 	return true
 }
 
-// return false if message should be limit
+// return false if message should be limit.
 func checkRate(m *Message, limiter *rate.Limiter) bool {
 	rateConfig := config.BotConfig.RateLimitConfig
 	if m.Sticker != nil {

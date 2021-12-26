@@ -8,7 +8,7 @@ import (
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// BotCommand - command in message
+// BotCommand - command in message.
 type BotCommand struct {
 	name string
 	args []string
@@ -19,7 +19,7 @@ var (
 	cmdRegex, _ = regexp.Compile(`^/[0-9a-zA-Z_]+$`)
 )
 
-// FromMessage - get command in a message
+// FromMessage - get command in a message.
 func FromMessage(msg *Message) *BotCommand {
 	args := splitText(strings.TrimSpace(msg.Text))
 	if len(args) == 0 {
@@ -43,17 +43,17 @@ func splitText(txt string) []string {
 	return ts
 }
 
-// Name - command name
+// Name - command name.
 func (c BotCommand) Name() string {
 	return c.name
 }
 
-// Argc - length of args
+// Argc - length of args.
 func (c BotCommand) Argc() int {
 	return len(c.args)
 }
 
-// Arg - get arg at index `idx`
+// Arg - get arg at index `idx`.
 func (c BotCommand) Arg(idx int) string {
 	if idx >= c.Argc() {
 		return ""
@@ -61,7 +61,7 @@ func (c BotCommand) Arg(idx int) string {
 	return c.args[idx]
 }
 
-// MultiArgsFrom - get args from index `idx`
+// MultiArgsFrom - get args from index `idx`.
 func (c BotCommand) MultiArgsFrom(idx int) []string {
 	if idx >= c.Argc() {
 		return []string{}
@@ -69,7 +69,7 @@ func (c BotCommand) MultiArgsFrom(idx int) []string {
 	return c.args[idx:]
 }
 
-// ArgAllInOneFrom - get all args as one string
+// ArgAllInOneFrom - get all args as one string.
 func (c BotCommand) ArgAllInOneFrom(idx int) string {
 	arg := strings.Builder{}
 	for _, s := range c.MultiArgsFrom(idx) {

@@ -3,20 +3,19 @@ package log
 import (
 	"csust-got/config"
 	"csust-got/prom"
-
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 var logger *zap.Logger
 
-// InitLogger init logger
+// InitLogger init logger.
 func InitLogger() {
 	logger = NewLogger()
 	zap.ReplaceGlobals(logger)
 }
 
-// NewLogger new logger
+// NewLogger new logger.
 func NewLogger() *zap.Logger {
 	var logConfig zap.Config
 	if config.BotConfig.DebugMode {
@@ -85,43 +84,43 @@ func prodConfig() zap.Config {
 	}
 }
 
-// Debug print log at debug level
+// Debug print log at debug level.
 func Debug(msg string, fields ...zap.Field) {
 	logger.Debug(msg, fields...)
 	prom.Log(zap.DebugLevel.String())
 }
 
-// Info print log at info level
+// Info print log at info level.
 func Info(msg string, fields ...zap.Field) {
 	logger.Info(msg, fields...)
 	prom.Log(zap.InfoLevel.String())
 }
 
-// Warn print log at warning level
+// Warn print log at warning level.
 func Warn(msg string, fields ...zap.Field) {
 	logger.Warn(msg, fields...)
 	prom.Log(zap.WarnLevel.String())
 }
 
-// Error print log at error level
+// Error print log at error level.
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
 	prom.Log(zap.ErrorLevel.String())
 }
 
-// Fatal print log at fatal level, then calls os.Exit(1)
+// Fatal print log at fatal level, then calls os.Exit(1).
 func Fatal(msg string, fields ...zap.Field) {
 	logger.Fatal(msg, fields...)
 	prom.Log(zap.FatalLevel.String())
 }
 
-// Panic print log at panic level, then panic
+// Panic print log at panic level, then panic.
 func Panic(msg string, fields ...zap.Field) {
 	logger.Panic(msg, fields...)
 	prom.Log(zap.PanicLevel.String())
 }
 
-// Sync sync logger
+// Sync sync logger.
 func Sync() {
 	if err := logger.Sync(); err != nil {
 		logger.Error("Logger Sync failed", zap.Error(err))

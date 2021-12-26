@@ -1,11 +1,6 @@
 package iwatch
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/log"
-	"csust-got/orm"
-	"csust-got/util"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,11 +11,16 @@ import (
 	"sync"
 	"time"
 
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/log"
+	"csust-got/orm"
+	"csust-got/util"
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// WatchHandler Apple Store Handler
+// WatchHandler Apple Store Handler.
 func WatchHandler(ctx Context) error {
 	command := entities.FromMessage(ctx.Message())
 
@@ -95,7 +95,7 @@ var (
 	watchingLock = sync.RWMutex{}
 )
 
-// WatchService Apple Store watcher service
+// WatchService Apple Store watcher service.
 func WatchService() {
 	resultChan := make(chan *result, 1024)
 	go watchSender(resultChan)
@@ -105,7 +105,7 @@ func WatchService() {
 	}
 }
 
-// watchSender watching Apple Store watcher send notify
+// watchSender watching Apple Store watcher send notify.
 func watchSender(ch <-chan *result) {
 	for r := range ch {
 		msg := "现在没有货了！"
@@ -128,7 +128,7 @@ func watchSender(ch <-chan *result) {
 	}
 }
 
-// watchApple Apple Store watcher service
+// watchApple Apple Store watcher service.
 func watchApple(ch chan<- *result) {
 	targets, ok := orm.GetTargetList()
 	if !ok {
@@ -329,7 +329,7 @@ func isStore(store string) bool {
 	return true
 }
 
-// watching watching Apple Store watcher
+// watching watching Apple Store watcher.
 func updateTargets() {
 	tmpMap, ok := orm.GetTargetMap()
 	if !ok {
@@ -342,7 +342,7 @@ func updateTargets() {
 	watchingLock.Unlock()
 }
 
-// try remove targets
+// try remove targets.
 func removeTargets() {
 	remTargets := make([]string, 0)
 	if tmpMap, ok := orm.GetTargetMap(); ok {

@@ -1,14 +1,15 @@
 package base
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/orm"
-	"csust-got/util"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
+
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/orm"
+	"csust-got/util"
 
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -19,12 +20,12 @@ var helloText = []string{
 	"我是一只只会嗦hello的咸鱼.",
 }
 
-// Hello is handle for command `hello`
+// Hello is handle for command `hello`.
 func Hello(ctx Context) error {
 	return ctx.Reply("hello ^_^ " + util.RandomChoice(helloText))
 }
 
-// HelloToAll is handle for command `hello_to_all`
+// HelloToAll is handle for command `hello_to_all`.
 func HelloToAll(ctx Context) error {
 	text := "大家好!"
 	if ctx.Message().Private() {
@@ -33,12 +34,12 @@ func HelloToAll(ctx Context) error {
 	return ctx.Send(text + util.RandomChoice(helloText))
 }
 
-// Links is handle for command `links`
+// Links is handle for command `links`.
 func Links(ctx Context) error {
 	return ctx.Send(config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
 }
 
-// Shutdown is handler for command `shutdown`
+// Shutdown is handler for command `shutdown`.
 func Shutdown(m *Message) {
 	if orm.IsShutdown(m.Chat.ID) {
 		util.SendReply(m.Chat, "我已经睡了，还请不要再找我了，可以使用/boot命令叫醒我……晚安:)", m)
@@ -52,7 +53,7 @@ func Shutdown(m *Message) {
 	util.SendReply(m.Chat, text, m)
 }
 
-// Boot is handler for command `boot`
+// Boot is handler for command `boot`.
 func Boot(m *Message) {
 	text := GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)"
 	orm.Boot(m.Chat.ID)
@@ -62,9 +63,9 @@ func Boot(m *Message) {
 	util.SendReply(m.Chat, text, m)
 }
 
-// Sleep is handle for command `sleep`
+// Sleep is handle for command `sleep`.
 func Sleep(ctx Context) error {
-	msg := ""
+	var msg string
 	t := time.Now().In(util.TimeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
 		msg = "晚安, 明天醒来就能看到我哦！"
@@ -76,12 +77,12 @@ func Sleep(ctx Context) error {
 	return ctx.Reply(msg)
 }
 
-// NoSleep is handle for command `no_sleep`
+// NoSleep is handle for command `no_sleep`.
 func NoSleep(ctx Context) error {
 	return ctx.Reply(config.BotConfig.MessageConfig.NoSleep)
 }
 
-// Forward is handle for command `forward`
+// Forward is handle for command `forward`.
 func Forward(m *Message) {
 	command := entities.FromMessage(m)
 	forwardMsg := &Message{

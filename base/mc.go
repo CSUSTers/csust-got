@@ -1,19 +1,20 @@
 package base
 
 import (
+	"fmt"
+	"strings"
+
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/prom"
 	"csust-got/util"
-	"fmt"
-	"strings"
 
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// MC we not use message count anymore
+// MC we not use message count anymore.
 func MC(m *Message) {
 	if !config.BotConfig.PromConfig.Enabled {
 		util.SendReply(m.Chat, "再mc自杀", m)

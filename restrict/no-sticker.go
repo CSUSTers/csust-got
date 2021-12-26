@@ -4,13 +4,11 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
-
-	. "gopkg.in/tucnak/telebot.v3"
-
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// NoSticker is a switch for NoStickerMode
+// NoSticker is a switch for NoStickerMode.
 func NoSticker(m *Message) {
 	orm.ToggleNoStickerMode(m.Chat.ID)
 	text := "NoStickerMode is off."
