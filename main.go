@@ -109,7 +109,7 @@ func initBot() (*Bot, error) {
 		Updates:   512,
 		ParseMode: ModeDefault,
 		OnError:   errorHandler,
-		Poller:    initPoller(),
+		Poller:    &LongPoller{Timeout: 10 * time.Second},
 		Client:    httpClient,
 	}
 	if config.BotConfig.DebugMode {
@@ -121,115 +121,110 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
+	bot.Use(blockMiddleware, fakeBanMiddleware, rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
+
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
 	return bot, nil
 }
 
-func initPoller() *MiddlewarePoller {
-	defaultPoller := &LongPoller{Timeout: 10 * time.Second}
-	blackListPoller := NewMiddlewarePoller(defaultPoller, blackListFilter)
-	fakeBanPoller := NewMiddlewarePoller(blackListPoller, fakeBanFilter)
-	fakeBanPoller.Capacity = 16
-	rateLimitPoller := NewMiddlewarePoller(fakeBanPoller, rateLimitFilter)
-	noStickerPoller := NewMiddlewarePoller(rateLimitPoller, noStickerFilter)
-	noStickerPoller.Capacity = 16
-	promPoller := NewMiddlewarePoller(noStickerPoller, promFilter)
-	shutdownPoller := NewMiddlewarePoller(promPoller, shutdownFilter)
-	shutdownPoller.Capacity = 16
-	return shutdownPoller
-}
-
-func blackListFilter(update *Update) bool {
-	if update.Message == nil {
-		return true
-	}
-	m := update.Message
-	if config.BotConfig.BlackListConfig.Check(m.Chat.ID) {
-		log.Info("message ignore by black list", zap.String("chat", m.Chat.Title))
-		return false
-	}
-	if config.BotConfig.BlackListConfig.Check(int64(m.Sender.ID)) {
-		log.Info("message ignore by black list", zap.String("user", m.Sender.Username))
-		return false
-	}
-	return true
-}
-
-func fakeBanFilter(update *Update) bool {
-	if update.Message == nil {
-		return true
-	}
-	m := update.Message
-	if orm.IsBanned(m.Chat.ID, m.Sender.ID) {
-		util.DeleteMessage(m)
-		log.Info("message deleted by fake ban", zap.String("chat", m.Chat.Title),
-			zap.String("user", m.Sender.Username))
-		return false
-	}
-	return true
-}
-
-func rateLimitFilter(update *Update) bool {
-	if update.Message == nil || update.Message.Private() {
-		return true
-	}
-	m := update.Message
-	whiteListConfig := config.BotConfig.WhiteListConfig
-	if !whiteListConfig.Enabled || !whiteListConfig.Check(m.Chat.ID) {
-		return true
-	}
-	if !restrict.CheckLimit(m) {
-		log.Info("message deleted by rate limit", zap.String("chat", m.Chat.Title),
-			zap.String("user", m.Sender.Username))
-		return false
-	}
-	return true
-}
-
-func shutdownFilter(update *Update) bool {
-	if update.Message == nil {
-		return true
-	}
-	m := update.Message
-	if m.Text != "" {
-		cmd := entities.FromMessage(m)
-		if cmd != nil && cmd.Name() == "boot" {
-			return true
+func blockMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat() == nil || ctx.Sender() == nil {
+			return next(ctx)
 		}
+		if config.BotConfig.BlockListConfig.Check(ctx.Chat().ID) {
+			log.Info("chat ignore by block list", zap.String("chat", ctx.Chat().Title))
+			return nil
+		}
+		if config.BotConfig.BlockListConfig.Check(int64(ctx.Sender().ID)) {
+			log.Info("sender ignore by block list", zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
 	}
-	if orm.IsShutdown(m.Chat.ID) {
-		log.Info("message ignore by shutdown", zap.String("chat", m.Chat.Title),
-			zap.String("user", m.Sender.Username))
-		return false
-	}
-	return true
 }
 
-func noStickerFilter(update *Update) bool {
-	if update.Message == nil || update.Message.Sticker == nil {
-		return true
+func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil {
+			return next(ctx)
+		}
+		if orm.IsBanned(ctx.Chat().ID, ctx.Sender().ID) {
+			util.DeleteMessage(ctx.Message())
+			log.Info("message deleted by fake ban", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
 	}
-	m := update.Message
-	if !orm.IsShutdown(m.Chat.ID) && orm.IsNoStickerMode(m.Chat.ID) {
-		util.DeleteMessage(m)
-		log.Info("message deleted by no sticker", zap.String("chat", m.Chat.Title),
-			zap.String("user", m.Sender.Username))
-		return false
-	}
-	return true
 }
 
-func promFilter(update *Update) bool {
-	prom.DailUpdate(update)
-	if update.Message == nil {
-		return true
+func rateMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil || ctx.Chat().Type == ChatPrivate {
+			return next(ctx)
+		}
+		whiteListConfig := config.BotConfig.WhiteListConfig
+		if !whiteListConfig.Enabled || !whiteListConfig.Check(ctx.Chat().ID) {
+			return next(ctx)
+		}
+		if !restrict.CheckLimit(ctx.Message()) {
+			log.Info("message deleted by rate limit", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
 	}
-	m := update.Message
-	command := entities.FromMessage(m)
-	if command != nil {
-		log.Info("bot receive command", zap.String("chat", m.Chat.Title),
-			zap.String("user", m.Sender.Username), zap.String("command", m.Text))
+}
+
+func noStickerMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil || ctx.Message().Sticker == nil {
+			return next(ctx)
+		}
+		if !orm.IsShutdown(ctx.Chat().ID) && orm.IsNoStickerMode(ctx.Chat().ID) {
+			util.DeleteMessage(ctx.Message())
+			log.Info("message deleted by no sticker", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
 	}
-	return true
+}
+
+func promMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Message() == nil {
+			return next(ctx)
+		}
+		prom.DialMessage(ctx.Message())
+		m := ctx.Message()
+		command := entities.FromMessage(m)
+		if command != nil {
+			log.Info("bot receive command", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username), zap.String("command", m.Text))
+		}
+		return next(ctx)
+	}
+}
+
+func shutdownMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil {
+			return next(ctx)
+		}
+		if ctx.Message().Text != "" {
+			cmd := entities.FromMessage(ctx.Message())
+			if cmd != nil && cmd.Name() == "boot" {
+				return next(ctx)
+			}
+		}
+		if orm.IsShutdown(ctx.Chat().ID) {
+			log.Info("message ignore by shutdown", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
+	}
 }

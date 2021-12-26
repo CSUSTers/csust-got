@@ -56,12 +56,8 @@ func newLabels(base, labels prometheus.Labels) prometheus.Labels {
 	return labels
 }
 
-// DailUpdate - dail an update
-func DailUpdate(update *Update) {
-	if update.Message == nil {
-		return
-	}
-	m := update.Message
+// DialMessage - dial an message
+func DialMessage(m *Message) {
 	if m.Private() {
 		return
 	}

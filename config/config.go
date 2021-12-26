@@ -40,10 +40,10 @@ func NewBotConfig() *Config {
 	config.RestrictConfig = new(restrictConfig)
 	config.MessageConfig = new(messageConfig)
 	config.WhiteListConfig = new(specialListConfig)
-	config.BlackListConfig = new(specialListConfig)
+	config.BlockListConfig = new(specialListConfig)
 	config.PromConfig = new(promConfig)
 	config.WhiteListConfig.SetName("white_list")
-	config.BlackListConfig.SetName("black_list")
+	config.BlockListConfig.SetName("black_list")
 	return config
 }
 
@@ -61,7 +61,7 @@ type Config struct {
 	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
 	MessageConfig   *messageConfig
-	BlackListConfig *specialListConfig
+	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	PromConfig      *promConfig
 }
@@ -113,7 +113,7 @@ func readConfig() {
 	BotConfig.RateLimitConfig.readConfig()
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
-	BotConfig.BlackListConfig.readConfig()
+	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
 
 }
@@ -134,7 +134,7 @@ func checkConfig() {
 	BotConfig.RestrictConfig.checkConfig()
 	BotConfig.RateLimitConfig.checkConfig()
 	BotConfig.MessageConfig.checkConfig()
-	BotConfig.BlackListConfig.checkConfig()
+	BotConfig.BlockListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
 	BotConfig.PromConfig.checkConfig()
 }
