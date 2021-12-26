@@ -1,25 +1,25 @@
 package orm
 
 import (
-	"csust-got/config"
-	"csust-got/log"
-	"csust-got/util"
 	"strconv"
 	"strings"
 	"time"
 
+	"csust-got/config"
+	"csust-got/log"
+	"csust-got/util"
 	"github.com/go-redis/redis/v7"
 	"go.uber.org/zap"
 )
 
 var client *redis.Client
 
-// InitRedis init redis
+// InitRedis init redis.
 func InitRedis() {
 	client = NewClient()
 }
 
-// NewClient new redis client
+// NewClient new redis client.
 func NewClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
 		Addr:     config.BotConfig.RedisConfig.RedisAddr,
@@ -30,8 +30,7 @@ func NewClient() *redis.Client {
 // Ping can ping a redis client.
 // return true if ping success.
 func Ping(c *redis.Client) bool {
-	_, err := c.Ping().Result()
-	if err != nil {
+	if _, err := c.Ping().Result(); err != nil {
 		log.Error("ping redis failed", zap.Error(err))
 		return false
 	}
@@ -69,21 +68,21 @@ func loadSpecialList(key string) []string {
 	return list
 }
 
-// LoadWhiteList load white list
+// LoadWhiteList load white list.
 func LoadWhiteList() {
 	chats := util.StringsToInts(loadSpecialList("white_list"))
 	log.Info("White List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.WhiteListConfig.Chats = chats
 }
 
-// LoadBlackList load black list
+// LoadBlackList load black list.
 func LoadBlackList() {
 	chats := util.StringsToInts(loadSpecialList("black_list"))
 	log.Info("Black List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.BlockListConfig.Chats = chats
 }
 
-// IsNoStickerMode check group in NoSticker mode
+// IsNoStickerMode check group in NoSticker mode.
 func IsNoStickerMode(chatID int64) bool {
 	ok, err := GetBool(wrapKeyWithChat("no_sticker", chatID))
 	if err != nil {
@@ -93,7 +92,7 @@ func IsNoStickerMode(chatID int64) bool {
 	return ok
 }
 
-//ToggleNoStickerMode toggle NoSticker mode
+//ToggleNoStickerMode toggle NoSticker mode.
 func ToggleNoStickerMode(chatID int64) bool {
 	err := ToggleBool(wrapKeyWithChat("no_sticker", chatID))
 	if err != nil {
@@ -102,7 +101,7 @@ func ToggleNoStickerMode(chatID int64) bool {
 	return err == nil
 }
 
-// Shutdown shutdown bot
+// Shutdown shutdown bot.
 func Shutdown(chatID int64) {
 	err := WriteBool(wrapKeyWithChat("shutdown", chatID), true, 0)
 	if err != nil {
@@ -110,7 +109,7 @@ func Shutdown(chatID int64) {
 	}
 }
 
-// Boot boot bot
+// Boot boot bot.
 func Boot(chatID int64) {
 	err := WriteBool(wrapKeyWithChat("shutdown", chatID), false, 0)
 	if err != nil {
@@ -118,7 +117,7 @@ func Boot(chatID int64) {
 	}
 }
 
-// IsShutdown check bot is shutdown
+// IsShutdown check bot is shutdown.
 func IsShutdown(chatID int64) bool {
 	ok, err := GetBool(wrapKeyWithChat("shutdown", chatID))
 	if err != nil {
@@ -128,7 +127,7 @@ func IsShutdown(chatID int64) bool {
 	return ok
 }
 
-// IsFakeBanInCD check fake ban is in cd
+// IsFakeBanInCD check fake ban is in cd.
 func IsFakeBanInCD(chatID int64, userID int64) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
@@ -138,7 +137,7 @@ func IsFakeBanInCD(chatID int64, userID int64) bool {
 	return ok
 }
 
-// IsBanned check some one is banned
+// IsBanned check some one is banned.
 func IsBanned(chatID int64, userID int64) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -148,7 +147,7 @@ func IsBanned(chatID int64, userID int64) bool {
 	return ok
 }
 
-// GetBannedDuration get some one banned duration
+// GetBannedDuration get some one banned duration.
 func GetBannedDuration(chatID int64, userID int64) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -157,7 +156,7 @@ func GetBannedDuration(chatID int64, userID int64) time.Duration {
 	return sec
 }
 
-// GetBannerDuration get fake ban cd
+// GetBannerDuration get fake ban cd.
 func GetBannerDuration(chatID int64, userID int64) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banner", chatID, userID))
 	if err != nil {
@@ -166,7 +165,7 @@ func GetBannerDuration(chatID int64, userID int64) time.Duration {
 	return sec
 }
 
-// ResetBannedDuration reset banned duration
+// ResetBannedDuration reset banned duration.
 func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
 	ok, err := client.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
@@ -176,14 +175,14 @@ func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
 	return ok
 }
 
-// AddBanDuration add ban duration
+// AddBanDuration add ban duration.
 func AddBanDuration(chatID int64, bannerID, bannedID int64, ad time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
 	d := GetBannedDuration(chatID, bannedID)
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
-// Ban ban some one
+// Ban ban some one.
 func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
@@ -194,7 +193,7 @@ func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 	return true
 }
 
-// MakeBannerCD make banner in cd
+// MakeBannerCD make banner in cd.
 func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
 	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
@@ -204,7 +203,7 @@ func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
 	return true
 }
 
-// StoreHitokoto store hitokoto
+// StoreHitokoto store hitokoto.
 func StoreHitokoto(hitokoto string) {
 	err := client.SAdd(wrapKey("hitokoto"), hitokoto).Err()
 	if err != nil {
@@ -212,7 +211,7 @@ func StoreHitokoto(hitokoto string) {
 	}
 }
 
-// GetHitokoto get hitokoto
+// GetHitokoto get hitokoto.
 func GetHitokoto(from bool) string {
 	res, err := client.SRandMember(wrapKey("hitokoto")).Result()
 	if err != nil {
@@ -225,7 +224,7 @@ func GetHitokoto(from bool) string {
 	return res
 }
 
-// WatchStore watch apple store
+// WatchStore watch apple store.
 func WatchStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -255,7 +254,7 @@ func WatchStore(userID int64, stores []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
-// RemoveStore not watch apple store
+// RemoveStore not watch apple store.
 func RemoveStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -274,7 +273,7 @@ func RemoveStore(userID int64, stores []string) bool {
 	return true
 }
 
-// WatchProduct watch apple product
+// WatchProduct watch apple product.
 func WatchProduct(userID int64, products []string) bool {
 	if len(products) == 0 {
 		return true
@@ -304,7 +303,7 @@ func WatchProduct(userID int64, products []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
-// RemoveProduct not watch apple product
+// RemoveProduct not watch apple product.
 func RemoveProduct(userID int64, products []string) bool {
 	if len(products) == 0 {
 		return true
@@ -323,7 +322,7 @@ func RemoveProduct(userID int64, products []string) bool {
 	return true
 }
 
-// AppleWatcherRegister apple watcher register
+// AppleWatcherRegister apple watcher register.
 func AppleWatcherRegister(userID int64) bool {
 	err := client.SAdd(wrapKey("apple_watcher"), userID).Err()
 	if err != nil {
@@ -333,7 +332,7 @@ func AppleWatcherRegister(userID int64) bool {
 	return true
 }
 
-// GetAppleWatcher get all apple watcher
+// GetAppleWatcher get all apple watcher.
 func GetAppleWatcher() ([]int64, bool) {
 	users, err := client.SMembers(wrapKey("apple_watcher")).Result()
 	if err != nil {
@@ -351,7 +350,7 @@ func GetAppleWatcher() ([]int64, bool) {
 	return userIDs, true
 }
 
-// AppleTargetRegister apple product and store register
+// AppleTargetRegister apple product and store register.
 func AppleTargetRegister(products, stores []string) bool {
 	if len(products) == 0 || len(stores) == 0 {
 		return true
@@ -374,7 +373,7 @@ func AppleTargetRegister(products, stores []string) bool {
 	return true
 }
 
-// AppleTargetRemove remove apple targets
+// AppleTargetRemove remove apple targets.
 func AppleTargetRemove(targets ...string) bool {
 	if len(targets) == 0 {
 		return true
@@ -394,7 +393,7 @@ func AppleTargetRemove(targets ...string) bool {
 	return true
 }
 
-// GetWatchingStores get watching apple stores of user
+// GetWatchingStores get watching apple stores of user.
 func GetWatchingStores(userID int64) ([]string, bool) {
 	stores, err := client.SMembers(wrapKeyWithUser("watch_store", userID)).Result()
 	if err != nil && err != redis.Nil {
@@ -404,7 +403,7 @@ func GetWatchingStores(userID int64) ([]string, bool) {
 	return stores, true
 }
 
-// GetWatchingProducts get watching apple products of user
+// GetWatchingProducts get watching apple products of user.
 func GetWatchingProducts(userID int64) ([]string, bool) {
 	products, err := client.SMembers(wrapKeyWithUser("watch_product", userID)).Result()
 	if err != nil && err != redis.Nil {
@@ -414,7 +413,7 @@ func GetWatchingProducts(userID int64) ([]string, bool) {
 	return products, true
 }
 
-// GetTargetList get watching apple store and product
+// GetTargetList get watching apple store and product.
 func GetTargetList() ([]string, bool) {
 	targets, err := client.SMembers(wrapKey("apple_target")).Result()
 	if err != nil && err != redis.Nil {
@@ -424,7 +423,7 @@ func GetTargetList() ([]string, bool) {
 	return targets, true
 }
 
-// GetTargetMap get and cal target map: target -> userID -> exist
+// GetTargetMap get and cal target map: target -> userID -> exist.
 func GetTargetMap() (map[string]map[int64]struct{}, bool) {
 	userIDs, ok := GetAppleWatcher()
 	if !ok {
@@ -454,7 +453,7 @@ func GetTargetMap() (map[string]map[int64]struct{}, bool) {
 	return targetMap, true
 }
 
-// SetProductName set apple product name
+// SetProductName set apple product name.
 func SetProductName(product, name string) bool {
 	err := client.Set(wrapKey("apple_product_name:"+product), name, 24*time.Hour).Err()
 	if err != nil {
@@ -464,7 +463,7 @@ func SetProductName(product, name string) bool {
 	return true
 }
 
-// GetProductName get apple product name
+// GetProductName get apple product name.
 func GetProductName(product string) string {
 	name, err := client.Get(wrapKey("apple_product_name:" + product)).Result()
 	if err != nil {
@@ -476,7 +475,7 @@ func GetProductName(product string) string {
 	return name
 }
 
-// SetStoreName set apple store name
+// SetStoreName set apple store name.
 func SetStoreName(store, name string) bool {
 	err := client.Set(wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
@@ -486,7 +485,7 @@ func SetStoreName(store, name string) bool {
 	return true
 }
 
-// GetStoreName get apple store name
+// GetStoreName get apple store name.
 func GetStoreName(store string) string {
 	name, err := client.Get(wrapKey("apple_store_name:" + store)).Result()
 	if err != nil {
@@ -498,17 +497,16 @@ func GetStoreName(store string) string {
 	return name
 }
 
-// SetTargetState set apple target last state
+// SetTargetState set apple target last state.
 func SetTargetState(target string, avaliable bool) {
 	err := client.Set(wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
 	if err != nil {
 		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
 		return
 	}
-	return
 }
 
-// GetTargetState get apple target last state
+// GetTargetState get apple target last state.
 func GetTargetState(target string) bool {
 	r, err := client.Get(wrapKey("apple_target_state:" + target)).Result()
 	if err != nil {

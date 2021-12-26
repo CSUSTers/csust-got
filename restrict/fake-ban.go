@@ -1,18 +1,18 @@
 package restrict
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/orm"
-	"csust-got/util"
 	"fmt"
 	"math/rand"
 	"time"
 
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/orm"
+	"csust-got/util"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// FakeBan fake ban some one
+// FakeBan fake ban some one.
 func FakeBan(m *Message) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
@@ -22,7 +22,7 @@ func FakeBan(m *Message) {
 	ExecFakeBan(m, banTime)
 }
 
-// Kill kill some one
+// Kill kill some one.
 func Kill(m *Message) {
 	seconds := config.BotConfig.RestrictConfig.KillSeconds
 	banTime := time.Duration(seconds) * time.Second
@@ -52,7 +52,7 @@ func fakeBanCheck(m *Message, d time.Duration) bool {
 	return true
 }
 
-// ExecFakeBan exec fake ban
+// ExecFakeBan exec fake ban.
 func ExecFakeBan(m *Message, d time.Duration) {
 	if !fakeBanCheck(m, d) {
 		return

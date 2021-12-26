@@ -1,18 +1,18 @@
 package util
 
 import (
-	"csust-got/config"
-	"csust-got/log"
 	"math/rand"
 	"strconv"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	"csust-got/config"
+	"csust-got/log"
 
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error
+// ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
 func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int, ok bool) {
 	// message id is a int-type number
 	id, err := strconv.Atoi(ns)
@@ -40,7 +40,7 @@ func SendReply(to Recipient, what interface{}, replyMsg *Message, ops ...interfa
 	return SendMessage(to, what, ops...)
 }
 
-// SendMessageWithError is same as SendMessage but return error
+// SendMessageWithError is same as SendMessage but return error.
 func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*Message, error) {
 	msg, err := config.BotConfig.Bot.Send(to, what, ops...)
 	if err != nil {
@@ -49,13 +49,13 @@ func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*
 	return msg, err
 }
 
-// EditMessage edit bot's message
+// EditMessage edit bot's message.
 func EditMessage(m *Message, what interface{}, ops ...interface{}) *Message {
 	msg, _ := EditMessageWithError(m, what, ops...)
 	return msg
 }
 
-// EditMessageWithError is same as EditMessage but return error
+// EditMessageWithError is same as EditMessage but return error.
 func EditMessageWithError(m *Message, what interface{}, ops ...interface{}) (*Message, error) {
 	msg, err := config.GetBot().Edit(m, what, ops...)
 	if err != nil {
@@ -64,13 +64,13 @@ func EditMessageWithError(m *Message, what interface{}, ops ...interface{}) (*Me
 	return msg, err
 }
 
-// SendReplyWithError is same as SendReply but return error
+// SendReplyWithError is same as SendReply but return error.
 func SendReplyWithError(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) (*Message, error) {
 	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessageWithError(to, what, ops...)
 }
 
-// DeleteMessage delete a message
+// DeleteMessage delete a message.
 func DeleteMessage(m *Message) {
 	err := config.BotConfig.Bot.Delete(m)
 	if err != nil {
@@ -78,7 +78,7 @@ func DeleteMessage(m *Message) {
 	}
 }
 
-// GetName can get user's name
+// GetName can get user's name.
 func GetName(user *User) string {
 	name := user.FirstName
 	if user.LastName != "" {
@@ -87,7 +87,7 @@ func GetName(user *User) string {
 	return name
 }
 
-// GetUserNameFromString can get userName from message text
+// GetUserNameFromString can get userName from message text.
 func GetUserNameFromString(s string) (string, bool) {
 	if len(s) > 1 && strings.HasPrefix(s, "@") {
 		return strings.Trim(s, "@"), true
@@ -95,7 +95,7 @@ func GetUserNameFromString(s string) (string, bool) {
 	return "", false
 }
 
-// GetAdminList can get admin list from chat
+// GetAdminList can get admin list from chat.
 func GetAdminList(chatID int64) []ChatMember {
 	chat := &Chat{ID: chatID}
 	admins, err := config.BotConfig.Bot.AdminsOf(chat)
@@ -106,7 +106,7 @@ func GetAdminList(chatID int64) []ChatMember {
 	return admins
 }
 
-// CanRestrictMembers can check if someone can restrict members
+// CanRestrictMembers can check if someone can restrict members.
 func CanRestrictMembers(chat *Chat, user *User) bool {
 	member, err := config.BotConfig.Bot.ChatMemberOf(chat, user)
 	if err != nil {
@@ -129,7 +129,7 @@ func CanRestrictMembers(chat *Chat, user *User) bool {
 // 	return chatMember
 // }
 
-// RandomChoice - rand one from slice
+// RandomChoice - rand one from slice.
 func RandomChoice(s []string) string {
 	if len(s) == 0 {
 		return ""
@@ -138,7 +138,7 @@ func RandomChoice(s []string) string {
 	return s[idx]
 }
 
-// StringsToInts parse []string to []int64
+// StringsToInts parse []string to []int64.
 func StringsToInts(s []string) []int64 {
 	res := make([]int64, 0)
 	for _, v := range s {
@@ -152,7 +152,7 @@ func StringsToInts(s []string) []int64 {
 	return res
 }
 
-// PrivateCommand warp command to private call only
+// PrivateCommand warp command to private call only.
 func PrivateCommand(fn HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		if ctx.Chat().Type != ChatPrivate {
@@ -162,7 +162,7 @@ func PrivateCommand(fn HandlerFunc) HandlerFunc {
 	}
 }
 
-// GroupCommand warp command to group call only
+// GroupCommand warp command to group call only.
 func GroupCommand(fn func(m *Message)) HandlerFunc {
 	return func(ctx Context) error {
 		if ctx.Chat().Type == ChatPrivate {
@@ -173,7 +173,7 @@ func GroupCommand(fn func(m *Message)) HandlerFunc {
 	}
 }
 
-// IsNumber check rune is number
+// IsNumber check rune is number.
 func IsNumber(r rune) bool {
 	if r < '0' || r > '9' {
 		return false
@@ -181,7 +181,7 @@ func IsNumber(r rune) bool {
 	return true
 }
 
-// IsUpper check rune is upper
+// IsUpper check rune is upper.
 func IsUpper(r rune) bool {
 	if r < 'A' || r > 'Z' {
 		return false
@@ -189,7 +189,7 @@ func IsUpper(r rune) bool {
 	return true
 }
 
-// IsLower check rune is lower
+// IsLower check rune is lower.
 func IsLower(r rune) bool {
 	if r < 'a' || r > 'z' {
 		return false

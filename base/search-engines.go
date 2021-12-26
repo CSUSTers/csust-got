@@ -1,16 +1,16 @@
 package base
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/log"
 	"fmt"
 	"net/url"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/log"
 
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
 type htmlMapper func(m *Message) string
@@ -76,7 +76,7 @@ func repeat(cmd string) string {
 	return cmd
 }
 
-// Search Engine
+// Search Engine.
 var (
 	Google   = mapToHTML(searchEngine(google))
 	Bing     = mapToHTML(searchEngine(bing))

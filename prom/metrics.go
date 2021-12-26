@@ -22,7 +22,7 @@ var messageCount = prometheus.NewCounterVec(
 	append([]string{"is_command", "is_sticker"}, baseLabels...),
 )
 
-// update process time
+// update process time.
 var updateCostTime = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "bot_update_process_time",
@@ -31,7 +31,7 @@ var updateCostTime = prometheus.NewGaugeVec(
 	baseLabels,
 )
 
-// chatMemberCount chatMemberCount
+// chatMemberCount chatMemberCount.
 var chatMemberCount = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Name: "bot_chat_members_count",
@@ -40,7 +40,7 @@ var chatMemberCount = prometheus.NewGaugeVec(
 	[]string{"host", "chat_name"},
 )
 
-// newMemberCount newMemberCount
+// newMemberCount newMemberCount.
 var newMemberCount = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "bot_new_members_count",
@@ -49,7 +49,7 @@ var newMemberCount = prometheus.NewCounterVec(
 	[]string{"host", "chat_name"},
 )
 
-// logCount logCount
+// logCount logCount.
 var logCount = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "bot_log_count",

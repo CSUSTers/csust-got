@@ -15,7 +15,7 @@ func EvalDuration(s string) (time.Duration, error) {
 }
 
 // GetBanCD evaluate cd with ban time
-// cd = 0.8x^2/log(x) + 50x
+// cd = 0.8x^2/log(x) + 50x.
 func GetBanCD(d time.Duration) time.Duration {
 	if cd, ok := cdMap[int64(d.Seconds())]; ok {
 		return time.Duration(cd) * time.Second

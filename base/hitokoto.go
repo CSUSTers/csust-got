@@ -1,9 +1,6 @@
 package base
 
 import (
-	"csust-got/entities"
-	"csust-got/log"
-	"csust-got/orm"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,12 +8,15 @@ import (
 	"net/url"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	"csust-got/entities"
+	"csust-got/log"
+	"csust-got/orm"
 
 	"go.uber.org/zap"
+	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// HitokotoResponse is HitokotoResponse
+// HitokotoResponse is HitokotoResponse.
 type HitokotoResponse struct {
 	ID       int    `json:"id"`
 	Sentence string `json:"hitokoto"`
@@ -29,10 +29,10 @@ func hitokotoAPI() *url.URL {
 	return u
 }
 
-// HitokotoArg is hitokoto args
+// HitokotoArg is hitokoto args.
 type HitokotoArg string
 
-// HitokotoEmptyArg is hitokoto empty args
+// HitokotoEmptyArg is hitokoto empty args.
 func HitokotoEmptyArg() HitokotoArg {
 	return ""
 }
@@ -75,22 +75,22 @@ func parseAPI(ctx Context) HitokotoArg {
 	return HitokotoArg(strings.Join(cmdSlice, ""))
 }
 
-// Hitokoto is command `hitokoto`
+// Hitokoto is command `hitokoto`.
 func Hitokoto(ctx Context) error {
 	return ctx.Reply(GetHitokoto(parseAPI(ctx), true), ModeHTML)
 }
 
-// HitDawu is command alias `hitokoto -i`
+// HitDawu is command alias `hitokoto -i`.
 func HitDawu(ctx Context) error {
 	return ctx.Reply(GetHitokoto("i", true), ModeHTML)
 }
 
-// HitoNetease is command alias `hitokoto -j`
+// HitoNetease is command alias `hitokoto -j`.
 func HitoNetease(ctx Context) error {
 	return ctx.Reply(GetHitokoto("j", true), ModeHTML)
 }
 
-// GetHitokoto can get a hitokoto
+// GetHitokoto can get a hitokoto.
 func GetHitokoto(arg HitokotoArg, from bool) string {
 	u := arg.toURL()
 	log.Debug("getting", zap.Stringer("url", u))

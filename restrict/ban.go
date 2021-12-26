@@ -1,15 +1,15 @@
 package restrict
 
 import (
-	"csust-got/config"
-	"csust-got/entities"
-	"csust-got/log"
-	"csust-got/util"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
 
+	"csust-got/config"
+	"csust-got/entities"
+	"csust-got/log"
+	"csust-got/util"
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -19,7 +19,7 @@ If user is restricted for more than 366 days or less than 30 seconds from the cu
 they are considered to be restricted forever.
 */
 
-// BanMyself is a handle for command `ban_myself`, which can ban yourself
+// BanMyself is a handle for command `ban_myself`, which can ban yourself.
 func BanMyself(m *Message) {
 	sec := time.Duration(rand.Intn(80)+40) * time.Second
 	text := "太强了，我居然ban不掉您，您TQL！"
@@ -91,7 +91,7 @@ func BanSomeone(chat *Chat, user *User, hard bool, duration time.Duration) bool 
 	return softBan(chat, member)
 }
 
-// only allow text or media message
+// only allow text or media message.
 func softBan(chat *Chat, member *ChatMember) bool {
 	member.Rights = NoRights()
 	member.CanSendMessages = true
@@ -99,7 +99,7 @@ func softBan(chat *Chat, member *ChatMember) bool {
 	return ban(chat, member)
 }
 
-// can't send anything
+// can't send anything.
 func hardBan(chat *Chat, member *ChatMember) bool {
 	member.Rights = NoRights()
 	return ban(chat, member)

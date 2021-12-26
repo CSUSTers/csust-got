@@ -1,16 +1,17 @@
 package base
 
 import (
-	"csust-got/config"
-	"csust-got/util"
 	"fmt"
 	"runtime"
 	"time"
 
+	"csust-got/config"
+	"csust-got/util"
+
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// Makefile variable
+// Makefile variable.
 var (
 	version   string
 	branch    string
@@ -19,7 +20,7 @@ var (
 
 var lastBoot = time.Now().In(util.TimeZoneCST).Format(util.TimeFormat)
 
-// Info - build info
+// Info - build info.
 func Info(ctx Context) error {
 	msg := "```\n----- Bot Info -----\n"
 	msg += fmt.Sprintf("UserName:    %s\n", config.BotConfig.Bot.Me.Username)
@@ -33,13 +34,13 @@ func Info(ctx Context) error {
 	return ctx.Send(msg, ModeMarkdownV2)
 }
 
-// GetUserID is handle for command `/id`
+// GetUserID is handle for command `/id`.
 func GetUserID(ctx Context) error {
 	msg := fmt.Sprintf("Your userID is %d", ctx.Sender().ID)
 	return ctx.Reply(msg)
 }
 
-// GetChatID is handle for command `/cid`
+// GetChatID is handle for command `/cid`.
 func GetChatID(ctx Context) error {
 	msg := fmt.Sprintf("Current chatID is %d", ctx.Chat().ID)
 	return ctx.Reply(msg)

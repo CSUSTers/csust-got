@@ -1,16 +1,16 @@
 package base
 
 import (
-	"csust-got/entities"
 	"strings"
 
+	"csust-got/entities"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// change 'y' to 'i' if end with this
+// change 'y' to 'i' if end with this.
 var xyTable = [...]string{"ty", "ly", "fy", "py", "dy", "by"}
 
-// HugeEncoder encode 'xxx' to 'hugexxxer'
+// HugeEncoder encode 'xxx' to 'hugexxxer'.
 func HugeEncoder(ctx Context) error {
 	command := entities.FromMessage(ctx.Message())
 
@@ -65,7 +65,7 @@ func HugeEncoder(ctx Context) error {
 	return ctx.Reply(strings.Join(args, "\n"))
 }
 
-// HugeDecoder decode 'hugehugehugexxxererer' to 'hugexxxer'
+// HugeDecoder decode 'hugehugehugexxxererer' to 'hugexxxer'.
 func HugeDecoder(ctx Context) error {
 	command := entities.FromMessage(ctx.Message())
 

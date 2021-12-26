@@ -4,11 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
-
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 var (
@@ -51,16 +50,10 @@ func TestReadEnv(t *testing.T) {
 	req := testInit(t)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
-	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
-	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_PASS", "some-env-password")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_PASS")
-	}()
+	t.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
+	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
+	t.Setenv(testEnvPrefix+"_"+"REDIS_PASS", "some-env-password")
 
 	// init config
 	BotConfig = NewBotConfig()
@@ -80,14 +73,9 @@ func TestEnvOverrideFile(t *testing.T) {
 	req := testInit(t)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
-	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "DEBUG")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
-	}()
+	t.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
+	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 
 	// init config
 	BotConfig = NewBotConfig()
@@ -108,13 +96,8 @@ func TestMustConfig(t *testing.T) {
 
 	// set must config env
 	for _, v := range mustConfigs {
-		_ = os.Setenv(testEnvPrefix+"_"+""+v, v)
+		t.Setenv(testEnvPrefix+"_"+""+v, v)
 	}
-	defer func() {
-		for _, v := range mustConfigs {
-			_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)
-		}
-	}()
 
 	// all set should not panic
 	BotConfig = NewBotConfig()
@@ -130,7 +113,7 @@ func TestMustConfig(t *testing.T) {
 			_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)                    // unset env
 			readConfig()                                                     // read config
 			require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() }) // should panic
-			_ = os.Setenv(testEnvPrefix+"_"+""+v, v)                         // set env
+			t.Setenv(testEnvPrefix+"_"+""+v, v)                              // set env
 		})
 	}
 }
@@ -152,20 +135,12 @@ func TestRateLimitConfig(t *testing.T) {
 	req.Equal(2, config.CommandCost)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_MAX_TOKEN", "0")
-	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
-	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
-	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
-	_ = os.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_COMMAND", "-1")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_MAX_TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_LIMIT")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_STICKER")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "RATE_LIMIT_COST_COMMAND")
-	}()
+	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	t.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_MAX_TOKEN", "0")
+	t.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_LIMIT", "0")
+	t.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST", "-1")
+	t.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_STICKER", "-1")
+	t.Setenv(testEnvPrefix+"_"+"RATE_LIMIT_COST_COMMAND", "-1")
 
 	// should override by env
 	readConfig()
@@ -190,13 +165,8 @@ func TestMessageConfig(t *testing.T) {
 	req := testInit(t)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
-	}()
-
+	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 	// init config
 	BotConfig = NewBotConfig()
 	initViper(testConfigFile, testEnvPrefix)
@@ -206,10 +176,7 @@ func TestMessageConfig(t *testing.T) {
 	req.Equal("好 的， 我 杀 我 自 己。", BotConfig.MessageConfig.RestrictBot)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"MESSAGE_RESTRICT_BOT", "")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "MESSAGE_RESTRICT_BOT")
-	}()
+	t.Setenv(testEnvPrefix+"_"+"MESSAGE_RESTRICT_BOT", "")
 	readConfig()
 	req.Equal("", BotConfig.MessageConfig.RestrictBot)
 
@@ -221,17 +188,15 @@ func TestSpecialListConfig(t *testing.T) {
 	req := testInit(t)
 
 	// set some env
-	_ = os.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
-	_ = os.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
-	defer func() {
-		_ = os.Unsetenv(testEnvPrefix + "_" + "TOKEN")
-		_ = os.Unsetenv(testEnvPrefix + "_" + "REDIS_ADDR")
-	}()
+	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
+	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 
 	// init config
 	BotConfig = NewBotConfig()
+
 	initViper(testConfigFile, testEnvPrefix)
 	readConfig()
+
 	defer viper.Reset()
 
 	req.True(BotConfig.BlockListConfig.Enabled)

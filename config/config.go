@@ -9,7 +9,7 @@ import (
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// BotConfig can get bot's config globally
+// BotConfig can get bot's config globally.
 var BotConfig *Config
 
 var (
@@ -66,27 +66,16 @@ type Config struct {
 	PromConfig      *promConfig
 }
 
-// GetBot returns Bot
+// GetBot returns Bot.
 func GetBot() *Bot {
 	return BotConfig.Bot
-}
-
-// BotID returns the BotID of this config.
-func (c Config) BotID() int64 {
-	return c.Bot.Me.ID
 }
 
 func initViper(configFile, envPrefix string) {
 	if configFile != "" {
 		viper.SetConfigFile(configFile)
 		if err := viper.ReadInConfig(); err != nil {
-			if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-				zap.L().Warn("config file not found!", zap.String("configFile", configFile), zap.Error(err))
-			} else {
-				zap.L().Warn("config file has found, but another error was produced when reading config!",
-					zap.String("configFile", configFile), zap.Error(err))
-			}
-			zap.L().Warn("config file is not available...", zap.String("configFile", configFile), zap.Error(err))
+			zap.L().Warn("an error was produced when reading config!", zap.String("configFile", configFile), zap.Error(err))
 			return
 		}
 	}
@@ -115,7 +104,6 @@ func readConfig() {
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
-
 }
 
 // check some config value is reasonable, otherwise set to default value.

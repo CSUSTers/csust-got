@@ -1,16 +1,17 @@
 package base
 
 import (
-	"csust-got/entities"
-	"csust-got/util"
 	"fmt"
 	"time"
+
+	"csust-got/entities"
+	"csust-got/util"
 
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
-// RunTask can run a task
+// RunTask can run a task.
 func RunTask(ctx Context) error {
 	text := "你嗦啥，我听不太懂欸……"
 
