@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"csust-got/config"
+
 	"github.com/prometheus/common/model"
 )
 

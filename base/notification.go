@@ -23,8 +23,7 @@ func WelcomeNewMember(ctx Context) error {
 
 // LeftMember is handle for some member left.
 func LeftMember(m *Message) {
-	member := m.UserLeft
-	if member == nil {
+	if m.UserLeft == nil {
 		return
 	}
 	prom.MemberLeft(m.Chat.Title)

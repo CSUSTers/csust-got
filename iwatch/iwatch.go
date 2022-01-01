@@ -16,6 +16,7 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
+
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -33,18 +34,7 @@ func WatchHandler(ctx Context) error {
 
 	// list
 	if command.Argc() == 0 {
-		products, productsOK := orm.GetWatchingProducts(userID)
-		stores, storesOK := orm.GetWatchingStores(userID)
-		if !productsOK || !storesOK {
-			return ctx.Reply("failed")
-		}
-		for i, v := range products {
-			products[i] = fmt.Sprintf("[%s] %s", v, orm.GetProductName(v))
-		}
-		for i, v := range stores {
-			stores[i] = fmt.Sprintf("[%s] %s", v, orm.GetStoreName(v))
-		}
-		return ctx.Reply(fmt.Sprintf("Your watching products:\n%s\n\nYour watching stores:\n%s\n", strings.Join(products, "\n"), strings.Join(stores, "\n")))
+		return listCommand(ctx, userID)
 	}
 
 	// arg >= 2
@@ -57,37 +47,61 @@ func WatchHandler(ctx Context) error {
 
 	switch cmdType {
 	case "a", "add", "+":
-		// register
-		log.Info("register", zap.Int64("user", userID), zap.Any("list", args))
-		products := make([]string, 0)
-		stores := make([]string, 0)
-		for _, v := range args {
-			if isProduct(v) {
-				products = append(products, v)
-			}
-			if isStore(v) {
-				stores = append(stores, v)
-			}
-		}
-		if len(products) == 0 && len(stores) == 0 {
-			return ctx.Reply("no product/store found")
-		}
-		if orm.WatchProduct(userID, products) && orm.WatchStore(userID, stores) {
-			go updateTargets()
-			return ctx.Reply("success")
-		}
-		return ctx.Reply("failed")
+		return addCommand(ctx, userID, args)
 	case "r", "rm", "remove", "d", "del", "delete", "-":
-		// remove store
-		log.Info("remove", zap.Int64("user", userID), zap.Any("list", args))
-		if orm.RemoveProduct(userID, args) && orm.RemoveStore(userID, args) {
-			go removeTargets()
-			return ctx.Reply("success")
-		}
-		return ctx.Reply("failed")
+		return remCommand(ctx, userID, args)
 	default:
 		return ctx.Reply("iwatch <add|remove> <prod1|store1> <prod2|store2> ...")
 	}
+}
+
+func listCommand(ctx Context, userID int64) error {
+	products, productsOK := orm.GetWatchingProducts(userID)
+	stores, storesOK := orm.GetWatchingStores(userID)
+	if !productsOK || !storesOK {
+		return ctx.Reply("failed")
+	}
+	for i, v := range products {
+		products[i] = fmt.Sprintf("[%s] %s", v, orm.GetProductName(v))
+	}
+	for i, v := range stores {
+		stores[i] = fmt.Sprintf("[%s] %s", v, orm.GetStoreName(v))
+	}
+	return ctx.Reply(fmt.Sprintf("Your watching products:\n%s\n\nYour watching stores:\n%s\n",
+		strings.Join(products, "\n"), strings.Join(stores, "\n")))
+}
+
+func addCommand(ctx Context, userID int64, args []string) error {
+	// register
+	log.Info("register", zap.Int64("user", userID), zap.Any("list", args))
+	products := make([]string, 0)
+	stores := make([]string, 0)
+	for _, v := range args {
+		if isProduct(v) {
+			products = append(products, v)
+		}
+		if isStore(v) {
+			stores = append(stores, v)
+		}
+	}
+	if len(products) == 0 && len(stores) == 0 {
+		return ctx.Reply("no product/store found")
+	}
+	if orm.WatchProduct(userID, products) && orm.WatchStore(userID, stores) {
+		go updateTargets()
+		return ctx.Reply("success")
+	}
+	return ctx.Reply("failed")
+}
+
+func remCommand(ctx Context, userID int64, args []string) error {
+	// remove store
+	log.Info("remove", zap.Int64("user", userID), zap.Any("list", args))
+	if orm.RemoveProduct(userID, args) && orm.RemoveStore(userID, args) {
+		go removeTargets()
+		return ctx.Reply("success")
+	}
+	return ctx.Reply("failed")
 }
 
 var (
@@ -108,9 +122,9 @@ func WatchService() {
 // watchSender watching Apple Store watcher send notify.
 func watchSender(ch <-chan *result) {
 	for r := range ch {
-		msg := "现在没有货了！"
+		msg := "现在没有货了!"
 		if r.Avaliable {
-			msg = "有货啦！"
+			msg = "有货啦!"
 		}
 		msg = fmt.Sprintf("%s\n%s\n%s\n", msg, r.ProductName, r.StoreName)
 		userList := make([]int64, 0)
@@ -176,7 +190,12 @@ func getTargetState(product, store string) (*result, error) {
 		return nil, err
 	}
 
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			log.Error("resp body close failed")
+		}
+	}()
+
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
@@ -303,7 +322,8 @@ func isProduct(product string) bool {
 	if product[7] != '/' {
 		return false
 	}
-	if !util.IsUpper(rune(product[0])) || !util.IsUpper(rune(product[1])) || !util.IsUpper(rune(product[5])) || !util.IsUpper(rune(product[6])) || !util.IsUpper(rune(product[8])) {
+	if !util.IsUpper(rune(product[0])) || !util.IsUpper(rune(product[1])) ||
+		!util.IsUpper(rune(product[5])) || !util.IsUpper(rune(product[6])) || !util.IsUpper(rune(product[8])) {
 		return false
 	}
 	for _, v := range product[2:5] {

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"csust-got/entities"
+
 	. "gopkg.in/tucnak/telebot.v3"
 )
 
@@ -51,9 +52,9 @@ func HugeEncoder(ctx Context) error {
 			}
 			// only add 'r' if $args[i] end with 'e'
 			if args[i][len(args[i])-1] == 'e' {
-				args[i] = args[i] + "r"
+				args[i] += "r"
 			} else {
-				args[i] = args[i] + "er"
+				args[i] += "er"
 			}
 		}
 		// if we get 'huger' after encode, we <fork> him.

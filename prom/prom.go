@@ -115,12 +115,12 @@ func MemberLeft(chatName string) {
 }
 
 // GetMember get number of group member in a group.
-func GetMember(chatName string, num int) {
-	chatMemberCount.With(prometheus.Labels{
-		"host":      host,
-		"chat_name": chatName,
-	}).Set(float64(num))
-}
+// func GetMember(chatName string, num int) {
+// 	chatMemberCount.With(prometheus.Labels{
+// 		"host":      host,
+// 		"chat_name": chatName,
+// 	}).Set(float64(num))
+// }
 
 // Log record how many log print in specific level.
 func Log(level string) {

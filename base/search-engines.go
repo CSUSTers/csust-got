@@ -37,39 +37,38 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 			} else if rep.Sticker != nil {
 				stickerSetName := rep.Sticker.SetName
 				stickerSet, err := config.BotConfig.Bot.StickerSet(stickerSetName)
-				if err != nil {
-					log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
-				} else {
+				if err == nil {
 					return engineFunc(stickerSet.Title)
 				}
+				log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
 			}
 		}
-		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦！或者至少回复你想要搜索的内容哦！"
+		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦! 或者至少回复你想要搜索的内容哦!"
 	}
 }
 
 func google(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := fmt.Sprintf("https://google.com/search?q=%s", query)
-	return fmt.Sprintf("谷歌的搜索结果~：<a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("谷歌的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func bing(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := fmt.Sprintf("https://bing.com/search?q=%s", query)
-	return fmt.Sprintf("必应的搜索结果~：<a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("必应的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func bilibili(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := fmt.Sprintf("https://search.bilibili.com/all?keyword=%s", query)
-	return fmt.Sprintf("哔哩哔哩🍻~：<a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("哔哩哔哩🍻~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func github(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := fmt.Sprintf("https://github.com/search?q=%s", query)
-	return fmt.Sprintf("🐙🐱 Github：<a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("🐙🐱 Github: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func repeat(cmd string) string {
