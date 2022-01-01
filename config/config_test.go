@@ -109,12 +109,10 @@ func TestMustConfig(t *testing.T) {
 	// every missing request should panic
 	errMsgs := []string{noTokenMsg, noRedisMsg}
 	for i, v := range mustConfigs {
-		t.Run(v, func(t *testing.T) {
-			_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)                    // unset env
-			readConfig()                                                     // read config
-			require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() }) // should panic
-			t.Setenv(testEnvPrefix+"_"+""+v, v)                              // set env
-		})
+		_ = os.Unsetenv(testEnvPrefix + "_" + "" + v)                    // unset env
+		readConfig()                                                     // read config
+		require.PanicsWithValue(t, errMsgs[i], func() { checkConfig() }) // should panic
+		t.Setenv(testEnvPrefix+"_"+""+v, v)                              // set env
 	}
 }
 
