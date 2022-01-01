@@ -31,19 +31,23 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 		if keyWord := cmd.ArgAllInOneFrom(0); keyWord != "" {
 			return engineFunc(keyWord)
 		}
-		if rep := m.ReplyTo; rep != nil {
-			if strings.Trim(rep.Text, " \t\n") != "" {
-				return engineFunc(rep.Text)
-			} else if rep.Sticker != nil {
-				stickerSetName := rep.Sticker.SetName
-				stickerSet, err := config.BotConfig.Bot.StickerSet(stickerSetName)
-				if err == nil {
-					return engineFunc(stickerSet.Title)
-				}
-				log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
-			}
+		text := "亲亲，这个命令<em>必须</em>要带上一个参数的哦! 或者至少回复你想要搜索的内容哦!"
+		rep := m.ReplyTo
+		if rep == nil {
+			return text
 		}
-		return "亲亲，这个命令<em>必须</em>要带上一个参数的哦! 或者至少回复你想要搜索的内容哦!"
+		if strings.Trim(rep.Text, " \t\n") != "" {
+			return engineFunc(rep.Text)
+		}
+		if rep.Sticker != nil {
+			stickerSetName := rep.Sticker.SetName
+			stickerSet, err := config.BotConfig.Bot.StickerSet(stickerSetName)
+			if err == nil {
+				return engineFunc(stickerSet.Title)
+			}
+			log.Error("searchEngine: GetStickerSet failed", zap.Error(err))
+		}
+		return text
 	}
 }
 

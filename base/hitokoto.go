@@ -1,12 +1,14 @@
 package base
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"csust-got/entities"
 	"csust-got/log"
@@ -22,6 +24,27 @@ type HitokotoResponse struct {
 	Sentence string `json:"hitokoto"`
 	Author   string `json:"from_who"`
 	From     string `json:"from"`
+}
+
+func (r *HitokotoResponse) setDefault() {
+	if r.Author == "" {
+		r.Author = "佚名"
+	}
+	if r.From == "" {
+		r.From = "未知出处"
+	} else {
+		r.From = "《" + r.From + "》"
+	}
+}
+
+func (r *HitokotoResponse) get(withSource bool) string {
+	r.setDefault()
+	str := r.Sentence
+	if withSource {
+		str += fmt.Sprintf(" by <em>%s %s</em>", r.Author, r.From)
+		go orm.StoreHitokoto(str)
+	}
+	return str
 }
 
 func hitokotoAPI() *url.URL {
@@ -91,13 +114,22 @@ func HitoNetease(ctx Context) error {
 }
 
 // GetHitokoto can get a hitokoto.
-func GetHitokoto(arg HitokotoArg, from bool) string {
+func GetHitokoto(arg HitokotoArg, withSource bool) string {
 	u := arg.toURL()
 	log.Debug("getting", zap.Stringer("url", u))
-	resp, err := http.Get(u.String())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		log.Error("Err@Hitokoto new request failed", zap.Error(err))
+		return orm.GetHitokoto(withSource)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Error("Err@Hitokoto [CONNECT TO REMOTE HOST]", zap.Error(err))
-		return orm.GetHitokoto(from)
+		return orm.GetHitokoto(withSource)
 	}
 	defer func() {
 		if err = resp.Body.Close(); err != nil {
@@ -107,26 +139,14 @@ func GetHitokoto(arg HitokotoArg, from bool) string {
 	word, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
-		return orm.GetHitokoto(from)
+		return orm.GetHitokoto(withSource)
 	}
 	koto := HitokotoResponse{}
 	err = json.Unmarshal(word, &koto)
 	if err != nil {
 		log.Error("Err@Hitokoto [JSON PARSE]", zap.Error(err), zap.ByteString("json", word))
-		return orm.GetHitokoto(from)
+		return orm.GetHitokoto(withSource)
 	}
-	if koto.Author == "" {
-		koto.Author = "佚名"
-	}
-	if koto.From == "" {
-		koto.From = "未知出处"
-	} else {
-		koto.From = "《" + koto.From + "》"
-	}
-	str := fmt.Sprintf("%s ", koto.Sentence)
-	if from {
-		str += fmt.Sprintf("by <em>%s %s</em>", koto.Author, koto.From)
-		orm.StoreHitokoto(str)
-	}
-	return str
+	koto.setDefault()
+	return koto.get(withSource)
 }

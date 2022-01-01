@@ -55,7 +55,7 @@ func Shutdown(m *Message) {
 
 // Boot is handler for command `boot`.
 func Boot(m *Message) {
-	text := GetHitokoto("i", false) + " 早上好，新的一天加油哦！:)"
+	text := GetHitokoto("i", false) + " 早上好，新的一天加油哦! :)"
 	orm.Boot(m.Chat.ID)
 	if orm.IsShutdown(m.Chat.ID) {
 		text = config.BotConfig.MessageConfig.BootFailed
@@ -65,16 +65,14 @@ func Boot(m *Message) {
 
 // Sleep is handle for command `sleep`.
 func Sleep(ctx Context) error {
-	var msg string
 	t := time.Now().In(util.TimeZoneCST)
 	if t.Hour() < 6 || t.Hour() >= 18 {
-		msg = "晚安, 明天醒来就能看到我哦！"
-	} else if t.Hour() >= 11 && t.Hour() < 15 {
-		msg = "wu安, 醒来就能看到我哦！"
-	} else {
-		msg = "醒来就能看到我哦！"
+		return ctx.Reply("晚安, 明天醒来就能看到我哦!")
 	}
-	return ctx.Reply(msg)
+	if t.Hour() >= 11 && t.Hour() < 15 {
+		return ctx.Reply("wu安, 醒来就能看到我哦!")
+	}
+	return ctx.Reply("醒来就能看到我哦!")
 }
 
 // NoSleep is handle for command `no_sleep`.
@@ -118,6 +116,6 @@ func Forward(m *Message) {
 // Use it to just get a reply like command `ban_myself`.
 func FakeBanMyself(ctx Context) error {
 	sec := time.Duration(rand.Intn(60)+60) * time.Second
-	text := "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
+	text := "我实现了你的愿望! 现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
 	return ctx.Reply(text)
 }

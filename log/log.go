@@ -111,8 +111,8 @@ func Error(msg string, fields ...zap.Field) {
 
 // Fatal print log at fatal level, then calls os.Exit(1).
 func Fatal(msg string, fields ...zap.Field) {
-	logger.Fatal(msg, fields...)
 	prom.Log(zap.FatalLevel.String())
+	logger.Fatal(msg, fields...)
 }
 
 // Panic print log at panic level, then panic.
