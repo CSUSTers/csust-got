@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/util"
+
 	"github.com/go-redis/redis/v7"
 	"go.uber.org/zap"
 )
@@ -60,7 +62,7 @@ func wrapKeyWithChatMember(key string, chatID int64, userID int64) string {
 func loadSpecialList(key string) []string {
 	list, err := client.SMembers(wrapKey(key)).Result()
 	if err != nil {
-		if err != redis.Nil {
+		if !errors.Is(err, redis.Nil) {
 			log.Error("load special list failed", zap.String("key", key), zap.Error(err))
 		}
 		list = make([]string, 0)
@@ -92,7 +94,7 @@ func IsNoStickerMode(chatID int64) bool {
 	return ok
 }
 
-//ToggleNoStickerMode toggle NoSticker mode.
+// ToggleNoStickerMode toggle NoSticker mode.
 func ToggleNoStickerMode(chatID int64) bool {
 	err := ToggleBool(wrapKeyWithChat("no_sticker", chatID))
 	if err != nil {
@@ -396,7 +398,7 @@ func AppleTargetRemove(targets ...string) bool {
 // GetWatchingStores get watching apple stores of user.
 func GetWatchingStores(userID int64) ([]string, bool) {
 	stores, err := client.SMembers(wrapKeyWithUser("watch_store", userID)).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get stores of user from redis failed", zap.Int64("user", userID), zap.Error(err))
 		return stores, false
 	}
@@ -406,7 +408,7 @@ func GetWatchingStores(userID int64) ([]string, bool) {
 // GetWatchingProducts get watching apple products of user.
 func GetWatchingProducts(userID int64) ([]string, bool) {
 	products, err := client.SMembers(wrapKeyWithUser("watch_product", userID)).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get products of user from redis failed", zap.Int64("user", userID), zap.Error(err))
 		return products, false
 	}
@@ -416,7 +418,7 @@ func GetWatchingProducts(userID int64) ([]string, bool) {
 // GetTargetList get watching apple store and product.
 func GetTargetList() ([]string, bool) {
 	targets, err := client.SMembers(wrapKey("apple_target")).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get targets from redis failed", zap.Error(err))
 		return targets, false
 	}
@@ -467,7 +469,7 @@ func SetProductName(product, name string) bool {
 func GetProductName(product string) string {
 	name, err := client.Get(wrapKey("apple_product_name:" + product)).Result()
 	if err != nil {
-		if err != redis.Nil {
+		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_product_name from redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
 		}
 		return product
@@ -489,7 +491,7 @@ func SetStoreName(store, name string) bool {
 func GetStoreName(store string) string {
 	name, err := client.Get(wrapKey("apple_store_name:" + store)).Result()
 	if err != nil {
-		if err != redis.Nil {
+		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_store_name from redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
 		}
 		return store
@@ -510,7 +512,7 @@ func SetTargetState(target string, avaliable bool) {
 func GetTargetState(target string) bool {
 	r, err := client.Get(wrapKey("apple_target_state:" + target)).Result()
 	if err != nil {
-		if err != redis.Nil {
+		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_target_state from redis failed", zap.String("target", target), zap.Error(err))
 		}
 		return false

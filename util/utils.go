@@ -18,14 +18,13 @@ func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int,
 	id, err := strconv.Atoi(ns)
 	if err != nil {
 		SendReply(m.Chat, "您这数字有点不太对劲啊。要不您回去再瞅瞅？", m)
-		ok = false
-	} else if !rng.IsEmpty() && !rng.Cover(id) {
-		SendReply(m.Chat, "太大或是太小，都不太行。适合的，才是坠吼的。", m)
-		ok = false
-	} else {
+		return 0, false
+	}
+	if rng.IsEmpty() || rng.Cover(id) {
 		return id, true
 	}
-	return
+	SendReply(m.Chat, "太大或是太小，都不太行。适合的，才是坠吼的。", m)
+	return id, false
 }
 
 // SendMessage will use the bot to send a message.

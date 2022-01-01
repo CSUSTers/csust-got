@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"errors"
 	"time"
 
 	"github.com/go-redis/redis/v7"
@@ -10,7 +11,7 @@ import (
 // This function will call WrapKey, so you needn't warp your key.
 func GetBool(key string) (bool, error) {
 	enable, err := client.Get(key).Int()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
 	return enable > 0, err

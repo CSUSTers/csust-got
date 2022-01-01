@@ -14,6 +14,7 @@ import (
 	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
+
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -33,52 +34,10 @@ func main() {
 	bot, err := initBot()
 	if err != nil {
 		log.Fatal(err.Error())
-		return
 	}
 
-	bot.Handle("/hello", base.Hello)
-	bot.Handle("/say_hello", base.Hello)
-	bot.Handle("/hello_to_all", base.HelloToAll)
-
-	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
-	bot.Handle("/cid", base.GetChatID)
-	bot.Handle("/info", base.Info)
-	bot.Handle("/links", base.Links)
-
-	// bot.Handle("/history", base.History)
-	bot.Handle("/forward", util.GroupCommand(base.Forward))
-	bot.Handle("/mc", util.GroupCommand(base.MC))
-
-	bot.Handle("/sleep", base.Sleep)
-	bot.Handle("/no_sleep", base.NoSleep)
-
-	bot.Handle("/google", base.Google)
-	bot.Handle("/bing", base.Bing)
-	bot.Handle("/bilibili", base.Bilibili)
-	bot.Handle("/github", base.Github)
-
-	bot.Handle("/recorder", base.Repeat)
-
-	bot.Handle("/hitokoto", base.Hitokoto)
-	bot.Handle("/hitowuta", base.HitDawu)
-	bot.Handle("/hitdawu", base.HitDawu)
-	bot.Handle("/hito_netease", base.HitoNetease)
-
-	bot.Handle("/hugencoder", base.HugeEncoder)
-	bot.Handle("/hugedecoder", base.HugeDecoder)
-
-	bot.Handle("/run_after", base.RunTask)
-
-	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
-	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
-	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
-	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
-	bot.Handle("/ban", util.GroupCommand(restrict.Ban))
-	bot.Handle("/ban_soft", util.GroupCommand(restrict.SoftBan))
-	bot.Handle("/no_sticker", util.GroupCommand(restrict.NoSticker))
-	bot.Handle("/shutdown", util.GroupCommand(base.Shutdown))
-	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
-	bot.Handle("/boot", util.GroupCommand(base.Boot))
+	registerBaseHandler(bot)
+	registerRestrictHandler(bot)
 
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
@@ -127,6 +86,54 @@ func initBot() (*Bot, error) {
 	return bot, nil
 }
 
+func registerBaseHandler(bot *Bot) {
+	bot.Handle("/hello", base.Hello)
+	bot.Handle("/say_hello", base.Hello)
+	bot.Handle("/hello_to_all", base.HelloToAll)
+
+	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
+	bot.Handle("/cid", base.GetChatID)
+	bot.Handle("/info", base.Info)
+	bot.Handle("/links", base.Links)
+
+	// bot.Handle("/history", base.History)
+	bot.Handle("/forward", util.GroupCommand(base.Forward))
+	bot.Handle("/mc", util.GroupCommand(base.MC))
+
+	bot.Handle("/sleep", base.Sleep)
+	bot.Handle("/no_sleep", base.NoSleep)
+
+	bot.Handle("/google", base.Google)
+	bot.Handle("/bing", base.Bing)
+	bot.Handle("/bilibili", base.Bilibili)
+	bot.Handle("/github", base.Github)
+
+	bot.Handle("/recorder", base.Repeat)
+
+	bot.Handle("/hitokoto", base.Hitokoto)
+	bot.Handle("/hitowuta", base.HitDawu)
+	bot.Handle("/hitdawu", base.HitDawu)
+	bot.Handle("/hito_netease", base.HitoNetease)
+
+	bot.Handle("/hugencoder", base.HugeEncoder)
+	bot.Handle("/hugedecoder", base.HugeDecoder)
+
+	bot.Handle("/run_after", base.RunTask)
+}
+
+func registerRestrictHandler(bot *Bot) {
+	bot.Handle("/fake_ban_myself", base.FakeBanMyself)
+	bot.Handle("/fake_ban", util.GroupCommand(restrict.FakeBan))
+	bot.Handle("/kill", util.GroupCommand(restrict.Kill))
+	bot.Handle("/ban_myself", util.GroupCommand(restrict.BanMyself))
+	bot.Handle("/ban", util.GroupCommand(restrict.BanCommand))
+	bot.Handle("/ban_soft", util.GroupCommand(restrict.SoftBanCommand))
+	bot.Handle("/no_sticker", util.GroupCommand(restrict.NoSticker))
+	bot.Handle("/shutdown", util.GroupCommand(base.Shutdown))
+	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
+	bot.Handle("/boot", util.GroupCommand(base.Boot))
+}
+
 func blockMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		if ctx.Chat() == nil || ctx.Sender() == nil {
@@ -136,7 +143,7 @@ func blockMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("chat ignore by block list", zap.String("chat", ctx.Chat().Title))
 			return nil
 		}
-		if config.BotConfig.BlockListConfig.Check(int64(ctx.Sender().ID)) {
+		if config.BotConfig.BlockListConfig.Check(ctx.Sender().ID) {
 			log.Info("sender ignore by block list", zap.String("user", ctx.Sender().Username))
 			return nil
 		}

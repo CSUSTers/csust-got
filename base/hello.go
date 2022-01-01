@@ -94,12 +94,11 @@ func Forward(m *Message) {
 		if command.Argc() > 0 {
 			id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
 			retry = 0
-			if ok {
-				forwardMsg.ID = id
-			} else {
+			if !ok {
 				util.SendReply(m.Chat, "嗦啥呢", m)
 				return
 			}
+			forwardMsg.ID = id
 		} else {
 			forwardMsg.ID = rand.Intn(m.ID) + 1
 		}

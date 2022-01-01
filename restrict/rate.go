@@ -7,6 +7,7 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/util"
+
 	"golang.org/x/time/rate"
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -35,8 +36,7 @@ func checkRate(m *Message, limiter *rate.Limiter) bool {
 	if m.Sticker != nil {
 		return limiter.AllowN(time.Now(), rateConfig.StickerCost)
 	}
-	cmd := entities.FromMessage(m)
-	if cmd != nil {
+	if cmd := entities.FromMessage(m); cmd != nil {
 		return limiter.AllowN(time.Now(), rateConfig.CommandCost)
 	}
 	return limiter.AllowN(time.Now(), rateConfig.Cost)

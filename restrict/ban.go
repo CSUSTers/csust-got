@@ -10,6 +10,7 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/util"
+
 	"go.uber.org/zap"
 	. "gopkg.in/tucnak/telebot.v3"
 )
@@ -22,58 +23,66 @@ they are considered to be restricted forever.
 // BanMyself is a handle for command `ban_myself`, which can ban yourself.
 func BanMyself(m *Message) {
 	sec := time.Duration(rand.Intn(80)+40) * time.Second
-	text := "太强了，我居然ban不掉您，您TQL！"
+	text := "太强了，我居然ban不掉您，您TQL!"
 	if BanSomeone(m.Chat, m.Sender, true, sec) {
-		text = "我实现了你的愿望！现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
+		text = "我实现了你的愿望! 现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
 	}
 	util.SendReply(m.Chat, text, m)
 }
 
-// SoftBan is handle for command `ban_soft`.
-func SoftBan(m *Message) {
-	BanCommand(m, false)
+// SoftBanCommand is handle for command `ban_soft`.
+func SoftBanCommand(m *Message) {
+	DoBan(m, false)
 }
 
-// Ban is handle for command `ban`.
-func Ban(m *Message) {
-	BanCommand(m, true)
+// BanCommand is handle for command `ban`.
+func BanCommand(m *Message) {
+	DoBan(m, true)
 }
 
-// BanCommand can execute ban.
-func BanCommand(m *Message, hard bool) {
+// DoBan can execute ban.
+func DoBan(m *Message, hard bool) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
 	if err != nil {
 		banTime = time.Duration(rand.Intn(80)+40) * time.Second
 	}
-	var banTarget *User = nil
+	var banTarget *User
 	if !util.CanRestrictMembers(m.Chat, m.Sender) {
 		banTarget = m.Sender
 	}
-	text := "我没办法完成你要我做的事……即便我已经很努力了……结局还是如此。"
 
-	if m.ReplyTo != nil {
-		if banTarget == nil {
-			banTarget = m.ReplyTo.Sender
-		}
-		if BanSomeone(m.Chat, banTarget, hard, banTime) {
-			if banTarget.ID == m.Sender.ID {
-				text = "我可能没有办法帮你完成你要我做的事情……只好……对不起！"
-			} else {
-				if hard {
-					text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会沉默 %d 秒，只不过……你真的希望事情变这样吗？",
-						util.GetName(banTarget), int64(banTime.Seconds()))
-				} else {
-					text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会失落 %d 秒，希望他再次振作起来。",
-						util.GetName(banTarget), int64(banTime.Seconds()))
-				}
-			}
-		}
-	} else {
+	text := banAndGetMessage(m, banTarget, hard, banTime)
+	util.SendReply(m.Chat, text, m)
+}
+
+func banAndGetMessage(m *Message, banTarget *User, hard bool, banTime time.Duration) string {
+	text := "我没办法完成你要我做的事……即便我已经很努力了……结局还是如此。"
+	if m.ReplyTo == nil {
 		text = "ban 谁呀，咋 ban 呀， 你到底会不会用啊:)"
 	}
 
-	util.SendReply(m.Chat, text, m)
+	if banTarget == nil {
+		banTarget = m.ReplyTo.Sender
+	}
+
+	if !BanSomeone(m.Chat, banTarget, hard, banTime) {
+		return text
+	}
+
+	if banTarget.ID == m.Sender.ID {
+		text = "我可能没有办法帮你完成你要我做的事情……只好……对不起!"
+	} else {
+		if hard {
+			text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会沉默 %d 秒，只不过……你真的希望事情变这样吗？",
+				util.GetName(banTarget), int64(banTime.Seconds()))
+		} else {
+			text = fmt.Sprintf("委派下来的工作已经做完了。%s 将会失落 %d 秒，希望他再次振作起来。",
+				util.GetName(banTarget), int64(banTime.Seconds()))
+		}
+	}
+
+	return text
 }
 
 // BanSomeone Use to ban someone, return true if success.
