@@ -36,5 +36,5 @@ func RunTask(ctx Context) error {
 		}
 	}
 	time.AfterFunc(delay, task)
-	return ctx.Reply(text)
+	return ctx.Reply(text, ModeMarkdownV2)
 }
