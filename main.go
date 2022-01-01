@@ -27,13 +27,13 @@ func main() {
 	orm.InitRedis()
 
 	orm.LoadWhiteList()
-	orm.LoadBlackList()
+	orm.LoadBlockList()
 
 	go iwatch.WatchService()
 
 	bot, err := initBot()
 	if err != nil {
-		log.Fatal(err.Error())
+		log.Panic(err.Error())
 	}
 
 	registerBaseHandler(bot)
@@ -57,7 +57,7 @@ func initBot() (*Bot, error) {
 	if config.BotConfig.Proxy != "" {
 		proxyURL, err := url.Parse(config.BotConfig.Proxy)
 		if err != nil {
-			log.Fatal("proxy is wrong!", zap.Error(err))
+			log.Panic("proxy is wrong!", zap.Error(err))
 		}
 		httpClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
 	}
@@ -136,14 +136,11 @@ func registerRestrictHandler(bot *Bot) {
 
 func blockMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if ctx.Chat() == nil || ctx.Sender() == nil {
-			return next(ctx)
-		}
-		if config.BotConfig.BlockListConfig.Check(ctx.Chat().ID) {
+		if ctx.Chat() != nil && config.BotConfig.BlockListConfig.Check(ctx.Chat().ID) {
 			log.Info("chat ignore by block list", zap.String("chat", ctx.Chat().Title))
 			return nil
 		}
-		if config.BotConfig.BlockListConfig.Check(ctx.Sender().ID) {
+		if ctx.Sender() != nil && config.BotConfig.BlockListConfig.Check(ctx.Sender().ID) {
 			log.Info("sender ignore by block list", zap.String("user", ctx.Sender().Username))
 			return nil
 		}
@@ -153,7 +150,7 @@ func blockMiddleware(next HandlerFunc) HandlerFunc {
 
 func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil {
+		if !isChatMessageHasSender(ctx) {
 			return next(ctx)
 		}
 		if orm.IsBanned(ctx.Chat().ID, ctx.Sender().ID) {
@@ -168,7 +165,7 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 
 func rateMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil || ctx.Chat().Type == ChatPrivate {
+		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
 			return next(ctx)
 		}
 		whiteListConfig := config.BotConfig.WhiteListConfig
@@ -186,7 +183,7 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 
 func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil || ctx.Message().Sticker == nil {
+		if !isChatMessageHasSender(ctx) || ctx.Message().Sticker == nil {
 			return next(ctx)
 		}
 		if !orm.IsShutdown(ctx.Chat().ID) && orm.IsNoStickerMode(ctx.Chat().ID) {
@@ -217,7 +214,7 @@ func promMiddleware(next HandlerFunc) HandlerFunc {
 
 func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if ctx.Chat() == nil || ctx.Message() == nil || ctx.Sender() == nil {
+		if !isChatMessageHasSender(ctx) {
 			return next(ctx)
 		}
 		if ctx.Message().Text != "" {
@@ -233,4 +230,8 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 		}
 		return next(ctx)
 	}
+}
+
+func isChatMessageHasSender(ctx Context) bool {
+	return ctx.Chat() != nil && ctx.Message() != nil && ctx.Sender() != nil
 }

@@ -77,10 +77,10 @@ func LoadWhiteList() {
 	config.BotConfig.WhiteListConfig.Chats = chats
 }
 
-// LoadBlackList load black list.
-func LoadBlackList() {
+// LoadBlockList load black list.
+func LoadBlockList() {
 	chats := util.StringsToInts(loadSpecialList("black_list"))
-	log.Info("Black List has load.", zap.Int("length", len(chats)))
+	log.Info("Block List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.BlockListConfig.Chats = chats
 }
 
@@ -441,18 +441,22 @@ func GetTargetMap() (map[string]map[int64]struct{}, bool) {
 			continue
 		}
 
-		for _, store := range stores {
-			for _, product := range products {
-				target := product + ":" + store
-				if _, ok := targetMap[target]; !ok {
-					targetMap[target] = make(map[int64]struct{})
-				}
-				targetMap[target][userID] = struct{}{}
-			}
-		}
+		setTargetMap(userID, stores, products, targetMap)
 	}
 
 	return targetMap, true
+}
+
+func setTargetMap(userID int64, stores, products []string, targetMap map[string]map[int64]struct{}) {
+	for _, store := range stores {
+		for _, product := range products {
+			target := product + ":" + store
+			if _, ok := targetMap[target]; !ok {
+				targetMap[target] = make(map[int64]struct{})
+			}
+			targetMap[target][userID] = struct{}{}
+		}
+	}
 }
 
 // SetProductName set apple product name.

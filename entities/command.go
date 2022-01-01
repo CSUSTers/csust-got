@@ -73,8 +73,8 @@ func (c BotCommand) MultiArgsFrom(idx int) []string {
 func (c BotCommand) ArgAllInOneFrom(idx int) string {
 	arg := strings.Builder{}
 	for _, s := range c.MultiArgsFrom(idx) {
-		arg.WriteString(s)
-		arg.WriteRune(' ')
+		_, _ = arg.WriteString(s)
+		_, _ = arg.WriteRune(' ')
 	}
 	return arg.String()
 }

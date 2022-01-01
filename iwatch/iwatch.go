@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,21 @@ import (
 	"csust-got/util"
 
 	"go.uber.org/zap"
+	"golang.org/x/net/context"
 	. "gopkg.in/tucnak/telebot.v3"
+)
+
+// iwatch err
+var (
+	ErrNoStore             = errors.New("no Store")
+	ErrNoPartsAvailability = errors.New("no PartsAvailability")
+	ErrStatusCode          = errors.New("response status code is not 200")
+	ErrResponeErrorMessage = errors.New("response has error message")
+)
+
+var (
+	productRegex = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{3}[A-Z]{2}/[A-Z]$`)
+	storeRegex   = regexp.MustCompile(`R[0-9]{3}`)
 )
 
 // WatchHandler Apple Store Handler.
@@ -74,16 +89,7 @@ func listCommand(ctx Context, userID int64) error {
 func addCommand(ctx Context, userID int64, args []string) error {
 	// register
 	log.Info("register", zap.Int64("user", userID), zap.Any("list", args))
-	products := make([]string, 0)
-	stores := make([]string, 0)
-	for _, v := range args {
-		if isProduct(v) {
-			products = append(products, v)
-		}
-		if isStore(v) {
-			stores = append(stores, v)
-		}
-	}
+	products, stores := splitProductAndStore(args)
 	if len(products) == 0 && len(stores) == 0 {
 		return ctx.Reply("no product/store found")
 	}
@@ -97,11 +103,24 @@ func addCommand(ctx Context, userID int64, args []string) error {
 func remCommand(ctx Context, userID int64, args []string) error {
 	// remove store
 	log.Info("remove", zap.Int64("user", userID), zap.Any("list", args))
-	if orm.RemoveProduct(userID, args) && orm.RemoveStore(userID, args) {
+	products, stores := splitProductAndStore(args)
+	if orm.RemoveProduct(userID, products) && orm.RemoveStore(userID, stores) {
 		go removeTargets()
 		return ctx.Reply("success")
 	}
 	return ctx.Reply("failed")
+}
+
+func splitProductAndStore(args []string) (products, stores []string) {
+	for _, v := range args {
+		if isProduct(v) {
+			products = append(products, v)
+		}
+		if isStore(v) {
+			stores = append(stores, v)
+		}
+	}
+	return products, stores
 }
 
 var (
@@ -174,10 +193,49 @@ func watchApple(ch chan<- *result) {
 }
 
 func getTargetState(product, store string) (*result, error) {
+	body, err := requestApple(product, store)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := new(targetResp)
+	err = json.Unmarshal(body, resp)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Body.Content.PickupMessage.ErrorMessage != "" {
+		return nil, fmt.Errorf("%s: %w", resp.Body.Content.PickupMessage.ErrorMessage, ErrResponeErrorMessage)
+	}
+
+	if len(resp.Body.Content.PickupMessage.Stores) == 0 {
+		return nil, ErrNoStore
+	}
+
+	storeResp := resp.Body.Content.PickupMessage.Stores[0]
+	if _, ok := storeResp.PartsAvailability[product]; !ok {
+		return nil, ErrNoPartsAvailability
+	}
+
+	r := &result{
+		Avaliable:   storeResp.PartsAvailability[product].StoreSelectionEnabled,
+		Product:     product,
+		Store:       store,
+		ProductName: storeResp.PartsAvailability[product].StorePickupProductTitle,
+		StoreName:   fmt.Sprintf("%s/%s/%s", storeResp.State, storeResp.City, storeResp.StoreName),
+		// Date:        pd.DeliveryOptions[0].Date,
+	}
+
+	return r, nil
+}
+
+func requestApple(product, store string) ([]byte, error) {
 	api := "https://www.apple.com.cn/shop/fulfillment-messages?little=true&mt=regular&parts.0=%s&store=%s"
 	api = fmt.Sprintf(api, url.QueryEscape(product), url.QueryEscape(store))
 
-	req, err := http.NewRequest("GET", api, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", api, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +249,7 @@ func getTargetState(product, store string) (*result, error) {
 	}
 
 	defer func() {
-		if err := res.Body.Close(); err != nil {
+		if err = res.Body.Close(); err != nil {
 			log.Error("resp body close failed")
 		}
 	}()
@@ -201,65 +259,11 @@ func getTargetState(product, store string) (*result, error) {
 		return nil, err
 	}
 
-	defer func() {
-		if err != nil {
-			log.Warn("resp", zap.String("product", product), zap.String("store", store), zap.ByteString("body", body))
-		}
-	}()
-
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http code is %d", res.StatusCode)
+		return nil, fmt.Errorf("http code is %d: %w", res.StatusCode, ErrStatusCode)
 	}
 
-	resp := new(targetResp)
-	err = json.Unmarshal(body, resp)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.Body.Content.PickupMessage.ErrorMessage != "" {
-		return nil, errors.New(resp.Body.Content.PickupMessage.ErrorMessage)
-	}
-
-	if len(resp.Body.Content.PickupMessage.Stores) == 0 {
-		return nil, errors.New("no Store")
-	}
-
-	// pdi, ok := resp.Body.Content.DeliveryMessage[product]
-	// if !ok {
-	// 	return nil, errors.New("resp not found product")
-	// }
-
-	// pdb, err := json.Marshal(pdi)
-	// if err != nil {
-	// 	return nil, errors.New("resp product marshal failed:" + err.Error())
-	// }
-
-	// pd := new(productInfo)
-	// err = json.Unmarshal(pdb, pd)
-	// if err != nil {
-	// 	return nil, errors.New("resp product unmarshal failed:" + err.Error())
-	// }
-
-	// if len(pd.DeliveryOptions) == 0 {
-	// 	return nil, errors.New("no DeliveryOptions")
-	// }
-
-	storeResp := resp.Body.Content.PickupMessage.Stores[0]
-	if _, ok := storeResp.PartsAvailability[product]; !ok {
-		return nil, errors.New("no PartsAvailability")
-	}
-
-	r := &result{
-		Avaliable:   storeResp.PartsAvailability[product].StoreSelectionEnabled,
-		Product:     product,
-		Store:       store,
-		ProductName: storeResp.PartsAvailability[product].StorePickupProductTitle,
-		StoreName:   fmt.Sprintf("%s/%s/%s", storeResp.State, storeResp.City, storeResp.StoreName),
-		// Date:        pd.DeliveryOptions[0].Date,
-	}
-
-	return r, nil
+	return body, nil
 }
 
 type targetResp struct {
@@ -316,37 +320,11 @@ type result struct {
 }
 
 func isProduct(product string) bool {
-	if len(product) != 9 {
-		return false
-	}
-	if product[7] != '/' {
-		return false
-	}
-	if !util.IsUpper(rune(product[0])) || !util.IsUpper(rune(product[1])) ||
-		!util.IsUpper(rune(product[5])) || !util.IsUpper(rune(product[6])) || !util.IsUpper(rune(product[8])) {
-		return false
-	}
-	for _, v := range product[2:5] {
-		if !util.IsUpper(v) && !util.IsNumber(v) {
-			return false
-		}
-	}
-	return true
+	return productRegex.MatchString(product)
 }
 
 func isStore(store string) bool {
-	if len(store) != 4 {
-		return false
-	}
-	if store[0] != 'R' {
-		return false
-	}
-	for _, v := range store[1:] {
-		if !util.IsNumber(v) {
-			return false
-		}
-	}
-	return true
+	return storeRegex.MatchString(store)
 }
 
 // watching watching Apple Store watcher.
