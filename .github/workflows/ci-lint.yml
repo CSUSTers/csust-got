@@ -1,11 +1,14 @@
 name: golangci-lint
+
 on:
   push:
     branches:
       - master
       - dev
   pull_request:
+
 jobs:
+
   golangci:
     name: lint
     runs-on: ubuntu-latest
@@ -24,10 +27,10 @@ jobs:
           args: --issues-exit-code=1
 
           # Optional: show only new issues if it's a pull request. The default value is `false`.
-          only-new-issues: true
+          only-new-issues: false
 
           # Optional: if set to true then the action will use pre-installed Go.
-          skip-go-installation: true
+          skip-go-installation: false
 
           # Optional: if set to true then the action don't cache or restore ~/go/pkg.
           skip-pkg-cache: true

@@ -2,14 +2,17 @@ name: Docker Build And Deployment
 
 on:
   push:
-    branches: [ dev, master ]
+    branches:
+      - dev
+      - master
   release:
-    types: [ published ]
+    types:
+      - published
 
 jobs:
 
-  setup_env:
-    name: "Setup Env"
+  build:
+    name: "Build And Push"
     runs-on: ubuntu-latest
     steps:
 
@@ -17,30 +20,6 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: ^1.17
-
-  test:
-    name: "Run Test"
-    runs-on: ubuntu-latest
-    needs: [ setup_env ]
-    defaults:
-      run:
-        working-directory: ./
-    steps:
-
-      - name: Get source
-        uses: actions/checkout@v2
-
-      - name: Get deps
-        run: make deps
-
-      - name: Test
-        run: make test
-
-  build:
-    name: "Build And Push"
-    runs-on: ubuntu-latest
-    needs: [ setup_env, test ]
-    steps:
 
       - name: Get source
         uses: actions/checkout@v2
@@ -102,7 +81,8 @@ jobs:
   deploy:
     name: "Deployment"
     runs-on: ubuntu-latest
-    needs: [ test, setup_env, build ]
+    needs:
+      - build
     steps:
 
       - name: Get source

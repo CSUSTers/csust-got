@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -136,7 +136,7 @@ func GetHitokoto(arg HitokotoArg, withSource bool) string {
 			log.Error("close response body failed", zap.Error(err))
 		}
 	}()
-	word, err := ioutil.ReadAll(resp.Body)
+	word, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error("Err@Hitokoto [READ FROM HTTP]", zap.Error(err), zap.String("response", fmt.Sprintf("%#v", resp)))
 		return orm.GetHitokoto(withSource)
