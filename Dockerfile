@@ -15,7 +15,7 @@ ENV TAG=$TAG
 
 WORKDIR /go/src/app
 COPY . .
-RUN make deploy
+RUN if [ ! -f got ]; then make deploy; fi
 
 # deploy image
 FROM alpine
