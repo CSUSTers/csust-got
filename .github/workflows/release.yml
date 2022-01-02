@@ -33,42 +33,10 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - platform: linux/amd64
-            goarch: amd64
-            goarm:
-          - platform: linux/386
-            goarch: 386
-            goarm:
-          - platform: linux/arm64
-            goarch: arm64
-            goarm:
-          - platform: linux/arm/v7
-            goarch: arm
-            goarm: 7
     steps:
-
-      - name: Setup Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: ^1.17
 
       - name: Get source
         uses: actions/checkout@v2
-
-      - name: Print version
-        id: "version"
-        run: |
-          echo "Version:" $(git branch --show-current)-$(git rev-parse --short HEAD)
-          echo "::set-output name=tag::${GITHUB_REF/refs\/tags\//}"
-
-      - name: Build bot
-        run: GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} make deploy
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v1
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -84,14 +52,13 @@ jobs:
         with:
           context: .
           push: true
-          platforms: ${{ matrix.platform }}
+          platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
           tags: |
             csust/csust-got:latest
-            csust/csust-got:${{ steps.version.outputs.tag }}
+            csust/csust-got:${{ github.ref_name }}
           build-args: |
-            TAG=${{ steps.version.outputs.tag }}
+            TAG=${{ github.ref_name }}
             BRANCH=release
-            RELEASE=release
 
 
   deploy:
