@@ -21,42 +21,45 @@ var (
 func HugeEncoder(ctx Context) error {
 	arg, ok := parseHugeArgs(ctx)
 	if !ok {
-		return ctx.Reply(arg)
+		return ctx.Reply(arg, ModeMarkdownV2)
 	}
 
 	// encode
 	arg = encode(arg)
 
-	// if we get 'huger' after encode, we <fork> him.
-	if arg == "huger" {
-		arg = "hugeF**Ker"
-	}
-
-	return ctx.Reply(arg)
+	return ctx.Reply(arg, ModeMarkdownV2)
 }
 
 // HugeDecoder decode 'hugehugehugexxxererer' to 'hugexxxer'.
 func HugeDecoder(ctx Context) error {
 	arg, ok := parseHugeArgs(ctx)
 	if !ok {
-		return ctx.Reply(arg)
+		return ctx.Reply(arg, ModeMarkdownV2)
 	}
 
 	// decode
 	arg = decode(arg)
 
-	return ctx.Reply(arg)
+	return ctx.Reply(arg, ModeMarkdownV2)
 }
 
 func parseHugeArgs(ctx Context) (arg string, ok bool) {
-	command := entities.FromMessage(ctx.Message())
-
-	// no args
-	if command.Argc() <= 0 {
-		return "HUGEFIVER", false
+	if ctx.Message().ReplyTo != nil {
+		arg = ctx.Message().ReplyTo.Text
 	}
 
-	arg = command.ArgAllInOneFrom(0)
+	command := entities.FromMessage(ctx.Message())
+
+	if command.Argc() > 0 {
+		arg = command.ArgAllInOneFrom(0)
+	}
+
+	arg = strings.TrimSpace(arg)
+
+	// no args
+	if arg == "" {
+		return "HUGEFIVER", false
+	}
 
 	// tldr
 	if len(arg) > 128 {
@@ -67,28 +70,39 @@ func parseHugeArgs(ctx Context) (arg string, ok bool) {
 }
 
 func encode(arg string) string {
+	if arg == "" {
+		return "HUGEFIVER"
+	}
 	// add 'huge' to prefix
 	if !strings.HasPrefix(arg, "huge") {
-		if arg[0] == 'e' {
-			arg = "hug" + arg
-		} else {
-			arg = "huge" + arg
+		if arg[0] != 'e' {
+			arg = "e" + arg
 		}
+		arg = "hug" + arg
 	}
 	// add 'er' to suffix
 	if !strings.HasSuffix(arg, "er") {
-		// change 'y' to 'i' if end with $xyTable
-		for _, v := range yEndTable {
-			if strings.HasSuffix(arg, v) {
-				arg = arg[0:len(arg)-1] + "i"
-				break
-			}
-		}
+		arg = encodeParseEnd(arg)
 		// only add 'r' if $arg end with 'e'
-		if arg[len(arg)-1] == 'e' {
-			arg += "r"
-		} else {
-			arg += "er"
+		if arg[len(arg)-1] != 'e' {
+			arg += "e"
+		}
+		arg += "r"
+	}
+	// if we get 'huger' after encode, we <fork> him.
+	if arg == "huger" {
+		arg = "hugeF**Ker"
+	}
+
+	return arg
+}
+
+// encodeParseEnd change 'y' to 'i' if end with $yEndTable
+func encodeParseEnd(arg string) string {
+	for _, v := range yEndTable {
+		if strings.HasSuffix(arg, v) {
+			arg = arg[0:len(arg)-1] + "i"
+			break
 		}
 	}
 	return arg
@@ -114,11 +128,6 @@ func decode(arg string) string {
 		if arg[erStart-2:erStart] != "er" {
 			break
 		}
-	}
-
-	// if we will get 'huger', we reply <fork>.
-	if erStart < hugeEnd {
-		return "hugeF**Ker"
 	}
 
 	// decode
