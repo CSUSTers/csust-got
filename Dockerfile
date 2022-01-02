@@ -1,8 +1,6 @@
-# __IMPORTENT__ 
-# requires docker 17.3 and above
-
 # build
-FROM golang:alpine AS buildenv
+FROM --platform=$BUILDPLATFORM golang:alpine AS buildenv
+ARG TARGETARCH
 
 RUN apk add make git tzdata
 
@@ -12,13 +10,15 @@ ARG RELEASE
 
 ENV BRANCH=$BRANCH
 ENV TAG=$TAG
+ENV GOARCH=$TARGETARCH
 
 WORKDIR /go/src/app
 COPY . .
-RUN if [ ! -f got ]; then make deploy; fi
+RUN make deploy
+
 
 # deploy image
-FROM alpine
+FROM --platform=$BUILDPLATFORM alpine
 
 RUN apk add tzdata
 
