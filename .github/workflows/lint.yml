@@ -1,13 +1,12 @@
 name: Lint
 
 on:
-  push:
-  pull_request:
+  workflow_call:
 
 jobs:
 
-  golangci:
-    name: lint
+  golangci-lint:
+    name: Golangci Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
