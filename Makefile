@@ -25,13 +25,13 @@ get:
 
 deps:
 	go mod download
-  
+
 build: get
 	CGO_ENABLED=$(CGOFLAG) \
 	go build -o $(OUTPUT) .
 
 test: 
-	go test -v ./...
+	go test -v -race -covermode=atomic ./...
 
 fmt:
 	gofmt -l -w .
