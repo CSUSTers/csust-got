@@ -2,33 +2,17 @@ name: Build And Deploy
 
 on:
   push:
-    branches:
-      - dev
-      - master
 
 jobs:
 
+  lint:
+    name: Lint
+    uses: CSUSTers/csust-got/.github/workflows/lint.yml@dev
+
+
   test:
     name: Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./
-    steps:
-
-      - name: Setup Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: ^1.17
-
-      - name: Get source
-        uses: actions/checkout@v2
-
-      - name: Get deps
-        run: make deps
-
-      - name: Test
-        run: make test
+    uses: CSUSTers/csust-got/.github/workflows/test.yml@dev
 
 
   build:

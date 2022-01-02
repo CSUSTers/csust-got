@@ -1,0 +1,40 @@
+name: Go Build
+
+on:
+  workflow_call:
+
+jobs:
+
+  go-build:
+    name: Go Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            goarch: amd64
+            goarm:
+          - platform: linux/386
+            goarch: 386
+            goarm:
+          - platform: linux/arm64
+            goarch: arm64
+            goarm:
+          - platform: linux/arm/v7
+            goarch: arm
+            goarm: 7
+    steps:
+
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.17
+
+      - name: Get source
+        uses: actions/checkout@v2
+
+      - name: Get deps
+        run: make deps
+
+      - name: Build bot
+        run: GOARCH=${{ matrix.goarch }} GOARM=${{ matrix.goarm }} make deploy
