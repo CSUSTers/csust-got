@@ -22,10 +22,10 @@ func RunTask(ctx Context) error {
 		return ctx.Reply(text)
 	}
 
-	text = fmt.Sprintf("好的，在 %v 后我会来叫你……`%s`，嗯，不愧是我。", delay, info)
+	text = fmt.Sprintf("好的, 在 %v 后我会来叫你…… `%s` , 嗯, 不愧是我。", delay, info)
 	task := func() {
 		uid := ctx.Sender().Username
-		hint := fmt.Sprintf("@%s 我来了，你要我提醒你……`%s`，大概没错吧。", uid, info)
+		hint := fmt.Sprintf("@%s 我来了, 你要我提醒你…… `%s` ,大概没错吧。", uid, info)
 		err := ctx.Send(hint, ModeMarkdownV2)
 		if err != nil {
 			zap.L().Error("Run Task send msg to user failed",
