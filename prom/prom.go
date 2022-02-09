@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 var host, _ = os.Hostname()

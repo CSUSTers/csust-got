@@ -6,7 +6,7 @@ import (
 	"csust-got/util"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // NoSticker is a switch for NoStickerMode.

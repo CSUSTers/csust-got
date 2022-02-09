@@ -9,7 +9,7 @@ import (
 	"csust-got/log"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.

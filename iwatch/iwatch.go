@@ -20,7 +20,7 @@ import (
 
 	"go.uber.org/zap"
 	"golang.org/x/net/context"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // iwatch err

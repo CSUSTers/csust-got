@@ -9,7 +9,7 @@ import (
 	"csust-got/util"
 
 	"golang.org/x/time/rate"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 var limitMap = make(map[string]*rate.Limiter, 16)

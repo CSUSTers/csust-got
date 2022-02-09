@@ -6,7 +6,7 @@ import (
 
 	"csust-got/entities"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 var (

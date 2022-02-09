@@ -15,7 +15,7 @@ import (
 	"csust-got/orm"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // HitokotoResponse is HitokotoResponse.
