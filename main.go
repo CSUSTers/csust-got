@@ -201,12 +201,11 @@ func promMiddleware(next HandlerFunc) HandlerFunc {
 		if ctx.Message() == nil {
 			return next(ctx)
 		}
-		prom.DialMessage(ctx.Message())
-		m := ctx.Message()
-		command := entities.FromMessage(m)
+		prom.DialContext(ctx)
+		command := entities.FromMessage(ctx.Message())
 		if command != nil {
 			log.Info("bot receive command", zap.String("chat", ctx.Chat().Title),
-				zap.String("user", ctx.Sender().Username), zap.String("command", m.Text))
+				zap.String("user", ctx.Sender().Username), zap.String("command", ctx.Message().Text))
 		}
 		return next(ctx)
 	}
