@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // BotCommand - command in message.

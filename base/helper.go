@@ -8,7 +8,7 @@ import (
 	"csust-got/config"
 	"csust-got/util"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // Makefile variable.

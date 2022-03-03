@@ -5,7 +5,7 @@ import (
 	"csust-got/prom"
 	"csust-got/util"
 
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // WelcomeNewMember is handle for welcome new member.

@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 var host, _ = os.Hostname()
@@ -56,17 +56,16 @@ func newLabels(base, labels prometheus.Labels) prometheus.Labels {
 	return labels
 }
 
-// DialMessage - dial an message.
-func DialMessage(m *Message) {
-	if m.Private() {
+// DialContext - dial with tg context.
+func DialContext(ctx Context) {
+	if ctx.Chat().Type == ChatPrivate {
 		return
 	}
 	labels := prometheus.Labels{"host": host}
 
-	chat := m.Chat
-	labels["chat_name"] = chat.Title
+	labels["chat_name"] = ctx.Chat().Title
 
-	user := m.Sender
+	user := ctx.Sender()
 	if user == nil || user.IsBot {
 		return
 	}
@@ -78,11 +77,11 @@ func DialMessage(m *Message) {
 
 	isCommand, isSticker := "false", "false"
 
-	if m.Sticker != nil {
+	if ctx.Message().Sticker != nil {
 		isSticker = "true"
 	}
 
-	command := entities.FromMessage(m)
+	command := entities.FromMessage(ctx.Message())
 	if command != nil {
 		isCommand = "true"
 		commandTimes.With(newLabels(labels, prometheus.Labels{

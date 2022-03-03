@@ -10,7 +10,7 @@ import (
 	"csust-got/log"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 type htmlMapper func(m *Message) string

@@ -11,7 +11,7 @@ import (
 	"csust-got/util"
 
 	"go.uber.org/zap"
-	. "gopkg.in/tucnak/telebot.v3"
+	. "gopkg.in/telebot.v3"
 )
 
 // MC we not use message count anymore.
