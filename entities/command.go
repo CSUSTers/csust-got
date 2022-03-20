@@ -15,32 +15,30 @@ type BotCommand struct {
 }
 
 var (
-	spaces, _   = regexp.Compile(`\s+`)
-	cmdRegex, _ = regexp.Compile(`^/[0-9a-zA-Z_]+$`)
+	spaces   = regexp.MustCompile(`\s+`)
+	cmdRegex = regexp.MustCompile(`^/([0-9a-zA-Z_]+)(?:@[^\s@]*)?$`)
 )
 
 // FromMessage - get command in a message.
 func FromMessage(msg *Message) *BotCommand {
-	args := splitText(strings.TrimSpace(msg.Text))
+	args := splitText(strings.TrimSpace(msg.Text), 2)
 	if len(args) == 0 {
 		return nil
 	}
 	name := args[0]
-	if idx := strings.IndexRune(name, '@'); idx != -1 {
-		name = name[:idx]
-	}
-	if !cmdRegex.MatchString(name) {
+	m := cmdRegex.FindStringSubmatch(name)
+	if len(m) == 0 {
 		return nil
 	}
-	return &BotCommand{name[1:], args[1:]}
+	name = m[1]
+	return &BotCommand{name, args[1:]}
 }
 
-func splitText(txt string) []string {
-	ts := []string{}
+func splitText(txt string, n int) []string {
 	if len(txt) > 0 {
-		ts = spaces.Split(txt, -1)
+		return spaces.Split(txt, n)
 	}
-	return ts
+	return nil
 }
 
 // Name - command name.

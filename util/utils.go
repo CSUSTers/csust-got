@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"csust-got/config"
 	"csust-got/log"
@@ -13,7 +14,7 @@ import (
 )
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
-func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int, ok bool) {
+func ParseNumberAndHandleError(m *Message, ns string, rng Range[int]) (number int, ok bool) {
 	// message id is a int-type number
 	id, err := strconv.Atoi(ns)
 	if err != nil {
@@ -139,7 +140,7 @@ func RandomChoice(s []string) string {
 
 // StringsToInts parse []string to []int64.
 func StringsToInts(s []string) []int64 {
-	res := make([]int64, 0)
+	res := make([]int64, 0, len(s))
 	for _, v := range s {
 		i, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -174,24 +175,15 @@ func GroupCommand(fn func(m *Message)) HandlerFunc {
 
 // IsNumber check rune is number.
 func IsNumber(r rune) bool {
-	if r < '0' || r > '9' {
-		return false
-	}
-	return true
+	return unicode.IsNumber(r)
 }
 
 // IsUpper check rune is upper.
 func IsUpper(r rune) bool {
-	if r < 'A' || r > 'Z' {
-		return false
-	}
-	return true
+	return unicode.IsUpper(r)
 }
 
 // IsLower check rune is lower.
 func IsLower(r rune) bool {
-	if r < 'a' || r > 'z' {
-		return false
-	}
-	return true
+	return unicode.IsLower(r)
 }
