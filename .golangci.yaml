@@ -538,7 +538,7 @@ linters:
     - forbidigo
     - gocognit
     - goconst
-    - gocritic
+    #- gocritic
     - godox
     - goerr113
     - gofmt
