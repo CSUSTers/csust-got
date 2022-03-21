@@ -1,6 +1,8 @@
 package util
 
-import "reflect"
+import (
+	"reflect"
+)
 
 type Result[T any] struct {
 	e error
@@ -18,6 +20,13 @@ func NewResult[T any](v T) Result[T] {
 func NewErrorResult[T any](e error) Result[T] {
 	return Result[T]{
 		e: e,
+	}
+}
+
+func WrapResult[T any](v T, e error) Result[T] {
+	return Result[T]{
+		e: e,
+		v: v,
 	}
 }
 
@@ -79,11 +88,18 @@ func (r Result[T]) Else(fn func(error) T) Result[T] {
 	return r
 }
 
-func (r Result[T]) ThenElse(fn func(T) T, o T) Result[T] {
+func (r Result[T]) ThenOr(fn func(T) T, o T) Result[T] {
 	if r.IsError() {
 		return NewResult(o)
 	}
 	return NewResult(fn(r.v))
+}
+
+func (r Result[T]) ThenElse(fn func(error) Result[T]) Result[T] {
+	if r.IsError() {
+		return fn(r.e)
+	}
+	return r
 }
 
 func (r Result[T]) Map(fn func(T) T) T {
@@ -105,4 +121,18 @@ func (r Result[T]) MapOrElse(fn_ok func(T) T, fn_fail func(error) T) T {
 		return fn_fail(r.e)
 	}
 	return fn_ok(r.v)
+}
+
+func (r Result[T]) Do(fn func(T)) Result[T] {
+	if !r.IsError() {
+		fn(r.v)
+	}
+	return r
+}
+
+func (r Result[T]) DoError(fn func(error)) Result[T] {
+	if r.IsError() {
+		fn(r.e)
+	}
+	return r
 }
