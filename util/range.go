@@ -1,6 +1,6 @@
 package util
 
-// RangeInt is a int range.
+// Range is a range.
 type Range[T Ordered] struct {
 	max T
 	min T
@@ -16,18 +16,25 @@ func (r Range[T]) IsEmpty() bool {
 	return r.max <= r.min
 }
 
-// NewRangeInt return a RangeInt object.
-func NewRangeInt(min, max int) Range[int] {
-	return Range[int]{
+// NewRangeInt return a Range[Int] object.
+func NewRangeInt[T Interger](min, max T) Range[T] {
+	return Range[T]{
 		max: max,
 		min: min,
 	}
 }
 
-// NewEmptyRangeInt return a empty RangeInt object.
-func NewEmptyRangeInt() Range[int] {
-	return Range[int]{
+// NewEmptyRangeInt return a empty Range[Int] object.
+func NewEmptyRangeInt[T Interger]() Range[T] {
+	return Range[T]{
 		min: 0,
 		max: 0,
+	}
+}
+
+func NewRange[T Ordered](min, max T) Range[T] {
+	return Range[T]{
+		max: max,
+		min: min,
 	}
 }
