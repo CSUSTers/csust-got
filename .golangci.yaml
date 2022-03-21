@@ -3,6 +3,7 @@
 
 # options for analysis running
 run:
+  go: 1.18
   # default concurrency is a available CPU number
   concurrency: 8
 
@@ -142,6 +143,9 @@ linters-settings:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
+      - hugeParam
+      - rangeValCopy
+      - typeDefFirst
 
     # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
@@ -297,12 +301,15 @@ linters-settings:
 
     # enable or disable analyzers by name
     # run `go tool vet help` to see all analyzers
-    enable:
-      - atomicalign
-    enable-all: false
+    # enable:
+    #   - atomicalign
+    enable-all: true
     disable:
       - shadow
-    disable-all: false
+      - nilness
+      - unusedwrite
+      - fieldalignment
+    # disable-all: false
 
   ifshort:
     # Maximum length of variable declaration measured in number of lines, after which linter won't suggest using short syntax.
@@ -538,13 +545,14 @@ linters:
     - forbidigo
     - gocognit
     - goconst
-    #- gocritic
+    - gocritic
     - godox
     - goerr113
     - gofmt
     - goimports
     - gomoddirectives
     - gosec
+    - govet
     - ifshort
     - nakedret
     - nestif
@@ -562,6 +570,9 @@ linters:
     - unparam
     - wastedassign
     - whitespace
+  disable:
+    - typecheck
+    - structcheck
   fast: false
 
 
