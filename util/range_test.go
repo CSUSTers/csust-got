@@ -83,7 +83,6 @@ func TestRange(t *testing.T) {
 	})
 }
 
-// nolint:revive
 func TestOpenAndClosedRange(t *testing.T) {
 	// closed range
 	t.Run("closed range", func(t *testing.T) {
