@@ -14,7 +14,7 @@ import (
 )
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
-func ParseNumberAndHandleError(m *tb.Message, ns string, rng Range[int]) (number int, ok bool) {
+func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {
 	// message id is a int-type number
 	id, err := strconv.Atoi(ns)
 	if err != nil {

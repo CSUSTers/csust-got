@@ -56,6 +56,7 @@ func Test_splitText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := splitText(tt.txt, -1)
 			require.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 
