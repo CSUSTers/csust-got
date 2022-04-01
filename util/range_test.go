@@ -81,7 +81,9 @@ func TestRange(t *testing.T) {
 		ass.False(r2.Cover("z1"))
 		ass.False(r2.Cover(string([]byte{0xff, 0xfe, 0x00})))
 	})
+}
 
+func TestOpenAndClosedRange(t *testing.T) {
 	// closed range
 	t.Run("closed range", func(t *testing.T) {
 		ass := assert.New(t)
@@ -220,6 +222,28 @@ func TestRange(t *testing.T) {
 			ass.True(r.Cover(5))
 			ass.False(r.Cover(6))
 		})
-
 	})
+}
+
+func TestIntervalType(t *testing.T) {
+	ass := assert.New(t)
+
+	ass.EqualValues(0b01, leftClosed)
+	ass.EqualValues(0b10, rightClosed)
+
+	ass.Equal(leftClosed|rightClosed, ClosedInterval)
+	ass.EqualValues(0, OpenInterval)
+	ass.Equal(leftClosed, LClosedROpen)
+	ass.Equal(rightClosed, LOpenRClosed)
+
+	ass.Equal(leftClosed, ClosedInterval&leftClosed)
+	ass.Equal(rightClosed, ClosedInterval&rightClosed)
+
+	ass.Equal(leftClosed, LClosedROpen&leftClosed)
+	ass.Equal(rightClosed, LOpenRClosed&rightClosed)
+
+	ass.EqualValues(0, OpenInterval&leftClosed)
+	ass.EqualValues(0, OpenInterval&rightClosed)
+	ass.EqualValues(0, LClosedROpen&rightClosed)
+	ass.EqualValues(0, LOpenRClosed&leftClosed)
 }

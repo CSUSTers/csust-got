@@ -1,5 +1,6 @@
 package util
 
+// IntervalType tags the type of interval/range.
 type IntervalType uint8
 
 const (
@@ -19,6 +20,7 @@ const (
 	LClosedROpen = leftClosed // 0b0001
 )
 
+// IRange is interface of range.
 type IRange[T Ordered] interface {
 	// Cover return if pattern `x` is in range.
 	Cover(x T) bool
@@ -47,7 +49,7 @@ func (r Range[T]) IsEmpty() bool {
 
 type emptyRange[T Ordered] struct{}
 
-func (r emptyRange[T]) Cover(x T) bool {
+func (r emptyRange[T]) Cover(_ T) bool {
 	return false
 }
 
