@@ -21,7 +21,7 @@ var (
 
 // FromMessage - get command in a message.
 func FromMessage(msg *Message) *BotCommand {
-	args := splitText(strings.TrimSpace(msg.Text), 2)
+	args := splitText(strings.TrimSpace(msg.Text), -1)
 	if len(args) == 0 {
 		return nil
 	}

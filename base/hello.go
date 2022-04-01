@@ -90,7 +90,7 @@ func Forward(m *Message) {
 	retry := 1
 	for retry >= 0 {
 		if command.Argc() > 0 {
-			id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRangeInt(0, m.ID))
+			id, ok := util.ParseNumberAndHandleError(m, command.Arg(0), util.NewRange(0, m.ID))
 			retry = 0
 			if !ok {
 				util.SendReply(m.Chat, "嗦啥呢", m)

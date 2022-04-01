@@ -16,19 +16,12 @@ func (r Range[T]) IsEmpty() bool {
 	return r.max <= r.min
 }
 
-// NewRangeInt return a Range[Int] object.
-func NewRangeInt[T Interger](min, max T) Range[T] {
-	return Range[T]{
-		max: max,
-		min: min,
-	}
-}
-
 // NewEmptyRangeInt return a empty Range[Int] object.
-func NewEmptyRangeInt[T Interger]() Range[T] {
+func NewEmptyRange[T Ordered]() Range[T] {
+	e := *new(T)
 	return Range[T]{
-		min: 0,
-		max: 0,
+		min: e,
+		max: e,
 	}
 }
 
