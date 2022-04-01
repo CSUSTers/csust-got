@@ -32,6 +32,7 @@ func NewEmptyRangeInt[T Interger]() Range[T] {
 	}
 }
 
+// NewRange returns a Range[T] object.
 func NewRange[T Ordered](min, max T) Range[T] {
 	return Range[T]{
 		max: max,
