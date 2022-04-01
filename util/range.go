@@ -49,10 +49,12 @@ func (r Range[T]) IsEmpty() bool {
 
 type emptyRange[T Ordered] struct{}
 
+// Cover always return false.
 func (r emptyRange[T]) Cover(_ T) bool {
 	return false
 }
 
+// IsEmpty always return true.
 func (r emptyRange[T]) IsEmpty() bool {
 	return true
 }
