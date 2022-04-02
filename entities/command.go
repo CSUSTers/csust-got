@@ -41,28 +41,24 @@ func FromMessage(msg *Message) *BotCommand {
 // CommandTakeArgs returns a command and rest part of text.
 // `argc` is the number of args to take, if `argc` < 0, all args will be taken.
 func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
+	taken := argc
 	if argc >= 0 {
-		argc++
+		taken = argc + 1
 	}
-	args := spaces.Split(strings.TrimSpace(msg.Text), argc)
+	args := spaces.Split(strings.TrimSpace(msg.Text), taken)
 	if len(args) == 0 {
 		err = errParseCommand
 		return
 	}
 
-	name := args[0][1:]
-	if idx := strings.IndexRune(name, '@'); idx != -1 {
-		name = name[1:idx]
+	name, args := args[0][1:], args[1:]
+	if idx := strings.IndexRune(name, '@'); idx >= 0 {
+		name = name[:idx]
 	}
-	if argc > 0 {
-		if len(args) < argc {
-			cmd = &BotCommand{name, args[1:]}
-		} else {
-			cmd = &BotCommand{name, args[1:argc]}
-			rest = args[argc]
-		}
-	} else {
-		cmd = &BotCommand{name, args[1:]}
+	cmd = &BotCommand{name, args}
+	if argc >= 0 && len(args) > argc {
+		cmd.args = args[:argc]
+		rest = args[argc]
 	}
 	return cmd, rest, nil
 }
