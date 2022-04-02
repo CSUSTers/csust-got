@@ -4,16 +4,17 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"csust-got/config"
 	"csust-got/log"
 
 	"go.uber.org/zap"
-	. "gopkg.in/telebot.v3"
+	tb "gopkg.in/telebot.v3"
 )
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
-func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int, ok bool) {
+func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {
 	// message id is a int-type number
 	id, err := strconv.Atoi(ns)
 	if err != nil {
@@ -28,19 +29,19 @@ func ParseNumberAndHandleError(m *Message, ns string, rng RangeInt) (number int,
 }
 
 // SendMessage will use the bot to send a message.
-func SendMessage(to Recipient, what interface{}, ops ...interface{}) *Message {
+func SendMessage(to tb.Recipient, what interface{}, ops ...interface{}) *tb.Message {
 	msg, _ := SendMessageWithError(to, what, ops...)
 	return msg
 }
 
 // SendReply will use the bot to reply a message.
-func SendReply(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) *Message {
-	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)
+func SendReply(to tb.Recipient, what interface{}, replyMsg *tb.Message, ops ...interface{}) *tb.Message {
+	ops = append([]interface{}{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessage(to, what, ops...)
 }
 
 // SendMessageWithError is same as SendMessage but return error.
-func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*Message, error) {
+func SendMessageWithError(to tb.Recipient, what interface{}, ops ...interface{}) (*tb.Message, error) {
 	msg, err := config.BotConfig.Bot.Send(to, what, ops...)
 	if err != nil {
 		log.Error("Can't send message", zap.Error(err))
@@ -49,13 +50,13 @@ func SendMessageWithError(to Recipient, what interface{}, ops ...interface{}) (*
 }
 
 // EditMessage edit bot's message.
-func EditMessage(m *Message, what interface{}, ops ...interface{}) *Message {
+func EditMessage(m *tb.Message, what interface{}, ops ...interface{}) *tb.Message {
 	msg, _ := EditMessageWithError(m, what, ops...)
 	return msg
 }
 
 // EditMessageWithError is same as EditMessage but return error.
-func EditMessageWithError(m *Message, what interface{}, ops ...interface{}) (*Message, error) {
+func EditMessageWithError(m *tb.Message, what interface{}, ops ...interface{}) (*tb.Message, error) {
 	msg, err := config.GetBot().Edit(m, what, ops...)
 	if err != nil {
 		log.Error("Can't edit message", zap.Error(err))
@@ -64,13 +65,13 @@ func EditMessageWithError(m *Message, what interface{}, ops ...interface{}) (*Me
 }
 
 // SendReplyWithError is same as SendReply but return error.
-func SendReplyWithError(to Recipient, what interface{}, replyMsg *Message, ops ...interface{}) (*Message, error) {
-	ops = append([]interface{}{&SendOptions{ReplyTo: replyMsg}}, ops...)
+func SendReplyWithError(to tb.Recipient, what interface{}, replyMsg *tb.Message, ops ...interface{}) (*tb.Message, error) {
+	ops = append([]interface{}{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessageWithError(to, what, ops...)
 }
 
 // DeleteMessage delete a message.
-func DeleteMessage(m *Message) {
+func DeleteMessage(m *tb.Message) {
 	err := config.BotConfig.Bot.Delete(m)
 	if err != nil {
 		log.Error("Can't delete message", zap.Error(err))
@@ -78,7 +79,7 @@ func DeleteMessage(m *Message) {
 }
 
 // GetName can get user's name.
-func GetName(user *User) string {
+func GetName(user *tb.User) string {
 	name := user.FirstName
 	if user.LastName != "" {
 		name += " " + user.LastName
@@ -95,18 +96,18 @@ func GetUserNameFromString(s string) (string, bool) {
 }
 
 // GetAdminList can get admin list from chat.
-func GetAdminList(chatID int64) []ChatMember {
-	chat := &Chat{ID: chatID}
+func GetAdminList(chatID int64) []tb.ChatMember {
+	chat := &tb.Chat{ID: chatID}
 	admins, err := config.BotConfig.Bot.AdminsOf(chat)
 	if err != nil {
 		log.Error("Can't get admin list", zap.Int64("chatID", chatID), zap.Error(err))
-		return []ChatMember{}
+		return []tb.ChatMember{}
 	}
 	return admins
 }
 
 // CanRestrictMembers can check if someone can restrict members.
-func CanRestrictMembers(chat *Chat, user *User) bool {
+func CanRestrictMembers(chat *tb.Chat, user *tb.User) bool {
 	member, err := config.BotConfig.Bot.ChatMemberOf(chat, user)
 	if err != nil {
 		log.Error("can get CanRestrictMembers", zap.Int64("chatID", chat.ID),
@@ -139,7 +140,7 @@ func RandomChoice(s []string) string {
 
 // StringsToInts parse []string to []int64.
 func StringsToInts(s []string) []int64 {
-	res := make([]int64, 0)
+	res := make([]int64, 0, len(s))
 	for _, v := range s {
 		i, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -152,9 +153,9 @@ func StringsToInts(s []string) []int64 {
 }
 
 // PrivateCommand warp command to private call only.
-func PrivateCommand(fn HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		if ctx.Chat().Type != ChatPrivate {
+func PrivateCommand(fn tb.HandlerFunc) tb.HandlerFunc {
+	return func(ctx tb.Context) error {
+		if ctx.Chat().Type != tb.ChatPrivate {
 			return ctx.Reply("这个命令只能私聊使用哦")
 		}
 		return fn(ctx)
@@ -162,9 +163,9 @@ func PrivateCommand(fn HandlerFunc) HandlerFunc {
 }
 
 // GroupCommand warp command to group call only.
-func GroupCommand(fn func(m *Message)) HandlerFunc {
-	return func(ctx Context) error {
-		if ctx.Chat().Type == ChatPrivate {
+func GroupCommand(fn func(m *tb.Message)) tb.HandlerFunc {
+	return func(ctx tb.Context) error {
+		if ctx.Chat().Type == tb.ChatPrivate {
 			return ctx.Reply("这个命令不支持私聊使用哦")
 		}
 		fn(ctx.Message())
@@ -174,24 +175,15 @@ func GroupCommand(fn func(m *Message)) HandlerFunc {
 
 // IsNumber check rune is number.
 func IsNumber(r rune) bool {
-	if r < '0' || r > '9' {
-		return false
-	}
-	return true
+	return unicode.IsNumber(r)
 }
 
 // IsUpper check rune is upper.
 func IsUpper(r rune) bool {
-	if r < 'A' || r > 'Z' {
-		return false
-	}
-	return true
+	return unicode.IsUpper(r)
 }
 
 // IsLower check rune is lower.
 func IsLower(r rune) bool {
-	if r < 'a' || r > 'z' {
-		return false
-	}
-	return true
+	return unicode.IsLower(r)
 }

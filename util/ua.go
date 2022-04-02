@@ -139,8 +139,10 @@ var uaList = []string{
 	"Mozilla/5.0 (Linux; Android 7.0; SM-G570M Build/NRD90M) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Mobile Safari/537.36",
 }
 
+var uaLen = len(uaList)
+
 // RandUA rand an user-agent.
 func RandUA() string {
-	idx := rand.Intn(len(uaList))
+	idx := rand.Intn(uaLen)
 	return uaList[idx]
 }

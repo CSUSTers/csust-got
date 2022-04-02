@@ -136,7 +136,7 @@ linters-settings:
     # By default list of stable checks is used.
     enabled-checks:
       - nestingReduce
-      - unnamedresult
+      # - unnamedresult
       - ruleguard
       - truncateCmp
 
@@ -403,7 +403,7 @@ linters-settings:
       - name: errorf
       - name: exported
       - name: function-length
-        arguments: [40, 100]
+        arguments: [40, 200]
       - name: get-return
       - name: identical-branches
       - name: if-return

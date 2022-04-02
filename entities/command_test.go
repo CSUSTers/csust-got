@@ -4,6 +4,7 @@ package entities
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +17,7 @@ func Test_splitText(t *testing.T) {
 		{
 			"Empty String",
 			"",
-			[]string{},
+			nil,
 		},
 		{
 			"Split Count: 1",
@@ -53,8 +54,14 @@ func Test_splitText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitText(tt.txt)
+			got := splitText(tt.txt, -1)
 			require.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, got)
 		})
 	}
+
+	t.Run("split limit 2", func(t *testing.T) {
+		got := splitText("love and peace", 2)
+		assert.Equal(t, []string{"love", "and peace"}, got)
+	})
 }
