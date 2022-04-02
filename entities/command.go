@@ -2,6 +2,7 @@
 package entities
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
@@ -17,6 +18,8 @@ type BotCommand struct {
 var (
 	spaces, _   = regexp.Compile(`\s+`)
 	cmdRegex, _ = regexp.Compile(`^/[0-9a-zA-Z_]+$`)
+
+	errParseCommand = errors.New("parse command failed")
 )
 
 // FromMessage - get command in a message.
@@ -33,6 +36,33 @@ func FromMessage(msg *Message) *BotCommand {
 		return nil
 	}
 	return &BotCommand{name[1:], args[1:]}
+}
+
+func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
+	if argc >= 0 {
+		argc = argc + 1
+	}
+	args := spaces.Split(strings.TrimSpace(msg.Text), argc)
+	if len(args) == 0 {
+		err = errParseCommand
+		return
+	} else {
+		name := args[0]
+		if idx := strings.IndexRune(name, '@'); idx != -1 {
+			name = name[:idx]
+		}
+		if argc > 0 {
+			if len(args) < argc {
+				cmd = &BotCommand{name, args[1:]}
+			} else {
+				cmd = &BotCommand{name, args[1:argc]}
+				rest = args[argc]
+			}
+		} else {
+			cmd = &BotCommand{name, args[1:]}
+		}
+	}
+	return
 }
 
 func splitText(txt string) []string {
