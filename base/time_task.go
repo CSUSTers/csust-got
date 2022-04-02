@@ -16,12 +16,14 @@ import (
 func RunTask(ctx Context) error {
 	text := "你嗦啥，我听不太懂欸……"
 
-	cmd := entities.FromMessage(ctx.Message())
+	msg := ctx.Message()
+	cmd := entities.FromMessage(msg)
 	delay, err := util.EvalDuration(cmd.Arg(0))
-	info := cmd.ArgAllInOneFrom(1)
 	if err != nil || delay < time.Second {
 		return ctx.Reply(text)
 	}
+	// info := cmd.ArgAllInOneFrom(1)
+	info := msg.Payload
 
 	text = fmt.Sprintf("好的, 在 %v 后我会来叫你…… <code>%s</code> , 嗯, 不愧是我。", delay, html.EscapeString(info))
 	task := func() {
