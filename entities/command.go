@@ -43,7 +43,9 @@ func FromMessage(msg *Message) *BotCommand {
 func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
 	taken := argc
 	if argc >= 0 {
-		taken = argc + 1
+		// cmd .. args .. rest
+		//  1  +  argc  +  1
+		taken = argc + 2
 	}
 	args := spaces.Split(strings.TrimSpace(msg.Text), taken)
 	if len(args) == 0 {
