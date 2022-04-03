@@ -231,7 +231,13 @@ func (h *Heap[T]) down(i int) bool {
 			break
 		}
 
-		min := h.min3(i, left, right)
+		min := i
+		if right >= h.Len() && left < h.Len() {
+			min = h.min2(i, left)
+		} else if right < h.Len() {
+			min = h.min3(i, left, right)
+		}
+
 		// `min` == `i` will end process
 		if min == i {
 			break

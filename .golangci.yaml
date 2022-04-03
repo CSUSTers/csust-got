@@ -352,7 +352,7 @@ linters-settings:
     # Enable strict mode will also include the errors caused by failing to parse the args.
     strict: false
     # Please refer to https://github.com/yeya24/promlinter#usage for detailed usage.
-    # disabled-linters:
+    disabled-linters:
     #  - "Help"
     #  - "MetricUnits"
     #  - "Counter"
@@ -392,7 +392,7 @@ linters-settings:
       - name: context-as-argument
       - name: context-keys-type
       - name: cyclomatic
-        arguments: [7]
+        arguments: [8]
       - name: defer
       - name: duplicated-imports
       - name: early-return
