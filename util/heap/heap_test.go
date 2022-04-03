@@ -7,29 +7,53 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	// benchmark 10K
+	b10K = 10_000
+	// benchmark 10M
+	b10M = 10_000_000
+	// benchmark min and max value
+	bMin, bMax = -1_000_000, 1_000_001
+	// benchmark max pop and push
+	bmp10K, bmp10M = 1_000, 100_000
 )
 
 var (
 	testLen = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 126, 127, 128}
 	maxInt  = []int{1, 10, 100, 1000, 100000}
 	minInt  = make([]int, len(maxInt))
+
+	// slice for benchmark len 10M
+	s10M = make([]int, b10M)
+	// slice for benchmark len 10K
+	s10K = s10M[:b10K]
+
+	randNum chan int
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	for i := range maxInt {
 		minInt[i] = -maxInt[i]
 	}
+
+	randNum = make(chan int, 1024)
+	go func() {
+		for {
+			randNum <- randInt(bMin, bMax)
+		}
+	}()
+
+	m.Run()
 }
 
 func TestHeap(t *testing.T) {
 	ass := assert.New(t)
 
 	d := []int{43, 56, 33, 55, 23, 44, 12, 34, 45, 67, 89, 90, 33}
-	h := TakeAsHeap(d, func(a, b int) bool {
-		return a < b
-	}, func(a, b int) bool {
-		return a == b
-	})
+	h := TakeAsHeap(d, funLess, funEqual)
 	h.Init()
 	ass.True(h.IsHeap())
 	t.Log(h.d)
@@ -52,7 +76,7 @@ func TestNewHeapInit(t *testing.T) {
 					}
 					// test NewHeapInit
 					var h *Heap[int]
-					ass.NotPanics(func() {
+					require.NotPanics(t, func() {
 						h = NewHeapInit(d, func(a, b int) bool {
 							return a < b
 						}, func(a, b int) bool {
@@ -92,11 +116,7 @@ func TestHeapPush(t *testing.T) {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 					}
 					// test NewHeapInit
-					h := NewHeapInit(d, func(a, b int) bool {
-						return a < b
-					}, func(a, b int) bool {
-						return a == b
-					})
+					h := NewHeapInit(d, funLess, funEqual)
 					// test push
 					var ok bool
 					for v := 0; v < testLen[ti]/2+1; v++ {
@@ -152,11 +172,7 @@ func TestHeapPop(t *testing.T) {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 					}
 					// test NewHeapInit
-					h := NewHeapInit(d, func(a, b int) bool {
-						return a < b
-					}, func(a, b int) bool {
-						return a == b
-					})
+					h := NewHeapInit(d, funLess, funEqual)
 					sort.Slice(d, func(i, j int) bool {
 						return d[i] < d[j]
 					})
@@ -169,9 +185,7 @@ func TestHeapPop(t *testing.T) {
 					// reverse
 					h = NewHeapInit(d, func(a, b int) bool {
 						return a > b
-					}, func(a, b int) bool {
-						return a == b
-					})
+					}, funEqual)
 					sort.Slice(d, func(i, j int) bool {
 						return d[i] > d[j]
 					})
@@ -206,11 +220,7 @@ func TestHeapInitAndPushAndPop(t *testing.T) {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 					}
 					// test NewHeapInit
-					h := NewHeapInit(d, func(a, b int) bool {
-						return a < b
-					}, func(a, b int) bool {
-						return a == b
-					})
+					h := NewHeapInit(d, funLess, funEqual)
 					// test push
 					var ok bool
 					for v := 0; v < testLen[ti]+1; v++ {
@@ -234,4 +244,91 @@ func TestHeapInitAndPushAndPop(t *testing.T) {
 			})
 		}
 	}
+}
+
+func BenchmarkHeapInit10K(b *testing.B) {
+	heap := TakeAsHeap(s10K, funLess, funEqual)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		randSlice(s10K, bMin, bMax)
+		b.StartTimer()
+
+		heap.Init()
+	}
+}
+
+func BenchmarkHeapInit10M(b *testing.B) {
+	heap := TakeAsHeap(s10M, funLess, funEqual)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		randSlice(s10M, bMin, bMax)
+		b.StartTimer()
+
+		heap.Init()
+	}
+}
+
+func BenchmarkHeapPopPush10K(b *testing.B) {
+	randSlice(s10K, bMin, bMax)
+	heap := TakeAsHeap(s10K, funLess, funEqual)
+	heap.Init()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		heap.Pop()
+		heap.Push(<-randNum)
+	}
+}
+
+func BenchmarkHeapPopPush10M(b *testing.B) {
+	randSlice(s10M, bMin, bMax)
+	heap := TakeAsHeap(s10M, funLess, funEqual)
+	heap.Init()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		heap.Pop()
+		heap.Push(<-randNum)
+	}
+}
+
+func BenchmarkHeapPop10M(b *testing.B) {
+	randSlice(s10M, bMin, bMax)
+	heap := TakeAsHeap(s10M, funLess, funEqual)
+	heap.Init()
+
+	b.ResetTimer()
+	for i := 0; i < b.N && i < bmp10K; i++ {
+		heap.Pop()
+	}
+	b.N = bmp10M
+}
+
+func funLess(a, b int) bool {
+	return a < b
+}
+
+func funEqual(a, b int) bool {
+	return a == b
+}
+
+func randSlice(xs []int, min, max int) {
+	for i := range xs {
+		xs[i] = <-randNum
+	}
+}
+
+// func shuffSlice(xs []int) {
+// 	for i := range xs {
+// 		j := randInt(i, len(xs))
+// 		xs[i], xs[j] = xs[j], xs[i]
+// 	}
+// }
+
+func randInt(min, max int) int {
+	return min + rand.Intn(max-min)
 }
