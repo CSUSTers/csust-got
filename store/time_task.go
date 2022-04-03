@@ -1,7 +1,6 @@
 package store
 
 import (
-	"csust-got/orm"
 	"csust-got/util/timer"
 )
 

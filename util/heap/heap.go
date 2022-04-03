@@ -2,14 +2,19 @@ package heap
 
 import "sort"
 
+// CompareFunction is generic function for comparing two value.
 type CompareFunction[T any] func(a, b T) bool
 
+// Heap is a heap.
+// Depending on `less` function implement, it can be min heap or max heap.
 type Heap[T any] struct {
 	d     []T
 	less  CompareFunction[T]
-	eqaul CompareFunction[T]
+	equal CompareFunction[T]
 }
 
+// TakeAsHeap takes a slice and returns a heap not initialized.
+// It don't take ownership of the slice.
 func NewHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	d := make([]T, len(ps))
 	copy(d, ps)
@@ -17,18 +22,23 @@ func NewHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	return &Heap[T]{d, less, equal}
 }
 
+// NewHeapInit takes a slice and returns a heap initialized.
+// It don't take ownership of the slice.
 func NewHeapInit[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	heap := NewHeap(ps, less, equal)
 	heap.Init()
 	return heap
 }
 
+// TakeAsHeap takes a slice and returns a heap not initialized.
+// It **takes** ownership of the slice.
 func TakeAsHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	heap := Heap[T]{ps, less, equal}
 	return &heap
 }
 
-// SortTopN taken ownership of `ps`, DOT NOT use where other
+// SortTopN sorts the top N elements of a slice on front, else in random order.
+// It **takes** ownership of `ps`, and acts on origin slice.
 func SortTopN[T any](ps []T, n int, less, equal CompareFunction[T]) []T {
 	larger := func(x, y T) bool {
 		return !less(x, y) && !equal(x, y)
@@ -70,6 +80,7 @@ func SortTopN[T any](ps []T, n int, less, equal CompareFunction[T]) []T {
 	// return append(minN, rest...)
 }
 
+// Init initializes the heap.
 func (h *Heap[T]) Init() {
 	if h.Len() <= 1 {
 		return
@@ -80,40 +91,51 @@ func (h *Heap[T]) Init() {
 	}
 }
 
+// Len returns the length of the heap.
 func (h *Heap[T]) Len() int {
 	return len(h.d)
 }
 
+// Swap swap two elements of the heap.
 func (h *Heap[T]) Swap(i, j int) {
 	h.d[i], h.d[j] = h.d[j], h.d[i]
 }
 
+// Larger takes two index of element, and returns if the first one is larger than the other.
 func (h *Heap[T]) Larger(i, j int) bool {
-	return !h.less(h.d[i], h.d[j]) && !h.eqaul(h.d[i], h.d[j])
+	return !h.less(h.d[i], h.d[j]) && !h.equal(h.d[i], h.d[j])
 }
 
+// Less takes two index of element, and returns if the first one is less than the other.
 func (h *Heap[T]) Less(i, j int) bool {
 	return h.less(h.d[i], h.d[j])
 }
 
+// Empty returns true if the heap is empty.
 func (h *Heap[T]) Empty() bool {
 	return h.Len() == 0
 }
 
+// IsHeap checks if the heap is a heap.
 func (h *Heap[T]) IsHeap() bool {
 	if h.Empty() {
 		return true
 	}
 
 	for i := 0; i < h.Len()/2; i++ {
-		if h.Larger(i, 2*i+1) || h.Larger(i, 2*i+2) {
+		left, right := 2*i+1, 2*i+2
+		if left >= h.Len() {
+			break
+		}
+		if h.Larger(i, left) || right < h.Len() && h.Larger(i, right) {
 			return false
 		}
 	}
 	return true
 }
 
-func (h *Heap[T]) Min(i, j, k int) int {
+// min takes 3 element index, and return the minimum one.
+func (h *Heap[T]) min(i, j, k int) int {
 	var secondLess, thirdLess bool
 	if j < h.Len() {
 		secondLess = h.Less(j, i)
@@ -122,11 +144,11 @@ func (h *Heap[T]) Min(i, j, k int) int {
 		thirdLess = h.Less(k, i)
 	}
 
-	// `j` and `k` Large than `i`
-	//   `j` Large `k` => `j`
-	//   _ 	      => `k`
-	// `which` is Large than `i` => `which`
-	// _ => `i`
+	// `j` and `k` less than `i`
+	//   `j` less `k` => `j`
+	//     	 else     => `k`
+	// `which` is less than `i` => `which`
+	//     else                  => `i`
 	if secondLess && thirdLess {
 		if h.Less(j, k) {
 			return j
@@ -141,11 +163,13 @@ func (h *Heap[T]) Min(i, j, k int) int {
 	return i
 }
 
+// Push pushes an element into the heap.
 func (h *Heap[T]) Push(e T) {
 	h.d = append(h.d, e)
 	h.up(h.Len() - 1)
 }
 
+// Pop pops an element from the heap.
 func (h *Heap[T]) Pop() (popped T) {
 	if h.Empty() {
 		return
@@ -163,6 +187,7 @@ func (h *Heap[T]) Pop() (popped T) {
 	return popped
 }
 
+// Replace replaces the element at index `n` with `e`.
 func (h *Heap[T]) Replace(e T, n int) (replaced T) {
 	if n >= h.Len() {
 		return
@@ -176,6 +201,7 @@ func (h *Heap[T]) Replace(e T, n int) (replaced T) {
 	return replaced
 }
 
+// Top returns the top element of the heap.
 func (h *Heap[T]) Top() (top T) {
 	if h.Empty() {
 		return
@@ -183,6 +209,7 @@ func (h *Heap[T]) Top() (top T) {
 	return h.d[0]
 }
 
+// up moves the element at index `n` up to its proper position.
 func (h *Heap[T]) up(i int) {
 	// loop when `e` is not top and `e` > child
 	for p := (i - 1) / 2; i > 0 && h.Larger(p, i); p, i = (p-1)/2, p {
@@ -190,6 +217,8 @@ func (h *Heap[T]) up(i int) {
 	}
 }
 
+// down moves the element at index `n` down to its proper position.
+// Returns true if the element at `i` is not in the initial position.
 func (h *Heap[T]) down(i int) bool {
 	init := i
 
@@ -202,7 +231,7 @@ func (h *Heap[T]) down(i int) bool {
 			break
 		}
 
-		min := h.Min(i, left, right)
+		min := h.min(i, left, right)
 		// `min` == `i` will end process
 		if min == i {
 			break
