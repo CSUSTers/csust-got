@@ -101,31 +101,6 @@ func (h *Heap[T]) Swap(i, j int) {
 	h.d[i], h.d[j] = h.d[j], h.d[i]
 }
 
-// gt takes two index of element, and returns if the first one is larger than the other.
-func (h *Heap[T]) gt(i, j int) bool {
-	return !h.less(h.d[i], h.d[j]) && !h.equal(h.d[i], h.d[j])
-}
-
-// lt takes two index of element, and returns if the first one is less than the other.
-func (h *Heap[T]) lt(i, j int) bool {
-	return h.less(h.d[i], h.d[j])
-}
-
-// ltEq takes two index of element, and returns if the first one is less than or equal the other.
-func (h *Heap[T]) ltEq(i, j int) bool {
-	return h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
-}
-
-// gtEq takes two index of element, and returns if the first one is larger than or equal the other.
-func (h *Heap[T]) gtEq(i, j int) bool {
-	return !h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
-}
-
-// eq takes two index of element, and returns true they are equal.
-func (h *Heap[T]) eq(i, j int) bool {
-	return h.equal(h.d[i], h.d[j])
-}
-
 // Empty returns true if the heap is empty.
 func (h *Heap[T]) Empty() bool {
 	return h.Len() == 0
@@ -147,20 +122,6 @@ func (h *Heap[T]) IsHeap() bool {
 		}
 	}
 	return true
-}
-
-// min2 takes 2 element index, and return the minimum one.
-func (h *Heap[T]) min2(i, j int) int {
-	if h.ltEq(i, j) {
-		return i
-	}
-	return j
-}
-
-// min3 takes 3 element index, and return the minimum one.
-func (h *Heap[T]) min3(i, j, k int) int {
-	less12 := h.min2(i, j)
-	return h.min2(less12, k)
 }
 
 // Push pushes an element into the heap.
@@ -212,6 +173,7 @@ func (h *Heap[T]) Top() (top T) {
 // up moves the element at index `n` up to its proper position.
 func (h *Heap[T]) up(i int) {
 	// loop when `e` is not top and `e` > child
+	// `p` is the parent, `i` is the child
 	for p := (i - 1) / 2; i > 0 && h.gt(p, i); p, i = (p-1)/2, p {
 		h.Swap(p, i)
 	}
@@ -248,4 +210,43 @@ func (h *Heap[T]) down(i int) bool {
 	}
 
 	return i != init
+}
+
+// min2 takes 2 element index, and return the minimum one.
+func (h *Heap[T]) min2(i, j int) int {
+	if h.ltEq(i, j) {
+		return i
+	}
+	return j
+}
+
+// min3 takes 3 element index, and return the minimum one.
+func (h *Heap[T]) min3(i, j, k int) int {
+	less12 := h.min2(i, j)
+	return h.min2(less12, k)
+}
+
+// gt takes two index of element, and returns if the first one is larger than the other.
+func (h *Heap[T]) gt(i, j int) bool {
+	return !h.less(h.d[i], h.d[j]) && !h.equal(h.d[i], h.d[j])
+}
+
+// lt takes two index of element, and returns if the first one is less than the other.
+func (h *Heap[T]) lt(i, j int) bool {
+	return h.less(h.d[i], h.d[j])
+}
+
+// ltEq takes two index of element, and returns if the first one is less than or equal the other.
+func (h *Heap[T]) ltEq(i, j int) bool {
+	return h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
+}
+
+// gtEq takes two index of element, and returns if the first one is larger than or equal the other.
+func (h *Heap[T]) gtEq(i, j int) bool {
+	return !h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
+}
+
+// eq takes two index of element, and returns true they are equal.
+func (h *Heap[T]) eq(i, j int) bool {
+	return h.equal(h.d[i], h.d[j])
 }
