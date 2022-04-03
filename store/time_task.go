@@ -1,12 +1,10 @@
 package store
 
-import (
-	"csust-got/util/timer"
-)
-
+// TimeTaskKey is the redis key for time task.
 const TimeTaskKey = "TIME_TASK_ITMES"
 
-var taskTimer *timer.Timer
+// var taskTimer *timer.Timer
 
+// InitTimeTaskStore initializes the time task.
 func InitTimeTaskStore() {
 }

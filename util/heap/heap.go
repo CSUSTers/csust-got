@@ -13,7 +13,7 @@ type Heap[T any] struct {
 	equal CompareFunction[T]
 }
 
-// TakeAsHeap takes a slice and returns a heap not initialized.
+// NewHeap takes a slice and returns a heap not initialized.
 // It don't take ownership of the slice.
 func NewHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	d := make([]T, len(ps))
@@ -69,7 +69,7 @@ func SortTopN[T any](ps []T, n int, less, equal CompareFunction[T]) []T {
 	minHeap := TakeAsHeap(maxHeap.d, less, equal)
 	minHeap.Init()
 	// `minN` is a slice own its NEW array instead of sharing array of `ps`
-	sort.Slice(maxHeap.d, maxHeap.Less)
+	sort.Slice(maxHeap.d, maxHeap.lt)
 
 	// sum of `len(headN)` and `len(rest)` equals `len(ps)`
 	// `rest` is always on the base array of `ps`
@@ -101,14 +101,29 @@ func (h *Heap[T]) Swap(i, j int) {
 	h.d[i], h.d[j] = h.d[j], h.d[i]
 }
 
-// Larger takes two index of element, and returns if the first one is larger than the other.
-func (h *Heap[T]) Larger(i, j int) bool {
+// gt takes two index of element, and returns if the first one is larger than the other.
+func (h *Heap[T]) gt(i, j int) bool {
 	return !h.less(h.d[i], h.d[j]) && !h.equal(h.d[i], h.d[j])
 }
 
-// Less takes two index of element, and returns if the first one is less than the other.
-func (h *Heap[T]) Less(i, j int) bool {
+// lt takes two index of element, and returns if the first one is less than the other.
+func (h *Heap[T]) lt(i, j int) bool {
 	return h.less(h.d[i], h.d[j])
+}
+
+// ltEq takes two index of element, and returns if the first one is less than or equal the other.
+func (h *Heap[T]) ltEq(i, j int) bool {
+	return h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
+}
+
+// gtEq takes two index of element, and returns if the first one is larger than or equal the other.
+func (h *Heap[T]) gtEq(i, j int) bool {
+	return !h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
+}
+
+// eq takes two index of element, and returns true they are equal.
+func (h *Heap[T]) eq(i, j int) bool {
+	return h.equal(h.d[i], h.d[j])
 }
 
 // Empty returns true if the heap is empty.
@@ -127,40 +142,25 @@ func (h *Heap[T]) IsHeap() bool {
 		if left >= h.Len() {
 			break
 		}
-		if h.Larger(i, left) || right < h.Len() && h.Larger(i, right) {
+		if h.gt(i, left) || right < h.Len() && h.gt(i, right) {
 			return false
 		}
 	}
 	return true
 }
 
-// min takes 3 element index, and return the minimum one.
-func (h *Heap[T]) min(i, j, k int) int {
-	var secondLess, thirdLess bool
-	if j < h.Len() {
-		secondLess = h.Less(j, i)
+// min2 takes 2 element index, and return the minimum one.
+func (h *Heap[T]) min2(i, j int) int {
+	if h.ltEq(i, j) {
+		return i
 	}
-	if k < h.Len() {
-		thirdLess = h.Less(k, i)
-	}
+	return j
+}
 
-	// `j` and `k` less than `i`
-	//   `j` less `k` => `j`
-	//     	 else     => `k`
-	// `which` is less than `i` => `which`
-	//     else                  => `i`
-	if secondLess && thirdLess {
-		if h.Less(j, k) {
-			return j
-		} else {
-			return k
-		}
-	} else if secondLess {
-		return j
-	} else if thirdLess {
-		return k
-	}
-	return i
+// min3 takes 3 element index, and return the minimum one.
+func (h *Heap[T]) min3(i, j, k int) int {
+	less12 := h.min2(i, j)
+	return h.min2(less12, k)
 }
 
 // Push pushes an element into the heap.
@@ -212,7 +212,7 @@ func (h *Heap[T]) Top() (top T) {
 // up moves the element at index `n` up to its proper position.
 func (h *Heap[T]) up(i int) {
 	// loop when `e` is not top and `e` > child
-	for p := (i - 1) / 2; i > 0 && h.Larger(p, i); p, i = (p-1)/2, p {
+	for p := (i - 1) / 2; i > 0 && h.gt(p, i); p, i = (p-1)/2, p {
 		h.Swap(p, i)
 	}
 }
@@ -231,7 +231,7 @@ func (h *Heap[T]) down(i int) bool {
 			break
 		}
 
-		min := h.min(i, left, right)
+		min := h.min3(i, left, right)
 		// `min` == `i` will end process
 		if min == i {
 			break

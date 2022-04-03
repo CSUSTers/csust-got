@@ -3,7 +3,7 @@
 
 # options for analysis running
 run:
-  go: 1.18
+  go: "1.18"
   # default concurrency is a available CPU number
   concurrency: 8
 
@@ -145,7 +145,6 @@ linters-settings:
       - regexpMust
       - hugeParam
       - rangeValCopy
-      - typeDefFirst
 
     # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
@@ -353,7 +352,7 @@ linters-settings:
     # Enable strict mode will also include the errors caused by failing to parse the args.
     strict: false
     # Please refer to https://github.com/yeya24/promlinter#usage for detailed usage.
-    disabled-linters:
+    # disabled-linters:
     #  - "Help"
     #  - "MetricUnits"
     #  - "Counter"

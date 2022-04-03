@@ -186,7 +186,6 @@ func TestOpenAndClosedRange(t *testing.T) {
 		})
 
 		t.Run("left open right closed", func(t *testing.T) {
-
 			ass := assert.New(t)
 
 			// (1, 1]
