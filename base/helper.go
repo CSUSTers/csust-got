@@ -59,3 +59,10 @@ func GetChatID(ctx Context) error {
 // 	}
 // 	prom.GetMember(chat.Title, num)
 // }
+
+// DoNothing is a handler do nothing
+// It just a placeholder for some handle endpoint, let the bot know
+// it should process this update, then the update can be processed in middleware.
+func DoNothing(ctx Context) error {
+	return nil
+}

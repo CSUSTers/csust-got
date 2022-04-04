@@ -41,6 +41,15 @@ func main() {
 
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
+	bot.Handle(OnText, base.DoNothing)
+	bot.Handle(OnSticker, base.DoNothing)
+	bot.Handle(OnAnimation, base.DoNothing)
+	bot.Handle(OnMedia, base.DoNothing)
+	bot.Handle(OnPhoto, base.DoNothing)
+	bot.Handle(OnVideo, base.DoNothing)
+	bot.Handle(OnVoice, base.DoNothing)
+	bot.Handle(OnVideoNote, base.DoNothing)
+	bot.Handle(OnDocument, base.DoNothing)
 
 	bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 
@@ -71,7 +80,7 @@ func initBot() (*Bot, error) {
 		Client:    httpClient,
 	}
 	if config.BotConfig.DebugMode {
-		settings.Verbose = true
+		settings.Verbose = false
 	}
 
 	bot, err := NewBot(settings)
@@ -79,7 +88,7 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
-	bot.Use(blockMiddleware, fakeBanMiddleware, rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
+	bot.Use(loggerMiddleware, blockMiddleware, fakeBanMiddleware, rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -132,6 +141,13 @@ func registerRestrictHandler(bot *Bot) {
 	bot.Handle("/shutdown", util.GroupCommand(base.Shutdown))
 	bot.Handle("/halt", util.GroupCommand(base.Shutdown))
 	bot.Handle("/boot", util.GroupCommand(base.Boot))
+}
+
+func loggerMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		log.Debug("bot receive update", zap.Any("update", ctx.Update()))
+		return next(ctx)
+	}
 }
 
 func blockMiddleware(next HandlerFunc) HandlerFunc {
