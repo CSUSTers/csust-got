@@ -97,7 +97,7 @@ linters-settings:
     check-generated: false
     # presence of "default" case in switch statements satisfies exhaustiveness,
     # even if all enum members are not listed
-    default-signifies-exhaustive: false
+    default-signifies-exhaustive: true
     # enum members matching the supplied regex do not have to be listed in
     # switch statements to satisfy exhaustiveness
     ignore-enum-members: ""
