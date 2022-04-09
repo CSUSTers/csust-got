@@ -232,7 +232,7 @@ func (t *TimeTask) fetchTaskLoop() {
 			next := t.nextTime.Get()
 			now := time.Now()
 
-			if next <= 0 || next <= now.Add(time.Second*10).UnixMilli() {
+			if next > 0 && next <= now.Add(time.Second*10).UnixMilli() {
 				break
 			}
 
