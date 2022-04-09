@@ -206,10 +206,11 @@ func (t *TimeTask) runningTaskLoop() {
 func (t *TimeTask) fetchTaskLoop() {
 	timer := time.NewTimer(time.Second)
 	for {
+		startTime := t.nextTime.Get()
 		endTime := time.Now().Add(FetchTaskTime).UnixMilli()
 
 		// fetch tasks from redis, and add to torunChan
-		ts, err := orm.QueryTasks(0, endTime)
+		ts, err := orm.QueryTasks(startTime, endTime)
 		if err != nil {
 			log.Error("query tasks error", zap.Error(err))
 			timer.Reset(time.Microsecond * 10)
