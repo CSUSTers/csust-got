@@ -130,9 +130,10 @@ func CanRestrictMembers(chat *tb.Chat, user *tb.User) bool {
 // }
 
 // RandomChoice - rand one from slice.
-func RandomChoice(s []string) string {
+func RandomChoice[T any](s []T) T {
+	var ret T
 	if len(s) == 0 {
-		return ""
+		return ret
 	}
 	idx := rand.Intn(len(s))
 	return s[idx]
