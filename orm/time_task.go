@@ -131,7 +131,7 @@ func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 	}
 
 	zs, err := rc.ZRangeByScoreWithScores(TimeTaskKey(), &redis.ZRangeBy{
-		Min:   tos,
+		Min:   "(" + tos,
 		Max:   "inf",
 		Count: 1,
 	}).Result()
