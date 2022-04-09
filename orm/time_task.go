@@ -142,7 +142,14 @@ func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 	return zs[0].Score, err
 }
 
-// DeleteTask deletes a task from redis.
-func DeleteTask(raw string) error {
-	return rc.ZRem(TimeTaskKey(), raw).Err()
+// DeleteTasks deletes a task from redis.
+func DeleteTasks(raws ...string) error {
+	if len(raws) == 0 {
+		return nil
+	}
+	var is []interface{}
+	for _, r := range raws {
+		is = append(is, r)
+	}
+	return rc.ZRem(TimeTaskKey(), is...).Err()
 }
