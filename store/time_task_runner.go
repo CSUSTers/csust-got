@@ -8,10 +8,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// TaskDeadTime is the time how long the task can live.
+// TaskDeadTime is the time how long the expired task can live.
+// Task will be deleted when bot started if task is expired for TaskDeadTime.
 const TaskDeadTime = time.Hour * 24 // 24h
 // FetchTaskTime fetch the task in future.
-const FetchTaskTime = time.Minute * 5 // 10min
+const FetchTaskTime = time.Minute * 5 // 5min
 
 // Task is an alias of orm.Task.
 type Task = orm.Task

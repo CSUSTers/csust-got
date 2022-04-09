@@ -2,6 +2,7 @@ package prom
 
 import (
 	"net/http"
+	_ "net/http/pprof" // pprof
 	"os"
 
 	"csust-got/config"
@@ -27,21 +28,21 @@ func InitPrometheus() {
 	prometheus.MustRegister(newMemberCount)
 	prometheus.MustRegister(logCount)
 
-	if !config.BotConfig.PromConfig.Enabled {
-		return
+	cfg := config.BotConfig
+	if cfg.PromConfig.Enabled {
+		apiClient, err := api.NewClient(api.Config{
+			Address: cfg.PromConfig.Address,
+		})
+		if err != nil {
+			zap.L().Fatal("init prometheus client failed", zap.Error(err))
+		}
+		client = v1.NewAPI(apiClient)
+
+		http.Handle("/metrics", promhttp.Handler())
 	}
 
-	apiClient, err := api.NewClient(api.Config{
-		Address: config.BotConfig.PromConfig.Address,
-	})
-	if err != nil {
-		zap.L().Fatal("init prometheus client failed", zap.Error(err))
-	}
-	client = v1.NewAPI(apiClient)
-
-	http.Handle("/metrics", promhttp.Handler())
 	go func() {
-		err := http.ListenAndServe(config.BotConfig.Listen, nil)
+		err := http.ListenAndServe(cfg.Listen, nil)
 		if err != nil {
 			zap.L().Error("InitPrometheus: Serve http failed", zap.Error(err))
 			Log(zap.ErrorLevel.String())
