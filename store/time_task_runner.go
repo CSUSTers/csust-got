@@ -102,6 +102,7 @@ func (t *TimeTask) DeleteTask(task *RawTask) {
 	t.deleteChan <- task
 }
 
+// nolint: revive // cognitive complexity of this function can not be reduced. 
 func (t *TimeTask) addTaskLoop() {
 	tasks := make([]*Task, 0, 8)
 	timer := time.NewTimer(time.Second)
@@ -120,19 +121,7 @@ func (t *TimeTask) addTaskLoop() {
 			}
 		}
 
-		ts := make([]*TaskNonced, 0, len(tasks))
-		minTime := time.Now().UnixMilli()
-		for _, task := range tasks {
-			now := time.Now()
-			if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() {
-				time.AfterFunc(time.Until(time.UnixMilli(task.ExecTime)), t.RunTaskFn(task, t.fn))
-			} else {
-				if task.ExecTime < minTime {
-					minTime = task.ExecTime
-				}
-				ts = append(ts, orm.NewTaskNonced(task))
-			}
-		}
+		ts, minTime := t.parseTasks(tasks)
 		// if add to redis error, then reset timer in 10ms, and try again.
 		if err := orm.AddTasks(ts...); err != nil {
 			log.Error("add tasks error", zap.Error(err))
@@ -145,6 +134,23 @@ func (t *TimeTask) addTaskLoop() {
 		tasks = tasks[:0]
 		timer.Reset(time.Second)
 	}
+}
+
+func (t *TimeTask) parseTasks(tasks []*orm.Task) ([]*orm.TaskNonced, int64) {
+	ts := make([]*TaskNonced, 0, len(tasks))
+	minTime := time.Now().UnixMilli()
+	for _, task := range tasks {
+		now := time.Now()
+		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() {
+			time.AfterFunc(time.Until(time.UnixMilli(task.ExecTime)), t.RunTaskFn(task, t.fn))
+		} else {
+			if task.ExecTime < minTime {
+				minTime = task.ExecTime
+			}
+			ts = append(ts, orm.NewTaskNonced(task))
+		}
+	}
+	return ts, minTime
 }
 
 func (t *TimeTask) deleteTaskLoop() {
@@ -162,6 +168,9 @@ func (t *TimeTask) deleteTaskLoop() {
 			}
 		}
 
-		orm.DeleteTasks(taskStrs...)
+		err := orm.DeleteTasks(taskStrs...)
+		if err != nil {
+			log.Error("delete tasks error", zap.Error(err))
+		}
 	}
 }
