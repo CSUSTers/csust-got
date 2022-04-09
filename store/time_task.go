@@ -10,13 +10,13 @@ import (
 
 // InitTimeTaskStore initializes the time task.
 func InitTimeTaskStore() {
-	tasks, err := orm.QueryTasks(0, time.Now().Add(FetchTaskTime).Unix())
+	tasks, err := orm.QueryTasks(0, time.Now().Add(FetchTaskTime).UnixMilli())
 	if err != nil {
 		log.Error("init query tasks error", zap.Error(err))
 		return
 	}
 	now := time.Now()
-	ddl := now.Add(TaskDeadTime).UnixMilli()
+	ddl := now.Add(-TaskDeadTime).UnixMilli()
 	for _, t := range tasks {
 		if t.ExecTime < ddl {
 			log.Info("task exec time expired, skip it", zap.String("task", t.Raw))
