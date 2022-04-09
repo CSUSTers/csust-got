@@ -221,8 +221,10 @@ func (t *TimeTask) fetchTaskLoop() {
 		}
 
 		// fetch next time from redis
-		next, _ := orm.NextTaskTime(endTime)
-		t.nextTime.Set(next)
+		next, err := orm.NextTaskTime(endTime)
+		if err != nil {
+			t.nextTime.Set(next)
+		}
 
 		// if next task is near, wait for a little time and enter next loop.
 		// if next task is far, wait for a little time and check again.
