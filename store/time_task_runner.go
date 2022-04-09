@@ -4,6 +4,7 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -48,6 +49,7 @@ func NewTimeTask(fn func(task *Task)) *TimeTask {
 		addChan:     make(chan *Task, 64),
 		deleteChan:  make(chan *RawTask, 64),
 		runningChan: make(chan *Task, 64),
+		torunChan:   make(chan *RawTask, 64),
 	}
 }
 
@@ -77,7 +79,7 @@ func (t *TimeTask) Run() {
 	go t.getLoopFn("add_loop", waiter)()
 	go t.getLoopFn("delete_loop", waiter)()
 	go t.getLoopFn("running_loop", waiter)()
-	go t.getLoopFn("fetcher_loop", waiter)()
+	go t.getLoopFn("fetch_loop", waiter)()
 
 	tries := 0
 	var timer <-chan time.Time
@@ -204,43 +206,39 @@ func (t *TimeTask) runningTaskLoop() {
 }
 
 func (t *TimeTask) fetchTaskLoop() {
-	timer := time.NewTimer(time.Second)
-	for {
+	ticker := time.NewTicker(time.Second)
+	for range ticker.C {
 		startTime := t.nextTime.Get()
 		endTime := time.Now().Add(FetchTaskTime).UnixMilli()
 
 		// fetch tasks from redis, and add to torunChan
-		ts, err := orm.QueryTasks(startTime, endTime)
+		err := t.fetchTask(startTime, endTime)
 		if err != nil {
-			log.Error("query tasks error", zap.Error(err))
-			timer.Reset(time.Microsecond * 10)
-			continue
-		}
-		for _, task := range ts {
-			t.torunChan <- task
-		}
-
-		// fetch next time from redis
-		next, err := orm.NextTaskTime(endTime)
-		if err != nil {
-			t.nextTime.Set(next)
-		}
-
-		// if next task is near, wait for a little time and enter next loop.
-		// if next task is far, wait for a little time and check again.
-		for {
-			next := t.nextTime.Get()
-			now := time.Now()
-
-			if next > 0 && next <= now.Add(time.Second*10).UnixMilli() {
-				break
+			if !errors.Is(err, orm.ErrNoTask) {
+				log.Error("query tasks error", zap.Error(err))
 			}
-
-			timer.Reset(time.Microsecond * 100)
-			<-timer.C
-			continue
 		}
 	}
+}
+
+func (t *TimeTask) fetchTask(from, to int64) error {
+	// fetch tasks from redis, and add to torunChan
+	ts, err := orm.QueryTasks(from, to)
+	if err != nil {
+		return err
+	}
+
+	for _, task := range ts {
+		t.torunChan <- task
+	}
+
+	// fetch next time from redis
+	next, err := orm.NextTaskTime(to)
+	if err != nil {
+		return err
+	}
+	t.nextTime.Set(next)
+	return nil
 }
 
 func (t *TimeTask) getLoopFn(name string, waiter chan string) func() {
