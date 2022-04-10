@@ -131,38 +131,36 @@ func (t *TimeTask) addTaskLoop() {
 			}
 		}
 
-		ts, minTime := t.parseTasks(tasks)
-		// if add to redis error, then reset timer in 10ms, and try again.
-		if err := orm.AddTasks(ts...); err != nil {
-			log.Error("add tasks error", zap.Error(err))
-			timer.Reset(time.Microsecond * 10)
-			continue
-		}
-		// if the mix time is before t.nextTime or t.nextTime <= 0, replace the nextTime.
-		nextTime := t.nextTime.Get()
-		if minTime < nextTime || nextTime <= 0 {
-			t.nextTime.Set(minTime)
-		}
-		tasks = tasks[:0]
-		timer.Reset(time.Second)
+		func() {
+			t.nextTime.RLock()
+			defer t.nextTime.RUnlock()
+
+			ts := t.parseTasks(tasks)
+			// if add to redis error, then reset timer in 10ms, and try again.
+			if err := orm.AddTasks(ts...); err != nil {
+				log.Error("add tasks error", zap.Error(err))
+				timer.Reset(time.Microsecond * 10)
+				return
+			}
+			// if add to redis success, then reset timer in 1s, then enter next loop.
+			tasks = tasks[:0]
+			timer.Reset(time.Second)
+		}()
 	}
 }
 
-func (t *TimeTask) parseTasks(tasks []*orm.Task) ([]*orm.TaskNonced, int64) {
+func (t *TimeTask) parseTasks(tasks []*orm.Task) []*orm.TaskNonced {
 	ts := make([]*TaskNonced, 0, len(tasks))
-	minTime := t.nextTime.Get()
+	next := t.nextTime.Get()
 	for _, task := range tasks {
 		now := time.Now()
-		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() {
+		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() || task.ExecTime <= next {
 			t.runningChan <- task
 		} else {
-			if task.ExecTime < minTime {
-				minTime = task.ExecTime
-			}
 			ts = append(ts, orm.NewTaskNonced(task))
 		}
 	}
-	return ts, minTime
+	return ts
 }
 
 func (t *TimeTask) deleteTaskLoop() {
@@ -208,7 +206,7 @@ func (t *TimeTask) runningTaskLoop() {
 func (t *TimeTask) fetchTaskLoop() {
 	ticker := time.NewTicker(time.Second)
 	for range ticker.C {
-		startTime := t.nextTime.Get()
+		startTime := t.nextTime.LockGet()
 		endTime := time.Now().Add(FetchTaskTime).UnixMilli()
 
 		// fetch tasks from redis, and add to toRunChan
@@ -234,10 +232,13 @@ func (t *TimeTask) fetchTask(from, to int64) error {
 
 	// fetch next time from redis
 	next, err := orm.NextTaskTime(to)
-	if err != nil {
+	if errors.Is(err, orm.ErrNoTask) {
+		t.nextTime.LockSet(time.Now().Add(FetchTaskTime).UnixMilli())
+		return nil
+	} else if err != nil {
 		return err
 	}
-	t.nextTime.Set(next)
+	t.nextTime.LockSet(next)
 	return nil
 }
 
