@@ -385,7 +385,7 @@ linters-settings:
       - name: blank-imports
       - name: bool-literal-in-expr
       - name: cognitive-complexity
-        arguments: [15]
+        arguments: [12]
       - name: confusing-results
       - name: constant-logical-expr
       - name: context-as-argument

@@ -4,6 +4,7 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"unsafe"
 
@@ -16,6 +17,9 @@ const TimeTaskKeyBody = "TIME_TASK_SET"
 
 var (
 	timeTaskKey *string
+
+	// ErrNoTask means no task in redis.
+	ErrNoTask = errors.New("no task")
 )
 
 // TimeTaskKey returns the redis key for time task, it will initialize the key at first running.
@@ -127,7 +131,7 @@ func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 	}
 
 	zs, err := rc.ZRangeByScoreWithScores(TimeTaskKey(), &redis.ZRangeBy{
-		Min:   tos,
+		Min:   "(" + tos,
 		Max:   "inf",
 		Count: 1,
 	}).Result()
@@ -142,7 +146,31 @@ func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 	return zs[0].Score, err
 }
 
-// DeleteTask deletes a task from redis.
-func DeleteTask(raw string) error {
-	return rc.ZRem(TimeTaskKey(), raw).Err()
+// NextTaskTime returns the next task time.
+func NextTaskTime(start int64) (int64, error) {
+	zs, err := rc.ZRangeByScoreWithScores(TimeTaskKey(), &redis.ZRangeBy{
+		Min:   "(" + util.I2Dec(start),
+		Max:   "inf",
+		Count: 1,
+	}).Result()
+	if err != nil {
+		log.Error("get tasks count failed", zap.Error(err))
+		return 0, err
+	}
+	if len(zs) == 0 {
+		return 0, ErrNoTask
+	}
+	return int64(zs[0].Score), nil
+}
+
+// DeleteTasks deletes a task from redis.
+func DeleteTasks(raws ...string) error {
+	if len(raws) == 0 {
+		return nil
+	}
+	is := make([]interface{}, 0, len(raws))
+	for _, r := range raws {
+		is = append(is, r)
+	}
+	return rc.ZRem(TimeTaskKey(), is...).Err()
 }
