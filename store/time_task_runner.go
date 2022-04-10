@@ -132,15 +132,20 @@ func (t *TimeTask) addTaskLoop() {
 		}
 
 		func() {
-			t.nextTime.RLock()
-			defer t.nextTime.RUnlock()
+			t.nextTime.Lock()
+			defer t.nextTime.Unlock()
 
-			ts := t.parseTasks(tasks)
+			ts, next := t.parseTasks(tasks)
 			// if add to redis error, then reset timer in 10ms, and try again.
 			if err := orm.AddTasks(ts...); err != nil {
 				log.Error("add tasks error", zap.Error(err))
 				timer.Reset(time.Microsecond * 10)
 				return
+			}
+
+			// if next < t.nextTime means a newer task has been added.
+			if next < t.nextTime.Get() {
+				t.nextTime.Set(next)
 			}
 			// if add to redis success, then reset timer in 1s, then enter next loop.
 			tasks = tasks[:0]
@@ -149,7 +154,7 @@ func (t *TimeTask) addTaskLoop() {
 	}
 }
 
-func (t *TimeTask) parseTasks(tasks []*orm.Task) []*orm.TaskNonced {
+func (t *TimeTask) parseTasks(tasks []*orm.Task) ([]*orm.TaskNonced, int64) {
 	ts := make([]*TaskNonced, 0, len(tasks))
 	next := t.nextTime.Get()
 	for _, task := range tasks {
@@ -157,10 +162,13 @@ func (t *TimeTask) parseTasks(tasks []*orm.Task) []*orm.TaskNonced {
 		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() || task.ExecTime <= next {
 			t.runningChan <- task
 		} else {
+			if task.ExecTime < next {
+				next = task.ExecTime
+			}
 			ts = append(ts, orm.NewTaskNonced(task))
 		}
 	}
-	return ts
+	return ts, next
 }
 
 func (t *TimeTask) deleteTaskLoop() {
@@ -208,6 +216,10 @@ func (t *TimeTask) fetchTaskLoop() {
 	for range ticker.C {
 		startTime := t.nextTime.LockGet()
 		endTime := time.Now().Add(FetchTaskTime).UnixMilli()
+
+		if startTime > endTime {
+			continue
+		}
 
 		// fetch tasks from redis, and add to toRunChan
 		err := t.fetchTask(startTime, endTime)
