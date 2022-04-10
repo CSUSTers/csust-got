@@ -32,14 +32,14 @@ type TimeTask struct {
 	fn func(task *Task)
 
 	// add task to this channel,
-	// it will be add to redis or add schceduler directly depending on execTime.
+	// it will be add to redis or add scheduler directly depending on execTime.
 	addChan chan *Task
 	// the tasks in this channel will be deleted from redis.
 	deleteChan chan *RawTask
 	// the tasks in this channel will be added to scheduler directly.
 	runningChan chan *Task
 	// the tasks in this channel will be added to scheduler, and deleted from redis.
-	torunChan chan *RawTask
+	toRunChan chan *RawTask
 }
 
 // NewTimeTask creates a new time task runner.
@@ -49,7 +49,7 @@ func NewTimeTask(fn func(task *Task)) *TimeTask {
 		addChan:     make(chan *Task, 64),
 		deleteChan:  make(chan *RawTask, 64),
 		runningChan: make(chan *Task, 64),
-		torunChan:   make(chan *RawTask, 64),
+		toRunChan:   make(chan *RawTask, 64),
 	}
 }
 
@@ -199,7 +199,7 @@ func (t *TimeTask) runningTaskLoop() {
 		select {
 		case task := <-t.runningChan:
 			time.AfterFunc(time.Until(time.UnixMilli(task.ExecTime)), t.RunTaskFn(task))
-		case task := <-t.torunChan:
+		case task := <-t.toRunChan:
 			time.AfterFunc(time.Until(time.UnixMilli(task.ExecTime)), t.RunTaskAndDeleteFn(task))
 		}
 	}
@@ -211,7 +211,7 @@ func (t *TimeTask) fetchTaskLoop() {
 		startTime := t.nextTime.Get()
 		endTime := time.Now().Add(FetchTaskTime).UnixMilli()
 
-		// fetch tasks from redis, and add to torunChan
+		// fetch tasks from redis, and add to toRunChan
 		err := t.fetchTask(startTime, endTime)
 		if err != nil {
 			if !errors.Is(err, orm.ErrNoTask) {
@@ -222,14 +222,14 @@ func (t *TimeTask) fetchTaskLoop() {
 }
 
 func (t *TimeTask) fetchTask(from, to int64) error {
-	// fetch tasks from redis, and add to torunChan
+	// fetch tasks from redis, and add to toRunChan
 	ts, err := orm.QueryTasks(from, to)
 	if err != nil {
 		return err
 	}
 
 	for _, task := range ts {
-		t.torunChan <- task
+		t.toRunChan <- task
 	}
 
 	// fetch next time from redis
