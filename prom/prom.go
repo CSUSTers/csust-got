@@ -2,7 +2,7 @@ package prom
 
 import (
 	"net/http"
-	_ "net/http/pprof" // pprof
+	// _ "net/http/pprof" // pprof
 	"os"
 
 	"csust-got/config"

@@ -68,9 +68,7 @@ func initBot() (*Bot, error) {
 		OnError:   errorHandler,
 		Poller:    &LongPoller{Timeout: 10 * time.Second},
 		Client:    httpClient,
-	}
-	if config.BotConfig.DebugMode {
-		settings.Verbose = false
+		Verbose:   false,
 	}
 
 	bot, err := NewBot(settings)
