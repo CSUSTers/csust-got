@@ -10,7 +10,7 @@ import (
 // GetBool gets a bool type value to a key in the redis storage.
 // This function will call WrapKey, so you needn't warp your key.
 func GetBool(key string) (bool, error) {
-	enable, err := client.Get(key).Int()
+	enable, err := rc.Get(key).Int()
 	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
@@ -24,7 +24,7 @@ func WriteBool(key string, value bool, expiration time.Duration) error {
 	if value {
 		newI = 1
 	}
-	return client.Set(key, newI, expiration).Err()
+	return rc.Set(key, newI, expiration).Err()
 }
 
 // ToggleBool toggles(negative) a bool type value to a key in the redis storage.
@@ -39,7 +39,7 @@ func ToggleBool(key string) error {
 
 // GetTTL get key expire duration.
 func GetTTL(key string) (time.Duration, error) {
-	sec, err := client.TTL(key).Result()
+	sec, err := rc.TTL(key).Result()
 	if err != nil || sec < 0 {
 		return 0, err
 	}

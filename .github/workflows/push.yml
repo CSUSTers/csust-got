@@ -65,4 +65,4 @@ jobs:
           port: ${{ secrets.PORT_DEV }}
           username: ${{ secrets.USERNAME_DEV }}
           key: ${{ secrets.PRIVATE_KEY_DEV }}
-          script: cd csust-got && docker-compose pull && docker-compose up -d
+          script: cd csust-got-dev && docker-compose pull && docker-compose up -d --force-recreate

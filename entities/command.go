@@ -2,6 +2,7 @@
 package entities
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
@@ -15,32 +16,63 @@ type BotCommand struct {
 }
 
 var (
-	spaces, _   = regexp.Compile(`\s+`)
-	cmdRegex, _ = regexp.Compile(`^/[0-9a-zA-Z_]+$`)
+	spaces   = regexp.MustCompile(`\s+`)
+	cmdRegex = regexp.MustCompile(`^/([0-9a-zA-Z_]+)(?:@[^\s@]+)?$`)
+
+	errParseCommand     = errors.New("parse command failed")
+	errParseCommandName = errors.New("parse command name failed")
 )
 
 // FromMessage - get command in a message.
 func FromMessage(msg *Message) *BotCommand {
-	args := splitText(strings.TrimSpace(msg.Text))
+	args := splitText(strings.TrimSpace(msg.Text), -1)
 	if len(args) == 0 {
 		return nil
 	}
 	name := args[0]
-	if idx := strings.IndexRune(name, '@'); idx != -1 {
-		name = name[:idx]
-	}
-	if !cmdRegex.MatchString(name) {
+	m := cmdRegex.FindStringSubmatch(name)
+	if len(m) == 0 {
 		return nil
 	}
-	return &BotCommand{name[1:], args[1:]}
+	name = m[1]
+	return &BotCommand{name, args[1:]}
 }
 
-func splitText(txt string) []string {
-	ts := []string{}
-	if len(txt) > 0 {
-		ts = spaces.Split(txt, -1)
+// CommandTakeArgs returns a command and rest part of text.
+// `argc` is the number of args to take, if `argc` < 0, all args will be taken.
+func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
+	taken := argc
+	if argc >= 0 {
+		// cmd .. args .. rest
+		//  1  +  argc  +  1
+		taken = argc + 2
 	}
-	return ts
+	args := spaces.Split(strings.TrimSpace(msg.Text), taken)
+	if len(args) == 0 {
+		err = errParseCommand
+		return
+	}
+
+	name, args := args[0], args[1:]
+	m := cmdRegex.FindStringSubmatch(name)
+	if len(m) == 0 {
+		return nil, "", errParseCommandName
+	}
+	name = m[1]
+	cmd = &BotCommand{name, args}
+
+	if argc >= 0 && len(args) > argc {
+		cmd.args = args[:argc]
+		rest = args[argc]
+	}
+	return cmd, rest, nil
+}
+
+func splitText(txt string, n int) []string {
+	if len(txt) > 0 {
+		return spaces.Split(txt, n)
+	}
+	return nil
 }
 
 // Name - command name.

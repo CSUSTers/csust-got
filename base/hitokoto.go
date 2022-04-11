@@ -32,7 +32,7 @@ func (r *HitokotoResponse) setDefault() {
 	}
 	if r.From == "" {
 		r.From = "未知出处"
-	} else {
+	} else if !strings.ContainsRune(r.From, '《') {
 		r.From = "《" + r.From + "》"
 	}
 }
