@@ -76,7 +76,8 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
-	bot.Use(loggerMiddleware, blockMiddleware, fakeBanMiddleware, rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
+	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
+		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -152,6 +153,22 @@ func loggerMiddleware(next HandlerFunc) HandlerFunc {
 	}
 }
 
+func skipMiddleware(next HandlerFunc) HandlerFunc {
+	skipSec := config.BotConfig.SkipDuration
+	return func(ctx Context) error {
+		m := ctx.Message()
+		if m == nil {
+			return next(ctx)
+		}
+		d := time.Since(m.Time())
+		if skipSec > 0 && int64(d.Seconds()) > skipSec {
+			log.Debug("bot skip expired update", zap.Any("update", ctx.Update()))
+			return nil
+		}
+		return next(ctx)
+	}
+}
+
 func blockMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		if ctx.Chat() != nil && config.BotConfig.BlockListConfig.Check(ctx.Chat().ID) {
@@ -182,11 +199,11 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 }
 
 func rateMiddleware(next HandlerFunc) HandlerFunc {
+	whiteListConfig := config.BotConfig.WhiteListConfig
 	return func(ctx Context) error {
 		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
 			return next(ctx)
 		}
-		whiteListConfig := config.BotConfig.WhiteListConfig
 		if !whiteListConfig.Enabled || !whiteListConfig.Check(ctx.Chat().ID) {
 			return next(ctx)
 		}

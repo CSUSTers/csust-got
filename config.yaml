@@ -6,6 +6,7 @@ worker: 4               # number of goroutine to recv update [int]
 token: ""
 proxy: "" # [http:// | socks5://] host:port
 listen: ":7777"
+skip_duration: 0 # skip expired message, duration in seconds, set to 0 to disable [int]
 
 black_list:
   enabled: true
