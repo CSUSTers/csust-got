@@ -5,8 +5,6 @@ import (
 	"csust-got/util"
 	"encoding/json"
 	"errors"
-	"sync/atomic"
-	"unsafe"
 
 	"github.com/go-redis/redis/v7"
 	"go.uber.org/zap"
@@ -16,7 +14,7 @@ import (
 const TimeTaskKeyBody = "TIME_TASK_SET"
 
 var (
-	timeTaskKey *string
+	// timeTaskKey *string
 
 	// ErrNoTask means no task in redis.
 	ErrNoTask = errors.New("no task")
@@ -24,15 +22,7 @@ var (
 
 // TimeTaskKey returns the redis key for time task, it will initialize the key at first running.
 func TimeTaskKey() string {
-	if timeTaskKey == nil {
-		k := wrapKey(TimeTaskKeyBody)
-		for timeTaskKey == nil {
-			if atomic.CompareAndSwapPointer((*unsafe.Pointer)((unsafe.Pointer)(&timeTaskKey)), nil, unsafe.Pointer(&k)) {
-				break
-			}
-		}
-	}
-	return *timeTaskKey
+	return wrapKey(TimeTaskKeyBody)
 }
 
 // Task is a struct stores the task info.
