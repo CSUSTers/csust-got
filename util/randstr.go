@@ -111,5 +111,5 @@ func (r *randstr) RandStr() string {
 
 // NewRandStr is a wrapper of NewRandStr.
 func (r *randstr) RandStrLen(length int) string {
-	return r.RandStrLen(length)
+	return string(r.RandBytesLen(length))
 }
