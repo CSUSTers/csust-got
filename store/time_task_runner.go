@@ -112,7 +112,7 @@ func (t *TimeTask) DeleteTask(task *RawTask) {
 	t.deleteChan <- task
 }
 
-// nolint: revive // cognitive complexity of this function can not be reduced.
+//nolint: revive // cognitive complexity of this function can not be reduced.
 func (t *TimeTask) addTaskLoop() {
 	tasks := make([]*Task, 0, 8)
 	timer := time.NewTimer(time.Second)

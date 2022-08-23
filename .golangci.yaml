@@ -104,13 +104,6 @@ linters-settings:
     # consider enums only in package scopes, not in inner scopes
     package-scope-only: false
 
-  forbidigo:
-    # Forbid the following identifiers (identifiers are written using regexp):
-    forbid:
-      - 'fmt\.Print.*'
-    # Exclude godoc examples from forbidigo checks.  Default is true.
-    exclude_godoc_examples: true
-
   goconst:
     # minimal length of string constant, 3 by default
     min-len: 3
@@ -138,14 +131,12 @@ linters-settings:
       - nestingReduce
       - ruleguard
       - truncateCmp
-      # - unnamedresult
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
       - hugeParam
       - rangeValCopy
-      - typeDefFirst
 
     # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
@@ -164,20 +155,12 @@ linters-settings:
       elseif:
         # whether to skip balanced if-else pairs (default true)
         skipBalanced: true
-      hugeParam:
-        # size in bytes that makes the warning trigger (default 80)
-        sizeThreshold: 80
       nestingReduce:
         # min number of statements inside a branch to trigger a warning (default 5)
         bodyWidth: 5
       rangeExprCopy:
         # size in bytes that makes the warning trigger (default 512)
         sizeThreshold: 512
-        # whether to check test functions (default true)
-        skipTestFuncs: true
-      rangeValCopy:
-        # size in bytes that makes the warning trigger (default 128)
-        sizeThreshold: 128
         # whether to check test functions (default true)
         skipTestFuncs: true
       ruleguard:
@@ -217,9 +200,7 @@ linters-settings:
       underef:
         # whether to skip (*x).method() calls where x is a pointer receiver (default true)
         skipRecvDeref: true
-      unnamedResult:
-        # whether to check exported functions
-        checkExported: true
+      
 
   godox:
     # report any comments starting with keywords, this is useful for TODO or FIXME comments that
@@ -229,9 +210,9 @@ linters-settings:
       - OPTIMIZE # marks code that should be optimized before merging
       - HACK # marks hack-arounds that should be removed before merging
 
-  gofmt:
-    # simplify code: gofmt with `-s` option, true by default
-    simplify: true
+  # gofmt:
+  #   # simplify code: gofmt with `-s` option, true by default
+  #   simplify: true
 
   gofumpt:
     lang-version: "1.19"
@@ -311,13 +292,6 @@ linters-settings:
       - fieldalignment
     # disable-all: false
 
-  ifshort:
-    # Maximum length of variable declaration measured in number of lines, after which linter won't suggest using short syntax.
-    # Has higher priority than max-decl-chars.
-    max-decl-lines: 1
-    # Maximum length of variable declaration measured in number of characters, after which linter won't suggest using short syntax.
-    max-decl-chars: 30
-
   nakedret:
     # make an issue if func has more lines of code than this setting and it has naked returns; default is 30
     max-func-lines: 30
@@ -328,7 +302,7 @@ linters-settings:
 
   nolintlint:
     # Disable to ensure that all nolint directives actually have an effect. Default is false.
-    allow-unused: false
+    allow-unused: true
     # Disable to ensure that nolint directives don't have a leading space. Default is true.
     allow-leading-space: true
     # Exclude following linters from requiring an explanation.  Default is [].
@@ -445,36 +419,10 @@ linters-settings:
     # https://staticcheck.io/docs/options#http_status_code_whitelist
     http-status-code-whitelist: [ "200", "400", "404", "500" ]
 
-  tagliatelle:
-    # check the struck tag name case
-    case:
-      # use the struct field name to check the name of the struct tag
-      use-field-name: true
-      rules:
-        # any struct tag type can be used.
-        # support string case: `camel`, `pascal`, `kebab`, `snake`, `goCamel`, `goPascal`, `goKebab`, `goSnake`, `upper`, `lower`
-        json: camel
-        yaml: camel
-        xml: camel
-        bson: camel
-        avro: snake
-        mapstructure: kebab
-
   tenv:
     # The option `all` will run against whole test files (`_test.go`) regardless of method/function signatures.
     # By default, only methods that take `*testing.T`, `*testing.B`, and `testing.TB` as arguments are checked.
     all: false
-
-  unparam:
-    # Inspect exported functions, default is false. Set to true if no external program/library imports your code.
-    # XXX: if you enable this setting, unparam will report a lot of false-positives in text editors:
-    # if it's called for subdir of a project it can't find external interfaces. All text editor integrations
-    # with golangci-lint call it on a directory with the changed file.
-    check-exported: false
-
-  unused:
-    # Select the Go version to target. The default is '1.13'.
-    go: "1.19"
 
   varnamelen:
     # The longest distance, in source lines, that is being considered a "small scope." (defaults to 5)
@@ -507,10 +455,6 @@ linters-settings:
       - i int
       - const C
 
-  whitespace:
-    multi-if: false   # Enforces newlines (or comments) after every multi-line if statement
-    multi-func: false # Enforces newlines (or comments) after every multi-line function signature
-
   wrapcheck:
     # An array of strings that specify substrings of signatures to ignore.
     # If this set, it will override the default set of ignored signatures.
@@ -540,18 +484,17 @@ linters:
     - errorlint
     - exhaustive
     - exportloopref
-    - forbidigo
+    # - forbidigo
     - gocognit
     - goconst
     - gocritic
     - godox
     - goerr113
-    - gofmt
-    - goimports
+    # - gofmt
+    # - goimports
     - gomoddirectives
     - gosec
     - govet
-    - ifshort
     - nakedret
     - nestif
     - nolintlint
@@ -560,16 +503,15 @@ linters:
     - revive
     - tenv
     - unconvert
-    # disabled by not supported in go
-    # - bodyclose
-    # - noctx
+    - bodyclose
+    - noctx
     # - rowserrcheck
     # - sqlclosecheck
-    # - stylecheck
-    # - tparallel
+    - stylecheck
+    - tparallel
     # - unparam
     # - wastedassign
-    - whitespace
+    # - whitespace
   disable:
     - typecheck
     - structcheck
