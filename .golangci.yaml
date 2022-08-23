@@ -300,17 +300,18 @@ linters-settings:
     # minimal complexity of if statements to report, 5 by default
     min-complexity: 5
 
-  nolintlint:
-    # Disable to ensure that all nolint directives actually have an effect. Default is false.
-    allow-unused: true
-    # Disable to ensure that nolint directives don't have a leading space. Default is true.
-    allow-leading-space: true
-    # Exclude following linters from requiring an explanation.  Default is [].
-    allow-no-explanation: [ ]
-    # Enable to require an explanation of nonzero length after each nolint directive. Default is false.
-    require-explanation: true
-    # Enable to require nolint directives to mention the specific linter being suppressed. Default is false.
-    require-specific: true
+  # nolintlint:
+  #   # Disable to ensure that all nolint directives actually have an effect. Default is false.
+  #   allow-unused: true
+  #   # Disable to ensure that nolint directives don't have a leading space. Default is true.
+  #   # allow-leading-space: true
+  #   allow-leading-whitespace: true
+  #   # Exclude following linters from requiring an explanation.  Default is [].
+  #   allow-no-explanation: [ ]
+  #   # Enable to require an explanation of nonzero length after each nolint directive. Default is false.
+  #   require-explanation: true
+  #   # Enable to require nolint directives to mention the specific linter being suppressed. Default is false.
+  #   require-specific: true
 
   prealloc:
     # XXX: we don't recommend using this linter before doing performance profiling.
@@ -497,7 +498,7 @@ linters:
     - govet
     - nakedret
     - nestif
-    - nolintlint
+    # - nolintlint
     - prealloc
     - predeclared
     - revive

@@ -242,13 +242,13 @@ func (h *Heap[T]) ltEq(i, j int) bool {
 }
 
 // gtEq takes two index of element, and returns if the first one is larger than or equal the other.
-//nolint: unused // use in future
+// nolint: unused // use in future
 func (h *Heap[T]) gtEq(i, j int) bool {
 	return !h.less(h.d[i], h.d[j]) || h.equal(h.d[i], h.d[j])
 }
 
 // eq takes two index of element, and returns true they are equal.
-//nolint: unused // use in future
+// nolint: unused // use in future
 func (h *Heap[T]) eq(i, j int) bool {
 	return h.equal(h.d[i], h.d[j])
 }
