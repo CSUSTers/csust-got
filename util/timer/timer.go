@@ -51,7 +51,6 @@ func NewTask(runAt int64, task func()) *Task {
 	}
 }
 
-
 // AddTask adds a task to the timer.
 func (t *Timer) AddTask(runAt int64, task func()) {
 	t.lock.Lock()
