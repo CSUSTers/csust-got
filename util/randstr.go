@@ -109,7 +109,7 @@ func (r *randstr) RandStr() string {
 	return string(r.RandBytes())
 }
 
-// NewRandStr is a wrapper of NewRandStr.
+// NewRandStr is a wrapper of RandBytesLen.
 func (r *randstr) RandStrLen(length int) string {
 	return string(r.RandBytesLen(length))
 }
