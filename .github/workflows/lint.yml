@@ -13,7 +13,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.48
+          version: v1.49
           args: --issues-exit-code=1
           only-new-issues: false
           skip-go-installation: false
