@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/go-redis/redis/v7 v7.4.1
-	github.com/prometheus/client_golang v1.13.0
+	github.com/prometheus/client_golang v1.13.1
 	github.com/prometheus/common v0.37.0
 	github.com/spf13/viper v1.13.0
 	github.com/stretchr/testify v1.8.0
