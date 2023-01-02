@@ -166,13 +166,13 @@ func (c *StableDiffusionConfig) GenStableDiffusionRequest() *StableDiffusionReq 
 const helpInfo = "sdcfg set \\<key\\> \\<value\\>\n" +
 	"sdcfg get \\<key\\>\n" +
 	"available keys: \n" +
-	"`server`: your own stable diffusion server address\\(write only\\).\n" +
-	"`prompt`: your default prompt, will add to your every command call.\n" +
-	"`negative_prompt`: your default negative prompt, will add to your every command call.\n" +
-	"`steps`: steps for stable diffusion.\n" +
-	"`scale`: scale for stable diffusion.\n" +
-	"`res`: resolution __width__x__height__.\n" +
-	"`number`: number of images for once command call.\n"
+	"`server`: your own stable diffusion server address\\(write only\\)\\.\n" +
+	"`prompt`: your default prompt, will add to your every command call\\.\n" +
+	"`negative_prompt`: your default negative prompt, will add to your every command call\\.\n" +
+	"`steps`: steps for stable diffusion\\.\n" +
+	"`scale`: scale for stable diffusion\\.\n" +
+	"`res`: resolution __width__x__height__\\.\n" +
+	"`number`: number of images for once command call\\.\n"
 
 // ConfigHandler handle /sdcfg command.
 func ConfigHandler(ctx Context) error {

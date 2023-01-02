@@ -48,17 +48,17 @@ jobs:
             BRANCH=release
 
 
-  # deploy:
-  #   name: Deployment
-  #   runs-on: ubuntu-latest
-  #   needs: [ test, build ]
-  #   steps:
+  deploy:
+    name: Deployment
+    runs-on: ubuntu-latest
+    needs: [ test, build ]
+    steps:
 
-  #     - name: Deployment
-  #       uses: appleboy/ssh-action@master
-  #       with:
-  #         host: ${{ secrets.HOST }}
-  #         port: ${{ secrets.PORT }}
-  #         username: ${{ secrets.USERNAME }}
-  #         key: ${{ secrets.PRIVATE_KEY }}
-  #         script: cd csust-got && docker-compose pull && docker-compose up -d --force-recreate
+      - name: Deployment
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.HOST }}
+          port: ${{ secrets.PORT }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.PRIVATE_KEY }}
+          script: cd csust-got && docker-compose pull && docker-compose up -d --force-recreate
