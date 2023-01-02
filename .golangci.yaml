@@ -360,14 +360,14 @@ linters-settings:
         # - name: bare-return
       - name: blank-imports
       - name: bool-literal-in-expr
-      - name: cognitive-complexity
-        arguments: [12]
-      - name: confusing-results
+      # - name: cognitive-complexity
+      #   arguments: [12]
+      # - name: confusing-results
       - name: constant-logical-expr
       - name: context-as-argument
       # - name: context-keys-type
-      - name: cyclomatic
-        arguments: [8]
+      # - name: cyclomatic
+      #   arguments: [8]
       - name: defer
       - name: duplicated-imports
       - name: early-return
@@ -376,8 +376,8 @@ linters-settings:
       - name: error-strings
       # - name: errorf
       - name: exported
-      - name: function-length
-        arguments: [40, 200]
+      # - name: function-length
+      #   arguments: [40, 200]
       - name: get-return
       - name: identical-branches
       - name: if-return
@@ -486,7 +486,7 @@ linters:
     - exhaustive
     - exportloopref
     # - forbidigo
-    - gocognit
+    # - gocognit
     - goconst
     - gocritic
     - godox

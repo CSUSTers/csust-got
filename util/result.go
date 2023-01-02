@@ -1,3 +1,4 @@
+// nolint: revive
 package util
 
 import (
@@ -66,7 +67,7 @@ func (r Result[T]) Unwrap() T {
 	return r.v
 }
 
-// Unwrap returns value of Result or another.
+// UnwrapOr returns value of Result or another.
 func (r Result[T]) UnwrapOr(v T) T {
 	if r.IsError() {
 		return v

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"csust-got/sd"
 	"net/http"
 	"net/url"
 	"time"
@@ -40,6 +41,10 @@ func main() {
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
 	bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
+	bot.Handle("/sd", sd.Handler)
+	bot.Handle("/sdcfg", sd.ConfigHandler)
+
+	go sd.Process()
 
 	base.Init()
 
