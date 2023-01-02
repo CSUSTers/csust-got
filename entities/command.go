@@ -103,10 +103,5 @@ func (c BotCommand) MultiArgsFrom(idx int) []string {
 
 // ArgAllInOneFrom - get all args as one string.
 func (c BotCommand) ArgAllInOneFrom(idx int) string {
-	arg := strings.Builder{}
-	for _, s := range c.MultiArgsFrom(idx) {
-		_, _ = arg.WriteString(s)
-		_, _ = arg.WriteRune(' ')
-	}
-	return arg.String()
+	return strings.Join(c.MultiArgsFrom(idx), " ")
 }
