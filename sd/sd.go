@@ -97,67 +97,92 @@ func Handler(ctx Context) error {
 // Process is the stable diffusion background worker.
 func Process() {
 	lock := new(sync.Mutex)
-	inUsedServer := make(map[string]chan struct{})
+	inUsedServer := make(map[string]chan *StableDiffusionContext)
 	maxWorker := make(chan struct{}, 10)
 
 	for ctx := range ch {
-		maxWorker <- struct{}{}
+		select {
+		case maxWorker <- struct{}{}:
+			// Do nothing
+		default:
+			err := ctx.BotContext.Reply("任务堆积太多，忙不过来了。")
+			if err != nil {
+				log.Error("reply error", zap.Error(err))
+			}
+			continue
+		}
+
 		ctx := ctx
-		go func() {
-			lock.Lock()
-			serverCh, ok := inUsedServer[ctx.UserConfig.GetServer()]
-			if !ok {
-				serverCh = make(chan struct{}, 1)
-				inUsedServer[ctx.UserConfig.GetServer()] = serverCh
-			}
-			lock.Unlock()
-			serverCh <- struct{}{}
+		server := ctx.UserConfig.GetServer()
 
-			defer func() {
-				<-maxWorker
-				<-serverCh
-			}()
-			resp, err := requestStableDiffusion(ctx.UserConfig.GetServer(), &ctx.Request)
-			if err != nil {
-				err := ctx.BotContext.Reply("寄了")
-				if err != nil {
-					log.Error("reply stable diffusion failed", zap.Error(err))
+		lock.Lock()
+		serverCh, ok := inUsedServer[server]
+		if !ok {
+			serverCh = make(chan *StableDiffusionContext, 10)
+			inUsedServer[ctx.UserConfig.GetServer()] = serverCh
+		}
+		lock.Unlock()
+		serverCh <- ctx
+
+		processFn := func() {
+			for {
+				select {
+				case ctx := <-serverCh:
+					func() {
+						ctx := ctx
+						defer func() {
+							<-maxWorker
+
+							mu.Lock()
+							busyUser[ctx.BotContext.Sender().ID]--
+							mu.Unlock()
+						}()
+						resp, err := requestStableDiffusion(ctx.UserConfig.GetServer(), &ctx.Request)
+						if err != nil {
+							err := ctx.BotContext.Reply("寄了")
+							if err != nil {
+								log.Error("reply stable diffusion failed", zap.Error(err))
+							}
+							return
+						}
+
+						photos := Album{}
+						for _, v := range resp.Images {
+							data, err := base64.StdEncoding.DecodeString(v)
+							if err != nil {
+								log.Error("decode stable diffusion image failed", zap.Error(err))
+								continue
+							}
+							photos = append(photos, &Photo{
+								File: File{FileReader: bytes.NewReader(data)},
+							})
+						}
+
+						err = ctx.BotContext.SendAlbum(photos)
+						if err != nil {
+							log.Error("send stable diffusion album failed", zap.Error(err))
+							err = ctx.BotContext.Reply("非常的寄")
+							if err != nil {
+								log.Error("reply stable diffusion failed", zap.Error(err))
+							}
+							return
+						}
+					}()
+				default:
+					lock.Lock()
+					if len(serverCh) == 0 {
+						delete(inUsedServer, server)
+						lock.Unlock()
+						return
+					}
+					lock.Unlock()
 				}
-				mu.Lock()
-				busyUser[ctx.BotContext.Sender().ID]--
-				mu.Unlock()
-				return
 			}
+		}
 
-			photos := Album{}
-			for _, v := range resp.Images {
-				data, err := base64.StdEncoding.DecodeString(v)
-				if err != nil {
-					log.Error("decode stable diffusion image failed", zap.Error(err))
-					continue
-				}
-				photos = append(photos, &Photo{
-					File: File{FileReader: bytes.NewReader(data)},
-				})
-			}
-
-			err = ctx.BotContext.SendAlbum(photos)
-			if err != nil {
-				log.Error("send stable diffusion album failed", zap.Error(err))
-				err = ctx.BotContext.Reply("非常的寄")
-				if err != nil {
-					log.Error("reply stable diffusion failed", zap.Error(err))
-				}
-				mu.Lock()
-				busyUser[ctx.BotContext.Sender().ID]--
-				mu.Unlock()
-				return
-			}
-
-			mu.Lock()
-			busyUser[ctx.BotContext.Sender().ID]--
-			mu.Unlock()
-		}()
+		if !ok {
+			go processFn()
+		}
 	}
 
 }
