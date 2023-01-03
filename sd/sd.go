@@ -61,7 +61,8 @@ func Handler(ctx Context) error {
 	}
 
 	if config.GetServer() == "" {
-		return ctx.Reply("喂喂喂，你还没有配置服务器好吧。快使用 /sdcfg 配置一个属于自己的服务器吧。")
+		return ctx.Reply("喂喂喂，你还没有配置服务器好吧。" +
+			"快使用 /sdcfg 配置一个属于自己的服务器，或者找好心人捐赠一个服务器吧")
 	}
 
 	prompt := command.ArgAllInOneFrom(0)
