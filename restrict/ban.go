@@ -44,7 +44,7 @@ func BanCommand(m *Message) {
 func DoBan(m *Message, hard bool) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
-	if err != nil {
+	if err != nil || isBanForever(banTime) {
 		banTime = time.Duration(rand.Intn(80)+40) * time.Second
 	}
 	var banTarget *User
@@ -54,6 +54,11 @@ func DoBan(m *Message, hard bool) {
 
 	text := banAndGetMessage(m, banTarget, hard, banTime)
 	util.SendReply(m.Chat, text, m)
+}
+
+// tg will ban forever if banTime less than 30 seconds or more than 366 days.
+func isBanForever(banTime time.Duration) bool {
+	return banTime < 30*time.Second || banTime > 366*24*time.Hour
 }
 
 func banAndGetMessage(m *Message, banTarget *User, hard bool, banTime time.Duration) string {

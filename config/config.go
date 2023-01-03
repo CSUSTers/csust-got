@@ -51,11 +51,11 @@ func NewBotConfig() *Config {
 type Config struct {
 	Bot *Bot
 
-	Token     string
-	Proxy     string
-	Listen    string
-	DebugMode bool
-	Worker    int
+	Token        string
+	Proxy        string
+	Listen       string
+	DebugMode    bool
+	SkipDuration int64
 
 	RedisConfig     *redisConfig
 	RestrictConfig  *restrictConfig
@@ -92,9 +92,9 @@ func readConfig() {
 	// base config
 	BotConfig.DebugMode = viper.GetBool("debug")
 	BotConfig.Token = viper.GetString("token")
-	BotConfig.Worker = viper.GetInt("worker")
 	BotConfig.Proxy = viper.GetString("proxy")
 	BotConfig.Listen = viper.GetString("listen")
+	BotConfig.SkipDuration = viper.GetInt64("skip_duration")
 
 	// other
 	BotConfig.RedisConfig.readConfig()
@@ -114,8 +114,8 @@ func checkConfig() {
 	if BotConfig.DebugMode {
 		zap.L().Warn("DEBUG MODE IS ON")
 	}
-	if BotConfig.Worker <= 0 {
-		BotConfig.Worker = 1
+	if BotConfig.SkipDuration < 0 {
+		BotConfig.SkipDuration = 0
 	}
 
 	BotConfig.RedisConfig.checkConfig()

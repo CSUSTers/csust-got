@@ -18,7 +18,7 @@ const (
 	// benchmark min and max value
 	bMin, bMax = -1_000_000, 1_000_001
 	// benchmark max pop and push
-	bmp10K, bmp10M = 1_000, 100_000
+	bmp10K = 10_000
 )
 
 var (
@@ -305,7 +305,9 @@ func BenchmarkHeapPop10M(b *testing.B) {
 	for i := 0; i < b.N && i < bmp10K; i++ {
 		heap.Pop()
 	}
-	b.N = bmp10M
+
+	//nolint:staticcheck // set `b.N` is necessary
+	b.N = bmp10K
 }
 
 func funLess(a, b int) bool {
