@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
@@ -22,6 +24,24 @@ var (
 	ch       = make(chan *StableDiffusionContext, 10)
 	busyUser = make(map[int64]int)
 )
+
+var httpClient *http.Client
+
+func init() {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.IdleConnTimeout = 3 * time.Minute
+
+	dialer := net.Dialer{
+		Timeout:   5 * time.Minute,
+		KeepAlive: 10 * time.Minute,
+	}
+	transport.Dial = dialer.Dial
+
+	httpClient = &http.Client{
+		Timeout:   3 * time.Minute,
+		Transport: transport,
+	}
+}
 
 // Handler stable diffusion handler.
 func Handler(ctx Context) error {
@@ -255,7 +275,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 	}
 
 	host := joinApi(addr, "/sdapi/v1/txt2img")
-	resp, err := http.Post(host, "application/json", bytes.NewReader(bs))
+	resp, err := httpClient.Post(host, "application/json", bytes.NewReader(bs))
 	if err != nil {
 		log.Error("request stable diffusion failed", zap.Error(err))
 		return nil, fmt.Errorf("request stable diffusion failed: %w", ErrServerNotAvailable)
