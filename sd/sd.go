@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -274,8 +275,22 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		return nil, err
 	}
 
-	host := joinApi(addr, "/sdapi/v1/txt2img")
-	resp, err := httpClient.Post(host, "application/json", bytes.NewReader(bs))
+	url, err := url.Parse(joinApi(addr, "/sdapi/v1/txt2img"))
+	if err != nil {
+		log.Error("parse stable diffusion url failed", zap.Error(err))
+		return nil, err
+	}
+	httpReq := &http.Request{
+		Method: http.MethodPost,
+		URL:    url,
+		Header: http.Header{
+			"Keep-Alive":   {"timeout=180, max=20"},
+			"Content-Type": {"application/json"},
+		},
+		Body: io.NopCloser(bytes.NewReader(bs)),
+	}
+
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		log.Error("request stable diffusion failed", zap.Error(err))
 		return nil, fmt.Errorf("request stable diffusion failed: %w", ErrServerNotAvailable)
