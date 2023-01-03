@@ -2,6 +2,7 @@ package sd
 
 import (
 	"bytes"
+	"context"
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
@@ -280,6 +281,8 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		log.Error("parse stable diffusion url failed", zap.Error(err))
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
 	httpReq := &http.Request{
 		Method: http.MethodPost,
 		URL:    reqUrl,
@@ -289,6 +292,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		},
 		Body: io.NopCloser(bytes.NewReader(bs)),
 	}
+	httpReq = httpReq.WithContext(ctx)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
