@@ -250,7 +250,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		return nil, err
 	}
 
-	host := fmt.Sprintf("%s/sdapi/v1/txt2img", addr)
+	host := joinApi(addr, "/sdapi/v1/txt2img")
 	resp, err := http.Post(host, "application/json", bytes.NewReader(bs))
 	if err != nil {
 		log.Error("request stable diffusion failed", zap.Error(err))
@@ -279,4 +279,14 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 	}
 
 	return &respData, nil
+}
+
+func joinApi(baseUrl, path string) string {
+	if baseUrl == "" {
+		return ""
+	}
+	if strings.HasSuffix(baseUrl, "/") {
+		baseUrl = strings.TrimSuffix(baseUrl, "/")
+	}
+	return baseUrl + path
 }

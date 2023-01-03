@@ -23,6 +23,7 @@ type StableDiffusionConfig struct {
 	Width          int    `json:"width"`
 	Height         int    `json:"height"`
 	Number         int    `json:"number"`
+	Sampler        string `json:"sampler"`
 }
 
 // GetValueByKey get value by key.
@@ -68,6 +69,11 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 			return 1
 		}
 		return c.Number
+	case key == "sampler":
+		if c.Sampler == "" {
+			return "Euler a"
+		}
+		return c.Sampler
 	default:
 		return "key not exists"
 	}
@@ -138,6 +144,11 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Number < 1 || c.Number > 4 {
 			return fmt.Errorf("%w: number too small or too large", ErrConfigIsInvalid)
 		}
+	case key == "sampler":
+		if value == "" {
+			value = "Euler a"
+		}
+		c.Sampler = value
 	default:
 		return fmt.Errorf("%w: invalid key: %s", ErrConfigIsInvalid, key)
 	}
@@ -159,7 +170,7 @@ func (c *StableDiffusionConfig) GenStableDiffusionRequest() *StableDiffusionReq 
 		Width:          c.GetValueByKey("width").(int),
 		Height:         c.GetValueByKey("height").(int),
 		BatchSize:      c.GetValueByKey("number").(int),
-		SamplerIndex:   "Euler a",
+		SamplerIndex:   c.GetValueByKey("sampler").(string),
 	}
 }
 
@@ -172,7 +183,8 @@ const helpInfo = "sdcfg set \\<key\\> \\<value\\>\n" +
 	"`steps`: steps for stable diffusion\\.\n" +
 	"`scale`: scale for stable diffusion\\.\n" +
 	"`res`: resolution __width__x__height__\\.\n" +
-	"`number`: number of images for once command call\\.\n"
+	"`number`: number of images for once command call\\.\n" +
+	"`sampler`: sampler for stable diffusion\\."
 
 // ConfigHandler handle /sdcfg command.
 func ConfigHandler(ctx Context) error {
@@ -199,7 +211,7 @@ func ConfigHandler(ctx Context) error {
 		if err != nil {
 			return ctx.Reply(err.Error())
 		}
-		configStr, err := json.Marshal(&config)
+		configStr, err := json.MarshalIndent(&config, "", "")
 		if err != nil {
 			return ctx.Reply("感觉有点问题")
 		}
