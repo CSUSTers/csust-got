@@ -334,7 +334,6 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		Method: http.MethodPost,
 		URL:    reqUrl,
 		Header: http.Header{
-			"Keep-Alive":   {"timeout=180, max=20"},
 			"Content-Type": {"application/json"},
 		},
 		Body: io.NopCloser(bytes.NewReader(bs)),
