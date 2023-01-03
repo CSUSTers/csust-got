@@ -83,7 +83,11 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 	switch {
 	case key == "server":
-		c.Server = value
+		if value == "*" {
+			c.Server = orm.GetSDDefaultServer()
+		} else {
+			c.Server = value
+		}
 	case key == "prompt":
 		c.Prompt = value
 	case key == "negative_prompt":
