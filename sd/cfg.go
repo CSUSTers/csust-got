@@ -86,7 +86,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if value == "*" {
 			c.Server = ""
 		} else {
-			c.Server = value
+			c.Server = strings.TrimSuffix(value, "/")
 		}
 	case key == "prompt":
 		c.Prompt = value
