@@ -145,7 +145,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 			return fmt.Errorf("%w: number too small or too large", ErrConfigIsInvalid)
 		}
 	case key == "sampler":
-		if value == "" {
+		if value == "*" {
 			value = "Euler a"
 		}
 		c.Sampler = value
