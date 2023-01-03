@@ -275,14 +275,14 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		return nil, err
 	}
 
-	url, err := url.Parse(joinApi(addr, "/sdapi/v1/txt2img"))
+	reqUrl, err := url.Parse(joinApi(addr, "/sdapi/v1/txt2img"))
 	if err != nil {
 		log.Error("parse stable diffusion url failed", zap.Error(err))
 		return nil, err
 	}
 	httpReq := &http.Request{
 		Method: http.MethodPost,
-		URL:    url,
+		URL:    reqUrl,
 		Header: http.Header{
 			"Keep-Alive":   {"timeout=180, max=20"},
 			"Content-Type": {"application/json"},
