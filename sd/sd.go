@@ -285,8 +285,6 @@ func joinApi(baseUrl, path string) string {
 	if baseUrl == "" {
 		return ""
 	}
-	if strings.HasSuffix(baseUrl, "/") {
-		baseUrl = strings.TrimSuffix(baseUrl, "/")
-	}
+	baseUrl = strings.TrimSuffix(baseUrl, "/")
 	return baseUrl + path
 }
