@@ -84,7 +84,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 	switch {
 	case key == "server":
 		if value == "*" {
-			c.Server = orm.GetSDDefaultServer()
+			c.Server = ""
 		} else {
 			c.Server = value
 		}
@@ -161,7 +161,11 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 
 // GetServer return server.
 func (c *StableDiffusionConfig) GetServer() string {
-	return c.Server
+	server := c.Server
+	if server == "" {
+		return orm.GetSDDefaultServer()
+	}
+	return server
 }
 
 // GenStableDiffusionRequest generate stable diffusion request by config.
