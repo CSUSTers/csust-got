@@ -35,7 +35,7 @@ func init() {
 		Timeout:   5 * time.Minute,
 		KeepAlive: 10 * time.Minute,
 	}
-	transport.Dial = dialer.Dial
+	transport.DialContext = dialer.DialContext
 
 	httpClient = &http.Client{
 		Timeout:   3 * time.Minute,
