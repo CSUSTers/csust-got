@@ -38,6 +38,10 @@ func Handler(ctx Context) error {
 		return ctx.Reply("完了，删库跑路了")
 	}
 
+	if config.GetServer() == "" {
+		return ctx.Reply("喂喂喂，你还没有配置服务器好吧。快使用 /sdcfg 配置一个属于自己的服务器吧。")
+	}
+
 	prompt := command.ArgAllInOneFrom(0)
 	prompt = strings.ReplaceAll(prompt, "，", ",")
 	if prompt == "" {
