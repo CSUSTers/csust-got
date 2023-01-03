@@ -572,7 +572,7 @@ func GetSDLastPrompt(userID int64) (string, error) {
 // GetSDDefaultServer get stable diffusion default server from redis.
 func GetSDDefaultServer() string {
 	defaultServer, err := rc.Get(wrapKey("stable_diffusion::default_server")).Result()
-	if err != nil || errors.Is(err, redis.Nil) {
+	if err != nil {
 		return ""
 	}
 	return defaultServer
