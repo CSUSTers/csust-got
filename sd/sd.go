@@ -363,7 +363,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 	}
 	httpReq = httpReq.WithContext(ctx)
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Expect", "100-continue")
+	// httpReq.Header.Set("Expect", "100-continue")
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
