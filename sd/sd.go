@@ -35,7 +35,7 @@ func init() {
 
 	dialer := net.Dialer{
 		Timeout:   5 * time.Minute,
-		KeepAlive: 10 * time.Minute,
+		KeepAlive: 10 * time.Second,
 	}
 	transport.DialContext = dialer.DialContext
 
