@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lucas-clemente/quic-go/http3"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
@@ -29,6 +30,28 @@ var (
 
 var httpClient *http.Client
 
+type mixRoundTripper struct {
+	TranditionalRoundTripper http.RoundTripper
+	H3RoundTripper           http.RoundTripper
+}
+
+func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTripper {
+	return &mixRoundTripper{
+		TranditionalRoundTripper: t,
+		H3RoundTripper:           h3,
+	}
+}
+
+func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.H3RoundTripper != nil {
+		resp, err := r.H3RoundTripper.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+	}
+	return r.TranditionalRoundTripper.RoundTrip(req)
+}
+
 func init() {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.IdleConnTimeout = 3 * time.Minute
@@ -38,10 +61,13 @@ func init() {
 		KeepAlive: 10 * time.Second,
 	}
 	transport.DialContext = dialer.DialContext
+	transport.ResponseHeaderTimeout = 3 * time.Minute
+
+	h3RoundTripper := &http3.RoundTripper{}
 
 	httpClient = &http.Client{
 		Timeout:   3 * time.Minute,
-		Transport: transport,
+		Transport: newMixRoundTripper(transport, h3RoundTripper),
 	}
 }
 
