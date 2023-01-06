@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lucas-clemente/quic-go"
 	"github.com/lucas-clemente/quic-go/http3"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
@@ -44,9 +45,12 @@ func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTr
 
 func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if r.H3RoundTripper != nil {
+		log.Debug("try h3", zap.String("url", req.URL.String()))
 		resp, err := r.H3RoundTripper.RoundTrip(req)
 		if err == nil {
 			return resp, nil
+		} else {
+			log.Debug("h3 failed", zap.Error(err))
 		}
 	}
 	return r.TranditionalRoundTripper.RoundTrip(req)
@@ -55,18 +59,21 @@ func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 func init() {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.IdleConnTimeout = 3 * time.Minute
+	transport.ResponseHeaderTimeout = 3 * time.Minute
 
 	dialer := net.Dialer{
-		Timeout:   5 * time.Minute,
 		KeepAlive: 10 * time.Second,
 	}
 	transport.DialContext = dialer.DialContext
-	transport.ResponseHeaderTimeout = 3 * time.Minute
 
-	h3RoundTripper := &http3.RoundTripper{}
+	h3RoundTripper := &http3.RoundTripper{
+		QuicConfig: &quic.Config{
+			MaxIdleTimeout:  3 * time.Minute,
+			KeepAlivePeriod: 10 * time.Second,
+		},
+	}
 
 	httpClient = &http.Client{
-		Timeout:   3 * time.Minute,
 		Transport: newMixRoundTripper(transport, h3RoundTripper),
 	}
 }
