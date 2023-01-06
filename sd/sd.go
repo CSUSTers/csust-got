@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -355,26 +354,18 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		return nil, err
 	}
 
-	// reqUrl, err := url.Parse(joinApi(addr, "/sdapi/v1/txt2img"))
-	// if err != nil {
-	// 	log.Error("parse stable diffusion url failed", zap.Error(err))
-	// 	return nil, err
-	// }
-	// ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	// defer cancel()
-	// httpReq := &http.Request{
-	// 	Method: http.MethodPost,
-	// 	URL:    reqUrl,
-	// 	Header: http.Header{
-	// 		"Content-Type": {"application/json"},
-	// 	},
-	// 	Body: io.NopCloser(bytes.NewReader(bs)),
-	// }
-	// httpReq = httpReq.WithContext(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	httpReq, err := http.NewRequest("POST", addr, bytes.NewReader(bs))
+	if err != nil {
+		log.Error("create stable diffusion request failed", zap.Error(err))
+		return nil, err
+	}
+	httpReq = httpReq.WithContext(ctx)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Expect", "100-continue")
 
-	// resp, err := httpClient.Do(httpReq)
-
-	resp, err := httpClient.Post(addr, "application/json", bytes.NewReader(bs))
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		log.Error("request stable diffusion failed", zap.Error(err))
 		return nil, fmt.Errorf("request stable diffusion failed: %w", ErrServerNotAvailable)
@@ -404,6 +395,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 	return &respData, nil
 }
 
+// nolint: unused // for some reason
 func joinApi(baseUrl, path string) string {
 	if baseUrl == "" {
 		return ""
