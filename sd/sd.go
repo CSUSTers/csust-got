@@ -49,9 +49,8 @@ func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp, err := r.H3RoundTripper.RoundTrip(req)
 		if err == nil {
 			return resp, nil
-		} else {
-			log.Debug("h3 failed", zap.Error(err))
 		}
+		log.Debug("h3 failed", zap.Error(err))
 	}
 	return r.TranditionalRoundTripper.RoundTrip(req)
 }
