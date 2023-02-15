@@ -10,7 +10,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/zap v1.24.0
 	golang.org/x/net v0.7.0
-	golang.org/x/time v0.1.0
+	golang.org/x/time v0.3.0
 	gopkg.in/telebot.v3 v3.1.2
 )
 
