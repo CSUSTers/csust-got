@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -29,8 +29,12 @@ func GetVoice(ctx Context) error {
 	if resp.StatusCode != 200 {
 		log.Error("api server response", zap.Int("status", resp.StatusCode))
 	} else {
-		body, _ := ioutil.ReadAll(resp.Body)
-		json.Unmarshal(body, &data)
+		body, _ := io.ReadAll(resp.Body)
+		err := json.Unmarshal(body, &data)
+		if err != nil {
+			log.Error("api server response", zap.Int("status", resp.StatusCode))
+			return err
+		}
 	}
 	audioCaption := fmt.Sprintf("%s \n\n #%s  %s", data.Text, data.Character, data.Topic)
 	voice := Voice{File: FromURL(data.Audio), Caption: audioCaption}
