@@ -13,8 +13,9 @@ import (
 var BotConfig *Config
 
 var (
-	noTokenMsg = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
-	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+	noTokenMsg      = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
+	noRedisMsg      = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+	noGenShinApiMsg = "genShinApi address is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -44,6 +45,7 @@ func NewBotConfig() *Config {
 	config.PromConfig = new(promConfig)
 	config.WhiteListConfig.SetName("white_list")
 	config.BlockListConfig.SetName("black_list")
+	config.GenShinConfig = new(genShinConfig)
 	return config
 }
 
@@ -64,6 +66,7 @@ type Config struct {
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	PromConfig      *promConfig
+	GenShinConfig   *genShinConfig
 }
 
 // GetBot returns Bot.
@@ -104,6 +107,9 @@ func readConfig() {
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
+
+	// genshin voice
+	BotConfig.GenShinConfig.readConfig()
 }
 
 // check some config value is reasonable, otherwise set to default value.
@@ -125,4 +131,5 @@ func checkConfig() {
 	BotConfig.BlockListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
 	BotConfig.PromConfig.checkConfig()
+	BotConfig.GenShinConfig.checkConfig()
 }
