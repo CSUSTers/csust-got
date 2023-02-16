@@ -25,6 +25,8 @@ func GetVoice(ctx Context) error {
 	resp, err := http.Get(serverAddress)
 	if err != nil {
 		log.Error("api server error", zap.Error(err))
+		err := ctx.Reply("凯瑟琳: \n 异常……", nil)
+		return err
 	}
 	if resp.StatusCode != 200 {
 		log.Error("api server response", zap.Int("status", resp.StatusCode))
