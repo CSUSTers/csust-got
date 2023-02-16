@@ -46,4 +46,4 @@ prometheus:
 
 # 原神语音api
 genshin_voice:
-  api_server: "https://api.csu.st/getVoice"
+  api_server: "https://api.csu.st"
