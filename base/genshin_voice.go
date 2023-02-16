@@ -28,13 +28,16 @@ func GetVoice(ctx Context) error {
 		err := ctx.Reply("凯瑟琳: \n 异常……", nil)
 		return err
 	}
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		log.Error("api server response", zap.Int("status", resp.StatusCode))
+		log.Error("api server response", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		err := ctx.Reply("凯瑟琳: \n 重试……", nil)
+		return err
 	} else {
-		body, _ := io.ReadAll(resp.Body)
 		err := json.Unmarshal(body, &data)
 		if err != nil {
-			log.Error("api server response", zap.Int("status", resp.StatusCode))
+			log.Error("json serialization failed", zap.Error(err), zap.String("body", string(body)))
+			err := ctx.Reply("凯瑟琳: \n 超时……", nil)
 			return err
 		}
 	}
