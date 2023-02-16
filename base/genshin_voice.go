@@ -33,13 +33,13 @@ func GetVoice(ctx Context) error {
 		log.Error("api server response", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
 		err := ctx.Reply("凯瑟琳: \n 重试……", nil)
 		return err
-	} else {
-		err := json.Unmarshal(body, &data)
-		if err != nil {
-			log.Error("json serialization failed", zap.Error(err), zap.String("body", string(body)))
-			err := ctx.Reply("凯瑟琳: \n 超时……", nil)
-			return err
-		}
+	}
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		log.Error("json serialization failed", zap.Error(err), zap.String("body", string(body)))
+		err := ctx.Reply("凯瑟琳: \n 超时……", nil)
+		return err
+
 	}
 	audioCaption := fmt.Sprintf("%s \n\n #%s  %s", data.Text, data.Character, data.Topic)
 	voice := Voice{File: FromURL(data.Audio), Caption: audioCaption}
