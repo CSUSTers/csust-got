@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/quic-go/quic-go"
 	"io"
 	"net"
 	"net/http"
@@ -16,8 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lucas-clemente/quic-go"
-	"github.com/lucas-clemente/quic-go/http3"
+	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
