@@ -2,6 +2,7 @@ package util
 
 import (
 	"math/rand"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -187,4 +188,23 @@ func IsUpper(r rune) bool {
 // IsLower check rune is lower.
 func IsLower(r rune) bool {
 	return unicode.IsLower(r)
+}
+
+// ReplaceSpace replace all empty chars in a string with the escape char
+func ReplaceSpace(in string) string {
+	patt := regexp.MustCompilePOSIX(`[\s\n]`)
+	return patt.ReplaceAllStringFunc(in, func(s string) string {
+		var r string
+		switch s {
+		case " ":
+			r = " "
+		case "\n":
+			r = `\n`
+		case "\t":
+			r = `\t`
+		default:
+			r = " "
+		}
+		return r
+	})
 }
