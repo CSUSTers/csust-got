@@ -43,3 +43,7 @@ prometheus:
   address: "prometheus:9090"
   message_query: 'topk(5, sum(rate(bot_message_count[24h])*(24*3600-5)) by (username))'
   sticker_query: 'topk(5, sum(rate(bot_message_count{is_sticker="true"}[24h])*(24*3600-5)) by (username))'
+
+# 原神语音api
+genshin_voice:
+  api_server: "https://api.csu.st/getVoice"

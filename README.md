@@ -77,4 +77,5 @@ no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
 hugencoder - <text> huge编码
 hugedecoder - <text> huge解码
+getvoice - 获取一段来自游戏《原神》的角色语音（Chinese Olny）
 ```

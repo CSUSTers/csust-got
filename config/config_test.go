@@ -34,6 +34,7 @@ func TestReadConfigFile(t *testing.T) {
 	req.Empty(BotConfig.Token)
 	req.Equal("redis:6379", BotConfig.RedisConfig.RedisAddr)
 	req.Equal("csust-bot-redis-password", BotConfig.RedisConfig.RedisPass)
+	req.Equal("https://api.csu.st/getVoice", BotConfig.GenShinConfig.ApiServer)
 
 	initViper("not_exist", "")
 	readConfig()
