@@ -122,6 +122,8 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/hugedecoder", base.HugeDecoder)
 
 	bot.Handle("/run_after", base.RunTask)
+
+	bot.Handle("/getvoice", base.GetVoice)
 }
 
 func registerRestrictHandler(bot *Bot) {

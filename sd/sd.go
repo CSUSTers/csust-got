@@ -6,17 +6,20 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/quic-go/quic-go"
+
+	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
@@ -29,19 +32,49 @@ var (
 
 var httpClient *http.Client
 
+type mixRoundTripper struct {
+	TranditionalRoundTripper http.RoundTripper
+	H3RoundTripper           http.RoundTripper
+}
+
+func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTripper {
+	return &mixRoundTripper{
+		TranditionalRoundTripper: t,
+		H3RoundTripper:           h3,
+	}
+}
+
+func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if r.H3RoundTripper != nil {
+		log.Debug("try h3", zap.String("url", util.ReplaceSpace(req.URL.String())))
+		resp, err := r.H3RoundTripper.RoundTrip(req)
+		if err == nil {
+			return resp, nil
+		}
+		log.Debug("h3 failed", zap.Error(err))
+	}
+	return r.TranditionalRoundTripper.RoundTrip(req)
+}
+
 func init() {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.IdleConnTimeout = 3 * time.Minute
+	transport.ResponseHeaderTimeout = 3 * time.Minute
 
 	dialer := net.Dialer{
-		Timeout:   5 * time.Minute,
-		KeepAlive: 10 * time.Minute,
+		KeepAlive: 10 * time.Second,
 	}
 	transport.DialContext = dialer.DialContext
 
+	h3RoundTripper := &http3.RoundTripper{
+		QuicConfig: &quic.Config{
+			MaxIdleTimeout:  3 * time.Minute,
+			KeepAlivePeriod: 10 * time.Second,
+		},
+	}
+
 	httpClient = &http.Client{
-		Timeout:   3 * time.Minute,
-		Transport: transport,
+		Transport: newMixRoundTripper(transport, h3RoundTripper),
 	}
 }
 
@@ -323,22 +356,16 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 		return nil, err
 	}
 
-	reqUrl, err := url.Parse(joinApi(addr, "/sdapi/v1/txt2img"))
-	if err != nil {
-		log.Error("parse stable diffusion url failed", zap.Error(err))
-		return nil, err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	httpReq := &http.Request{
-		Method: http.MethodPost,
-		URL:    reqUrl,
-		Header: http.Header{
-			"Content-Type": {"application/json"},
-		},
-		Body: io.NopCloser(bytes.NewReader(bs)),
+	httpReq, err := http.NewRequest("POST", addr, bytes.NewReader(bs))
+	if err != nil {
+		log.Error("create stable diffusion request failed", zap.Error(err))
+		return nil, err
 	}
 	httpReq = httpReq.WithContext(ctx)
+	httpReq.Header.Set("Content-Type", "application/json")
+	// httpReq.Header.Set("Expect", "100-continue")
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -370,6 +397,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 	return &respData, nil
 }
 
+// nolint: unused // for some reason
 func joinApi(baseUrl, path string) string {
 	if baseUrl == "" {
 		return ""
