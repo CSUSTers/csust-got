@@ -15,6 +15,6 @@ func (c *genShinConfig) readConfig() {
 
 func (c *genShinConfig) checkConfig() {
 	if c.ApiServer == "" {
-		zap.L().Panic(noGenShinApiMsg)
+		zap.L().Warn(noGenShinApiMsg)
 	}
 }
