@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 
-	"github.com/go-redis/redis/v7"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,8 @@ func NewClient() *redis.Client {
 // Ping can ping a redis client.
 // return true if ping success.
 func Ping(c *redis.Client) bool {
-	if _, err := c.Ping().Result(); err != nil {
+	// TODO: replace ctx with real ctx
+	if _, err := c.Ping(context.TODO()).Result(); err != nil {
 		log.Error("ping redis failed", zap.Error(err))
 		return false
 	}
@@ -60,7 +62,7 @@ func wrapKeyWithChatMember(key string, chatID int64, userID int64) string {
 }
 
 func loadSpecialList(key string) []string {
-	list, err := rc.SMembers(wrapKey(key)).Result()
+	list, err := rc.SMembers(context.TODO(), wrapKey(key)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("load special list failed", zap.String("key", key), zap.Error(err))
@@ -169,7 +171,8 @@ func GetBannerDuration(chatID int64, userID int64) time.Duration {
 
 // ResetBannedDuration reset banned duration.
 func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
-	ok, err := rc.Expire(wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
+	// TODO: replace ctx with real ctx
+	ok, err := rc.Expire(context.TODO(), wrapKeyWithChatMember("banned", chatID, bannedID), d).Result()
 	if err != nil {
 		log.Error("ResetBannedDuration failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannedID), zap.Error(err))
 		return false
@@ -207,7 +210,7 @@ func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
 
 // StoreHitokoto store hitokoto.
 func StoreHitokoto(hitokoto string) {
-	err := rc.SAdd(wrapKey("hitokoto"), hitokoto).Err()
+	err := rc.SAdd(context.TODO(), wrapKey("hitokoto"), hitokoto).Err()
 	if err != nil {
 		log.Error("save hitokoto to redis failed", zap.Error(err))
 	}
@@ -215,7 +218,7 @@ func StoreHitokoto(hitokoto string) {
 
 // GetHitokoto get hitokoto.
 func GetHitokoto(from bool) string {
-	res, err := rc.SRandMember(wrapKey("hitokoto")).Result()
+	res, err := rc.SRandMember(context.TODO(), wrapKey("hitokoto")).Result()
 	if err != nil {
 		log.Error("get hitokoto from redis failed", zap.Error(err))
 		return config.BotConfig.MessageConfig.HitokotoNotFound
@@ -241,7 +244,7 @@ func WatchStore(userID int64, stores []string) bool {
 	for i, v := range stores {
 		userStore[i] = v
 	}
-	err := rc.SAdd(wrapKeyWithUser("watch_store", userID), userStore...).Err()
+	err := rc.SAdd(context.TODO(), wrapKeyWithUser("watch_store", userID), userStore...).Err()
 	if err != nil {
 		log.Error("register store to redis failed", zap.Int64("user", userID), zap.Any("store", stores), zap.Error(err))
 		return false
@@ -266,7 +269,7 @@ func RemoveStore(userID int64, stores []string) bool {
 	for i, v := range stores {
 		userStore[i] = v
 	}
-	err := rc.SRem(wrapKeyWithUser("watch_store", userID), userStore...).Err()
+	err := rc.SRem(context.TODO(), wrapKeyWithUser("watch_store", userID), userStore...).Err()
 	if err != nil {
 		log.Error("remove store from redis failed", zap.Int64("user", userID), zap.Any("store", stores), zap.Error(err))
 		return false
@@ -290,7 +293,7 @@ func WatchProduct(userID int64, products []string) bool {
 	for i, v := range products {
 		userProduct[i] = v
 	}
-	err := rc.SAdd(wrapKeyWithUser("watch_product", userID), userProduct...).Err()
+	err := rc.SAdd(context.TODO(), wrapKeyWithUser("watch_product", userID), userProduct...).Err()
 	if err != nil {
 		log.Error("register product to redis failed", zap.Int64("user", userID), zap.Any("product", products), zap.Error(err))
 		return false
@@ -315,7 +318,7 @@ func RemoveProduct(userID int64, products []string) bool {
 	for i, v := range products {
 		userProduct[i] = v
 	}
-	err := rc.SRem(wrapKeyWithUser("watch_product", userID), userProduct...).Err()
+	err := rc.SRem(context.TODO(), wrapKeyWithUser("watch_product", userID), userProduct...).Err()
 	if err != nil {
 		log.Error("remove product from redis failed", zap.Int64("user", userID), zap.Any("product", products), zap.Error(err))
 		return false
@@ -326,7 +329,7 @@ func RemoveProduct(userID int64, products []string) bool {
 
 // AppleWatcherRegister apple watcher register.
 func AppleWatcherRegister(userID int64) bool {
-	err := rc.SAdd(wrapKey("apple_watcher"), userID).Err()
+	err := rc.SAdd(context.TODO(), wrapKey("apple_watcher"), userID).Err()
 	if err != nil {
 		log.Error("register user to redis failed", zap.Int64("user", userID), zap.Error(err))
 		return false
@@ -336,7 +339,7 @@ func AppleWatcherRegister(userID int64) bool {
 
 // GetAppleWatcher get all apple watcher.
 func GetAppleWatcher() ([]int64, bool) {
-	users, err := rc.SMembers(wrapKey("apple_watcher")).Result()
+	users, err := rc.SMembers(context.TODO(), wrapKey("apple_watcher")).Result()
 	if err != nil {
 		log.Error("get apple user from redis failed", zap.Error(err))
 		return []int64{}, false
@@ -366,7 +369,7 @@ func AppleTargetRegister(products, stores []string) bool {
 	}
 
 	// save to redis
-	err := rc.SAdd(wrapKey("apple_target"), targets...).Err()
+	err := rc.SAdd(context.TODO(), wrapKey("apple_target"), targets...).Err()
 	if err != nil {
 		log.Error("register target to redis failed", zap.Any("target", targets), zap.Error(err))
 		return false
@@ -386,7 +389,7 @@ func AppleTargetRemove(targets ...string) bool {
 	}
 
 	// save to redis
-	err := rc.SRem(wrapKey("apple_target"), tar...).Err()
+	err := rc.SRem(context.TODO(), wrapKey("apple_target"), tar...).Err()
 	if err != nil {
 		log.Error("remove target from redis failed", zap.Any("target", targets), zap.Error(err))
 		return false
@@ -397,7 +400,7 @@ func AppleTargetRemove(targets ...string) bool {
 
 // GetWatchingStores get watching apple stores of user.
 func GetWatchingStores(userID int64) ([]string, bool) {
-	stores, err := rc.SMembers(wrapKeyWithUser("watch_store", userID)).Result()
+	stores, err := rc.SMembers(context.TODO(), wrapKeyWithUser("watch_store", userID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get stores of user from redis failed", zap.Int64("user", userID), zap.Error(err))
 		return stores, false
@@ -407,7 +410,7 @@ func GetWatchingStores(userID int64) ([]string, bool) {
 
 // GetWatchingProducts get watching apple products of user.
 func GetWatchingProducts(userID int64) ([]string, bool) {
-	products, err := rc.SMembers(wrapKeyWithUser("watch_product", userID)).Result()
+	products, err := rc.SMembers(context.TODO(), wrapKeyWithUser("watch_product", userID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get products of user from redis failed", zap.Int64("user", userID), zap.Error(err))
 		return products, false
@@ -417,7 +420,7 @@ func GetWatchingProducts(userID int64) ([]string, bool) {
 
 // GetTargetList get watching apple store and product.
 func GetTargetList() ([]string, bool) {
-	targets, err := rc.SMembers(wrapKey("apple_target")).Result()
+	targets, err := rc.SMembers(context.TODO(), wrapKey("apple_target")).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
 		log.Error("get targets from redis failed", zap.Error(err))
 		return targets, false
@@ -461,7 +464,7 @@ func setTargetMap(userID int64, stores, products []string, targetMap map[string]
 
 // SetProductName set apple product name.
 func SetProductName(product, name string) bool {
-	err := rc.Set(wrapKey("apple_product_name:"+product), name, 24*time.Hour).Err()
+	err := rc.Set(context.TODO(), wrapKey("apple_product_name:"+product), name, 24*time.Hour).Err()
 	if err != nil {
 		log.Error("set apple_product_name to redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
 		return false
@@ -471,7 +474,7 @@ func SetProductName(product, name string) bool {
 
 // GetProductName get apple product name.
 func GetProductName(product string) string {
-	name, err := rc.Get(wrapKey("apple_product_name:" + product)).Result()
+	name, err := rc.Get(context.TODO(), wrapKey("apple_product_name:"+product)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_product_name from redis failed", zap.String("product", product), zap.Any("name", name), zap.Error(err))
@@ -483,7 +486,7 @@ func GetProductName(product string) string {
 
 // SetStoreName set apple store name.
 func SetStoreName(store, name string) bool {
-	err := rc.Set(wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
+	err := rc.Set(context.TODO(), wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
 		log.Error("set apple_store_name to redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
 		return false
@@ -493,7 +496,7 @@ func SetStoreName(store, name string) bool {
 
 // GetStoreName get apple store name.
 func GetStoreName(store string) string {
-	name, err := rc.Get(wrapKey("apple_store_name:" + store)).Result()
+	name, err := rc.Get(context.TODO(), wrapKey("apple_store_name:"+store)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_store_name from redis failed", zap.String("store", store), zap.Any("name", name), zap.Error(err))
@@ -505,7 +508,7 @@ func GetStoreName(store string) string {
 
 // SetTargetState set apple target last state.
 func SetTargetState(target string, avaliable bool) {
-	err := rc.Set(wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
+	err := rc.Set(context.TODO(), wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
 	if err != nil {
 		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
 		return
@@ -514,7 +517,7 @@ func SetTargetState(target string, avaliable bool) {
 
 // GetTargetState get apple target last state.
 func GetTargetState(target string) bool {
-	r, err := rc.Get(wrapKey("apple_target_state:" + target)).Result()
+	r, err := rc.Get(context.TODO(), wrapKey("apple_target_state:"+target)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get apple_target_state from redis failed", zap.String("target", target), zap.Error(err))
@@ -526,7 +529,7 @@ func GetTargetState(target string) bool {
 
 // SetSDConfig set stable diffusion config.
 func SetSDConfig(userID int64, cfg string) error {
-	err := rc.Set(wrapKeyWithUser("stable_diffusion_config", userID), cfg, 0).Err()
+	err := rc.Set(context.TODO(), wrapKeyWithUser("stable_diffusion_config", userID), cfg, 0).Err()
 	if err != nil {
 		log.Error("set stable diffusion config to redis failed", zap.Int64("user", userID), zap.String("config", cfg), zap.Error(err))
 		return err
@@ -536,7 +539,7 @@ func SetSDConfig(userID int64, cfg string) error {
 
 // GetSDConfig get stable diffusion config.
 func GetSDConfig(userID int64) (string, error) {
-	cfg, err := rc.Get(wrapKeyWithUser("stable_diffusion_config", userID)).Result()
+	cfg, err := rc.Get(context.TODO(), wrapKeyWithUser("stable_diffusion_config", userID)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get stable diffusion config from redis failed", zap.Int64("user", userID), zap.Error(err))
@@ -548,7 +551,7 @@ func GetSDConfig(userID int64) (string, error) {
 
 // SetSDLastPrompt save user's last stable diffusion prompt.
 func SetSDLastPrompt(userID int64, lastPrompt string) error {
-	err := rc.Set(wrapKeyWithUser("stable_diffusion_last_prompt", userID), lastPrompt, 0).Err()
+	err := rc.Set(context.TODO(), wrapKeyWithUser("stable_diffusion_last_prompt", userID), lastPrompt, 0).Err()
 	if err != nil {
 		log.Error("set stable diffusion last prompt to redis failed", zap.Int64("user", userID), zap.String("lastPrompt", lastPrompt), zap.Error(err))
 		return err
@@ -558,7 +561,7 @@ func SetSDLastPrompt(userID int64, lastPrompt string) error {
 
 // GetSDLastPrompt get user's last stable diffusion prompt.
 func GetSDLastPrompt(userID int64) (string, error) {
-	lastPrompt, err := rc.Get(wrapKeyWithUser("stable_diffusion_last_prompt", userID)).Result()
+	lastPrompt, err := rc.Get(context.TODO(), wrapKeyWithUser("stable_diffusion_last_prompt", userID)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get stable diffusion last prompt from redis failed", zap.Int64("user", userID), zap.Error(err))
@@ -571,7 +574,7 @@ func GetSDLastPrompt(userID int64) (string, error) {
 
 // GetSDDefaultServer get stable diffusion default server from redis.
 func GetSDDefaultServer() string {
-	defaultServer, err := rc.Get(wrapKey("stable_diffusion::default_server")).Result()
+	defaultServer, err := rc.Get(context.TODO(), wrapKey("stable_diffusion::default_server")).Result()
 	if err != nil {
 		return ""
 	}

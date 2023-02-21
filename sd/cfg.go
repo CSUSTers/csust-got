@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-redis/redis/v7"
+	"github.com/redis/go-redis/v9"
 	. "gopkg.in/telebot.v3"
 )
 
