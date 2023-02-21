@@ -47,3 +47,4 @@ prometheus:
 # 原神语音api
 genshin_voice:
   api_server: "https://api.csu.st"
+  err_audio_addr: "https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg"

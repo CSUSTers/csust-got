@@ -123,7 +123,8 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/run_after", base.RunTask)
 
-	bot.Handle("/getvoice", base.GetVoice)
+	bot.Handle("/getvoice_old", base.GetVoice)
+	bot.Handle("/getvoice", base.GetVoiceV2)
 }
 
 func registerRestrictHandler(bot *Bot) {
