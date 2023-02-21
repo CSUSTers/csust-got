@@ -77,5 +77,6 @@ no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
 hugencoder - <text> huge编码
 hugedecoder - <text> huge解码
-getvoice - 获取一段来自游戏《原神》的角色语音（Chinese Olny）
+getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 通过前述五个参数查询（可选填），获取一段来自游戏《原神》的角色语音（Chinese Olny），数据来源于游戏解包
+getvoice_old - getvoice的旧版入口，没有查询功能，数据来源于mys爬虫
 ```
