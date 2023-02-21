@@ -1,12 +1,13 @@
 package orm
 
 import (
+	"context"
 	"csust-got/log"
 	"csust-got/util"
 	"encoding/json"
 	"errors"
 
-	"github.com/go-redis/redis/v7"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -67,27 +68,27 @@ func AddTasks(tasks ...*TaskNonced) error {
 		return nil
 	}
 
-	zs := make([]*redis.Z, 0, len(tasks))
+	zs := make([]redis.Z, 0, len(tasks))
 	for _, t := range tasks {
 		value, err := json.Marshal(t)
 		if err != nil {
 			log.Error("json marshal failed", zap.Error(err), zap.Any("task", t))
 			return err
 		}
-		zs = append(zs, &redis.Z{
+		zs = append(zs, redis.Z{
 			Score:  float64(t.ExecTime),
 			Member: value,
 		})
 	}
 
-	err := rc.ZAdd(TimeTaskKey(), zs...).Err()
+	err := rc.ZAdd(context.TODO(), TimeTaskKey(), zs...).Err()
 	return err
 }
 
 // QueryTasks query tasks from redis with a time range.
 func QueryTasks(from, to int64) ([]*RawTask, error) {
 	froms, tos := util.I2Dec(from), util.I2Dec(to)
-	zs, err := rc.ZRangeByScore(TimeTaskKey(), &redis.ZRangeBy{
+	zs, err := rc.ZRangeByScore(context.TODO(), TimeTaskKey(), &redis.ZRangeBy{
 		Min: froms,
 		Max: tos,
 	}).Result()
@@ -114,13 +115,13 @@ func QueryTasks(from, to int64) ([]*RawTask, error) {
 // DelTasksInTimeRange deletes tasks from redis with time range, and returns the next task score.
 func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 	froms, tos := util.I2Dec(from), util.I2Dec(to)
-	err = rc.ZRemRangeByScore(wrapKey(TimeTaskKeyBody), froms, tos).Err()
+	err = rc.ZRemRangeByScore(context.TODO(), wrapKey(TimeTaskKeyBody), froms, tos).Err()
 	if err != nil {
 		log.Error("del tasks failed", zap.Error(err))
 		return 0, err
 	}
 
-	zs, err := rc.ZRangeByScoreWithScores(TimeTaskKey(), &redis.ZRangeBy{
+	zs, err := rc.ZRangeByScoreWithScores(context.TODO(), TimeTaskKey(), &redis.ZRangeBy{
 		Min:   "(" + tos,
 		Max:   "inf",
 		Count: 1,
@@ -138,7 +139,7 @@ func DelTasksInTimeRange(from, to int64) (next float64, err error) {
 
 // NextTaskTime returns the next task time.
 func NextTaskTime(start int64) (int64, error) {
-	zs, err := rc.ZRangeByScoreWithScores(TimeTaskKey(), &redis.ZRangeBy{
+	zs, err := rc.ZRangeByScoreWithScores(context.TODO(), TimeTaskKey(), &redis.ZRangeBy{
 		Min:   "(" + util.I2Dec(start),
 		Max:   "inf",
 		Count: 1,
@@ -162,5 +163,5 @@ func DeleteTasks(raws ...string) error {
 	for _, r := range raws {
 		is = append(is, r)
 	}
-	return rc.ZRem(TimeTaskKey(), is...).Err()
+	return rc.ZRem(context.TODO(), TimeTaskKey(), is...).Err()
 }

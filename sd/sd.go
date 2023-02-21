@@ -6,16 +6,18 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/quic-go/quic-go"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/quic-go/quic-go"
 
 	"github.com/quic-go/quic-go/http3"
 	"go.uber.org/zap"
@@ -44,7 +46,7 @@ func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTr
 
 func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if r.H3RoundTripper != nil {
-		log.Debug("try h3", zap.String("url", req.URL.String()))
+		log.Debug("try h3", zap.String("url", util.ReplaceSpace(req.URL.String())))
 		resp, err := r.H3RoundTripper.RoundTrip(req)
 		if err == nil {
 			return resp, nil
