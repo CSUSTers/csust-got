@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/go-redis/redis/v7"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 

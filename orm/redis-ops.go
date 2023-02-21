@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/go-redis/redis/v7"
+	"github.com/redis/go-redis/v9"
 )
 
 // GetBool gets a bool type value to a key in the redis storage.
