@@ -9,7 +9,6 @@ import (
 	"csust-got/base"
 	"csust-got/config"
 	"csust-got/entities"
-	"csust-got/iwatch"
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/prom"
@@ -30,7 +29,7 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
-	go iwatch.WatchService()
+	// go iwatch.WatchService()
 
 	bot, err := initBot()
 	if err != nil {
@@ -40,7 +39,7 @@ func main() {
 	registerBaseHandler(bot)
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
-	bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
+	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 
@@ -97,7 +96,7 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
 	bot.Handle("/cid", base.GetChatID)
 	bot.Handle("/info", base.Info)
-	bot.Handle("/links", base.Links)
+	// bot.Handle("/links", base.Links)
 
 	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", util.GroupCommand(base.Forward))
