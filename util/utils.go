@@ -192,7 +192,7 @@ func IsLower(r rune) bool {
 
 // ReplaceSpace replace all empty chars in a string with the escape char
 func ReplaceSpace(in string) string {
-	patt := regexp.MustCompilePOSIX(`[\s\n]`)
+	patt := regexp.MustCompile(`[\s\n]`)
 	return patt.ReplaceAllStringFunc(in, func(s string) string {
 		var r string
 		switch s {
