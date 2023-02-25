@@ -59,7 +59,6 @@ google - <Key Words> 咕果搜索...
 bing - <Key Words> 巨硬搜索...
 bilibili - <Key Words> 在B站搜索...
 github - <Key Words> 在github搜索...
-links - 这里有一些链接
 ban_myself - 把自己ban掉rand[40,120]秒
 ban - 我就是要滥权！【Admin】
 ban_soft - 软禁！使某人失去快乐~【Admin】
@@ -77,5 +76,6 @@ no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
 hugencoder - <text> huge编码
 hugedecoder - <text> huge解码
-getvoice - 获取一段来自游戏《原神》的角色语音（Chinese Olny）
+getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 通过前述五个参数查询（可选填），获取一段来自游戏《原神》的角色语音（Chinese Olny），数据来源于游戏解包
+getvoice_old - getvoice的旧版入口，没有查询功能，数据来源于mys爬虫
 ```

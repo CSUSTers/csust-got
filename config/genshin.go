@@ -6,11 +6,13 @@ import (
 )
 
 type genShinConfig struct {
-	ApiServer string
+	ApiServer    string
+	ErrAudioAddr string
 }
 
 func (c *genShinConfig) readConfig() {
 	c.ApiServer = viper.GetString("genshin_voice.api_server")
+	c.ErrAudioAddr = viper.GetString("genshin_voice.err_audio_addr")
 }
 
 func (c *genShinConfig) checkConfig() {
