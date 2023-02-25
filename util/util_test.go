@@ -18,3 +18,25 @@ func TestEvalDate(t *testing.T) {
 		assert.Errorf(t, err, "EvalDuration(\"1\") should get error, but it's ok and result is %v", evalDuration)
 	})
 }
+
+func TestReplaceSpace(t *testing.T) {
+	t.Run("Empty String", func(t *testing.T) {
+		out := ReplaceSpace("")
+		assert.Equal(t, "", out)
+	})
+
+	t.Run("Not Replace", func(t *testing.T) {
+		out := ReplaceSpace("abc_=123")
+		assert.Equal(t, "abc_=123", out)
+	})
+
+	t.Run("Replace Newline", func(t *testing.T) {
+		out := ReplaceSpace("abc\n123\n456")
+		assert.Equal(t, `abc\n123\n456`, out)
+	})
+
+	t.Run("Replace Space", func(t *testing.T) {
+		out := ReplaceSpace(`abc	123 456`)
+		assert.Equal(t, `abc\t123 456`, out)
+	})
+}
