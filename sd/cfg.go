@@ -163,8 +163,9 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 func (c *StableDiffusionConfig) GetServer() string {
 	server := c.Server
 	if server == "" {
-		return orm.GetSDDefaultServer()
+		server = orm.GetSDDefaultServer()
 	}
+	server = strings.TrimSuffix(server, "/")
 	return server
 }
 

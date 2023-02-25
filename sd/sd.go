@@ -358,7 +358,7 @@ func requestStableDiffusion(addr string, req *StableDiffusionReq) (*StableDiffus
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	httpReq, err := http.NewRequest("POST", addr, bytes.NewReader(bs))
+	httpReq, err := http.NewRequest("POST", addr+"/sdapi/v1/txt2img", bytes.NewReader(bs))
 	if err != nil {
 		log.Error("create stable diffusion request failed", zap.Error(err))
 		return nil, err
