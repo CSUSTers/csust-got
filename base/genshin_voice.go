@@ -7,12 +7,14 @@ import (
 	"csust-got/util"
 	"encoding/json"
 	"fmt"
-	"go.uber.org/zap"
-	. "gopkg.in/telebot.v3"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
+
+	"go.uber.org/zap"
+	. "gopkg.in/telebot.v3"
 )
 
 // v1 版本的api返回的json数据结构
@@ -75,6 +77,7 @@ func GetVoiceV2(ctx Context) error {
 		log.Error("指令解析失败", zap.Error(err))
 		return err
 	}
+
 	data := genShinVoiceV2{}
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer
 	resp, err := http.Get(serverAddress + "/GenShin/GetVoice/v2" + arg)
@@ -84,10 +87,26 @@ func GetVoiceV2(ctx Context) error {
 		err := SendErrVoice(m.Chat, "连接语音api服务器失败")
 		return err
 	}
+
+	var inputText string
+	_, inputText, err = entities.CommandTakeArgs(m, 0)
+	if err != nil {
+		log.Error("get an error when parse user input text", zap.Error(err))
+		err = SendErrVoice(m.Chat, "用户输出错误")
+		return err
+	}
+
+	margs, restArgs, _ := parseVoiceArgsArray(inputText)
+	debugMsg := []string{}
+	for _, m := range margs {
+		debugMsg = append(debugMsg, fmt.Sprintf("%s=%s", m[0], m[1]))
+	}
+	debugMsg = append(debugMsg, restArgs...)
+
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		log.Error("语音api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数："+arg)
+		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数：\n"+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
@@ -117,6 +136,25 @@ func parseVoiceArgs(ctx Context) (arg string, ok bool) {
 		return arg + "text=" + url.QueryEscape(args[len(args)-1]), true
 	}
 	return arg, true
+}
+
+func parseVoiceArgsArray(s string) (margs [][2]string, restArgs []string, ok bool) {
+	patt := regexp.MustCompile(`(?:^|\s)(?:(?:(角色|文本|性别|主题|类型)=(\S*))|(\S+))`)
+	ms := patt.FindAllStringSubmatch(s, -1)
+
+	margs = make([][2]string, 0)
+	restArgs = make([]string, 0)
+	ok = true
+
+	for _, m := range ms {
+		if m[1] == "" {
+			restArgs = append(restArgs, m[3])
+		} else {
+			margs = append(margs, [2]string{m[1], m[2]})
+		}
+	}
+
+	return
 }
 
 // argsMapper 将输入的参数转换为api服务器的url参数
