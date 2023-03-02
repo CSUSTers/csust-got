@@ -15,7 +15,8 @@ def giveBackURL():
         conn = sqlite3.connect('/var/www/character.db')
         c = conn.cursor()
         c.execute(
-            "SELECT * FROM character ORDER BY RANDOM() LIMIT 1;")
+
+            "SELECT * FROM character WHERE id >= (ABS(RANDOM()) % (SELECT MAX(id) FROM character)) LIMIT 1;")
         result = c.fetchone()
         conn.close()
         # 生成返回的json
@@ -59,22 +60,22 @@ def giveBackURLv2():
                 # 如果没有参数，随机返回一条数据
                 if args['character'] == None and args['topic'] == None and args['text'] == None:
                     c.execute(
-                        "SELECT * FROM character ORDER BY RANDOM() LIMIT 1;")
+                        "SELECT * FROM character WHERE id >= (ABS(RANDOM()) % (SELECT MAX(id) FROM character)) LIMIT 1;")
                     result = c.fetchone()
                     return jsonify(result)
                 # 如果有参数，根据参数返回数据
                 else:
                     sql = """
-with filtered as (SELECT id
-                FROM character
-                WHERE npcNameLocal like ?
-                    AND topic like ?
-                    AND "text" like ?
-                    AND sex like ?
-                    AND type like ?)
-select *
-from character
-where id in (select id from filtered order by random() limit 1)
+                    with filtered as (SELECT id
+                                    FROM character
+                                    WHERE npcNameLocal like ?
+                                        AND topic like ?
+                                        AND "text" like ?
+                                        AND sex like ?
+                                        AND type like ?)
+                    select *
+                    from character
+                    where id in (select id from filtered order by random() limit 1)
                     """
 
                     c.execute(sql,
@@ -104,7 +105,8 @@ where id in (select id from filtered order by random() limit 1)
                     })
         except Exception as e:
             print(e)
-            return jsonify({'text': '进不去……', 'err': e}), 404
+            return jsonify({'text': '进不去……', 'err': str(e)}), 404
+
 
 
 def run():
