@@ -8,19 +8,24 @@
 另，本项目使用的语音素材及文本，版权均归于米哈游所有。本项目仅用于学习交流，除已获取版权方许可者外，禁止使用本项目进行商业用途。
 
 ## 如何用
+
 推荐使用docker安装部署，请保证你的docker版本大于等于19.03.0。
 
 在任一安装有docker的机器上，克隆此仓库，然后运行以下命令：
+
 ```bash
 sudo chmod +x ./start_docker_container.sh
 sudo ./start_docker_container.sh
 ```
+
 如果一切正常，您将看到docker容器编译成功，并能在 `docker ps` 的结果中看到一个名为 `voice_gen` 的容器正在运行, 然后您可以通过 `http://localhost:37332` 访问本项目。
 
 ### Api 文档
+
 目前有2个Api，详情如下：
 
 #### 1. 获取语音列表（数据来自[米游社](https://github.com/CSUSTers/mys-voice-genshin)）
+
 | URL | request | version | status |
 | :--- | :--- | :--- | :--- |
 | /GenShin/GetVoice | Get | 1.0 | true |
@@ -50,6 +55,7 @@ sudo ./start_docker_container.sh
 ```
 
 #### 2. 获取语音列表（数据来自[游戏解包](https://github.com/w4123/GenshinVoice)）
+
 | URL | request | version | status |
 | :--- | :--- | :--- | :--- |
 | /GenShin/GetVoice/v2 | Get | 2.0 | true |
@@ -95,7 +101,8 @@ sudo ./start_docker_container.sh
 ```
 
 ## 项目结构
-```
+
+``` plaintext
 ├── db/
 │   ├── character.db # mys数据
 │   ├── genshinVoice.db # 游戏解包数据
@@ -103,5 +110,4 @@ sudo ./start_docker_container.sh
 ├── db_utils/
 │   └── db_utils.py # 将json导入数据库的工具
 └── ******** # 其他文件
-``` 
-
+```
