@@ -15,6 +15,7 @@ def giveBackURL():
         conn = sqlite3.connect('/var/www/character.db')
         c = conn.cursor()
         c.execute(
+
             "SELECT * FROM character WHERE id >= (ABS(RANDOM()) % (SELECT MAX(id) FROM character)) LIMIT 1;")
         result = c.fetchone()
         conn.close()
@@ -55,47 +56,57 @@ def giveBackURLv2():
             conn = sqlite3.connect('/var/www/genshinVoice.db')
             c = conn.cursor()
 
-            # 如果没有参数，随机返回一条数据
-            if args['character'] == None and args['topic'] == None and args['text'] == None:
-                c.execute(
-                    "SELECT * FROM character WHERE id >= (ABS(RANDOM()) % (SELECT MAX(id) FROM character)) LIMIT 1;")
-                result = c.fetchone()
-                conn.close()
-                return jsonify(result)
-            # 如果有参数，根据参数返回数据
-            else:
-                sql = "SELECT * FROM character WHERE npcNameLocal like ? AND topic like ? AND text like ? AND sex like ? AND type like ?"
+            with conn:
+                # 如果没有参数，随机返回一条数据
+                if args['character'] == None and args['topic'] == None and args['text'] == None:
+                    c.execute(
+                        "SELECT * FROM character WHERE id >= (ABS(RANDOM()) % (SELECT MAX(id) FROM character)) LIMIT 1;")
+                    result = c.fetchone()
+                    return jsonify(result)
+                # 如果有参数，根据参数返回数据
+                else:
+                    sql = """
+                    with filtered as (SELECT id
+                                    FROM character
+                                    WHERE npcNameLocal like ?
+                                        AND topic like ?
+                                        AND "text" like ?
+                                        AND sex like ?
+                                        AND type like ?)
+                    select *
+                    from character
+                    where id in (select id from filtered order by random() limit 1)
+                    """
 
-                argsList = (args['character'], args['topic'],
-                            args['text'], args['sex'], args['type'])
+                    c.execute(sql,
+                              (f"%{args['character']}%",
+                               f"%{args['topic']}%",
+                               f"%{args['text']}%",
+                               f"%{args['sex']}%",
+                               f"%{args['type']}%"))
 
-                c.execute(sql, argsList)
+                    # 从result中随机取出一条数据
+                    results = c.fetchall()
+                    # 如果没有数据，返回404
+                    if len(results) == 0:
+                        return jsonify({'text': '进不去……'}), 404
 
-                # 从result中随机取出一条数据
-                import random
-                result = c.fetchall()
-                print(len(result))
-                # 如果没有数据，返回404
-                if len(result) == 0:
-                    conn.close()
-                    return jsonify({'text': '进不去……'}), 404
-
-                result = random.choice(result)
-                conn.close()
-                return jsonify({
-                    'npcNameLocal': result[1],
-                    'sex': result[2],
-                    'type': result[3],
-                    'topic': result[4],
-                    'text': result[5],
-                    'npcNameCode': result[6],
-                    'language': result[7],
-                    'fileName': result[8],
-                    'audioURL': result[9],
-                })
+                    result = results[0]
+                    return jsonify({
+                        'npcNameLocal': result[1],
+                        'sex': result[2],
+                        'type': result[3],
+                        'topic': result[4],
+                        'text': result[5],
+                        'npcNameCode': result[6],
+                        'language': result[7],
+                        'fileName': result[8],
+                        'audioURL': result[9],
+                    })
         except Exception as e:
             print(e)
             return jsonify({'text': '进不去……', 'err': str(e)}), 404
+
 
 
 def run():
