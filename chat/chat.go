@@ -29,6 +29,7 @@ type chatContext struct {
 	msg *Message
 }
 
+// InitChat init chat service
 func InitChat() {
 	if config.BotConfig.ChatConfig.Key != "" {
 		client = gogpt.NewClient(config.BotConfig.ChatConfig.Key)
@@ -36,8 +37,8 @@ func InitChat() {
 	}
 }
 
-// Chat with GPT
-func ChatGPT(ctx Context) error {
+// GPTChat is handler for chat with GPT
+func GPTChat(ctx Context) error {
 	if client == nil {
 		return nil
 	}
@@ -92,7 +93,11 @@ func chatService() {
 
 			stream, err := client.CreateChatCompletionStream(context.Background(), *ctx.req)
 			if err != nil {
-				util.EditMessageWithError(ctx.msg, "An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
+				_, err := util.EditMessageWithError(ctx.msg,
+					"An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
+				if err != nil {
+					log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+				}
 				return
 			}
 			defer stream.Close()
@@ -122,17 +127,22 @@ func chatService() {
 				}
 			}()
 
+			ticker := time.NewTicker(500 * time.Millisecond)
 		out:
-			for range time.Tick(time.Second) {
+			for range ticker.C {
 				contentLock.Lock()
 				contentCopy := content
 				contentLock.Unlock()
 				if len(strings.TrimSpace(contentCopy)) > 0 {
-					util.EditMessageWithError(ctx.msg, contentCopy)
+					_, err := util.EditMessageWithError(ctx.msg, contentCopy)
+					if err != nil {
+						log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+					}
 				}
 				select {
 				case <-done:
 					break out
+				default:
 				}
 			}
 
@@ -140,7 +150,10 @@ func chatService() {
 				contentLock.Lock()
 				// content += fmt.Sprintf("\n\nusage: %d + %d = %d\n", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 				content += fmt.Sprintf("\n\nwait: %v\n", time.Since(start))
-				util.EditMessageWithError(ctx.msg, content)
+				_, err := util.EditMessageWithError(ctx.msg, content)
+				if err != nil {
+					log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+				}
 				contentLock.Unlock()
 			}
 
