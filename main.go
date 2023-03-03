@@ -1,6 +1,7 @@
 package main
 
 import (
+	"csust-got/chat"
 	"csust-got/sd"
 	"net/http"
 	"net/url"
@@ -44,6 +45,8 @@ func main() {
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 
 	go sd.Process()
+
+	go chat.InitChat()
 
 	base.Init()
 
@@ -124,6 +127,8 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/getvoice_old", base.GetVoice)
 	bot.Handle("/getvoice", base.GetVoiceV2)
+
+	bot.Handle("/chat", chat.ChatGPT)
 }
 
 func registerRestrictHandler(bot *Bot) {

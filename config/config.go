@@ -46,6 +46,7 @@ func NewBotConfig() *Config {
 	config.WhiteListConfig.SetName("white_list")
 	config.BlockListConfig.SetName("black_list")
 	config.GenShinConfig = new(genShinConfig)
+	config.ChatConfig = new(chatConfig)
 	return config
 }
 
@@ -67,6 +68,7 @@ type Config struct {
 	WhiteListConfig *specialListConfig
 	PromConfig      *promConfig
 	GenShinConfig   *genShinConfig
+	ChatConfig      *chatConfig
 }
 
 // GetBot returns Bot.
@@ -107,6 +109,7 @@ func readConfig() {
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
+	BotConfig.ChatConfig.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()
@@ -132,4 +135,5 @@ func checkConfig() {
 	BotConfig.WhiteListConfig.checkConfig()
 	BotConfig.PromConfig.checkConfig()
 	BotConfig.GenShinConfig.checkConfig()
+	BotConfig.ChatConfig.checkConfig()
 }
