@@ -4,11 +4,11 @@ go 1.20
 
 require (
 	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/common v0.40.0
+	github.com/prometheus/common v0.41.0
 	github.com/quic-go/quic-go v0.33.0
 	github.com/redis/go-redis/v9 v9.0.2
 	github.com/spf13/viper v1.15.0
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.8.2
 	go.uber.org/zap v1.24.0
 	golang.org/x/net v0.7.0
 	golang.org/x/time v0.3.0
