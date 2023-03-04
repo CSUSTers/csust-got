@@ -44,12 +44,12 @@ func GPTChat(ctx Context) error {
 		return nil
 	}
 
-	command := entities.FromMessage(ctx.Message())
-	if command.Argc() <= 0 {
-		return ctx.Reply("您好，有什么问题可以为您解答吗？")
+	_, arg, err := entities.CommandTakeArgs(ctx.Message(), 0)
+	if err != nil {
+		log.Error("[ChatGPT] Can't take args", zap.Error(err))
+		return ctx.Reply("嗦啥呢？")
 	}
-	arg := command.ArgAllInOneFrom(0)
-	if len(strings.TrimSpace(arg)) == 0 {
+	if len(arg) == 0 {
 		return ctx.Reply("您好，有什么问题可以为您解答吗？")
 	}
 	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
