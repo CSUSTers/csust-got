@@ -2,6 +2,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"csust-got/util"
 
 	"github.com/redis/go-redis/v9"
+	gogpt "github.com/sashabaranov/go-gpt3"
 	"go.uber.org/zap"
 )
 
@@ -59,6 +61,12 @@ func wrapKeyWithChatMember(key string, chatID int64, userID int64) string {
 	cid := strconv.FormatInt(chatID, 10)
 	uid := strconv.FormatInt(userID, 10)
 	return wrapKey(key + ":c" + cid + ":u" + uid)
+}
+
+func wrapKeyWithChatMsg(key string, chatID int64, msgID int) string {
+	cid := strconv.FormatInt(chatID, 10)
+	mid := strconv.Itoa(msgID)
+	return wrapKey(key + ":c" + cid + ":u" + mid)
 }
 
 func loadSpecialList(key string) []string {
@@ -579,4 +587,43 @@ func GetSDDefaultServer() string {
 		return ""
 	}
 	return defaultServer
+}
+
+// SetChatContext save user's chat context with GPT to redis.
+func SetChatContext(chatID int64, msgID int, chatContext []gogpt.ChatCompletionMessage) error {
+	if len(chatContext) == 0 {
+		return nil
+	}
+	if chatContext[0].Role == "system" {
+		chatContext = chatContext[1:]
+	}
+	chatContextJSON, err := json.Marshal(chatContext)
+	if err != nil {
+		log.Error("marshal chat context failed", zap.Int64("chat", chatID), zap.Int("msg", msgID), zap.Error(err))
+		return err
+	}
+	err = rc.Set(context.TODO(), wrapKeyWithChatMsg("chat_context", chatID, msgID), chatContextJSON, 7*24*time.Hour).Err()
+	if err != nil {
+		log.Error("set chat context to redis failed", zap.Int64("chat", chatID), zap.Int("msg", msgID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// GetChatContext get user's chat context with GPT from redis.
+func GetChatContext(chatID int64, msgID int) ([]gogpt.ChatCompletionMessage, error) {
+	chatContextJSON, err := rc.Get(context.TODO(), wrapKeyWithChatMsg("chat_context", chatID, msgID)).Result()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			log.Error("get chat context from redis failed", zap.Int64("chat", chatID), zap.Int("msg", msgID), zap.Error(err))
+		}
+		return nil, err
+	}
+	var chatContext []gogpt.ChatCompletionMessage
+	err = json.Unmarshal([]byte(chatContextJSON), &chatContext)
+	if err != nil {
+		log.Error("unmarshal chat context failed", zap.Int64("chat", chatID), zap.Int("msg", msgID), zap.Error(err))
+		return nil, err
+	}
+	return chatContext, nil
 }
