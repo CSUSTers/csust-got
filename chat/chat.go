@@ -123,7 +123,7 @@ func chatService() {
 
 			stream, err := client.CreateChatCompletionStream(context.Background(), *ctx.req)
 			if err != nil {
-				replyMsg, err = util.EditMessageWithError(ctx.msg,
+				_, err = util.EditMessageWithError(ctx.msg,
 					"An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
 				if err != nil {
 					log.Error("[ChatGPT] Can't edit message", zap.Error(err))
@@ -183,7 +183,7 @@ func chatService() {
 
 			contentLock.Lock()
 			if strings.TrimSpace(content) == "" {
-				content += fmt.Sprintf("\n...嗦不粗话")
+				content += "\n...嗦不粗话"
 			}
 			if config.BotConfig.DebugMode {
 				// content += fmt.Sprintf("\n\nusage: %d + %d = %d\n", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
