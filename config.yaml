@@ -53,4 +53,4 @@ chatgpt:
   key: ""
   max_tokens: 1000
   temperature: 0.7
-  prompt_limit: 100
+  prompt_limit: 500

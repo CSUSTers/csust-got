@@ -48,8 +48,11 @@ func GPTChat(ctx Context) error {
 		return ctx.Reply("您好，有什么问题可以为您解答吗？")
 	}
 	arg := command.ArgAllInOneFrom(0)
-	if len(arg) > config.BotConfig.ChatConfig.PromptLimit || len(strings.TrimSpace(arg)) == 0 {
-		return ctx.Reply("An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
+	if len(strings.TrimSpace(arg)) == 0 {
+		return ctx.Reply("您好，有什么问题可以为您解答吗？")
+	}
+	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
+		return ctx.Reply("TLDR")
 	}
 
 	req := gogpt.ChatCompletionRequest{
@@ -58,7 +61,7 @@ func GPTChat(ctx Context) error {
 		Messages: []gogpt.ChatCompletionMessage{
 			{Role: "user", Content: arg},
 		},
-		Stream:      false,
+		Stream:      true,
 		Temperature: config.BotConfig.ChatConfig.Temperature,
 	}
 
@@ -73,7 +76,7 @@ func GPTChat(ctx Context) error {
 	case chatChan <- payload:
 		return nil
 	default:
-		return ctx.Reply("An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
+		return ctx.Reply("要处理的对话太多了，要不您稍后再试试？")
 	}
 }
 
@@ -127,16 +130,20 @@ func chatService() {
 				}
 			}()
 
-			ticker := time.NewTicker(500 * time.Millisecond)
+			ticker := time.NewTicker(time.Second) // 每秒尝试编辑一次，编辑过快会被tg限流
+			defer ticker.Stop()
+			lastContent := "" // 记录上次编辑的内容，内容相同则不再编辑，避免tg的api返回400
 		out:
 			for range ticker.C {
 				contentLock.Lock()
 				contentCopy := content
 				contentLock.Unlock()
-				if len(strings.TrimSpace(contentCopy)) > 0 {
+				if len(strings.TrimSpace(contentCopy)) > 0 && strings.TrimSpace(contentCopy) != strings.TrimSpace(lastContent) {
 					_, err := util.EditMessageWithError(ctx.msg, contentCopy)
 					if err != nil {
 						log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+					} else {
+						lastContent = contentCopy
 					}
 				}
 				select {
@@ -149,7 +156,7 @@ func chatService() {
 			if config.BotConfig.DebugMode {
 				contentLock.Lock()
 				// content += fmt.Sprintf("\n\nusage: %d + %d = %d\n", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-				content += fmt.Sprintf("\n\nwait: %v\n", time.Since(start))
+				content += fmt.Sprintf("\n\ntime cost: %v\n", time.Since(start))
 				_, err := util.EditMessageWithError(ctx.msg, content)
 				if err != nil {
 					log.Error("[ChatGPT] Can't edit message", zap.Error(err))
