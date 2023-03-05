@@ -48,3 +48,11 @@ prometheus:
 genshin_voice:
   api_server: "https://api.csu.st"
   err_audio_addr: "https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg"
+
+chatgpt:
+  key: ""
+  max_tokens: 1000
+  temperature: 1
+  prompt_limit: 500
+  system_prompt: ""
+  keep_context: 0

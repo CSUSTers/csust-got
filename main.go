@@ -1,6 +1,7 @@
 package main
 
 import (
+	"csust-got/chat"
 	"csust-got/sd"
 	"net/http"
 	"net/url"
@@ -44,6 +45,8 @@ func main() {
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 
 	go sd.Process()
+
+	go chat.InitChat()
 
 	base.Init()
 
@@ -124,6 +127,8 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/getvoice_old", base.GetVoice)
 	bot.Handle("/getvoice", base.GetVoiceV2)
+
+	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -206,17 +211,26 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 }
 
 func rateMiddleware(next HandlerFunc) HandlerFunc {
-	whiteListConfig := config.BotConfig.WhiteListConfig
 	return func(ctx Context) error {
 		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
-			return next(ctx)
-		}
-		if !whiteListConfig.Enabled || !whiteListConfig.Check(ctx.Chat().ID) {
 			return next(ctx)
 		}
 		if !restrict.CheckLimit(ctx.Message()) {
 			log.Info("message deleted by rate limit", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
+			return nil
+		}
+		return next(ctx)
+	}
+}
+
+func whiteMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if !config.BotConfig.WhiteListConfig.Enabled {
+			return next(ctx)
+		}
+		if ctx.Chat() != nil && !config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
+			log.Info("chat ignore by white list", zap.String("chat", ctx.Chat().Title))
 			return nil
 		}
 		return next(ctx)
