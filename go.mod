@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/common v0.41.0
+	github.com/prometheus/common v0.42.0
 	github.com/quic-go/quic-go v0.33.0
 	github.com/redis/go-redis/v9 v9.0.2
 	github.com/sashabaranov/go-gpt3 v1.3.3
