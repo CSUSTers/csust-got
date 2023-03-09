@@ -127,6 +127,7 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/getvoice_old", base.GetVoice)
 	bot.Handle("/getvoice", base.GetVoiceV2)
+	bot.Handle("/genvoice", base.GetVoiceV3)
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 }
