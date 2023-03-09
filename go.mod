@@ -7,7 +7,7 @@ require (
 	github.com/prometheus/common v0.42.0
 	github.com/quic-go/quic-go v0.33.0
 	github.com/redis/go-redis/v9 v9.0.2
-	github.com/sashabaranov/go-gpt3 v1.3.3
+	github.com/sashabaranov/go-openai v1.5.0
 	github.com/spf13/viper v1.15.0
 	github.com/stretchr/testify v1.8.2
 	go.uber.org/zap v1.24.0

@@ -13,7 +13,7 @@ import (
 	"csust-got/util"
 
 	"github.com/redis/go-redis/v9"
-	gogpt "github.com/sashabaranov/go-gpt3"
+	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 )
 
@@ -590,7 +590,7 @@ func GetSDDefaultServer() string {
 }
 
 // SetChatContext save user's chat context with GPT to redis.
-func SetChatContext(chatID int64, msgID int, chatContext []gogpt.ChatCompletionMessage) error {
+func SetChatContext(chatID int64, msgID int, chatContext []openai.ChatCompletionMessage) error {
 	if len(chatContext) == 0 {
 		return nil
 	}
@@ -611,7 +611,7 @@ func SetChatContext(chatID int64, msgID int, chatContext []gogpt.ChatCompletionM
 }
 
 // GetChatContext get user's chat context with GPT from redis.
-func GetChatContext(chatID int64, msgID int) ([]gogpt.ChatCompletionMessage, error) {
+func GetChatContext(chatID int64, msgID int) ([]openai.ChatCompletionMessage, error) {
 	chatContextJSON, err := rc.Get(context.TODO(), wrapKeyWithChatMsg("chat_context", chatID, msgID)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
@@ -619,7 +619,7 @@ func GetChatContext(chatID int64, msgID int) ([]gogpt.ChatCompletionMessage, err
 		}
 		return nil, err
 	}
-	var chatContext []gogpt.ChatCompletionMessage
+	var chatContext []openai.ChatCompletionMessage
 	err = json.Unmarshal([]byte(chatContextJSON), &chatContext)
 	if err != nil {
 		log.Error("unmarshal chat context failed", zap.Int64("chat", chatID), zap.Int("msg", msgID), zap.Error(err))
