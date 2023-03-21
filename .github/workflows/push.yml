@@ -46,7 +46,7 @@ jobs:
           push: true
           platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
           tags: |
-            csust/csust-got:latest-${{ github.ref_name }}
+            ${{ secrets.HARBOR_URL }}/csust/csust-got:latest-${{ github.ref_name }}
           build-args: |
             TAG=${{ steps.version.outputs.sha }}
             BRANCH=${{ github.ref_name }}
