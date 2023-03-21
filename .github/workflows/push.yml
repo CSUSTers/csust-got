@@ -44,7 +44,6 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
           tags: |
             ${{ secrets.HARBOR_URL }}/csust/csust-got:latest-${{ github.ref_name }}
           build-args: |
