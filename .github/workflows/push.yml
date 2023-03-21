@@ -39,7 +39,7 @@ jobs:
           image: csust/csust-got
           tags: latest-${{ github.ref_name }}
           containerfiles: |
-            ./DockerFile
+            ./Dockerfile
 
       - name: Push To harbor
         id: push-to-harbor
