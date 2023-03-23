@@ -42,7 +42,7 @@ jobs:
             ./Dockerfile
 
       - name: Push To harbor
-        id: push-to-harbor
+        id: push-to-harbor 
         uses: redhat-actions/push-to-registry@v2
         with:
           image: ${{ steps.build-image.outputs.image }}
