@@ -49,7 +49,7 @@ func GetVoice(ctx Context) error {
 	m := ctx.Message()
 	data := genShinVoice{}
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer
-	resp, err := http.Get(serverAddress + "/GenShin/GetVoice")
+	resp, err := http.Get(serverAddress + "/GetVoice")
 	if err != nil {
 		log.Error("api server error", zap.Error(err))
 		util.SendReply(m.Chat, "凯瑟琳: \n 异常……", m)
@@ -86,7 +86,7 @@ func GetVoiceV2(ctx Context) error {
 
 	data := genShinVoiceV2{}
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer
-	resp, err := http.Get(serverAddress + "/GenShin/GetVoice/v2" + arg)
+	resp, err := http.Get(serverAddress + "/GetVoice/v2" + arg)
 
 	if err != nil {
 		log.Error("连接语音api服务器失败", zap.Error(err))
@@ -137,7 +137,7 @@ func GetVoiceV3(ctx Context) error {
 	}
 
 	data := genShinVoiceV3{}
-	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/genarator/GetVoice/v3" + arg
+	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/GetVoice/v3" + arg
 	log.Info(serverAddress)
 
 	resp, err := http.Get(serverAddress)

@@ -35,30 +35,31 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v2
+        id: build-image
+        uses: redhat-actions/buildah-build@v2
         with:
-          context: .
-          push: true
           platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
+          image: csust/csust-got
           tags: |
             csust/csust-got:latest
             csust/csust-got:${{ github.ref_name }}
           build-args: |
             TAG=${{ github.ref_name }}
             BRANCH=release
-
+          containerfiles: |
+              ./Dockerfile
 
   deploy:
     name: Deployment
     runs-on: ubuntu-latest
     needs: [ test, build ]
     steps:
-
-      - name: Deployment
-        uses: appleboy/ssh-action@master
+      - name: Push To harbor
+        id: push-to-harbor
+        uses: redhat-actions/push-to-registry@v2
         with:
-          host: ${{ secrets.HOST }}
-          port: ${{ secrets.PORT }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.PRIVATE_KEY }}
-          script: cd csust-got && docker-compose pull && docker-compose up -d --force-recreate
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ${{ secrets.HARBOR_URL }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWD }}

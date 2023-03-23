@@ -32,7 +32,7 @@ type TimeTask struct {
 	fn func(task *Task)
 
 	// add task to this channel,
-	// it will be add to redis or add scheduler directly depending on execTime.
+	// it will be added to redis or add scheduler directly depending on execTime.
 	addChan chan *Task
 	// the tasks in this channel will be deleted from redis.
 	deleteChan chan *RawTask
