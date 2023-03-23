@@ -56,3 +56,4 @@ chatgpt:
   prompt_limit: 500
   system_prompt: ""
   keep_context: 0
+  model: ""

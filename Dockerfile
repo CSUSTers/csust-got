@@ -1,5 +1,7 @@
 # build
-FROM --platform=$BUILDPLATFORM golang:alpine AS buildenv
+FROM --platform=$BUILDPLATFORM golang:1.20-alpine AS buildenv
+RUN set -eux && sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories
+ENV GOPROXY="https://goproxy.io"
 ARG TARGETARCH
 
 RUN apk add make git tzdata

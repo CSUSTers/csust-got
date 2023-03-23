@@ -4,15 +4,16 @@ go 1.20
 
 require (
 	github.com/prometheus/client_golang v1.14.0
-	github.com/prometheus/common v0.41.0
+	github.com/prometheus/common v0.42.0
 	github.com/quic-go/quic-go v0.33.0
 	github.com/redis/go-redis/v9 v9.0.2
+	github.com/sashabaranov/go-openai v1.5.4
 	github.com/spf13/viper v1.15.0
 	github.com/stretchr/testify v1.8.2
 	go.uber.org/zap v1.24.0
-	golang.org/x/net v0.7.0
+	golang.org/x/net v0.8.0
 	golang.org/x/time v0.3.0
-	gopkg.in/telebot.v3 v3.1.2
+	gopkg.in/telebot.v3 v3.1.3
 )
 
 require (
@@ -41,7 +42,6 @@ require (
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-19 v0.2.1 // indirect
 	github.com/quic-go/qtls-go1-20 v0.1.1 // indirect
-	github.com/sashabaranov/go-gpt3 v1.3.3 // indirect
 	github.com/spf13/afero v1.9.3 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
@@ -52,8 +52,8 @@ require (
 	golang.org/x/crypto v0.6.0 // indirect
 	golang.org/x/exp v0.0.0-20230213192124-5e25df0256eb // indirect
 	golang.org/x/mod v0.8.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/sys v0.6.0 // indirect
+	golang.org/x/text v0.8.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
