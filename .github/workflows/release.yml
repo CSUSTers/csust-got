@@ -33,7 +33,9 @@ jobs:
         uses: redhat-actions/buildah-build@v2
         with:
           image: csust/csust-got-hoo
-          tags:  latest-${{ github.ref_name }}
+          tags: |  
+            latest
+            latest-${{ github.ref_name }}
           containerfiles: |
             ./Dockerfile
       - name: Push To harbor
