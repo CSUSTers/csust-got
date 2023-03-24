@@ -39,10 +39,10 @@ jobs:
         uses: redhat-actions/buildah-build@v2
         with:
           platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
-          image: csust/csust-got
+          image: csust/csust-got-hoo
           tags: |
-            csust/csust-got:latest
-            csust/csust-got:${{ github.ref_name }}
+            csust/csust-got-hoo:latest
+            csust/csust-got-hoo:${{ github.ref_name }}
           build-args: |
             TAG=${{ github.ref_name }}
             BRANCH=release
