@@ -21,7 +21,6 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-
       - name: Get source
         uses: actions/checkout@v3
 
