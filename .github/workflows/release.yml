@@ -23,21 +23,20 @@ jobs:
     steps:
       - name: Get source
         uses: actions/checkout@v3
+        
+      - name: Print version
+        id: "version"
+        run: echo "::set-output name=sha::$(git rev-parse --short HEAD)"
 
       - name: Build and push
         id: build-image
         uses: redhat-actions/buildah-build@v2
         with:
-          platforms: linux/arm/v7,linux/arm64,linux/386,linux/amd64
           image: csust/csust-got-hoo
           tags: |
-            csust/csust-got-hoo:latest
-            csust/csust-got-hoo:${{ github.ref_name }}
-          build-args: |
-            TAG=${{ github.ref_name }}
-            BRANCH=release
+            latest-${{ github.ref_name }}
           containerfiles: |
-              ./Dockerfile
+            ./Dockerfile
 
   deploy:
     name: Deployment
