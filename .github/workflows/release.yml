@@ -38,6 +38,9 @@ jobs:
             latest-${{ github.ref_name }}
           containerfiles: |
             ./Dockerfile
+          build-args: |
+            TAG=${{ github.ref_name }}
+            BRANCH=release
       - name: Push To harbor
         id: push-to-harbor
         uses: redhat-actions/push-to-registry@v2
