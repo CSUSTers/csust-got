@@ -23,10 +23,6 @@ jobs:
     steps:
       - name: Get source
         uses: actions/checkout@v3
-        
-      - name: Print version
-        id: "version"
-        run: echo "::set-output name=sha::$(git rev-parse --short HEAD)"
 
       - name: Build
         id: build-image
