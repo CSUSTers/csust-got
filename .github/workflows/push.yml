@@ -25,10 +25,6 @@ jobs:
       - name: Get source
         uses: actions/checkout@v3
 
-      - name: Print version
-        id: "version"
-        run: echo "::set-output name=sha::$(git rev-parse --short HEAD)"
-
       - name: Build Image
         id: build-image
         uses: redhat-actions/buildah-build@v2
