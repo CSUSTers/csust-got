@@ -35,7 +35,6 @@ jobs:
         with:
           image: csust/csust-got-hoo
           tags: |
-            latest
             latest-${{ github.ref_name }}
           containerfiles: |
             ./Dockerfile
