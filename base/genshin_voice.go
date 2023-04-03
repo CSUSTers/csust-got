@@ -181,25 +181,16 @@ func GetVoiceV3(ctx Context) error {
 
 // GetVoiceV3Pro (v3版本 Pro) 语音生成, pro代表可传入自定义的ssml
 func GetVoiceV3Pro(ctx Context) error {
-	arg, ok := parseVoiceArgs(ctx)
 	m := ctx.Message()
-	if !ok {
-		err := SendErrVoice(m.Chat, "指令解析失败")
-		log.Error("指令解析失败", zap.Error(err))
-		return err
+	command := entities.FromMessage(ctx.Message())
+	var args []string
+	if command.Argc() > 0 {
+		args = command.MultiArgsFrom(0)
 	}
-
 	data := genShinVoiceV3{}
-	arg, err := url.QueryUnescape(arg)
-	if err != nil {
-		return err
-	}
-	values, err := url.ParseQuery(arg)
-	if err != nil {
-		log.Error("url解析失败", zap.Error(err))
-		err := SendErrVoice(m.Chat, "指令解析失败")
-		return err
-	}
+
+	values := url.Values{}
+	values.Add("text", strings.Join(args, " "))
 	log.Info("url解析成功", zap.String("values", values.Encode()))
 
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/GetVoice/v4"
