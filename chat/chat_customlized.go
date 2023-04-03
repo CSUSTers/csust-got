@@ -35,17 +35,16 @@ func Cust(ctx Context) error {
 		return ctx.Reply("TLDR")
 	}
 
-	err = generateRequestCust(ctx, arg)
+	msg, err := util.SendReplyWithError(ctx.Chat(), "正在思考...", ctx.Message())
 	if err != nil {
 		return err
 	}
-
-	_, err = util.SendReplyWithError(ctx.Chat(), "正在思考...", ctx.Message())
+	err = generateRequestCust(arg, msg)
 	return err
 
 }
 
-func generateRequestCust(ctx Context, arg string) error {
+func generateRequestCust(arg string, msg *Message) error {
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/Chat" + "?text=" + url.QueryEscape(arg)
 	log.Info(serverAddress)
 
@@ -65,7 +64,7 @@ func generateRequestCust(ctx Context, arg string) error {
 		log.Error("chat api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
 		return err
 	}
-	_, err = util.EditMessageWithError(ctx.Message(), data.Text)
+	_, err = util.EditMessageWithError(msg, data.Text)
 
 	if err != nil {
 		log.Error("[ChatGPT] Can't edit message", zap.Error(err))

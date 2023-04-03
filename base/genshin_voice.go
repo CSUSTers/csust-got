@@ -197,6 +197,7 @@ func GetVoiceV3Pro(ctx Context) error {
 		err := SendErrVoice(m.Chat, "指令解析失败")
 		return err
 	}
+	log.Info("url解析成功", zap.String("values", values.Encode()))
 
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/GetVoice/v4"
 	log.Info(serverAddress)
