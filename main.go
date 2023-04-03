@@ -132,7 +132,7 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-	bot.Handle("/chatqiu", chat.Cust, whiteMiddleware)
+	bot.Handle("/qiuchat", chat.Cust, whiteMiddleware)
 }
 
 func registerRestrictHandler(bot *Bot) {
