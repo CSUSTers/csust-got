@@ -190,7 +190,10 @@ func GetVoiceV3Pro(ctx Context) error {
 	}
 
 	data := genShinVoiceV3{}
-
+	arg, err := url.QueryUnescape(arg)
+	if err != nil {
+		return err
+	}
 	values, err := url.ParseQuery(arg)
 	if err != nil {
 		log.Error("url解析失败", zap.Error(err))

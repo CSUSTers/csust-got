@@ -28,9 +28,6 @@ func Cust(ctx Context) error {
 		log.Error("[ChatGPT] Can't take args", zap.Error(err))
 		return ctx.Reply("嗦啥呢？")
 	}
-	if len(arg) == 0 {
-		return ctx.Reply("您好，有什么问题可以为您解答吗？")
-	}
 	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
 		return ctx.Reply("TLDR")
 	}
