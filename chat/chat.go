@@ -218,7 +218,7 @@ func chatWithStream(ctx *chatContext) {
 		}
 	}()
 
-	ticker := time.NewTicker(2 * time.Second) // 编辑过快会被tg限流
+	ticker := time.NewTicker(5 * time.Second) // 编辑过快会被tg限流
 	defer ticker.Stop()
 	lastContent := "" // 记录上次编辑的内容，内容相同则不再编辑，避免tg的api返回400
 out:

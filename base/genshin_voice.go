@@ -179,6 +179,62 @@ func GetVoiceV3(ctx Context) error {
 	return err
 }
 
+// GetVoiceV3Pro (v3版本 Pro) 语音生成, pro代表可传入自定义的ssml
+func GetVoiceV3Pro(ctx Context) error {
+	m := ctx.Message()
+	command := entities.FromMessage(ctx.Message())
+	var args []string
+	if command.Argc() > 0 {
+		args = command.MultiArgsFrom(0)
+	}
+	data := genShinVoiceV3{}
+
+	values := url.Values{}
+	values.Add("text", strings.Join(args, " "))
+	log.Info("url解析成功", zap.String("values", values.Encode()))
+
+	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/GetVoice/v4"
+	log.Info(serverAddress)
+
+	resp, err := http.PostForm(serverAddress, values)
+	if err != nil {
+		log.Error("连接语音api服务器失败", zap.Error(err))
+		err := SendErrVoice(m.Chat, "连接语音api服务器失败")
+		return err
+	}
+
+	var inputText string
+	_, inputText, err = entities.CommandTakeArgs(m, 0)
+	if err != nil {
+		log.Error("get an error when parse user input text", zap.Error(err))
+		err = SendErrVoice(m.Chat, "用户输出错误")
+		return err
+	}
+
+	margs, restArgs, _ := parseVoiceArgsArray(inputText)
+	debugMsg := []string{}
+	for _, m := range margs {
+		debugMsg = append(debugMsg, fmt.Sprintf("%s=%s", m[0], m[1]))
+	}
+	debugMsg = append(debugMsg, restArgs...)
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		log.Error("语音api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数：\n"+strings.Join(debugMsg, "\n"))
+		return err
+	}
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		log.Error("语音api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
+		err := SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
+		return err
+
+	}
+	err = SendVoiceV3(m.Chat, data)
+	return err
+}
+
 func parseVoiceArgs(ctx Context) (arg string, ok bool) {
 	command := entities.FromMessage(ctx.Message())
 	var args []string
