@@ -127,8 +127,12 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/getvoice_old", base.GetVoice)
 	bot.Handle("/getvoice", base.GetVoiceV2)
+	bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
+	bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
+	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
+	bot.Handle("/qiuchat", chat.Cust, whiteMiddleware)
 }
 
 func registerRestrictHandler(bot *Bot) {

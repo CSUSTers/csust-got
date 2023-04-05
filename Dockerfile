@@ -1,5 +1,5 @@
 # build
-FROM --platform=$BUILDPLATFORM golang:alpine AS buildenv
+FROM --platform=$BUILDPLATFORM golang:1.20-alpine AS buildenv
 ARG TARGETARCH
 
 RUN apk add make git tzdata
