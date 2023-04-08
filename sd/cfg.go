@@ -24,6 +24,12 @@ type StableDiffusionConfig struct {
 	Height         int    `json:"height"`
 	Number         int    `json:"number"`
 	Sampler        string `json:"sampler"`
+
+	HiResEnabled         string  `json:"hr"`
+	DenoisingStrength    float64 `json:"denoising_strength"`
+	HiResScale           float64 `json:"hr_scale"`
+	HiResUpscaler        string  `json:"hr_upscaler"`
+	HiResSecondPassSteps int     `json:"hr_second_pass_steps"`
 }
 
 // GetValueByKey get value by key.
@@ -38,7 +44,8 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 		return c.Prompt
 	case key == "negative_prompt":
 		if c.NegativePrompt == "" {
-			return "nsfw, lowres, bad anatomy, bad hands, (((deformed))), [blurry], (poorly drawn hands), (poorly drawn feet), text, error, missing fingers, extra digit, " +
+			return "nsfw, lowres, bad anatomy, bad hands, (((deformed))), [blurry], (poorly drawn hands), (poorly drawn feet), " +
+				"text, error, missing fingers, extra digit, " +
 				"fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
 		}
 		return c.NegativePrompt
@@ -74,6 +81,31 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 			return "Euler a"
 		}
 		return c.Sampler
+	case key == "hr":
+		if c.HiResEnabled == "" {
+			return "off"
+		}
+		return c.HiResEnabled
+	case key == "denoising_strength":
+		if c.DenoisingStrength == 0 {
+			return 0.6
+		}
+		return c.DenoisingStrength
+	case key == "hr_scale":
+		if c.HiResScale == 0 {
+			return 2.0
+		}
+		return c.HiResScale
+	case key == "hr_upscaler":
+		if c.HiResUpscaler == "" {
+			return "Latent"
+		}
+		return c.HiResUpscaler
+	case key == "hr_second_pass_steps":
+		if c.HiResSecondPassSteps == 0 {
+			return 20
+		}
+		return c.HiResSecondPassSteps
 	default:
 		return "key not exists"
 	}
@@ -153,6 +185,44 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 			value = "Euler a"
 		}
 		c.Sampler = value
+	case key == "hr":
+		if value == "on" {
+			c.HiResEnabled = "on"
+		} else {
+			c.HiResEnabled = "off"
+		}
+	case key == "denoising_strength":
+		denoisingStrength, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("%w: denoising_strength must be a float", ErrConfigIsInvalid)
+		}
+		c.DenoisingStrength = denoisingStrength
+		if c.DenoisingStrength < 0 || c.DenoisingStrength > 1 {
+			return fmt.Errorf("%w: denoising_strength must be between 0 and 1", ErrConfigIsInvalid)
+		}
+	case key == "hr_scale":
+		hrScale, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("%w: hr_scale must be a float", ErrConfigIsInvalid)
+		}
+		c.HiResScale = hrScale
+		if c.HiResScale < 1 || c.HiResScale > 4 {
+			return fmt.Errorf("%w: hr_scale must be between 1 and 4", ErrConfigIsInvalid)
+		}
+	case key == "hr_upscaler":
+		if value == "*" {
+			value = "Latent"
+		}
+		c.HiResUpscaler = value
+	case key == "hr_second_pass_steps":
+		hrSecondPassSteps, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("%w: hr_second_pass_steps must be a integer", ErrConfigIsInvalid)
+		}
+		c.HiResSecondPassSteps = hrSecondPassSteps
+		if c.HiResSecondPassSteps < 0 || c.HiResSecondPassSteps > 50 {
+			return fmt.Errorf("%w: hr_second_pass_steps too small or too large", ErrConfigIsInvalid)
+		}
 	default:
 		return fmt.Errorf("%w: invalid key: %s", ErrConfigIsInvalid, key)
 	}
@@ -171,7 +241,7 @@ func (c *StableDiffusionConfig) GetServer() string {
 
 // GenStableDiffusionRequest generate stable diffusion request by config.
 func (c *StableDiffusionConfig) GenStableDiffusionRequest() *StableDiffusionReq {
-	return &StableDiffusionReq{
+	req := &StableDiffusionReq{
 		Prompt:         c.GetValueByKey("prompt").(string),
 		NegativePrompt: c.GetValueByKey("negative_prompt").(string),
 		Steps:          c.GetValueByKey("steps").(int),
@@ -181,6 +251,15 @@ func (c *StableDiffusionConfig) GenStableDiffusionRequest() *StableDiffusionReq 
 		BatchSize:      c.GetValueByKey("number").(int),
 		SamplerIndex:   c.GetValueByKey("sampler").(string),
 	}
+	if c.GetValueByKey("hr").(string) == "on" {
+		req.HiResEnabled = true
+		req.DenoisingStrength = c.GetValueByKey("denoising_strength").(float64)
+		req.HiResScale = c.GetValueByKey("hr_scale").(float64)
+		req.HiResUpscaler = c.GetValueByKey("hr_upscaler").(string)
+		req.HiResSecondPassSteps = c.GetValueByKey("hr_second_pass_steps").(int)
+		req.BatchSize = 1
+	}
+	return req
 }
 
 const helpInfo = "sdcfg set \\<key\\> \\<value\\>\n" +
@@ -193,7 +272,12 @@ const helpInfo = "sdcfg set \\<key\\> \\<value\\>\n" +
 	"`scale`: scale for stable diffusion\\.\n" +
 	"`res`: resolution __width__x__height__\\.\n" +
 	"`number`: number of images for once command call\\.\n" +
-	"`sampler`: sampler for stable diffusion\\."
+	"`sampler`: sampler for stable diffusion, default is `Euler a`\\.\n" +
+	"`hr`: high resolution fix `on`/`off`, will force `number` to 1\\.\n" +
+	"`denoising_strength`: denoising strength for high resolution\\.\n" +
+	"`hr_scale`: high resolution scale\\.\n" +
+	"`hr_upscaler`: high resolution upscaler, default is `Latent`\\.\n" +
+	"`hr_second_pass_steps`: high resolution fix steps\\."
 
 // ConfigHandler handle /sdcfg command.
 func ConfigHandler(ctx Context) error {

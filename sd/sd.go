@@ -120,7 +120,11 @@ func Handler(ctx Context) error {
 		Request:    *req,
 	}:
 		busyUser[userID]++
-		return ctx.Reply("在画了在画了")
+		msg := "在画了在画了"
+		if req.HiResEnabled {
+			msg += "，高清修复已开启，可能会比较慢，耐心等待一下~"
+		}
+		return ctx.Reply(msg)
 	default:
 		return ctx.Reply("忙不过来了")
 	}
@@ -264,6 +268,12 @@ type StableDiffusionReq struct {
 	Height         int    `json:"height"`
 	BatchSize      int    `json:"batch_size"`
 	SamplerIndex   string `json:"sampler_index"`
+
+	HiResEnabled         bool    `json:"enable_hr"`
+	DenoisingStrength    float64 `json:"denoising_strength"`
+	HiResScale           float64 `json:"hr_scale"`
+	HiResUpscaler        string  `json:"hr_upscaler"`
+	HiResSecondPassSteps int     `json:"hr_second_pass_steps"`
 }
 
 /*
