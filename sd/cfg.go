@@ -38,7 +38,7 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 		return c.Prompt
 	case key == "negative_prompt":
 		if c.NegativePrompt == "" {
-			return "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, " +
+			return "nsfw, lowres, bad anatomy, bad hands, (((deformed))), [blurry], (poorly drawn hands), (poorly drawn feet), text, error, missing fingers, extra digit, " +
 				"fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
 		}
 		return c.NegativePrompt

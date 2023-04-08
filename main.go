@@ -43,6 +43,7 @@ func main() {
 	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
+	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	go sd.Process()
 
@@ -264,7 +265,7 @@ func promMiddleware(next HandlerFunc) HandlerFunc {
 		prom.DialContext(ctx)
 		command := entities.FromMessage(ctx.Message())
 		if command != nil {
-			log.Info("bot receive command", zap.String("chat", ctx.Chat().Title),
+			log.Debug("bot receive command", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username), zap.String("command", ctx.Message().Text))
 		}
 		return next(ctx)
