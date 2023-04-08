@@ -279,6 +279,11 @@ const helpInfo = "sdcfg set \\<key\\> \\<value\\>\n" +
 	"`hr_upscaler`: high resolution upscaler, default is `Latent`\\.\n" +
 	"`hr_second_pass_steps`: high resolution fix steps\\."
 
+const (
+	sdSubCmdSet = "set"
+	sdSubCmdGet = "get"
+)
+
 // ConfigHandler handle /sdcfg command.
 func ConfigHandler(ctx Context) error {
 	command := entities.FromMessage(ctx.Message())
@@ -293,13 +298,34 @@ func ConfigHandler(ctx Context) error {
 		return ctx.Reply("完了，删库跑路了")
 	}
 
+	var mode, key, value string
 	switch command.Arg(0) {
-	case "set":
+	case sdSubCmdSet:
 		if command.Argc() < 3 {
 			return ctx.Reply(helpInfo, ModeMarkdownV2)
 		}
-		key := command.Arg(1)
-		value := command.ArgAllInOneFrom(2)
+		mode = sdSubCmdSet
+		key = command.Arg(1)
+		value = command.ArgAllInOneFrom(2)
+	case sdSubCmdGet:
+		if command.Argc() < 2 {
+			return ctx.Reply(helpInfo, ModeMarkdownV2)
+		}
+		mode = sdSubCmdGet
+		key = command.Arg(1)
+	default:
+		if command.Argc() == 1 {
+			mode = sdSubCmdGet
+			key = command.Arg(0)
+		} else {
+			mode = sdSubCmdSet
+			key = command.Arg(0)
+			value = command.ArgAllInOneFrom(1)
+		}
+	}
+
+	switch mode {
+	case sdSubCmdSet:
 		err = config.SetValueByKey(key, value)
 		if err != nil {
 			return ctx.Reply(err.Error())
@@ -313,11 +339,7 @@ func ConfigHandler(ctx Context) error {
 			return ctx.Reply("完了，删库跑路了")
 		}
 		return ctx.Reply("配置保存成功")
-	case "get":
-		if command.Argc() < 2 {
-			return ctx.Reply(helpInfo, ModeMarkdownV2)
-		}
-		key := command.Arg(1)
+	case sdSubCmdGet:
 		return ctx.Reply(fmt.Sprintf("`%v`", config.GetValueByKey(key)), ModeMarkdownV2)
 	}
 
