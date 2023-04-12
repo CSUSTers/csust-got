@@ -298,7 +298,12 @@ func chatWithoutStream(ctx *chatContext) {
 	}
 
 	if config.BotConfig.DebugMode {
-		content += fmt.Sprintf("\n\nusage: %d + %d = %d\n", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+		content += fmt.Sprintf("\n\nusage: %d + %d = %d\nCredits spent (US$) : \n    %.2f (gpt-4) ; \n    %.3f (gpt-3.5)\n",
+			resp.Usage.PromptTokens,
+			resp.Usage.CompletionTokens,
+			resp.Usage.TotalTokens,
+			(float32(resp.Usage.PromptTokens)*0.03+float32(resp.Usage.CompletionTokens)*0.06)/1000,
+			float32(resp.Usage.TotalTokens)*0.002/1000)
 		content += fmt.Sprintf("time cost: %v\n", time.Since(start))
 	}
 	replyMsg, err := util.EditMessageWithError(ctx.msg, content)
