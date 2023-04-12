@@ -57,3 +57,5 @@ chatgpt:
   system_prompt: ""
   keep_context: 0
   model: ""
+  retry_nums: 5
+  retry_interval: 1  # 单位：秒

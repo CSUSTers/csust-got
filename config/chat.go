@@ -3,13 +3,15 @@ package config
 import "github.com/spf13/viper"
 
 type chatConfig struct {
-	Key          string
-	MaxTokens    int
-	Temperature  float32
-	PromptLimit  int
-	SystemPrompt string
-	KeepContext  int
-	Model        string
+	Key           string
+	MaxTokens     int
+	Temperature   float32
+	PromptLimit   int
+	SystemPrompt  string
+	KeepContext   int
+	Model         string
+	RetryNums     int
+	RetryInterval int
 }
 
 func (c *chatConfig) readConfig() {
@@ -20,6 +22,8 @@ func (c *chatConfig) readConfig() {
 	c.SystemPrompt = viper.GetString("chatgpt.system_prompt")
 	c.KeepContext = viper.GetInt("chatgpt.keep_context")
 	c.Model = viper.GetString("chatgpt.model")
+	c.RetryNums = viper.GetInt("chatgpt.retry_nums")
+	c.RetryInterval = viper.GetInt("chatgpt.retry_interval")
 }
 
 func (c *chatConfig) checkConfig() {
