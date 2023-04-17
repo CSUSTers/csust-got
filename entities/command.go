@@ -1,4 +1,4 @@
-// Package entities provides a abstraction of tg bot entities.
+// Package entities provides an abstraction of tg bot entities.
 package entities
 
 import (

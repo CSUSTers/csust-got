@@ -39,4 +39,7 @@ func (c *chatConfig) checkConfig() {
 	if c.KeepContext < 0 {
 		c.KeepContext = 0
 	}
+	if c.RetryNums < 1 {
+		c.RetryNums = 1
+	}
 }
