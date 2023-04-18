@@ -298,8 +298,16 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		var seg gse.Segmenter
-		seg.LoadDict("zh, dict/dictionary.txt")
-		seg.LoadStop("dict/stop_words.txt")
+		err := seg.LoadDict("zh, dict/dictionary.txt")
+		if err != nil {
+			log.Error("load dict error", zap.Error(err))
+			return next(ctx)
+		}
+		err = seg.LoadStop("dict/stop_words.txt")
+		if err != nil {
+			log.Error("load stop words error", zap.Error(err))
+			return next(ctx)
+		}
 		words := seg.Slice(ctx.Message().Text)
 		for _, word := range words {
 			if len(word) > 0 {
