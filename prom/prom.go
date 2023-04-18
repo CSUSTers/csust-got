@@ -129,3 +129,11 @@ func Log(level string) {
 		"level": level,
 	}).Inc()
 }
+
+func WordCount(word string, chatName string) {
+	wordCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+		"word":      word,
+	}).Inc()
+}

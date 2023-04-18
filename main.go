@@ -18,6 +18,8 @@ import (
 
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
+
+	"github.com/go-ego/gse"
 )
 
 func main() {
@@ -85,7 +87,8 @@ func initBot() (*Bot, error) {
 	}
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
-		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
+		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
+		messagesCollectionMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -287,6 +290,21 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("message ignore by shutdown", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
+		}
+		return next(ctx)
+	}
+}
+
+func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		var seg gse.Segmenter
+		seg.LoadDict("zh, dict/dictionary.txt")
+		seg.LoadStop("dict/stop_words.txt")
+		words := seg.Slice(ctx.Message().Text)
+		for _, word := range words {
+			if len(word) > 0 {
+				prom.WordCount(word, ctx.Chat().Title)
+			}
 		}
 		return next(ctx)
 	}
