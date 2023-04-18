@@ -3,6 +3,7 @@ module csust-got
 go 1.20
 
 require (
+	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/prometheus/client_golang v1.15.0
 	github.com/prometheus/common v0.42.0
 	github.com/quic-go/quic-go v0.33.0
@@ -17,6 +18,7 @@ require (
 )
 
 require (
+	github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect

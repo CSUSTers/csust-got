@@ -57,3 +57,12 @@ var logCount = prometheus.NewCounterVec(
 	},
 	[]string{"host", "level"},
 )
+
+// wordCount how many times a word be sent
+var wordCount = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "bot_word_count",
+		Help: "how many words",
+	},
+	[]string{"host", "chat_name", "word"},
+)
