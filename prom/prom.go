@@ -130,6 +130,7 @@ func Log(level string) {
 	}).Inc()
 }
 
+// WordCount summarize the frequency of words.
 func WordCount(word string, chatName string) {
 	wordCount.With(prometheus.Labels{
 		"host":      host,
