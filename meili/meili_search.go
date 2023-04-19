@@ -10,13 +10,13 @@ import (
 	"github.com/meilisearch/meilisearch-go"
 )
 
-type MeiliData struct {
+type meiliData struct {
 	Data   map[string]interface{}
 	ChatID int64
 }
 
 var (
-	dataChan  = make(chan MeiliData, 100)
+	dataChan  = make(chan meiliData, 100)
 	client    *meilisearch.Client
 	clientMux sync.Mutex
 )
@@ -64,5 +64,5 @@ func init() {
 
 // AddData2Meili add data to meili search.
 func AddData2Meili(data map[string]interface{}, chatID int64) {
-	dataChan <- MeiliData{Data: data, ChatID: chatID}
+	dataChan <- meiliData{Data: data, ChatID: chatID}
 }
