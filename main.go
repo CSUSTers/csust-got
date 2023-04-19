@@ -47,6 +47,8 @@ func main() {
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
+	meili.InitMeili()
+
 	go sd.Process()
 
 	go chat.InitChat()

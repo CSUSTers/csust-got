@@ -19,7 +19,15 @@ var (
 	dataChan  = make(chan meiliData, 100)
 	client    *meilisearch.Client
 	clientMux sync.Mutex
+	once      sync.Once
 )
+
+// InitMeili will start a meili worker goroutine
+func InitMeili() {
+	once.Do(func() {
+		go StartWorker()
+	})
+}
 
 func getClient() *meilisearch.Client {
 	clientMux.Lock()
@@ -33,33 +41,32 @@ func getClient() *meilisearch.Client {
 	return client
 }
 
-func init() {
-	go func() {
-		for data := range dataChan {
-			client := getClient()
-			indexName := config.BotConfig.MeiliConfig.IndexPrefix + strconv.FormatInt(data.ChatID, 10)
-			_, err := client.Index(indexName).FetchInfo()
+// StartWorker will start meili worker
+func StartWorker() {
+	for data := range dataChan {
+		client := getClient()
+		indexName := config.BotConfig.MeiliConfig.IndexPrefix + strconv.FormatInt(data.ChatID, 10)
+		_, err := client.Index(indexName).FetchInfo()
 
-			if err != nil {
-				indexCfg := &meilisearch.IndexConfig{
-					Uid:        indexName,
-					PrimaryKey: "message_id",
-				}
-				_, err = client.CreateIndex(indexCfg)
-				if err != nil {
-					log.Error("[MeiliSearch]: create index failed", zap.Error(err))
-					continue
-				}
+		if err != nil {
+			indexCfg := &meilisearch.IndexConfig{
+				Uid:        indexName,
+				PrimaryKey: "message_id",
 			}
-
-			_, err = client.Index(indexName).AddDocuments(data.Data, "message_id")
+			_, err = client.CreateIndex(indexCfg)
 			if err != nil {
 				log.Error("[MeiliSearch]: create index failed", zap.Error(err))
 				continue
 			}
-			log.Debug("[MeiliSearch]: add data to index success", zap.Any("data", data.Data))
 		}
-	}()
+
+		_, err = client.Index(indexName).AddDocuments(data.Data, "message_id")
+		if err != nil {
+			log.Error("[MeiliSearch]: create index failed", zap.Error(err))
+			continue
+		}
+		log.Debug("[MeiliSearch]: add data to index success", zap.Any("data", data.Data))
+	}
 }
 
 // AddData2Meili add data to meili search.
