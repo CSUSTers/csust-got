@@ -27,6 +27,7 @@ func InitPrometheus() {
 	prometheus.MustRegister(chatMemberCount)
 	prometheus.MustRegister(newMemberCount)
 	prometheus.MustRegister(logCount)
+	prometheus.MustRegister(wordCount)
 
 	cfg := config.BotConfig
 	if cfg.PromConfig.Enabled {
@@ -127,5 +128,14 @@ func Log(level string) {
 	logCount.With(prometheus.Labels{
 		"host":  host,
 		"level": level,
+	}).Inc()
+}
+
+// WordCount summarize the frequency of words.
+func WordCount(word string, chatName string) {
+	wordCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+		"word":      word,
 	}).Inc()
 }

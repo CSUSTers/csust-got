@@ -17,7 +17,7 @@ restrict:
   fake_ban_max_add: 120    # max add ban time for command `kill` or `fake ban xxx` [second]
 rate_limit:
   max_token: 20         # token bucket size, must [int]
-  limit: 0.5            # how many tokens get every seconds [float64]
+  limit: 0.5            # how many tokens get every second [float64]
   cost: 1               # default cost every message [int]
   cost_sticker: 3       # cost of every sticker, sticker message use this cost [int]
   cost_command: 2       # cost of every command, command message use this cost [int]
@@ -41,8 +41,8 @@ message:
 prometheus:
   enabled: false
   address: "prometheus:9090"
-  message_query: 'topk(5, sum(rate(bot_message_count[24h])*(24*3600-5)) by (username))'
-  sticker_query: 'topk(5, sum(rate(bot_message_count{is_sticker="true"}[24h])*(24*3600-5)) by (username))'
+  message_query: 'topk(5, sum(rate(bot_message_count{chat_name="##"}[24h])*(24*3600-5)) by (username))'
+  sticker_query: 'topk(5, sum(rate(bot_message_count{chat_name="##", is_sticker="true"}[24h])*(24*3600-5)) by (username))'
 
 # 原神语音api
 genshin_voice:
@@ -59,3 +59,10 @@ chatgpt:
   model: ""
   retry_nums: 5
   retry_interval: 1  # 单位：秒
+
+# meili search
+meili:
+  enabled: false
+  address: "http://127.0.0.1:7070"
+  api_key: ""
+  index_prefix: "csust-got-"

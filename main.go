@@ -2,7 +2,9 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/meili"
 	"csust-got/sd"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"time"
@@ -85,7 +87,8 @@ func initBot() (*Bot, error) {
 	}
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
-		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware)
+		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
+		messagesCollectionMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -287,6 +290,27 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("message ignore by shutdown", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
+		}
+		return next(ctx)
+	}
+}
+
+func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if config.BotConfig.MeiliConfig.Enabled {
+			// 将message存入 meilisearch
+			msgJSON, err := json.Marshal(ctx.Message())
+			if err != nil {
+				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
+				return next(ctx)
+			}
+			var msgMap map[string]interface{}
+			err = json.Unmarshal(msgJSON, &msgMap)
+			if err != nil {
+				log.Error("[MeiliSearch] json unmarshal message error", zap.Error(err))
+				return next(ctx)
+			}
+			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}

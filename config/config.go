@@ -16,6 +16,7 @@ var (
 	noTokenMsg      = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
 	noRedisMsg      = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 	noGenShinApiMsg = "genShinApi address is not set! Please set config file config.yaml!"
+	noMeiliMsg      = "meili configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -47,6 +48,7 @@ func NewBotConfig() *Config {
 	config.BlockListConfig.SetName("black_list")
 	config.GenShinConfig = new(genShinConfig)
 	config.ChatConfig = new(chatConfig)
+	config.MeiliConfig = new(meiliConfig)
 	return config
 }
 
@@ -69,6 +71,7 @@ type Config struct {
 	PromConfig      *promConfig
 	GenShinConfig   *genShinConfig
 	ChatConfig      *chatConfig
+	MeiliConfig     *meiliConfig
 }
 
 // GetBot returns Bot.
@@ -110,6 +113,7 @@ func readConfig() {
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
 	BotConfig.ChatConfig.readConfig()
+	BotConfig.MeiliConfig.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()
@@ -136,4 +140,5 @@ func checkConfig() {
 	BotConfig.PromConfig.checkConfig()
 	BotConfig.GenShinConfig.checkConfig()
 	BotConfig.ChatConfig.checkConfig()
+	BotConfig.MeiliConfig.checkConfig()
 }
