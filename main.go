@@ -2,11 +2,11 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/meili"
 	"csust-got/sd"
-	"github.com/huichen/sego"
+	"encoding/json"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"csust-got/base"
@@ -297,15 +297,20 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 
 func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		var segmenter sego.Segmenter
-		segmenter.LoadDictionary("/dict/dictionary.txt")
-		segments := segmenter.Segment([]byte(ctx.Message().Text))
-		words := sego.SegmentsToSlice(segments, false)
-		log.Debug("[WordSegment]", zap.String("words", strings.Join(words, ",")))
-		for _, word := range words {
-			if len(word) > 0 {
-				prom.WordCount(word, ctx.Chat().Title)
+		if config.BotConfig.MeiliConfig.Enabled {
+			// 将message存入 meilisearch
+			msgJSON, err := json.Marshal(ctx.Message())
+			if err != nil {
+				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
+				return next(ctx)
 			}
+			var msgMap map[string]interface{}
+			err = json.Unmarshal(msgJSON, &msgMap)
+			if err != nil {
+				log.Error("[MeiliSearch] json unmarshal message error", zap.Error(err))
+				return next(ctx)
+			}
+			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}

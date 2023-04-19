@@ -59,3 +59,10 @@ chatgpt:
   model: ""
   retry_nums: 5
   retry_interval: 1  # 单位：秒
+
+# meili search
+meili:
+  enabled: false
+  address: "http://127.0.0.1:7070"
+  api_key: ""
+  index_prefix: "csust-got-"
