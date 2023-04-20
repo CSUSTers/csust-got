@@ -147,4 +147,5 @@ func checkConfig() {
 	BotConfig.GenShinConfig.checkConfig()
 	BotConfig.ChatConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
+	BotConfig.McConfig.checkConfig()
 }
