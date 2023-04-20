@@ -72,7 +72,7 @@ func generateMCMessage(data []prom.MsgCount, msgType string) string {
 		return "看来你在没有人烟的荒原，快找一些朋友来玩吧。"
 	}
 
-	for idx, d := range data {
+	for idx, d := range data[:util.Min(len(data), config.BotConfig.McConfig.MaxCount)] {
 		text += fmt.Sprintf(tmpls[idx], d.Name, d.Value, msgType)
 	}
 

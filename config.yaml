@@ -66,3 +66,6 @@ meili:
   address: "http://127.0.0.1:7070"
   api_key: ""
   index_prefix: "csust-got-"
+
+mc:
+  max_count: 10

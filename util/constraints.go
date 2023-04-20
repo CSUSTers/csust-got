@@ -34,3 +34,38 @@ type Number interface {
 type Ordered interface {
 	Interger | Float | ~string
 }
+
+// Max get the max of args
+func Max[T Ordered](args ...T) T {
+	if len(args) == 0 {
+		return *new(T)
+	} else if len(args) == 1 {
+		return args[0]
+	}
+
+	temp := args[0]
+	for _, x := range args[1:] {
+		if x > temp {
+			temp = x
+		}
+	}
+	return temp
+}
+
+// Min get the min of args
+func Min[T Ordered](args ...T) T {
+	if len(args) == 0 {
+		return *new(T)
+	} else if len(args) == 1 {
+		return args[0]
+	}
+
+	temp := args[0]
+	for _, x := range args[1:] {
+		if x < temp {
+			temp = x
+		}
+	}
+	return temp
+}
+
