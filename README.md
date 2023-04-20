@@ -3,8 +3,8 @@
 [![Go Report](https://goreportcard.com/badge/github.com/csusters/csust-got)](https://goreportcard.com/report/github.com/csusters/csust-got)
 [![codebeat badge](https://codebeat.co/badges/4d134b7f-e345-4378-b00d-7ab2177b94bc)](https://codebeat.co/projects/github-com-csusters-csust-got-master)
 
-![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/master?label=master%20test)
-![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/CSUSTers/csust-got/Test/dev?label=dev%20test)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/CSUSTers/csust-got/test.yml?branch=master&label=Test%20%7C%20master)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/CSUSTers/csust-got/test.yml?branch=dev&label=Test%20%7C%20dev)
 
 ![GitHub language count](https://img.shields.io/github/languages/count/csusters/csust-got)
 ![GitHub](https://img.shields.io/github/license/csusters/csust-got)
