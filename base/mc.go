@@ -2,6 +2,7 @@ package base
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"csust-got/config"
@@ -44,10 +45,10 @@ func MC(m *Message) {
 	t := strings.TrimLeft(cmd.Arg(0), "-")
 	switch t {
 	case "sticker", "s":
-		data, err = prom.QueryStickerCount(m.Chat.Title)
+		data, err = prom.QueryStickerCount(strconv.FormatInt(m.Chat.ID, 10))
 		msgType = "sticker"
 	default:
-		data, err = prom.QueryMessageCount(m.Chat.Title)
+		data, err = prom.QueryMessageCount(strconv.FormatInt(m.Chat.ID, 10))
 		msgType = "message"
 	}
 

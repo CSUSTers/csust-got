@@ -2,6 +2,8 @@ package prom
 
 import (
 	"net/http"
+	"strconv"
+
 	// _ "net/http/pprof" // pprof
 	"os"
 
@@ -65,6 +67,7 @@ func DialContext(ctx Context) {
 	}
 	labels := prometheus.Labels{"host": host}
 
+	labels["chat_id"] = strconv.FormatInt(ctx.Chat().ID, 10)
 	labels["chat_name"] = ctx.Chat().Title
 
 	user := ctx.Sender()

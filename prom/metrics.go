@@ -2,7 +2,7 @@ package prom
 
 import "github.com/prometheus/client_golang/prometheus"
 
-var baseLabels = []string{"host", "chat_name", "username"}
+var baseLabels = []string{"host", "chat_id", "chat_name", "username"}
 
 // Record how many times a command has been called.
 var commandTimes = prometheus.NewCounterVec(
