@@ -94,7 +94,7 @@ func excuteSearch(ctx Context) string {
 	// -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(ctx.Chat().ID, 10)[4:] + "/"
 	for item := range respMap {
-		rplMsg += "内容: “ `" + respMap[item]["text"] + "` ” message id: [" + respMap[item]["id"] + "](" + chatUrl + "/" + respMap[item]["id"] + ") \n\n"
+		rplMsg += "内容: “ `" + respMap[item]["text"] + "` ” message id: [" + respMap[item]["id"] + "](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}
 	// TODO: format rplMsg
 	return rplMsg
