@@ -139,6 +139,9 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
 	bot.Handle("/qiuchat", chat.Cust, whiteMiddleware)
+
+	// meilisearch handler
+	bot.Handle("/search", meili.SearchHandle)
 }
 
 func registerRestrictHandler(bot *Bot) {
