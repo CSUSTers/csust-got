@@ -48,6 +48,16 @@ func ExtractFields(hits []interface{}) ([]map[string]string, error) {
 
 // SearchHandle handles search command
 func SearchHandle(ctx Context) error {
+	if config.BotConfig.MeiliConfig.Enabled {
+		rplMsg := excuteSearch(ctx)
+		err := ctx.Reply(rplMsg, ModeMarkdownV2)
+		return err
+	}
+	err := ctx.Reply("MeiliSearch is not enabled")
+	return err
+}
+
+func excuteSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
 	query := searchQuery{}
 	if command.Argc() > 0 {
@@ -63,29 +73,27 @@ func SearchHandle(ctx Context) error {
 	result, err := SearchMeili(query)
 	if err != nil {
 		log.Error("[MeiliSearch]: search failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-		return err
+		return "Search failed"
 	}
 	resp, ok := result.(*meilisearch.SearchResponse)
 	if !ok {
 		log.Error("[MeiliSearch]: Parse search response failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-		return err
+		return "Parse search response failed"
 	}
 	if len(resp.Hits) == 0 {
-		err = ctx.Reply("No result found")
 		log.Error("[MeiliSearch]: No result found", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-		return err
+		return "No result found"
 	}
 	log.Debug("[MeiliSearch]: Search success", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Any("result", resp.Hits))
 	respMap, err := ExtractFields(resp.Hits)
 	if err != nil {
 		log.Error("[MeiliSearch]: Extract fields failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+		return "Extract fields failed"
 	}
 	var rplMsg string
 	for item := range respMap {
 		rplMsg += "内容: “ `" + respMap[item]["text"] + "` ” message id: `" + respMap[item]["id"] + "` \n\n"
 	}
 	// TODO: format rplMsg
-
-	err = ctx.Reply(rplMsg, ModeMarkdownV2)
-	return err
+	return rplMsg
 }
