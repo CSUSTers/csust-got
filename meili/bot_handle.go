@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 	"strconv"
+	"strings"
 )
 
 type resultMsg struct {
@@ -18,6 +19,17 @@ type resultMsg struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
+}
+
+// EscapeTelegramReservedChars escape telegram reserved chars
+func EscapeTelegramReservedChars(s string) string {
+	reservedChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+
+	for _, char := range reservedChars {
+		s = strings.ReplaceAll(s, char, "\\"+char)
+	}
+
+	return s
 }
 
 // ExtractFields extract fields from search result
@@ -94,7 +106,10 @@ func excuteSearch(ctx Context) string {
 	// -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(ctx.Chat().ID, 10)[4:] + "/"
 	for item := range respMap {
-		rplMsg += "内容: “ `" + respMap[item]["text"] + "` ” message id: [" + respMap[item]["id"] + "](" + chatUrl + respMap[item]["id"] + ") \n\n"
+		rplMsg += "内容: “ `" +
+			EscapeTelegramReservedChars(respMap[item]["text"]) +
+			"` ” message id: [" + respMap[item]["id"] +
+			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}
 	// TODO: format rplMsg
 	return rplMsg
