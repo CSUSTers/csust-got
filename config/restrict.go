@@ -1,15 +1,8 @@
 package config
 
-import "github.com/spf13/viper"
-
 type restrictConfig struct {
-	KillSeconds          int
-	FakeBanMaxAddSeconds int
-}
-
-func (c *restrictConfig) readConfig() {
-	c.KillSeconds = viper.GetInt("restrict.kill_duration")
-	c.FakeBanMaxAddSeconds = viper.GetInt("restrict.fake_ban_max_add")
+	KillSeconds          int `koanf:"kill_duration"`
+	FakeBanMaxAddSeconds int `koanf:"fake_ban_max_add"`
 }
 
 func (c *restrictConfig) checkConfig() {
@@ -22,19 +15,11 @@ func (c *restrictConfig) checkConfig() {
 }
 
 type rateLimitConfig struct {
-	MaxToken    int
-	Limit       float64
-	Cost        int
-	StickerCost int
-	CommandCost int
-}
-
-func (c *rateLimitConfig) readConfig() {
-	c.MaxToken = viper.GetInt("rate_limit.max_token")
-	c.Limit = viper.GetFloat64("rate_limit.limit")
-	c.Cost = viper.GetInt("rate_limit.cost")
-	c.StickerCost = viper.GetInt("rate_limit.cost_sticker")
-	c.CommandCost = viper.GetInt("rate_limit.cost_command")
+	MaxToken    int     `koanf:"max_token"`
+	Limit       float64 `koanf:"limit"`
+	Cost        int     `koanf:"cost"`
+	StickerCost int     `koanf:"cost_sticker"`
+	CommandCost int     `koanf:"cost_command"`
 }
 
 func (c *rateLimitConfig) checkConfig() {

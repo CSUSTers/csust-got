@@ -1,22 +1,14 @@
 package config
 
 import (
-	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
 type meiliConfig struct {
-	Enabled     bool
-	HostAddr    string
-	ApiKey      string
-	IndexPrefix string
-}
-
-func (c *meiliConfig) readConfig() {
-	c.Enabled = viper.GetBool("meili.enabled")
-	c.HostAddr = viper.GetString("meili.address")
-	c.IndexPrefix = viper.GetString("meili.index_prefix")
-	c.ApiKey = viper.GetString("meili.api_key")
+	Enabled     bool   `koanf:"enabled"`
+	HostAddr    string `koanf:"address"`
+	ApiKey      string `koanf:"api_key"`
+	IndexPrefix string `koanf:"index_prefix"`
 }
 
 func (c *meiliConfig) checkConfig() {

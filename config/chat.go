@@ -1,29 +1,15 @@
 package config
 
-import "github.com/spf13/viper"
-
 type chatConfig struct {
-	Key           string
-	MaxTokens     int
-	Temperature   float32
-	PromptLimit   int
-	SystemPrompt  string
-	KeepContext   int
-	Model         string
-	RetryNums     int
-	RetryInterval int
-}
-
-func (c *chatConfig) readConfig() {
-	c.Key = viper.GetString("chatgpt.key")
-	c.MaxTokens = viper.GetInt("chatgpt.max_tokens")
-	c.Temperature = float32(viper.GetFloat64("chatgpt.temperature"))
-	c.PromptLimit = viper.GetInt("chatgpt.prompt_limit")
-	c.SystemPrompt = viper.GetString("chatgpt.system_prompt")
-	c.KeepContext = viper.GetInt("chatgpt.keep_context")
-	c.Model = viper.GetString("chatgpt.model")
-	c.RetryNums = viper.GetInt("chatgpt.retry_nums")
-	c.RetryInterval = viper.GetInt("chatgpt.retry_interval")
+	Key           string  `koanf:"key"`
+	MaxTokens     int     `koanf:"max_tokens"`
+	Temperature   float32 `koanf:"temperature"`
+	PromptLimit   int     `koanf:"prompt_limit"`
+	SystemPrompt  string  `koanf:"system_prompt"`
+	KeepContext   int     `koanf:"keep_context"`
+	Model         string  `koanf:"model"`
+	RetryNums     int     `koanf:"retry_nums"`
+	RetryInterval int     `koanf:"retry_interval"`
 }
 
 func (c *chatConfig) checkConfig() {

@@ -87,9 +87,9 @@ func LoadWhiteList() {
 	config.BotConfig.WhiteListConfig.Chats = chats
 }
 
-// LoadBlockList load black list.
+// LoadBlockList load block list.
 func LoadBlockList() {
-	chats := util.StringsToInts(loadSpecialList("black_list"))
+	chats := util.StringsToInts(loadSpecialList("block_list"))
 	log.Info("Block List has load.", zap.Int("length", len(chats)))
 	config.BotConfig.BlockListConfig.Chats = chats
 }
@@ -575,7 +575,7 @@ func GetSDLastPrompt(userID int64) (string, error) {
 			log.Error("get stable diffusion last prompt from redis failed", zap.Int64("user", userID), zap.Error(err))
 			return "", err
 		}
-		return "", err
+		return "", nil
 	}
 	return lastPrompt, nil
 }

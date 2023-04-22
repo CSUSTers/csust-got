@@ -1,16 +1,9 @@
 package config
 
-import "github.com/spf13/viper"
-
 type specialListConfig struct {
-	Name    string
-	Enabled bool
-	Chats   []int64
-}
-
-func (c *specialListConfig) readConfig() {
-	c.Chats = make([]int64, 0)
-	c.Enabled = viper.GetBool(c.Name + ".enabled")
+	Name    string  `koanf:"-"`
+	Enabled bool    `koanf:"enabled"`
+	Chats   []int64 `koanf:"-"`
 }
 
 func (c *specialListConfig) checkConfig() {

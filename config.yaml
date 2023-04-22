@@ -1,14 +1,13 @@
 # global config
 debug: false
-worker: 4               # number of goroutine to recv update [int]
 
 # bot config
 token: ""
 proxy: "" # [http:// | socks5://] host:port
 listen: ":7777"
-skip_duration: 0 # skip expired message, duration in seconds, set to 0 to disable [int]
+skip_duration: 30 # skip expired message, duration in seconds, set to 0 to disable [int]
 
-black_list:
+block_list:
   enabled: true
 white_list:
   enabled: true
