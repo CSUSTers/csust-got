@@ -90,7 +90,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware)
+		messagesCollectionMiddleware, contentFilterMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -316,6 +316,23 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
+		}
+		return next(ctx)
+	}
+}
+
+// contentFilterMiddleware 过滤消息中的内容
+func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		text := ctx.Message().Text
+		caption := ctx.Message().Caption
+		if text == "" && caption != "" {
+			text = caption
+		}
+		err := base.UrlFilter(ctx, text)
+		if err != nil {
+			log.Error("url filter error", zap.Error(err))
+			return next(ctx)
 		}
 		return next(ctx)
 	}
