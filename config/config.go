@@ -16,6 +16,7 @@ var (
 	noTokenMsg      = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
 	noRedisMsg      = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 	noGenShinApiMsg = "genShinApi address is not set! Please set config file config.yaml!"
+	noMeiliMsg      = "meili configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -35,18 +36,23 @@ func InitConfig(configFile, envPrefix string) {
 // NewBotConfig - return new bot config with all zero value.
 // In general, you don't need to NewBotConfig, global BotConfig should be used.
 func NewBotConfig() *Config {
-	config := new(Config)
-	config.RateLimitConfig = new(rateLimitConfig)
-	config.RedisConfig = new(redisConfig)
-	config.RestrictConfig = new(restrictConfig)
-	config.MessageConfig = new(messageConfig)
-	config.WhiteListConfig = new(specialListConfig)
-	config.BlockListConfig = new(specialListConfig)
-	config.PromConfig = new(promConfig)
+	config := &Config{
+		RateLimitConfig: new(rateLimitConfig),
+		RedisConfig:     new(redisConfig),
+		RestrictConfig:  new(restrictConfig),
+		MessageConfig:   new(messageConfig),
+		WhiteListConfig: new(specialListConfig),
+		BlockListConfig: new(specialListConfig),
+		PromConfig:      new(promConfig),
+		GenShinConfig:   new(genShinConfig),
+		ChatConfig:      new(chatConfig),
+		MeiliConfig:     new(meiliConfig),
+		McConfig:        new(mcConfig),
+	}
+
 	config.WhiteListConfig.SetName("white_list")
 	config.BlockListConfig.SetName("black_list")
-	config.GenShinConfig = new(genShinConfig)
-	config.ChatConfig = new(chatConfig)
+
 	return config
 }
 
@@ -69,6 +75,8 @@ type Config struct {
 	PromConfig      *promConfig
 	GenShinConfig   *genShinConfig
 	ChatConfig      *chatConfig
+	MeiliConfig     *meiliConfig
+	McConfig        *mcConfig
 }
 
 // GetBot returns Bot.
@@ -110,6 +118,8 @@ func readConfig() {
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.PromConfig.readConfig()
 	BotConfig.ChatConfig.readConfig()
+	BotConfig.MeiliConfig.readConfig()
+	BotConfig.McConfig.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()
@@ -136,4 +146,6 @@ func checkConfig() {
 	BotConfig.PromConfig.checkConfig()
 	BotConfig.GenShinConfig.checkConfig()
 	BotConfig.ChatConfig.checkConfig()
+	BotConfig.MeiliConfig.checkConfig()
+	BotConfig.McConfig.checkConfig()
 }

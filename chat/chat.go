@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -141,52 +143,59 @@ func chatService() {
 	}
 }
 
-func chatWithoutStream(ctx *chatContext) {
-	start := time.Now()
-
-	resp, err := client.CreateChatCompletion(context.Background(), *ctx.req)
-	if err != nil {
-		log.Error("[ChatGPT] Can't create completion", zap.Error(err))
-		return
+func extractStatusCode(err error) int {
+	// 从错误消息中提取状态码
+	re := regexp.MustCompile(`status code: (\d+)`)
+	matches := re.FindStringSubmatch(err.Error())
+	if len(matches) > 1 {
+		statusCode, err := strconv.Atoi(matches[1])
+		if err == nil {
+			return statusCode
+		}
 	}
+	return 0
+}
 
-	content := resp.Choices[0].Message.Content
-
-	if strings.TrimSpace(content) == "" {
-		content += "\n...嗦不粗话"
+func handleStreamError(ctx *chatContext, err error) bool {
+	statusCode := extractStatusCode(err)
+	if statusCode == 429 { // 错误代码为429
+		log.Debug("[ChatGPT] Rate limit exceeded, retrying...", zap.Error(err))
+		return true // 重试
 	}
-
-	if config.BotConfig.DebugMode {
-		content += fmt.Sprintf("\n\nusage: %d + %d = %d\n", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
-		content += fmt.Sprintf("time cost: %v\n", time.Since(start))
-	}
-	replyMsg, err := util.EditMessageWithError(ctx.msg, content)
+	_, err = util.EditMessageWithError(ctx.msg,
+		"An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
 	if err != nil {
 		log.Error("[ChatGPT] Can't edit message", zap.Error(err))
-		return
 	}
-
-	err = orm.SetChatContext(ctx.Context.Chat().ID, replyMsg.ID, ctx.req.Messages)
-	if err != nil {
-		log.Error("[ChatGPT] Can't set chat context", zap.Error(err))
-	}
+	return false // 不重试
 
 }
 
 func chatWithStream(ctx *chatContext) {
 	start := time.Now()
 
-	var replyMsg *Message
+	retryNums := config.BotConfig.ChatConfig.RetryNums
+	retryInterval := config.BotConfig.ChatConfig.RetryInterval
 
-	stream, err := client.CreateChatCompletionStream(context.Background(), *ctx.req)
-	if err != nil {
-		_, err = util.EditMessageWithError(ctx.msg,
-			"An error occurred. If this issue persists please contact us through our help center at help.openai.com.")
-		if err != nil {
-			log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+	var replyMsg *Message
+	var stream *openai.ChatCompletionStream
+	var err error
+
+	// 重试5次，每次间隔1s
+	for i := 0; i < retryNums; i++ {
+		log.Debug("[ChatGPT] retry", zap.Int("retry", i), zap.String("content", ctx.req.Messages[len(ctx.req.Messages)-1].Content))
+		stream, err = client.CreateChatCompletionStream(context.Background(), *ctx.req)
+		if err == nil {
+			log.Debug("[ChatGPT] Create stream successfully", zap.Duration("duration", time.Since(start)))
+			break // 如果成功创建stream，跳出循环
+		}
+		if handleStreamError(ctx, err) {
+			time.Sleep(time.Duration(retryInterval) * time.Second) // retryInterval 秒后重试
+			continue
 		}
 		return
 	}
+
 	defer stream.Close()
 
 	content := ""
@@ -259,5 +268,52 @@ out:
 		if err != nil {
 			log.Error("[ChatGPT] Can't set chat context", zap.Error(err))
 		}
+	}
+}
+func chatWithoutStream(ctx *chatContext) {
+	start := time.Now()
+
+	retryNums := config.BotConfig.ChatConfig.RetryNums
+	retryInterval := config.BotConfig.ChatConfig.RetryInterval
+
+	var resp openai.ChatCompletionResponse
+	var err error
+
+	for i := 0; i < retryNums; i++ {
+		resp, err = client.CreateChatCompletion(context.Background(), *ctx.req)
+		if err == nil {
+			break // 如果成功创建stream，跳出循环
+		}
+		if handleStreamError(ctx, err) {
+			time.Sleep(time.Duration(retryInterval) * time.Second) // retryInterval 秒后重试
+			continue
+		}
+		return
+	}
+
+	content := resp.Choices[0].Message.Content
+
+	if strings.TrimSpace(content) == "" {
+		content += "\n...嗦不粗话"
+	}
+
+	if config.BotConfig.DebugMode {
+		content += fmt.Sprintf("\n\nusage: %d + %d = %d\nCredits spent (US$) : \n    %.2f (gpt-4) ; \n    %.3f (gpt-3.5)\n",
+			resp.Usage.PromptTokens,
+			resp.Usage.CompletionTokens,
+			resp.Usage.TotalTokens,
+			(float32(resp.Usage.PromptTokens)*0.03+float32(resp.Usage.CompletionTokens)*0.06)/1000,
+			float32(resp.Usage.TotalTokens)*0.002/1000)
+		content += fmt.Sprintf("time cost: %v\n", time.Since(start))
+	}
+	replyMsg, err := util.EditMessageWithError(ctx.msg, content)
+	if err != nil {
+		log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+		return
+	}
+
+	err = orm.SetChatContext(ctx.Context.Chat().ID, replyMsg.ID, ctx.req.Messages)
+	if err != nil {
+		log.Error("[ChatGPT] Can't set chat context", zap.Error(err))
 	}
 }

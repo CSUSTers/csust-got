@@ -33,14 +33,14 @@ var (
 var httpClient *http.Client
 
 type mixRoundTripper struct {
-	TranditionalRoundTripper http.RoundTripper
-	H3RoundTripper           http.RoundTripper
+	TraditionalRoundTripper http.RoundTripper
+	H3RoundTripper          http.RoundTripper
 }
 
 func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTripper {
 	return &mixRoundTripper{
-		TranditionalRoundTripper: t,
-		H3RoundTripper:           h3,
+		TraditionalRoundTripper: t,
+		H3RoundTripper:          h3,
 	}
 }
 
@@ -53,7 +53,7 @@ func (r *mixRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		log.Debug("h3 failed", zap.Error(err))
 	}
-	return r.TranditionalRoundTripper.RoundTrip(req)
+	return r.TraditionalRoundTripper.RoundTrip(req)
 }
 
 func init() {
@@ -120,7 +120,11 @@ func Handler(ctx Context) error {
 		Request:    *req,
 	}:
 		busyUser[userID]++
-		return ctx.Reply("在画了在画了")
+		msg := "在画了在画了"
+		if req.HiResEnabled {
+			msg += "，高清修复已开启，可能会比较慢，耐心等待一下~"
+		}
+		return ctx.Reply(msg)
 	default:
 		return ctx.Reply("忙不过来了")
 	}
@@ -264,6 +268,12 @@ type StableDiffusionReq struct {
 	Height         int    `json:"height"`
 	BatchSize      int    `json:"batch_size"`
 	SamplerIndex   string `json:"sampler_index"`
+
+	HiResEnabled         bool    `json:"enable_hr"`
+	DenoisingStrength    float64 `json:"denoising_strength"`
+	HiResScale           float64 `json:"hr_scale"`
+	HiResUpscaler        string  `json:"hr_upscaler"`
+	HiResSecondPassSteps int     `json:"hr_second_pass_steps"`
 }
 
 /*
@@ -404,4 +414,19 @@ func joinApi(baseUrl, path string) string {
 	}
 	baseUrl = strings.TrimSuffix(baseUrl, "/")
 	return baseUrl + path
+}
+
+// LastPromptHandler is the handler of last prompt.
+func LastPromptHandler(ctx Context) error {
+	prompt, err := orm.GetSDLastPrompt(ctx.Message().Sender.ID)
+	if err != nil {
+		log.Error("get last prompt failed", zap.Error(err))
+		return ctx.Reply("Maybe I forgot what you said last time.")
+	}
+
+	if prompt == "" {
+		return ctx.Reply("You haven't used stable diffusion yet.")
+	}
+
+	return ctx.Reply("Your last prompt is:\n`"+prompt+"`", ModeMarkdownV2)
 }

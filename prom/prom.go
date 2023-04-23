@@ -2,6 +2,8 @@ package prom
 
 import (
 	"net/http"
+	"strconv"
+
 	// _ "net/http/pprof" // pprof
 	"os"
 
@@ -27,6 +29,7 @@ func InitPrometheus() {
 	prometheus.MustRegister(chatMemberCount)
 	prometheus.MustRegister(newMemberCount)
 	prometheus.MustRegister(logCount)
+	prometheus.MustRegister(wordCount)
 
 	cfg := config.BotConfig
 	if cfg.PromConfig.Enabled {
@@ -64,6 +67,7 @@ func DialContext(ctx Context) {
 	}
 	labels := prometheus.Labels{"host": host}
 
+	labels["chat_id"] = strconv.FormatInt(ctx.Chat().ID, 10)
 	labels["chat_name"] = ctx.Chat().Title
 
 	user := ctx.Sender()
@@ -127,5 +131,14 @@ func Log(level string) {
 	logCount.With(prometheus.Labels{
 		"host":  host,
 		"level": level,
+	}).Inc()
+}
+
+// WordCount summarize the frequency of words.
+func WordCount(word string, chatName string) {
+	wordCount.With(prometheus.Labels{
+		"host":      host,
+		"chat_name": chatName,
+		"word":      word,
 	}).Inc()
 }

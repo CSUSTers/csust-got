@@ -2,7 +2,7 @@ package prom
 
 import "github.com/prometheus/client_golang/prometheus"
 
-var baseLabels = []string{"host", "chat_name", "username"}
+var baseLabels = []string{"host", "chat_id", "chat_name", "username"}
 
 // Record how many times a command has been called.
 var commandTimes = prometheus.NewCounterVec(
@@ -56,4 +56,13 @@ var logCount = prometheus.NewCounterVec(
 		Help: "how many logs",
 	},
 	[]string{"host", "level"},
+)
+
+// wordCount how many times a word be sent
+var wordCount = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "bot_word_count",
+		Help: "how many words",
+	},
+	[]string{"host", "chat_name", "word"},
 )
