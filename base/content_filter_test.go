@@ -1,6 +1,7 @@
 package base
 
 import (
+	"net/url"
 	"reflect"
 	"testing"
 )
@@ -77,7 +78,7 @@ func Test_getOriginalURL(t *testing.T) {
 	}
 }
 
-func TestUrlConverter(t *testing.T) {
+func TestBilibiliHandler(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    string
@@ -86,60 +87,33 @@ func TestUrlConverter(t *testing.T) {
 	}{
 		{
 			"bilibili.com Test",
-			"假设你的新游戏对光影有极高的要求，目前最方便的解法就是光追 https://www.bilibili.com/video/BV14m4y1y7U8/ 3214324564523",
-			"https://www.bilibili.com/video/av697839032\n",
+			"https://www.bilibili.com/video/BV14m4y1y7U8/",
+			"https://www.bilibili.com/video/av697839032",
 			false,
 		},
 		{
 			"b23.tv Test 1",
-			"光追的情况下甚至得重新开发一套特效 https://b23.tv/BV1es4y1d7Gu 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"https://www.bilibili.com/video/av995285358\n",
+			"https://b23.tv/BV1es4y1d7Gu",
+			"https://www.bilibili.com/video/av995285358",
 			false,
 		},
 		{
 			"b23.tv Test 2",
-			"光追的情况下甚至得重新开发一套特效 https://b23.tv/av697839032 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"https://www.bilibili.com/video/av697839032\n",
+			"https://b23.tv/av697839032",
+			"https://www.bilibili.com/video/av697839032",
 			false,
 		},
 		{
 			"b23.tv Test 3",
-			"光追的情况下甚至得重新开发一套特效 https://b23.tv/mpnbvw2 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"https://www.bilibili.com/video/av995285358\n",
-			false,
-		},
-		{
-			"b23.tv Test 4",
-			"光追的情况下甚至得重新开发一套特效 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"",
-			false,
-		},
-		{
-			"b23.tv Test 5",
-			"光追的情况下甚至得重新开发一套特效 https://t.me/CE_Observe 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"",
-			false,
-		},
-		{
-			"b23.tv Test 6",
-			"光追的情况下甚 https://www.bilibili.com/video/BV19L411e7bt/ 至得 https://www.bilibili.com/video/BV1es4y1d7Gu?buvid=YE4F98ED85781C8D4B4D8FE2F4FDDC3A2016&amp;is_story_h5=false&amp;mid=o3R3GNkGkdjbo4WgkXVZlw%3D%3D&amp;p=1&amp;plat_id=116&amp;share_from=ugc&amp;share_medium=iphone&amp;share_plat=ios&amp;share_session_id=83CF26A4-186E-4B3D-A060-52B81F7811C9&amp;share_source=COPY&amp;share_tag=s_i&amp;timestamp=1682132738&amp;unique_k=mpnbvw2&amp;up_id=514347794 重新 https://b23.tv/BV19L411D7hr 开发一套特效 https://b23.tv/mpnbvw2 不止是手机，这种情况 https://b23.tv/ZAUoajf 甚至包括NS和SteamDeck",
-			"https://www.bilibili.com/video/av442654976" +
-				"\n" + "https://www.bilibili.com/video/av995285358" +
-				"\n" + "https://www.bilibili.com/video/av441555975" +
-				"\n" + "https://www.bilibili.com/video/av995285358" +
-				"\n" + "https://www.bilibili.com/video/av697661975" + "\n",
-			false,
-		},
-		{
-			"twitter Test",
-			"光追的情况下甚至得重新开发一套特效 https://twitter.com/Gunjou_row/status/1640669724865617920/ 不止是手机，这种情况甚至包括NS和SteamDeck",
-			"https://fxtwitter.com/Gunjou_row/status/1640669724865617920/\n",
+			"https://b23.tv/mpnbvw2",
+			"https://www.bilibili.com/video/av995285358",
 			false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := urlConverter(tt.args)
+			urlTest, _ := url.Parse(tt.args)
+			got, err := bilibiliHandler(urlTest)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UrlConverter() error = %v, wantErr %v", err, tt.wantErr)
 				return

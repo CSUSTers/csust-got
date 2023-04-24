@@ -142,6 +142,8 @@ func registerBaseHandler(bot *Bot) {
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
+
+	bot.Handle("/slink", base.ShortUrlHandle)
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -329,11 +331,8 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		if text == "" && caption != "" {
 			text = caption
 		}
-		err := base.UrlFilter(ctx, text)
-		if err != nil {
-			log.Error("url filter error", zap.Error(err))
-			return next(ctx)
-		}
+		go base.UrlFilter(ctx, text)
+
 		return next(ctx)
 	}
 }

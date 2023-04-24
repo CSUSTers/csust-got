@@ -69,3 +69,21 @@ meili:
 
 mc:
   max_count: 10
+
+github:
+  enabled: false
+  token: ""
+  repo: "csust-got"
+  owner: ""
+  branch: "master"
+  path: "config.yaml"
+
+content_filter:
+  url_filter:
+    enabled: true
+    bv2av:
+      enable_user_list:
+        - 734058204
+    tw2fx:
+      enable_user_list:
+        - 734058204

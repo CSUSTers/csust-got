@@ -1,10 +1,12 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/log"
 	"errors"
 	bg "github.com/iyear/biligo"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 	"gopkg.in/telebot.v3"
 	"io"
 	"mvdan.cc/xurls/v2"
@@ -35,7 +37,7 @@ func findUrls(text string) ([]string, error) {
 }
 
 // handleSwitch forwarding url to corresponding handler
-func handleSwitch(urlStr string) (string, error) {
+func handleSwitch(urlStr string, uid string) (string, error) {
 	parsedUrl, err := url.Parse(urlStr)
 	if err != nil {
 		return "", err
@@ -43,9 +45,18 @@ func handleSwitch(urlStr string) (string, error) {
 	switch parsedUrl.Host {
 	// bv转av，去除跟踪链接
 	case "www.bilibili.com", "bilibili.com", "b23.tv":
-		return bilibiliHandler(parsedUrl)
+		// 如果uid不在启用列表中，不做处理
+		enabledList := config.BotConfig.ContentFilterConfig.UrlFilterConfig.Bv2av.EnabledUserList
+		log.Debug("bv enabled list", zap.Strings("list", enabledList))
+		if slices.Contains(enabledList, uid) {
+			return bilibiliHandler(parsedUrl)
+		}
 	case "twitter.com":
-		return twitterHandler(parsedUrl)
+		enabledList := config.BotConfig.ContentFilterConfig.UrlFilterConfig.Tw2fx.EnabledUserList
+		log.Debug("tw enabled list", zap.Strings("list", enabledList))
+		if slices.Contains(enabledList, uid) {
+			return twitterHandler(parsedUrl)
+		}
 	}
 
 	return "", nil
@@ -108,7 +119,7 @@ func getOriginalURL(shortURL string) (string, error) {
 	return originalURL, nil
 }
 
-func urlConverter(text string) (string, error) {
+func urlConverter(text string, uid string) (string, error) {
 	urls, err := findUrls(text)
 	if err != nil {
 		return "", err
@@ -118,7 +129,7 @@ func urlConverter(text string) (string, error) {
 	}
 	text = ""
 	for _, oneUrl := range urls {
-		urlStr, err := handleSwitch(oneUrl)
+		urlStr, err := handleSwitch(oneUrl, uid)
 		if err != nil {
 			return "", err
 		}
@@ -130,8 +141,11 @@ func urlConverter(text string) (string, error) {
 }
 
 // UrlFilter get all urls in text to new urls
-func UrlFilter(ctx telebot.Context, text string) error {
-	msgSendBack, err := urlConverter(text)
+func UrlFilter(ctx telebot.Context, text string) {
+	if !config.BotConfig.ContentFilterConfig.UrlFilterConfig.Enabled {
+		return
+	}
+	msgSendBack, err := urlConverter(text, strconv.FormatInt(ctx.Message().Sender.ID, 10))
 	if err != nil {
 		log.Error("[Content filter] UrlConverter error: %v", zap.Error(err))
 	}
@@ -141,5 +155,4 @@ func UrlFilter(ctx telebot.Context, text string) error {
 			log.Error("[Content filter] Reply error: %v", zap.Error(err))
 		}
 	}
-	return err
 }
