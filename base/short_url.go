@@ -5,27 +5,14 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
+	"csust-got/util"
 	"fmt"
 	gh "github.com/google/go-github/v35/github"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	. "gopkg.in/telebot.v3"
-	"math/rand"
 	"strings"
-	"time"
 )
-
-// 生成一个6位的随机标识符
-func generateIdentifier() string {
-	const identifierChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var identifier strings.Builder
-	source := rand.NewSource(time.Now().UnixNano())
-	randomGen := rand.New(source)
-	for i := 0; i < 6; i++ {
-		identifier.WriteByte(identifierChars[randomGen.Intn(len(identifierChars))])
-	}
-	return identifier.String()
-}
 
 // 将URL添加到CSV文件并提交到GitHub仓库
 func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, error) {
@@ -54,16 +41,19 @@ func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, erro
 	}
 
 	// 生成一个新的标识符
-	identifier := generateIdentifier()
+	identifierGen := util.NewRandStrWithLength(6)
+	identifier := identifierGen.RandStr()
 	for identifiers[identifier] {
-		identifier = generateIdentifier()
+		identifier = identifierGen.RandStr()
 	}
 
 	// 添加新的URL到CSV文件
 	newContent := fmt.Sprintf("%s\n%s,%s", fileContent, identifier, url)
 
+	prefix := config.BotConfig.GithubConfig.ShortUrlPrefix
+
 	// 更新文件
-	message := fmt.Sprintf("Add URL: %s (short: s.csu.st/%s)", url, identifier)
+	message := fmt.Sprintf("Add URL: %s (short: %s/%s)", url, prefix, identifier)
 	sha := fileRef.GetSHA()
 	opts := &gh.RepositoryContentFileOptions{
 		Message: &message,
@@ -75,7 +65,7 @@ func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, erro
 		return "", fmt.Errorf("couldn't update file: %w", err)
 	}
 
-	return "https://s.csu.st/" + identifier + "\n", nil
+	return "https://" + prefix + "/" + identifier + "\n", nil
 }
 
 // ShortUrlHandle handles the short url command.
@@ -124,7 +114,7 @@ func ShortUrlHandle(ctx Context) error {
 		}
 		rplUrls += shortUrl
 	}
-	err = ctx.Reply(rplUrls + "\n\n 以上是您的短链接，由于GitHub Action编译页面需要一定时间，请等待1-2分钟后再访问。")
+	err = ctx.Reply(rplUrls + "\n\n 以上是您的短链接，由于 GitHub Action 编译页面需要一定时间，请等待1-2分钟后再访问。")
 	if err != nil {
 		log.Error("ShortUrlHandle: reply failed", zap.Error(err))
 	}

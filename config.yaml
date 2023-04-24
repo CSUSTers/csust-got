@@ -77,6 +77,7 @@ github:
   owner: ""
   branch: "master"
   path: "config.yaml"
+  short_url_prefix: "s.csu.st"
 
 content_filter:
   url_filter:

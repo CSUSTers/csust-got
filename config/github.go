@@ -6,12 +6,13 @@ import (
 )
 
 type githubConfig struct {
-	Enabled bool
-	Token   string
-	Repo    string
-	Owner   string
-	Branch  string
-	Path    string
+	Enabled        bool
+	Token          string
+	Repo           string
+	Owner          string
+	Branch         string
+	Path           string
+	ShortUrlPrefix string
 }
 
 func (c *githubConfig) readConfig() {
@@ -21,6 +22,7 @@ func (c *githubConfig) readConfig() {
 	c.Owner = viper.GetString("github.owner")
 	c.Branch = viper.GetString("github.branch")
 	c.Path = viper.GetString("github.path")
+	c.ShortUrlPrefix = viper.GetString("github.short_url_prefix")
 }
 
 func (c *githubConfig) checkConfig() {
