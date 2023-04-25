@@ -90,7 +90,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware)
+		messagesCollectionMiddleware, contentFilterMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -142,6 +142,8 @@ func registerBaseHandler(bot *Bot) {
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
+
+	bot.Handle("/slink", base.ShortUrlHandle)
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -317,6 +319,20 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 		}
+		return next(ctx)
+	}
+}
+
+// contentFilterMiddleware 过滤消息中的内容
+func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		text := ctx.Message().Text
+		caption := ctx.Message().Caption
+		if text == "" && caption != "" {
+			text = caption
+		}
+		go base.UrlFilter(ctx, text)
+
 		return next(ctx)
 	}
 }
