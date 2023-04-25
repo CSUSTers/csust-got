@@ -83,8 +83,9 @@ content_filter:
   url_filter:
     enabled: true
     bv2av:
+      # telegram uids here
       enable_user_list:
-        - 734058204
+        - 123123123
     tw2fx:
       enable_user_list:
-        - 734058204
+        - 123123123
