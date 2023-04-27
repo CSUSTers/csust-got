@@ -12,6 +12,7 @@ import (
 	"golang.org/x/oauth2"
 	. "gopkg.in/telebot.v3"
 	"strings"
+	"time"
 )
 
 // 将URL添加到CSV文件并提交到GitHub仓库
@@ -65,7 +66,7 @@ func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, erro
 		return "", fmt.Errorf("couldn't update file: %w", err)
 	}
 
-	return "https://" + prefix + "/" + identifier + "\n", nil
+	return "https://" + prefix + "/" + identifier, nil
 }
 
 // ShortUrlHandle handles the short url command.
@@ -74,7 +75,7 @@ func ShortUrlHandle(ctx Context) error {
 	if !enabled {
 		err := ctx.Reply("未启用此功能，先去配置文件填写配置吧")
 		if err != nil {
-			log.Error("ShortUrlHandle: reply failed", zap.Error(err))
+			log.Error("[slink]: ShortUrlHandle: reply failed", zap.Error(err))
 			return err
 		}
 	}
@@ -86,7 +87,7 @@ func ShortUrlHandle(ctx Context) error {
 	}
 	urls, err := findUrls(args)
 	if err != nil {
-		log.Error("ShortUrlHandle: findUrls failed", zap.Error(err))
+		log.Error("[slink]: ShortUrlHandle: findUrls failed", zap.Error(err))
 		return err
 	}
 	if len(urls) == 0 {
@@ -105,18 +106,55 @@ func ShortUrlHandle(ctx Context) error {
 	tc := oauth2.NewClient(ghCtx, ts)
 
 	client := gh.NewClient(tc)
-	rplUrls := ""
+	rplUrls := make([]string, 0, len(urls))
 	for _, urlStr := range urls {
 		shortUrl, err := addURLToCSV(client, owner, repo, path, urlStr)
 		if err != nil {
-			log.Error("ShortUrlHandle: addURLToCSV failed", zap.Error(err))
+			log.Error("[slink]: ShortUrlHandle: addURLToCSV failed", zap.Error(err))
 			return err
 		}
-		rplUrls += shortUrl
+		rplUrls = append(rplUrls, shortUrl)
 	}
-	err = ctx.Reply(rplUrls + "\n\n 以上是您的短链接，由于 GitHub Action 编译页面需要一定时间，请等待1-2分钟后再访问。")
+	msg, err := util.SendReplyWithError(ctx.Chat(), strings.Join(rplUrls, " ⌛\n\n")+
+		" ⌛\n\n \n以上是您的短链接，请等待1-2分钟，待就绪指示器变绿后再访问。", ctx.Message())
 	if err != nil {
-		log.Error("ShortUrlHandle: reply failed", zap.Error(err))
+		log.Error("[slink]: ShortUrlHandle: reply failed", zap.Error(err))
 	}
+	go updateUrlStatus(msg, rplUrls)
 	return err
+}
+
+// updateUrlStatus pooling the urls status, and update the message when the url is ready.
+func updateUrlStatus(msg *Message, urls []string) {
+	startTime := time.Now()
+	log.Debug("[slink]: ", zap.Strings("urls", urls))
+	for len(urls) > 0 {
+		for _, oneUrl := range urls {
+			log.Debug("[slink]: checking …… ", zap.String("oneUrl", oneUrl))
+			if util.CheckUrl(oneUrl) {
+				text := strings.Replace(msg.Text, oneUrl+" ⌛", oneUrl+" ✅", 1)
+				log.Debug("[slink]: reply changed with success ", zap.String("text", text))
+				newMsg, err := util.EditMessageWithError(msg, text)
+				if err != nil {
+					log.Error("[slink]: updateUrlStatus: edit message failed", zap.Error(err))
+					return
+				}
+				msg = newMsg
+				urls = util.DeleteSlice(urls, oneUrl)
+				startTime = time.Now()
+			}
+			if time.Since(startTime) > 5*time.Minute {
+				text := strings.Replace(msg.Text, oneUrl+" ⌛", oneUrl+" ❌", 1)
+				log.Debug("[slink]: reply changed with falling ", zap.String("text", text))
+				newMsg, err := util.EditMessageWithError(msg, text)
+				if err != nil {
+					log.Error("[slink]: updateUrlStatus: edit message failed", zap.Error(err))
+					return
+				}
+				msg = newMsg
+				urls = util.DeleteSlice(urls, oneUrl)
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}
 }
