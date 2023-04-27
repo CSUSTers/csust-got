@@ -23,6 +23,7 @@ func Cust(ctx Context) error {
 		return nil
 	}
 
+	log.Debug("[ChatGPT] Cust", zap.String("text", ctx.Message().Text))
 	_, arg, err := entities.CommandTakeArgs(ctx.Message(), 0)
 	if err != nil {
 		log.Error("[ChatGPT] Can't take args", zap.Error(err))
