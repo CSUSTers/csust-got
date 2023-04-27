@@ -6,6 +6,7 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"encoding/json"
+	"fmt"
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v3"
 	"math/rand"
@@ -77,6 +78,10 @@ func SetGachaSession(ctx telebot.Context) error {
 		log.Error("[GaCha]: unmarshal tenant failed", zap.Error(err))
 		return ctx.Reply("Failed")
 	}
+	err = ctx.Reply("Modify success")
+	if err != nil {
+		log.Error("[GaCha]: reply failed", zap.Error(err))
+	}
 	return orm.SaveGachaSession(ctx.Chat().ID, tenant)
 }
 
@@ -88,5 +93,6 @@ func WithMsgRpl(ctx telebot.Context) error {
 		log.Error("[GaCha]: perform gacha failed", zap.Error(err))
 		return ctx.Reply("Failed")
 	}
-	return ctx.Reply(strconv.FormatInt(result, 10))
+	rplMsg := fmt.Sprintf("You got %d star", result)
+	return ctx.Reply(rplMsg)
 }

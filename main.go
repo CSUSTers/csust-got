@@ -337,7 +337,7 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 			text = caption
 		}
 		go base.UrlFilter(ctx, text)
-
+		go chat.GachaReplyHandler(ctx)
 		return next(ctx)
 	}
 }
