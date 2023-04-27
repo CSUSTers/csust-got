@@ -62,7 +62,15 @@ func ExtractFields(hits []interface{}) ([]map[string]string, error) {
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
 		rplMsg := excuteSearch(ctx)
-		err := ctx.Reply(rplMsg, ModeMarkdownV2)
+		// send pm unless err
+		_, pmErr := ctx.Bot().Send(ctx.Sender(), rplMsg, ModeMarkdownV2)
+		var err error
+		if pmErr != nil {
+			log.Info("[MeiliSearch]: PM failed, fallback to group chat")
+			err = ctx.Reply("你还没和 bot 私聊过呢，先私聊 bot 再来搜索吧")
+		} else {
+			err = ctx.Reply("你感到私聊突然多出了一条消息，快去看看吧")
+		}
 		return err
 	}
 	err := ctx.Reply("MeiliSearch is not enabled")
