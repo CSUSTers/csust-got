@@ -83,6 +83,8 @@ genvoice - <text> 生成原神语音
 provoice - <text> 使用自定义ssml生成语音
 search - <key word> 搜索历史记录
 slink - <URL> 短链接
+gacha_setting - 设置一个json格式的配置
+gacha - 抽卡，按照你的配置
 ```
 
 ## attachment

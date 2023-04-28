@@ -4,6 +4,7 @@ import (
 	"csust-got/chat"
 	"csust-got/meili"
 	"csust-got/sd"
+	"csust-got/util/gacha"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -144,6 +145,10 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/search", meili.SearchHandle)
 
 	bot.Handle("/slink", base.ShortUrlHandle)
+
+	// gacha handler
+	bot.Handle("/gacha_setting", gacha.SetGachaSession)
+	bot.Handle("/gacha", gacha.WithMsgRpl)
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -332,7 +337,7 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 			text = caption
 		}
 		go base.UrlFilter(ctx, text)
-
+		go chat.GachaReplyHandler(ctx)
 		return next(ctx)
 	}
 }

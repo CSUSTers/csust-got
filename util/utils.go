@@ -2,6 +2,7 @@ package util
 
 import (
 	"math/rand"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -207,4 +208,28 @@ func ReplaceSpace(in string) string {
 		}
 		return r
 	})
+}
+
+// CheckUrl checks if the url is valid (http 404, etc)
+func CheckUrl(url string) bool {
+	resp, err := http.Get(url)
+	if err != nil {
+		return false
+	}
+	err = resp.Body.Close()
+	if err != nil {
+		return false
+	}
+	return resp.StatusCode == http.StatusOK
+}
+
+// DeleteSlice 删除slice中的某个元素
+func DeleteSlice(a []string, subSlice string) []string {
+	ret := make([]string, 0, len(a))
+	for _, val := range a {
+		if val != subSlice {
+			ret = append(ret, val)
+		}
+	}
+	return ret
 }

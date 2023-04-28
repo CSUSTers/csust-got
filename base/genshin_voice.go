@@ -292,7 +292,7 @@ func argsMapper(args []string) (arg string, argsNew []string) {
 		vRune := []rune(v)
 		if _, ok := m[string(vRune[0:3])]; ok {
 			// 在args列表中移除这条记录
-			argsNew = deleteSlice(argsNew, v)
+			argsNew = util.DeleteSlice(argsNew, v)
 			// 替换前三个字符
 			v = m[string(vRune[0:3])] + url.QueryEscape(string(vRune[3:]))
 			arg += v + "&"
@@ -322,15 +322,4 @@ func SendVoiceV3(chat *Chat, v genShinVoiceV3) error {
 	voice := Voice{File: FromURL(v.VoiceUrl), Caption: audioCaption}
 	_, err := voice.Send(config.BotConfig.Bot, chat, nil)
 	return err
-}
-
-// deleteSlice 删除slice中的某个元素
-func deleteSlice(a []string, subSlice string) []string {
-	ret := make([]string, 0, len(a))
-	for _, val := range a {
-		if val != subSlice {
-			ret = append(ret, val)
-		}
-	}
-	return ret
 }
