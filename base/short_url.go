@@ -15,20 +15,20 @@ import (
 	"time"
 )
 
-// 将URL添加到CSV文件并提交到GitHub仓库
-func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, error) {
+// 将多个URL添加到CSV文件并提交到GitHub仓库
+func addURLsToCSV(client *gh.Client, owner, repo, path string, urls []string) ([]string, error) {
 	ctx := context.Background()
 
 	// 获取文件引用
 	fileRef, _, _, err := client.Repositories.GetContents(ctx, owner, repo, path, &gh.RepositoryContentGetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("couldn't get contents: %w", err)
+		return nil, fmt.Errorf("couldn't get contents: %w", err)
 	}
 
 	// 获取现有的内容
 	fileContent, err := fileRef.GetContent()
 	if err != nil {
-		return "", fmt.Errorf("couldn't get content: %w", err)
+		return nil, fmt.Errorf("couldn't get content: %w", err)
 	}
 	// 去掉最后一个换行符
 	fileContent = strings.TrimSuffix(fileContent, "\n")
@@ -41,20 +41,25 @@ func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, erro
 		}
 	}
 
-	// 生成一个新的标识符
+	// 生成多个新的标识符
 	identifierGen := util.NewRandStrWithLength(6)
-	identifier := identifierGen.RandStr()
-	for identifiers[identifier] {
-		identifier = identifierGen.RandStr()
+	newURLs := make([]string, 0, len(urls))
+	newLines := make([]string, 0, len(urls))
+
+	for _, url := range urls {
+		identifier := identifierGen.RandStr()
+		for identifiers[identifier] {
+			identifier = identifierGen.RandStr()
+		}
+		newURL := "https://" + config.BotConfig.GithubConfig.ShortUrlPrefix + "/" + identifier
+		newURLs = append(newURLs, newURL)
+		newLines = append(newLines, fmt.Sprintf("%s,%s", identifier, url))
 	}
 
-	// 添加新的URL到CSV文件
-	newContent := fmt.Sprintf("%s\n%s,%s", fileContent, identifier, url)
-
-	prefix := config.BotConfig.GithubConfig.ShortUrlPrefix
+	newContent := fmt.Sprintf("%s\n%s", fileContent, strings.Join(newLines, "\n"))
 
 	// 更新文件
-	message := fmt.Sprintf("Add URL: %s (short: %s/%s)", url, prefix, identifier)
+	message := fmt.Sprintf("Add URLs: %s", urls)
 	sha := fileRef.GetSHA()
 	opts := &gh.RepositoryContentFileOptions{
 		Message: &message,
@@ -63,10 +68,10 @@ func addURLToCSV(client *gh.Client, owner, repo, path, url string) (string, erro
 	}
 	_, _, err = client.Repositories.UpdateFile(ctx, owner, repo, path, opts)
 	if err != nil {
-		return "", fmt.Errorf("couldn't update file: %w", err)
+		return nil, fmt.Errorf("couldn't update file: %w", err)
 	}
 
-	return "https://" + prefix + "/" + identifier, nil
+	return newURLs, nil
 }
 
 // ShortUrlHandle handles the short url command.
@@ -106,15 +111,12 @@ func ShortUrlHandle(ctx Context) error {
 	tc := oauth2.NewClient(ghCtx, ts)
 
 	client := gh.NewClient(tc)
-	rplUrls := make([]string, 0, len(urls))
-	for _, urlStr := range urls {
-		shortUrl, err := addURLToCSV(client, owner, repo, path, urlStr)
-		if err != nil {
-			log.Error("[slink]: ShortUrlHandle: addURLToCSV failed", zap.Error(err))
-			return err
-		}
-		rplUrls = append(rplUrls, shortUrl)
+	rplUrls, err := addURLsToCSV(client, owner, repo, path, urls)
+	if err != nil {
+		log.Error("[slink]: ShortUrlHandle: addURLToCSV failed", zap.Error(err))
+		return err
 	}
+
 	msg, err := util.SendReplyWithError(ctx.Chat(), strings.Join(rplUrls, " ⌛\n\n")+
 		" ⌛\n\n \n以上是您的短链接，请等待1-2分钟，待就绪指示器变绿后再访问。", ctx.Message())
 	if err != nil {
@@ -141,7 +143,6 @@ func updateUrlStatus(msg *Message, urls []string) {
 				}
 				msg = newMsg
 				urls = util.DeleteSlice(urls, oneUrl)
-				startTime = time.Now()
 			}
 			if time.Since(startTime) > 5*time.Minute {
 				text := strings.Replace(msg.Text, oneUrl+" ⌛", oneUrl+" ❌", 1)
