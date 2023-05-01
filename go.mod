@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/google/go-github/v35 v35.3.0
-	github.com/iyear/biligo v0.1.6
+	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.24.0
 	github.com/prometheus/client_golang v1.15.0
 	github.com/prometheus/common v0.42.0
