@@ -518,7 +518,7 @@ func GetStoreName(store string) string {
 func SetTargetState(target string, avaliable bool) {
 	err := rc.Set(context.TODO(), wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
 	if err != nil {
-		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
+		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("available", avaliable), zap.Error(err))
 		return
 	}
 }

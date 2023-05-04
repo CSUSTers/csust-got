@@ -233,3 +233,13 @@ func DeleteSlice(a []string, subSlice string) []string {
 	}
 	return ret
 }
+
+// GetAllReplyMessagesText get all reply messages text.
+func GetAllReplyMessagesText(m *tb.Message) string {
+	var ret string
+	for m.ReplyTo != nil {
+		ret += m.ReplyTo.Text + "\n"
+		m = m.ReplyTo
+	}
+	return ret
+}

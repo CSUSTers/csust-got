@@ -3,7 +3,6 @@ package base
 import (
 	"context"
 	"csust-got/config"
-	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/util"
 	"fmt"
@@ -86,15 +85,11 @@ func ShortUrlHandle(ctx Context) error {
 	}
 
 	// 提取命令参数中的url
-	command := entities.FromMessage(ctx.Message())
+	args := ctx.Message().Text
 	if ctx.Message().ReplyTo != nil {
-		command = entities.FromMessage(ctx.Message().ReplyTo)
+		args += ctx.Message().ReplyTo.Text
 	}
 
-	var args string
-	if command.Argc() > 0 {
-		args = command.ArgAllInOneFrom(0)
-	}
 	urls, err := findUrls(args)
 	if err != nil {
 		log.Error("[slink]: ShortUrlHandle: findUrls failed", zap.Error(err))

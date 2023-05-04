@@ -30,9 +30,9 @@ func CustomModelChat(ctx Context) error {
 		log.Error("[ChatGPT] CustomModelChat Can't take args", zap.Error(err))
 		return ctx.Reply("嗦啥呢？")
 	}
-	if ctx.Message().ReplyTo != nil {
-		arg = ctx.Message().ReplyTo.Text + arg
-	}
+	arg += util.GetAllReplyMessagesText(ctx.Message())
+	log.Debug("[ChatGPT] CustomModelChat", zap.String("text", arg))
+
 	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
 		return ctx.Reply("TLDR")
 	}

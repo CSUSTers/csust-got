@@ -2,6 +2,7 @@ package util
 
 import (
 	"github.com/stretchr/testify/assert"
+	tb "gopkg.in/telebot.v3"
 	"testing"
 )
 
@@ -38,6 +39,41 @@ func TestCheckUrl(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equalf(t, tt.want, CheckUrl(tt.args.url), "CheckUrl(%v)", tt.args.url)
+		})
+	}
+}
+
+func TestGetAllReplyMessagesText(t *testing.T) {
+	type args struct {
+		m *tb.Message
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "normal test",
+			args: args{
+				&tb.Message{
+					ReplyTo: &tb.Message{
+						ReplyTo: &tb.Message{
+							ReplyTo: &tb.Message{
+								Text: "test4",
+							},
+							Text: "test3",
+						},
+						Text: "test2",
+					},
+					Text: "test1",
+				},
+			},
+			want: "test2\ntest3\ntest4\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, GetAllReplyMessagesText(tt.args.m), "GetAllReplyMessagesText(%v)", tt.args.m)
 		})
 	}
 }
