@@ -14,6 +14,9 @@ import (
 )
 
 // execute a gacha. Result: 3, 4, 5 stands for 3 star, 4 star, 5 star.
+// 设想以下情景: 对于一个抽卡游戏，其规则是设定一个较低的初始概率p，作为每次抽中的概率，随着抽卡次数的逐渐增加，p值会渐渐增加。
+// 另外还有一个保底次数n，其定义是抽到第n次时必然会抽中。但出于商业需求考虑，p值在抽卡次数小于2n/3时，会维持一个较低的概率，在2n/3次之后才会显著提升，直到达到n次p为必然发生。
+// 此算法的目的是控制用户抽中的次数期望在2n/3到6n/7次。请写一个golang函数，使得对于传入的初始概率p和保底次数n，返回一个长度为n的概率数组，以满足上述要求。
 func execute(tenant *config.GachaTenant) int64 {
 	tenant.FiveStar.Counter++
 	tenant.FourStar.Counter++

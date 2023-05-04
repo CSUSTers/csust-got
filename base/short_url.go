@@ -84,8 +84,13 @@ func ShortUrlHandle(ctx Context) error {
 			return err
 		}
 	}
+
 	// 提取命令参数中的url
 	command := entities.FromMessage(ctx.Message())
+	if ctx.Message().ReplyTo != nil {
+		command = entities.FromMessage(ctx.Message().ReplyTo)
+	}
+
 	var args string
 	if command.Argc() > 0 {
 		args = command.ArgAllInOneFrom(0)

@@ -17,17 +17,21 @@ type chatCustModel struct {
 	Text string `json:"text"`
 }
 
-// Cust 自定义的大语言模型
-func Cust(ctx Context) error {
+// CustomModelChat 自定义的大语言模型
+func CustomModelChat(ctx Context) error {
 	if client == nil {
 		return nil
 	}
 
-	log.Debug("[ChatGPT] Cust", zap.String("text", ctx.Message().Text))
+	log.Debug("[ChatGPT] CustomModelChat", zap.String("text", ctx.Message().Text))
+
 	_, arg, err := entities.CommandTakeArgs(ctx.Message(), 0)
 	if err != nil {
-		log.Error("[ChatGPT] Can't take args", zap.Error(err))
+		log.Error("[ChatGPT] CustomModelChat Can't take args", zap.Error(err))
 		return ctx.Reply("嗦啥呢？")
+	}
+	if ctx.Message().ReplyTo != nil {
+		arg = ctx.Message().ReplyTo.Text + arg
 	}
 	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
 		return ctx.Reply("TLDR")
@@ -37,35 +41,35 @@ func Cust(ctx Context) error {
 	if err != nil {
 		return err
 	}
-	err = generateRequestCust(arg, msg)
+	err = generateRequestCustomModelChat(arg, msg)
 	return err
 
 }
 
-func generateRequestCust(arg string, msg *Message) error {
+func generateRequestCustomModelChat(arg string, msg *Message) error {
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/Chat" + "?text=" + url.QueryEscape(arg)
 	log.Info(serverAddress)
 
 	data := chatCustModel{}
 	resp, err := http.Get(serverAddress)
 	if err != nil {
-		log.Error("连接chat api服务器失败", zap.Error(err))
+		log.Error("[ChatGPT] CustomModelChat 连接chat api服务器失败", zap.Error(err))
 		return err
 	}
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		log.Error("chat api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		log.Error("[ChatGPT] CustomModelChat chat api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
 	if err != nil {
-		log.Error("chat api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
+		log.Error("[ChatGPT] CustomModelChat chat api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
 		return err
 	}
 	_, err = util.EditMessageWithError(msg, data.Text)
 
 	if err != nil {
-		log.Error("[ChatGPT] Can't edit message", zap.Error(err))
+		log.Error("[ChatGPT] CustomModelChat Can't edit message", zap.Error(err))
 	}
 	return err
 }
