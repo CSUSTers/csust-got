@@ -6,7 +6,7 @@ require (
 	github.com/google/go-github/v35 v35.3.0
 	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.24.0
-	github.com/prometheus/client_golang v1.15.0
+	github.com/prometheus/client_golang v1.15.1
 	github.com/prometheus/common v0.42.0
 	github.com/quic-go/quic-go v0.34.0
 	github.com/redis/go-redis/v9 v9.0.3
