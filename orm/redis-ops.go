@@ -49,3 +49,21 @@ func GetTTL(key string) (time.Duration, error) {
 	}
 	return sec, nil
 }
+
+// IncreaseSortedSetByOne increases an item in given sorted set.
+func IncreaseSortedSetByOne(key string, member string) error {
+	// create key if not exists
+	exists, err := rc.Exists(context.Background(), key).Result()
+	if err != nil {
+		return err
+	}
+	if exists == 0 {
+		rc.ZAdd(context.Background(), key, redis.Z{
+			Score:  1,
+			Member: member,
+		})
+	} else {
+		rc.ZIncrBy(context.Background(), key, 1, member)
+	}
+	return err
+}

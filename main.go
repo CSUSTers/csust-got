@@ -5,6 +5,7 @@ import (
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/util/gacha"
+	"csust-got/word_seg"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -323,6 +324,8 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
+			// 分词并存入redis
+			go word_seg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}
