@@ -5,13 +5,17 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v3"
 	"math/rand"
 	"strconv"
 )
+
+var errEmptyTenant = errors.New("empty tenant")
 
 // execute a gacha. Result: 3, 4, 5 stands for 3 star, 4 star, 5 star.
 // 设想以下情景: 对于一个抽卡游戏，其规则是设定一个较低的初始概率p，作为每次抽中的概率，随着抽卡次数的逐渐增加，p值会渐渐增加。
@@ -64,28 +68,42 @@ func PerformGaCha(chatID int64) (int64, error) {
 	return result, nil
 }
 
-// SetGachaSession sets the gacha session for the caller chat
-func SetGachaSession(ctx telebot.Context) error {
-	m := ctx.Message()
+// setGachaSession sets the gacha session for the caller chat
+func setGachaSession(m *telebot.Message) (config.GachaTenant, error) {
 	command := entities.FromMessage(m)
-	arg := command.ArgAllInOneFrom(0)
-	if arg == "" {
-		// default value： 5star : 0.6, 90; 4star : 5.7, 10
+	arg := ""
+	if command == nil {
 		arg = "{\"FiveStar\":{\"Counter\":0,\"Probability\":0.6,\"FailBackNum\":90},\"" +
 			"FourStar\":{\"Counter\":0,\"Probability\":5.7,\"FailBackNum\":10},\"ID\":\"" +
-			strconv.FormatInt(ctx.Chat().ID, 10) + "\"}"
+			strconv.FormatInt(m.Chat.ID, 10) + "\"}"
+	} else {
+		arg = command.ArgAllInOneFrom(0)
 	}
 	var tenant config.GachaTenant
 	err := json.Unmarshal([]byte(arg), &tenant)
 	if err != nil {
-		log.Error("[GaCha]: unmarshal tenant failed", zap.Error(err))
-		return ctx.Reply("Failed")
+		return tenant, err
 	}
-	err = ctx.Reply("Modify success")
+	if tenant == (config.GachaTenant{}) {
+		return tenant, errEmptyTenant
+	}
+	return tenant, nil
+}
+
+// SetGachaHandle is the handler for gacha_setting command
+func SetGachaHandle(ctx telebot.Context) error {
+	m := ctx.Message()
+	tenant, err := setGachaSession(m)
+	if err != nil {
+		log.Error("[GaCha]: set gacha session failed", zap.Error(err))
+		err = ctx.Reply("Set Failed")
+		return err
+	}
+	_, err = util.SendReplyWithError(m.Chat, "Modify Success", m)
 	if err != nil {
 		log.Error("[GaCha]: reply failed", zap.Error(err))
 	}
-	return orm.SaveGachaSession(ctx.Chat().ID, tenant)
+	return orm.SaveGachaSession(m.Chat.ID, tenant)
 }
 
 // WithMsgRpl is the handler for gacha command

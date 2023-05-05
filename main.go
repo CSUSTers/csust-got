@@ -147,7 +147,7 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/slink", base.ShortUrlHandle)
 
 	// gacha handler
-	bot.Handle("/gacha_setting", gacha.SetGachaSession)
+	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
 }
 
