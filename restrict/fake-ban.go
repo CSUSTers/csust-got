@@ -13,7 +13,7 @@ import (
 	. "gopkg.in/telebot.v3"
 )
 
-// FakeBan fake ban some one.
+// FakeBan fake ban someone.
 func FakeBan(m *Message) {
 	cmd := entities.FromMessage(m)
 	banTime, err := time.ParseDuration(cmd.Arg(0))
@@ -23,7 +23,7 @@ func FakeBan(m *Message) {
 	ExecFakeBan(m, banTime)
 }
 
-// Kill kill some one.
+// Kill someone.
 func Kill(m *Message) {
 	seconds := config.BotConfig.RestrictConfig.KillSeconds
 	banTime := time.Duration(seconds) * time.Second
@@ -66,7 +66,7 @@ func ExecFakeBan(m *Message, d time.Duration) {
 		text = config.BotConfig.MessageConfig.RestrictBot
 		banned = m.Sender
 	} else if banned.ID == m.Sender.ID {
-		// they want to ban themself
+		// they want to ban themselves
 		text = fmt.Sprintf("那我就不客气了，我将会追杀你，直到时间过去所谓“%v”。", d)
 	}
 	// check if user 'banned' already banned

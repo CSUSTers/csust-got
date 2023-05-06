@@ -16,7 +16,7 @@ type Timer struct {
 	nextTime int64
 }
 
-// Task contains a utc microsecond time and a task function.
+// Task contains an utc microsecond time and a task function.
 type Task struct {
 	runAt int64
 	task  func()

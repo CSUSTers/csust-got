@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/google/go-github/v35 v35.3.0
+	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.24.0
 	github.com/prometheus/client_golang v1.15.1
@@ -23,6 +24,7 @@ require (
 )
 
 require (
+	github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

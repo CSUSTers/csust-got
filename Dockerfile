@@ -25,5 +25,8 @@ RUN apk add tzdata
 WORKDIR /app
 COPY --from=buildenv /go/src/app/got .
 COPY --from=buildenv /go/src/app/config.yaml .
+COPY --from=buildenv /go/src/app/dict/dictionary.txt .
+COPY --from=buildenv /go/src/app/dict/stop_words.txt .
+
 
 CMD ["./got"]

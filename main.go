@@ -5,6 +5,7 @@ import (
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/util/gacha"
+	"csust-got/word_seg"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -49,6 +50,7 @@ func main() {
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	meili.InitMeili()
+	wordSeg.InitWordSeg()
 
 	go sd.Process()
 
@@ -139,7 +141,7 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-	bot.Handle("/qiuchat", chat.Cust, whiteMiddleware)
+	bot.Handle("/qiuchat", chat.CustomModelChat, whiteMiddleware)
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
@@ -147,7 +149,7 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/slink", base.ShortUrlHandle)
 
 	// gacha handler
-	bot.Handle("/gacha_setting", gacha.SetGachaSession)
+	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
 }
 
@@ -323,6 +325,8 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
+			// 分词并存入redis
+			go wordSeg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}

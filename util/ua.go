@@ -141,7 +141,7 @@ var uaList = []string{
 
 var uaLen = len(uaList)
 
-// RandUA rand an user-agent.
+// RandUA rand a user-agent.
 func RandUA() string {
 	idx := rand.Intn(uaLen)
 	return uaList[idx]

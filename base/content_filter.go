@@ -17,8 +17,10 @@ import (
 	"strings"
 )
 
-var errNoUrlsFound = errors.New("no URLs found in the input string")
-var errRetrieveVideoInfo = errors.New("failed to retrieve video info")
+var (
+	errNoUrlsFound       = errors.New("no URLs found in the input string")
+	errRetrieveVideoInfo = errors.New("failed to retrieve video info")
+)
 
 // findUrls returns all urls from input string
 func findUrls(text string) ([]string, error) {

@@ -237,7 +237,7 @@ func GetHitokoto(from bool) string {
 	return res
 }
 
-// WatchStore watch apple store.
+// WatchStore watch Apple Store.
 func WatchStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -267,7 +267,7 @@ func WatchStore(userID int64, stores []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
-// RemoveStore not watch apple store.
+// RemoveStore not watch Apple Store.
 func RemoveStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -406,7 +406,7 @@ func AppleTargetRemove(targets ...string) bool {
 	return true
 }
 
-// GetWatchingStores get watching apple stores of user.
+// GetWatchingStores get watching Apple Store of user.
 func GetWatchingStores(userID int64) ([]string, bool) {
 	stores, err := rc.SMembers(context.TODO(), wrapKeyWithUser("watch_store", userID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -426,7 +426,7 @@ func GetWatchingProducts(userID int64) ([]string, bool) {
 	return products, true
 }
 
-// GetTargetList get watching apple store and product.
+// GetTargetList get watching Apple Store and product.
 func GetTargetList() ([]string, bool) {
 	targets, err := rc.SMembers(context.TODO(), wrapKey("apple_target")).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -492,7 +492,7 @@ func GetProductName(product string) string {
 	return name
 }
 
-// SetStoreName set apple store name.
+// SetStoreName set Apple Store name.
 func SetStoreName(store, name string) bool {
 	err := rc.Set(context.TODO(), wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
@@ -502,7 +502,7 @@ func SetStoreName(store, name string) bool {
 	return true
 }
 
-// GetStoreName get apple store name.
+// GetStoreName get Apple Store name.
 func GetStoreName(store string) string {
 	name, err := rc.Get(context.TODO(), wrapKey("apple_store_name:"+store)).Result()
 	if err != nil {
@@ -518,7 +518,7 @@ func GetStoreName(store string) string {
 func SetTargetState(target string, avaliable bool) {
 	err := rc.Set(context.TODO(), wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
 	if err != nil {
-		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
+		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("available", avaliable), zap.Error(err))
 		return
 	}
 }

@@ -86,8 +86,8 @@ j -> Netease Music
 k -> philosophy
 l -> joke
 if arg not in above, we will ignore it.
-if there is no args, api will randomly choice from above.
-if there is multiple args, api will randomly choice from them.
+if there is no args, api will randomly choose from above.
+if there is multiple args, api will randomly choose from them.
 */
 func parseAPI(ctx Context) HitokotoArg {
 	cmd := entities.FromMessage(ctx.Message())

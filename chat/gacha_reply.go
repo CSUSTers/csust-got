@@ -12,13 +12,14 @@ func GachaReplyHandler(ctx telebot.Context) {
 	result, err := gacha.PerformGaCha(ctx.Chat().ID)
 	if err != nil {
 		log.Error("[GaCha]: perform gacha failed", zap.Error(err))
+		return
 	}
 	ctx.Message().Text = "/chat " + ctx.Message().Text
 	switch result {
 	case 3:
 		return
 	case 4:
-		err = Cust(ctx)
+		err = CustomModelChat(ctx)
 		if err != nil {
 			log.Error("[ChatGPT]: get a answer failed", zap.Error(err))
 		}

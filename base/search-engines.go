@@ -24,7 +24,7 @@ func mapToHTML(mapper htmlMapper) func(Context) error {
 type searchEngineFunc func(string) string
 
 // searchEngine makes a 'search engine' by a searchEngine function.
-// a searchEngine function get a string as "term", and returns a HTML formatted string message.
+// a searchEngine function get a string as "term", and returns an HTML formatted string message.
 func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 	return func(m *Message) string {
 		cmd := entities.FromMessage(m)

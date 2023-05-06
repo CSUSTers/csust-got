@@ -59,7 +59,7 @@ func (r emptyRange[T]) IsEmpty() bool {
 	return true
 }
 
-// NewEmptyRange return a empty Range[T] object.
+// NewEmptyRange return an empty Range[T] object.
 func NewEmptyRange[T Ordered]() IRange[T] {
 	return new(emptyRange[T])
 }

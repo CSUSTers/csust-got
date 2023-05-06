@@ -14,7 +14,7 @@ type Heap[T any] struct {
 }
 
 // NewHeap takes a slice and returns a heap not initialized.
-// It don't take ownership of the slice.
+// It doesn't take ownership of the slice.
 func NewHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	d := make([]T, len(ps))
 	copy(d, ps)
@@ -23,7 +23,7 @@ func NewHeap[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 }
 
 // NewHeapInit takes a slice and returns a heap initialized.
-// It don't take ownership of the slice.
+// It doesn't take ownership of the slice.
 func NewHeapInit[T any](ps []T, less, equal CompareFunction[T]) *Heap[T] {
 	heap := NewHeap(ps, less, equal)
 	heap.Init()
@@ -96,7 +96,7 @@ func (h *Heap[T]) Len() int {
 	return len(h.d)
 }
 
-// Swap swap two elements of the heap.
+// Swap two elements of the heap.
 func (h *Heap[T]) Swap(i, j int) {
 	h.d[i], h.d[j] = h.d[j], h.d[i]
 }

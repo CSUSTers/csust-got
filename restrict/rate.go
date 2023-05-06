@@ -30,7 +30,7 @@ func CheckLimit(m *Message) bool {
 	return true
 }
 
-// return false if message should be limit.
+// return false if message should be limited.
 func checkRate(m *Message, limiter *rate.Limiter) bool {
 	rateConfig := config.BotConfig.RateLimitConfig
 	if m.Sticker != nil {

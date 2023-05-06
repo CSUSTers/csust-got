@@ -9,7 +9,7 @@ if docker ps -a | grep -q $app; then
   docker stop $app
   
   if [ $? -eq 0 ]; then
-    docker rm $container_name
+    docker rm "$container_name"
   else
     echo "cannot stop container, exit."
     exit 255
