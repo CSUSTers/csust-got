@@ -59,7 +59,7 @@ func (r Result[T]) Expect(msg string) T {
 	return r.v
 }
 
-// Expect returns value of Result or panic.
+// Unwrap returns value of Result or panic.
 func (r Result[T]) Unwrap() T {
 	if r.IsError() {
 		panic("get value from an error result")
@@ -96,7 +96,7 @@ func (r Result[T]) Then(fn func(T) T) Result[T] {
 	return NewResult(fn(r.v))
 }
 
-// Else deal with a error-handling function and returns a Result.
+// Else deal with an error-handling function and returns a Result.
 func (r Result[T]) Else(fn func(error) T) Result[T] {
 	if r.IsError() {
 		return NewResult(fn(r.e))
@@ -133,11 +133,11 @@ func (r Result[T]) MapOr(fn func(T) T, d T) T {
 	return fn(r.v)
 }
 
-func (r Result[T]) MapOrElse(fn_ok func(T) T, fn_fail func(error) T) T {
+func (r Result[T]) MapOrElse(fnOk func(T) T, fnFail func(error) T) T {
 	if r.IsError() {
-		return fn_fail(r.e)
+		return fnFail(r.e)
 	}
-	return fn_ok(r.v)
+	return fnOk(r.v)
 }
 
 func (r Result[T]) Do(fn func(T)) Result[T] {

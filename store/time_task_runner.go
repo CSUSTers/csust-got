@@ -13,7 +13,7 @@ import (
 // TaskDeadTime is the time how long the expired task can live.
 // Task will be deleted when bot started if task is expired for TaskDeadTime.
 const TaskDeadTime = time.Hour * 6 // 6h
-// FetchTaskTime fetch the task in future.
+// FetchTaskTime fetch the task in the future.
 const FetchTaskTime = time.Minute // 1min
 
 // Task is an alias of orm.Task.

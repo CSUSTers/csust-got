@@ -73,7 +73,7 @@ func RandStrLen(length int) string {
 	return string(rs.RandBytesLen(length))
 }
 
-// RandBytes returns a random bytes with given.
+// RandBytesLen returns a random bytes with given.
 // if length == 0, it will return empty bytes; if length < 0, it will return default length bytes.
 func (r *randstr) RandBytesLen(length int) []byte {
 	rnd := r.rnd
@@ -109,7 +109,7 @@ func (r *randstr) RandStr() string {
 	return string(r.RandBytes())
 }
 
-// NewRandStr is a wrapper of RandBytesLen.
+// RandStrLen is a wrapper of RandBytesLen.
 func (r *randstr) RandStrLen(length int) string {
 	return string(r.RandBytesLen(length))
 }

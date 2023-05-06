@@ -113,7 +113,7 @@ func ToggleNoStickerMode(chatID int64) bool {
 	return err == nil
 }
 
-// Shutdown shutdown bot.
+// Shutdown bot.
 func Shutdown(chatID int64) {
 	err := WriteBool(wrapKeyWithChat("shutdown", chatID), true, 0)
 	if err != nil {
@@ -149,7 +149,7 @@ func IsFakeBanInCD(chatID int64, userID int64) bool {
 	return ok
 }
 
-// IsBanned check some one is banned.
+// IsBanned check someone is banned.
 func IsBanned(chatID int64, userID int64) bool {
 	ok, err := GetBool(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -159,7 +159,7 @@ func IsBanned(chatID int64, userID int64) bool {
 	return ok
 }
 
-// GetBannedDuration get some one banned duration.
+// GetBannedDuration get someone banned duration.
 func GetBannedDuration(chatID int64, userID int64) time.Duration {
 	sec, err := GetTTL(wrapKeyWithChatMember("banned", chatID, userID))
 	if err != nil {
@@ -195,7 +195,7 @@ func AddBanDuration(chatID int64, bannerID, bannedID int64, ad time.Duration) bo
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
-// Ban ban some one.
+// Ban ban someone.
 func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
@@ -237,7 +237,7 @@ func GetHitokoto(from bool) string {
 	return res
 }
 
-// WatchStore watch apple store.
+// WatchStore watch Apple Store.
 func WatchStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -267,7 +267,7 @@ func WatchStore(userID int64, stores []string) bool {
 	return AppleTargetRegister(products, stores)
 }
 
-// RemoveStore not watch apple store.
+// RemoveStore not watch Apple Store.
 func RemoveStore(userID int64, stores []string) bool {
 	if len(stores) == 0 {
 		return true
@@ -406,7 +406,7 @@ func AppleTargetRemove(targets ...string) bool {
 	return true
 }
 
-// GetWatchingStores get watching apple stores of user.
+// GetWatchingStores get watching Apple Store of user.
 func GetWatchingStores(userID int64) ([]string, bool) {
 	stores, err := rc.SMembers(context.TODO(), wrapKeyWithUser("watch_store", userID)).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -426,7 +426,7 @@ func GetWatchingProducts(userID int64) ([]string, bool) {
 	return products, true
 }
 
-// GetTargetList get watching apple store and product.
+// GetTargetList get watching Apple Store and product.
 func GetTargetList() ([]string, bool) {
 	targets, err := rc.SMembers(context.TODO(), wrapKey("apple_target")).Result()
 	if err != nil && !errors.Is(err, redis.Nil) {
@@ -492,7 +492,7 @@ func GetProductName(product string) string {
 	return name
 }
 
-// SetStoreName set apple store name.
+// SetStoreName set Apple Store name.
 func SetStoreName(store, name string) bool {
 	err := rc.Set(context.TODO(), wrapKey("apple_store_name:"+store), name, 24*time.Hour).Err()
 	if err != nil {
@@ -502,7 +502,7 @@ func SetStoreName(store, name string) bool {
 	return true
 }
 
-// GetStoreName get apple store name.
+// GetStoreName get Apple Store name.
 func GetStoreName(store string) string {
 	name, err := rc.Get(context.TODO(), wrapKey("apple_store_name:"+store)).Result()
 	if err != nil {
@@ -518,7 +518,7 @@ func GetStoreName(store string) string {
 func SetTargetState(target string, avaliable bool) {
 	err := rc.Set(context.TODO(), wrapKey("apple_target_state:"+target), avaliable, 24*time.Hour).Err()
 	if err != nil {
-		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("avaliable", avaliable), zap.Error(err))
+		log.Error("set apple_target_state to redis failed", zap.String("target", target), zap.Any("available", avaliable), zap.Error(err))
 		return
 	}
 }
@@ -626,4 +626,37 @@ func GetChatContext(chatID int64, msgID int) ([]openai.ChatCompletionMessage, er
 		return nil, err
 	}
 	return chatContext, nil
+}
+
+// LoadGachaSession load gacha settings of a certain session from redis.
+func LoadGachaSession(chatID int64) (config.GachaTenant, error) {
+	tenantJSON, err := rc.Get(context.TODO(), wrapKeyWithChat("gacha_tenant", chatID)).Result()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			log.Error("get gacha tenant from redis failed", zap.Int64("chat", chatID), zap.Error(err))
+		}
+		return config.GachaTenant{}, err
+	}
+	var tenant config.GachaTenant
+	err = json.Unmarshal([]byte(tenantJSON), &tenant)
+	if err != nil {
+		log.Error("unmarshal gacha tenant failed", zap.Int64("chat", chatID), zap.Error(err))
+		return config.GachaTenant{}, err
+	}
+	return tenant, nil
+}
+
+// SaveGachaSession save gacha settings of a certain session to redis.
+func SaveGachaSession(chatID int64, tenant config.GachaTenant) error {
+	tenantJSON, err := json.Marshal(tenant)
+	if err != nil {
+		log.Error("marshal gacha tenant failed", zap.Int64("chat", chatID), zap.Error(err))
+		return err
+	}
+	err = rc.Set(context.TODO(), wrapKeyWithChat("gacha_tenant", chatID), tenantJSON, 42*24*time.Hour).Err()
+	if err != nil {
+		log.Error("set gacha tenant to redis failed", zap.Int64("chat", chatID), zap.Error(err))
+		return err
+	}
+	return nil
 }

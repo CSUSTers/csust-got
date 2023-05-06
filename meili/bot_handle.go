@@ -61,15 +61,23 @@ func ExtractFields(hits []interface{}) ([]map[string]string, error) {
 // SearchHandle handles search command
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
-		rplMsg := excuteSearch(ctx)
-		err := ctx.Reply(rplMsg, ModeMarkdownV2)
+		rplMsg := executeSearch(ctx)
+		// send pm unless err
+		_, pmErr := ctx.Bot().Send(ctx.Sender(), rplMsg, ModeMarkdownV2)
+		var err error
+		if pmErr != nil {
+			log.Info("[MeiliSearch]: PM failed, fallback to group chat")
+			err = ctx.Reply("你还没和 bot 私聊过呢，先私聊 bot 再来搜索吧")
+		} else {
+			err = ctx.Reply("你感到私聊突然多出了一条消息，快去看看吧")
+		}
 		return err
 	}
 	err := ctx.Reply("MeiliSearch is not enabled")
 	return err
 }
 
-func excuteSearch(ctx Context) string {
+func executeSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
 	query := searchQuery{}
 	if command.Argc() > 0 {
@@ -103,7 +111,7 @@ func excuteSearch(ctx Context) string {
 		return "Extract fields failed"
 	}
 	var rplMsg string
-	// -1001817319583 -> 1817319583
+	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(ctx.Chat().ID, 10)[4:] + "/"
 	for item := range respMap {
 		rplMsg += "内容: “ `" +

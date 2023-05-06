@@ -2,6 +2,7 @@ package util
 
 import (
 	"math/rand"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -16,7 +17,7 @@ import (
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
 func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {
-	// message id is a int-type number
+	// message id is an int-type number
 	id, err := strconv.Atoi(ns)
 	if err != nil {
 		SendReply(m.Chat, "您这数字有点不太对劲啊。要不您回去再瞅瞅？", m)
@@ -207,4 +208,38 @@ func ReplaceSpace(in string) string {
 		}
 		return r
 	})
+}
+
+// CheckUrl checks if the url is valid (http 404, etc)
+func CheckUrl(url string) bool {
+	resp, err := http.Get(url)
+	if err != nil {
+		return false
+	}
+	err = resp.Body.Close()
+	if err != nil {
+		return false
+	}
+	return resp.StatusCode == http.StatusOK
+}
+
+// DeleteSlice 删除slice中的某个元素
+func DeleteSlice(a []string, subSlice string) []string {
+	ret := make([]string, 0, len(a))
+	for _, val := range a {
+		if val != subSlice {
+			ret = append(ret, val)
+		}
+	}
+	return ret
+}
+
+// GetAllReplyMessagesText get all reply messages text.
+func GetAllReplyMessagesText(m *tb.Message) string {
+	var ret string
+	for m.ReplyTo != nil {
+		ret += m.ReplyTo.Text + "\n"
+		m = m.ReplyTo
+	}
+	return ret
 }

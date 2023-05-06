@@ -327,7 +327,7 @@ func isStore(store string) bool {
 	return storeRegex.MatchString(store)
 }
 
-// watching watching Apple Store watcher.
+// watching Apple Store watcher.
 func updateTargets() {
 	tmpMap, ok := orm.GetTargetMap()
 	if !ok {

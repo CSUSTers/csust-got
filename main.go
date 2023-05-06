@@ -4,6 +4,8 @@ import (
 	"csust-got/chat"
 	"csust-got/meili"
 	"csust-got/sd"
+	"csust-got/util/gacha"
+	"csust-got/word_seg"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -48,6 +50,7 @@ func main() {
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	meili.InitMeili()
+	wordSeg.InitWordSeg()
 
 	go sd.Process()
 
@@ -90,7 +93,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware)
+		messagesCollectionMiddleware, contentFilterMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -138,10 +141,16 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-	bot.Handle("/qiuchat", chat.Cust, whiteMiddleware)
+	bot.Handle("/qiuchat", chat.CustomModelChat, whiteMiddleware)
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
+
+	bot.Handle("/slink", base.ShortUrlHandle)
+
+	// gacha handler
+	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
+	bot.Handle("/gacha", gacha.WithMsgRpl)
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -316,7 +325,23 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
+			// 分词并存入redis
+			go wordSeg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
 		}
+		return next(ctx)
+	}
+}
+
+// contentFilterMiddleware 过滤消息中的内容
+func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		text := ctx.Message().Text
+		caption := ctx.Message().Caption
+		if text == "" && caption != "" {
+			text = caption
+		}
+		go base.UrlFilter(ctx, text)
+		go chat.GachaReplyHandler(ctx)
 		return next(ctx)
 	}
 }

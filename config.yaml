@@ -69,3 +69,23 @@ meili:
 
 mc:
   max_count: 10
+
+github:
+  enabled: false
+  token: ""
+  repo: "csust-got"
+  owner: ""
+  branch: "master"
+  path: "config.yaml"
+  short_url_prefix: "s.csu.st"
+
+content_filter:
+  url_filter:
+    enabled: true
+    bv2av:
+      # telegram uids here
+      enable_user_list:
+        - 123123123
+    tw2fx:
+      enable_user_list:
+        - 123123123

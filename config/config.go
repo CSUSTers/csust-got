@@ -17,6 +17,7 @@ var (
 	noRedisMsg      = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 	noGenShinApiMsg = "genShinApi address is not set! Please set config file config.yaml!"
 	noMeiliMsg      = "meili configuration is not set! Please set config file config.yaml!"
+	noGithubMsg     = "github configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -37,17 +38,19 @@ func InitConfig(configFile, envPrefix string) {
 // In general, you don't need to NewBotConfig, global BotConfig should be used.
 func NewBotConfig() *Config {
 	config := &Config{
-		RateLimitConfig: new(rateLimitConfig),
-		RedisConfig:     new(redisConfig),
-		RestrictConfig:  new(restrictConfig),
-		MessageConfig:   new(messageConfig),
-		WhiteListConfig: new(specialListConfig),
-		BlockListConfig: new(specialListConfig),
-		PromConfig:      new(promConfig),
-		GenShinConfig:   new(genShinConfig),
-		ChatConfig:      new(chatConfig),
-		MeiliConfig:     new(meiliConfig),
-		McConfig:        new(mcConfig),
+		RateLimitConfig:     new(rateLimitConfig),
+		RedisConfig:         new(redisConfig),
+		RestrictConfig:      new(restrictConfig),
+		MessageConfig:       new(messageConfig),
+		WhiteListConfig:     new(specialListConfig),
+		BlockListConfig:     new(specialListConfig),
+		PromConfig:          new(promConfig),
+		GenShinConfig:       new(genShinConfig),
+		ChatConfig:          new(chatConfig),
+		MeiliConfig:         new(meiliConfig),
+		McConfig:            new(mcConfig),
+		GithubConfig:        new(githubConfig),
+		ContentFilterConfig: new(contentFilterConfig),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -66,17 +69,19 @@ type Config struct {
 	DebugMode    bool
 	SkipDuration int64
 
-	RedisConfig     *redisConfig
-	RestrictConfig  *restrictConfig
-	RateLimitConfig *rateLimitConfig
-	MessageConfig   *messageConfig
-	BlockListConfig *specialListConfig
-	WhiteListConfig *specialListConfig
-	PromConfig      *promConfig
-	GenShinConfig   *genShinConfig
-	ChatConfig      *chatConfig
-	MeiliConfig     *meiliConfig
-	McConfig        *mcConfig
+	RedisConfig         *redisConfig
+	RestrictConfig      *restrictConfig
+	RateLimitConfig     *rateLimitConfig
+	MessageConfig       *messageConfig
+	BlockListConfig     *specialListConfig
+	WhiteListConfig     *specialListConfig
+	PromConfig          *promConfig
+	GenShinConfig       *genShinConfig
+	ChatConfig          *chatConfig
+	MeiliConfig         *meiliConfig
+	McConfig            *mcConfig
+	GithubConfig        *githubConfig
+	ContentFilterConfig *contentFilterConfig
 }
 
 // GetBot returns Bot.
@@ -120,6 +125,8 @@ func readConfig() {
 	BotConfig.ChatConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
+	BotConfig.GithubConfig.readConfig()
+	BotConfig.ContentFilterConfig.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()
@@ -148,4 +155,6 @@ func checkConfig() {
 	BotConfig.ChatConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
+	BotConfig.GithubConfig.checkConfig()
+	BotConfig.ContentFilterConfig.checkConfig()
 }

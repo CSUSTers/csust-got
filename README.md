@@ -79,6 +79,13 @@ hugedecoder - <text> huge解码
 getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 
 getvoice_old - getvoice的旧版入口，没有查询功能，数据来源于mys爬虫
 chat - <text> 聊会天呗
+qiuchat - <text> 聊会天呗
+genvoice - <text> 生成原神语音
+provoice - <text> 使用自定义ssml生成语音
+search - <key word> 搜索历史记录
+slink - <URL> 短链接
+gacha_setting - 设置一个json格式的配置
+gacha - 抽卡，按照你的配置
 ```
 
 ## attachment
