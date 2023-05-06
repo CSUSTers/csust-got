@@ -50,6 +50,7 @@ func main() {
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	meili.InitMeili()
+	wordSeg.InitWordSeg()
 
 	go sd.Process()
 
@@ -325,7 +326,7 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 			// 分词并存入redis
-			go word_seg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
+			go wordSeg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}
