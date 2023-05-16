@@ -88,11 +88,13 @@ func executeSearch(ctx Context) string {
 			searchKeywordIdx = 2
 		}
 	}
-	// check if user is a member of chat_id group
-	_, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().ID)
-	if err != nil {
-		log.Error("[MeiliSearch]: Not a member of specified group", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-		return "Not a member of specified group"
+	if searchKeywordIdx > 0 {
+		// check if user is a member of chat_id group
+		_, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().ID)
+		if err != nil {
+			log.Error("[MeiliSearch]: Not a member of specified group", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+			return "Not a member of specified group"
+		}
 	}
 	query := searchQuery{}
 	if command.Argc() > 0 {

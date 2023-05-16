@@ -124,7 +124,7 @@ func CanRestrictMembers(chat *tb.Chat, user *tb.User) bool {
 func GetChatMember(bot *tb.Bot, chatID int64, userID int64) (*tb.ChatMember, error) {
 	params := map[string]string{
 		"chat_id": strconv.FormatInt(chatID, 10),
-		"user_id": strconv.FormatInt(chatID, 10),
+		"user_id": strconv.FormatInt(userID, 10),
 	}
 	data, err := bot.Raw("getChatMember", params)
 	if err != nil {
