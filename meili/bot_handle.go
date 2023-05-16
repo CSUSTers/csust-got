@@ -4,6 +4,7 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
+	"csust-got/util"
 	"encoding/json"
 	"github.com/meilisearch/meilisearch-go"
 	"go.uber.org/zap"
@@ -62,15 +63,7 @@ func ExtractFields(hits []interface{}) ([]map[string]string, error) {
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
 		rplMsg := executeSearch(ctx)
-		// send pm unless err
-		_, pmErr := ctx.Bot().Send(ctx.Sender(), rplMsg, ModeMarkdownV2)
-		var err error
-		if pmErr != nil {
-			log.Info("[MeiliSearch]: PM failed, fallback to group chat")
-			err = ctx.Reply("你还没和 bot 私聊过呢，先私聊 bot 再来搜索吧")
-		} else {
-			err = ctx.Reply("你感到私聊突然多出了一条消息，快去看看吧")
-		}
+		err := ctx.Reply(rplMsg, ModeMarkdownV2)
 		return err
 	}
 	err := ctx.Reply("MeiliSearch is not enabled")
@@ -79,14 +72,36 @@ func SearchHandle(ctx Context) error {
 
 func executeSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
+	chatId := ctx.Chat().ID
+	// parse option
+	searchKeywordIdx := 0
+	if command.Argc() > 2 {
+		option := command.Arg(0)
+		if option == "-id" {
+			// when search by id, index 0 arg is "-id", 1 arg is id, pass rest to query
+			var err error
+			chatId, err = strconv.ParseInt(command.Arg(1), 10, 64)
+			if err != nil {
+				log.Error("[MeiliSearch]: Parse chat id failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+				return err.Error()
+			}
+			searchKeywordIdx = 2
+		}
+	}
+	// check if user is a member of chat_id group
+	_, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().ID)
+	if err != nil {
+		log.Error("[MeiliSearch]: Not a member of specified group", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+		return "Not a member of specified group"
+	}
 	query := searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
 			Limit: 10,
 		}
 		query = searchQuery{
-			Query:         command.ArgAllInOneFrom(0),
-			IndexName:     config.BotConfig.MeiliConfig.IndexPrefix + strconv.FormatInt(ctx.Chat().ID, 10),
+			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
+			IndexName:     config.BotConfig.MeiliConfig.IndexPrefix + strconv.FormatInt(chatId, 10),
 			SearchRequest: searchRequest,
 		}
 	}

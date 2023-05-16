@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/json"
 	"math/rand"
 	"net/http"
 	"regexp"
@@ -120,16 +121,21 @@ func CanRestrictMembers(chat *tb.Chat, user *tb.User) bool {
 }
 
 // GetChatMember can get chat member from chat.
-// func GetChatMember(bot *tgbotapi.BotAPI, chatID int64, userID int) ChatMember {
-// 	chatMember, err := bot.GetChatMember(tgbotapi.ChatConfigWithUser{
-// 		ChatID: chatID,
-// 		UserID: userID,
-// 	})
-// 	if err != nil {
-// 		log.Error("GetChatMember failed", zap.Error(err))
-// 	}
-// 	return chatMember
-// }
+func GetChatMember(bot *tb.Bot, chatID int64, userID int64) (*tb.ChatMember, error) {
+	params := map[string]string{
+		"chat_id": strconv.FormatInt(chatID, 10),
+		"user_id": strconv.FormatInt(chatID, 10),
+	}
+	data, err := bot.Raw("getChatMember", params)
+	if err != nil {
+		return nil, err
+	}
+	var chatMember *tb.ChatMember
+	if err := json.Unmarshal(data, &chatMember); err != nil {
+		return nil, err
+	}
+	return chatMember, nil
+}
 
 // RandomChoice - rand one from slice.
 func RandomChoice[T any](s []T) T {
