@@ -8,7 +8,7 @@ require (
 	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.24.0
 	github.com/prometheus/client_golang v1.15.1
-	github.com/prometheus/common v0.43.0
+	github.com/prometheus/common v0.44.0
 	github.com/quic-go/quic-go v0.34.0
 	github.com/redis/go-redis/v9 v9.0.4
 	github.com/sashabaranov/go-openai v1.9.4
