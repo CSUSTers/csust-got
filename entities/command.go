@@ -17,7 +17,7 @@ type BotCommand struct {
 
 var (
 	spaces   = regexp.MustCompile(`\s+`)
-	cmdRegex = regexp.MustCompile(`^/([0-9a-zA-Z_]+)(?:@[^\s@]+)?$`)
+	cmdRegex = regexp.MustCompile(`^/([0-9a-zA-Z_]+)(?:@[^\s@]+)?`)
 
 	errParseCommand     = errors.New("parse command failed")
 	errParseCommandName = errors.New("parse command name failed")
