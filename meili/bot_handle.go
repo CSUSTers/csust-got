@@ -129,7 +129,7 @@ func executeSearch(ctx Context) string {
 	}
 	var rplMsg string
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
-	chatUrl := "https://t.me/c/" + strconv.FormatInt(ctx.Chat().ID, 10)[4:] + "/"
+	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
 		rplMsg += "内容: “ `" +
 			EscapeTelegramReservedChars(respMap[item]["text"]) +
