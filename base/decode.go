@@ -18,7 +18,7 @@ import (
 )
 
 // DecodeCommandPatt is regex patt of this command
-var DecodeCommandPatt = regexp.MustCompile(`^decode(?:_([a-zA-Z\d\.\-]+)(?:_([a-zA-Z\d\.\-]+))?)?$`)
+var DecodeCommandPatt = regexp.MustCompile(`^decode(?:_([a-zA-Z\d\.\-]+)?(?:_([a-zA-Z\d\.\-]+))?)?(?:@.*)?\s*$`)
 
 var errInvalidCmd = errors.New("invalid command")
 
