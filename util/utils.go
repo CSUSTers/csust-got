@@ -144,17 +144,17 @@ func GetChatMember(bot *tb.Bot, chatID int64, userID string) (*ChatMemberRespons
 		"chat_id": strconv.FormatInt(chatID, 10),
 		"user_id": userID,
 	}
-	log.Debug("[GetChatMember]", zap.Any("chat_id", chatID), zap.Any("user_id", userID))
+	log.Debug("[GetChatMember]", zap.Int64("chat_id", chatID), zap.String("user_id", userID))
 	data, err := bot.Raw("getChatMember", params)
 	if err != nil {
 		return nil, err
 	}
-	var chatMember *ChatMemberResponse
+	var chatMember ChatMemberResponse
 	if err := json.Unmarshal(data, &chatMember); err != nil {
 		return nil, err
 	}
-	log.Debug("[GetChatMember]", zap.Any("response", data), zap.Any("chatMember", chatMember))
-	return chatMember, nil
+	log.Debug("[GetChatMember]", zap.ByteString("response", data), zap.Any("chatMember", &chatMember))
+	return &chatMember, nil
 }
 
 // RandomChoice - rand one from slice.
