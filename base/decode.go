@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 
 	exencoding "golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
@@ -62,6 +64,8 @@ func Decode(ctx tb.Context) error {
 		encoder = traditionalchinese.Big5.NewEncoder()
 	case "shift-jis":
 		encoder = japanese.ShiftJIS.NewEncoder()
+	case "windows-1252":
+		encoder = charmap.Windows1252.NewEncoder()
 	default:
 		useEncoder = false
 	}
@@ -82,6 +86,20 @@ func Decode(ctx tb.Context) error {
 			}
 		case "utf8":
 			bs = []byte(text)
+		case "utf16le":
+			s := utf16.Encode([]rune(text))
+			bs = make([]byte, len(s)*2)
+			for i, v := range s {
+				bs[i*2] = byte(v)
+				bs[i*2+1] = byte(v >> 8)
+			}
+		case "utf16be":
+			s := utf16.Encode([]rune(text))
+			bs = make([]byte, len(s)*2)
+			for i, v := range s {
+				bs[i*2] = byte(v >> 8)
+				bs[i*2+1] = byte(v)
+			}
 		}
 	}
 
@@ -98,6 +116,8 @@ func Decode(ctx tb.Context) error {
 		decoder = traditionalchinese.Big5.NewDecoder()
 	case "shift-jis":
 		decoder = japanese.ShiftJIS.NewDecoder()
+	case "windows-1252":
+		decoder = charmap.Windows1252.NewDecoder()
 	default:
 		useDecoder = false
 	}
@@ -113,6 +133,25 @@ func Decode(ctx tb.Context) error {
 			result = hex.EncodeToString(bs)
 		case "utf8":
 			result = string(bs)
+		case "utf16le":
+			bsLen := len(bs)
+			if bsLen%2 != 0 {
+				bsLen--
+			}
+			s := make([]uint16, bsLen/2)
+			for i := 0; i < len(s); i++ {
+				s[i] = uint16(bs[i*2]) | uint16(bs[i*2+1])<<8
+			}
+			result = string(utf16.Decode(s))
+		case "utf16be":
+			bsLen := len(bs)
+			if bsLen%2 != 0 {
+				bsLen--
+			}
+			s := make([]uint16, bsLen/2)
+			for i := 0; i < len(s); i++ {
+				s[i] = uint16(bs[i*2+1]) | uint16(bs[i*2])<<8
+			}
 		}
 	}
 
@@ -136,6 +175,12 @@ func normalizeEncoding(in string) string {
 		return "big5"
 	case "jp", "shift-jis", "shift_jis":
 		return "shift-jis"
+	case "windows-1252", "windows1252", "codepage-1252", "codepage1252", "cp1252", "latin1", "latin-1":
+		return "windows-1252"
+	case "utf16", "utf-16", "utf16le", "utf-16le":
+		return "utf16le"
+	case "utf16be", "utf-16be":
+		return "utf16be"
 	case "base64":
 		return "base64"
 	case "hex":
