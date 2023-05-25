@@ -73,6 +73,7 @@ func SearchHandle(ctx Context) error {
 func executeSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
 	chatId := ctx.Chat().ID
+	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
 	// parse option
 	searchKeywordIdx := 0
 	if command.Argc() > 2 {
@@ -90,10 +91,15 @@ func executeSearch(ctx Context) string {
 	}
 	if searchKeywordIdx > 0 {
 		// check if user is a member of chat_id group
-		_, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().ID)
+		member, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().Recipient())
 		if err != nil {
-			log.Error("[MeiliSearch]: Not a member of specified group", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-			return "Not a member of specified group"
+			log.Error("[MeiliSearch]: Error in GetChatMember", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+			return "Error when getting chat member"
+		}
+		if member.Result.Status == "left" {
+			log.Error("[MeiliSearch]: Not a member of the specified group", zap.String("Search args", command.ArgAllInOneFrom(0)),
+				zap.Int64("chatId", chatId), zap.String("user", ctx.Sender().Recipient()))
+			return "Not a member of the specified group"
 		}
 	}
 	query := searchQuery{}

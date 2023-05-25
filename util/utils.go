@@ -16,6 +16,24 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+// ChatMemberResponse of GetChatMember method
+type ChatMemberResponse struct {
+	Ok     bool `json:"ok"`
+	Result struct {
+		User struct {
+			IsBot        bool   `json:"is_bot"`
+			Id           int    `json:"id"`
+			FirstName    string `json:"first_name"`
+			LastName     string `json:"last_name"`
+			Username     string `json:"username"`
+			LanguageCode string `json:"language_code"`
+		} `json:"user"`
+		Status      string `json:"status"`
+		CustomTitle string `json:"custom_title"`
+		IsAnonymous bool   `json:"is_anonymous"`
+	} `json:"result"`
+}
+
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
 func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {
 	// message id is an int-type number
@@ -121,19 +139,21 @@ func CanRestrictMembers(chat *tb.Chat, user *tb.User) bool {
 }
 
 // GetChatMember can get chat member from chat.
-func GetChatMember(bot *tb.Bot, chatID int64, userID int64) (*tb.ChatMember, error) {
+func GetChatMember(bot *tb.Bot, chatID int64, userID string) (*ChatMemberResponse, error) {
 	params := map[string]string{
 		"chat_id": strconv.FormatInt(chatID, 10),
-		"user_id": strconv.FormatInt(userID, 10),
+		"user_id": userID,
 	}
+	log.Debug("[GetChatMember]", zap.Any("chat_id", chatID), zap.Any("user_id", userID))
 	data, err := bot.Raw("getChatMember", params)
 	if err != nil {
 		return nil, err
 	}
-	var chatMember *tb.ChatMember
+	var chatMember *ChatMemberResponse
 	if err := json.Unmarshal(data, &chatMember); err != nil {
 		return nil, err
 	}
+	log.Debug("[GetChatMember]", zap.Any("response", data), zap.Any("chatMember", chatMember))
 	return chatMember, nil
 }
 
