@@ -37,10 +37,11 @@ jobs:
 
       - name: Push To harbor
         id: push-to-harbor 
-        uses: redhat-actions/push-to-registry@v2
+        uses: CSUSTers/push-to-registry@main
         with:
           image: ${{ steps.build-image.outputs.image }}
           tags: ${{ steps.build-image.outputs.tags }}
           registry: ${{ secrets.HARBOR_URL }}
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWD }}
+          retry: 1000

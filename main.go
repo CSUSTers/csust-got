@@ -5,8 +5,9 @@ import (
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/util/gacha"
-	"csust-got/word_seg"
+	wordSeg "csust-got/word_seg"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"time"
@@ -23,6 +24,8 @@ import (
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
+
+var errInvalidCmd = errors.New("invalid command")
 
 func main() {
 	config.InitConfig("config.yaml", "BOT")
@@ -151,6 +154,24 @@ func registerBaseHandler(bot *Bot) {
 	// gacha handler
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
+
+	// custom regexp handler
+	bot.Handle(OnText, customHandler)
+}
+
+func customHandler(ctx Context) error {
+
+	cmd := entities.FromMessage(ctx.Message())
+	if cmd == nil {
+		return errInvalidCmd
+	}
+	cmdText := cmd.Name()
+
+	if base.DecodeCommandPatt.MatchString(cmdText) {
+		return base.Decode(ctx)
+	}
+
+	return nil
 }
 
 func registerRestrictHandler(bot *Bot) {
@@ -169,7 +190,7 @@ func registerRestrictHandler(bot *Bot) {
 func registerEventHandler(bot *Bot) {
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
-	bot.Handle(OnText, base.DoNothing)
+	// bot.Handle(OnText, base.DoNothing)
 	bot.Handle(OnSticker, base.DoNothing)
 	bot.Handle(OnAnimation, base.DoNothing)
 	bot.Handle(OnMedia, base.DoNothing)

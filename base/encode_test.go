@@ -23,7 +23,7 @@ func Test_encode(t *testing.T) {
 		{"py", "hugepier"},
 	}
 	for _, tt := range tests {
-		got := encode(tt.args)
+		got := hooEncode(tt.args)
 		require.Equalf(t, tt.want, got, "encode(%s)", tt.args)
 	}
 }
@@ -44,7 +44,7 @@ func Test_decode(t *testing.T) {
 		{"hugehugeer", "hugeer"},
 	}
 	for _, tt := range tests {
-		got := decode(tt.args)
+		got := hooDecode(tt.args)
 		require.Equalf(t, tt.want, got, "decode(%s)", tt.args)
 	}
 }

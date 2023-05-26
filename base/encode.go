@@ -25,7 +25,7 @@ func HugeEncoder(ctx Context) error {
 	}
 
 	// encode
-	arg = encode(arg)
+	arg = hooEncode(arg)
 
 	return ctx.Reply(arg, ModeMarkdownV2)
 }
@@ -38,7 +38,7 @@ func HugeDecoder(ctx Context) error {
 	}
 
 	// decode
-	arg = decode(arg)
+	arg = hooDecode(arg)
 
 	return ctx.Reply(arg, ModeMarkdownV2)
 }
@@ -69,7 +69,7 @@ func parseHugeArgs(ctx Context) (arg string, ok bool) {
 	return arg, true
 }
 
-func encode(arg string) string {
+func hooEncode(arg string) string {
 	if arg == "" {
 		return "HUGEFIVER"
 	}
@@ -108,7 +108,7 @@ func encodeParseEnd(arg string) string {
 	return arg
 }
 
-func decode(arg string) string {
+func hooDecode(arg string) string {
 	if !hugeRegex.MatchString(arg) {
 		return "hugeFAKEr"
 	}
