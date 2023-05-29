@@ -1,7 +1,9 @@
 package base
 
 import (
+	"bytes"
 	"csust-got/entities"
+	"csust-got/log"
 	"csust-got/util"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,7 +12,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 
+	"go.uber.org/zap"
 	exencoding "golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
@@ -54,6 +58,19 @@ func Decode(ctx tb.Context) error {
 	var bs []byte
 	var encoder *exencoding.Encoder
 	useEncoder := true
+
+	if from != "utf8" {
+		var buf bytes.Buffer
+		for _, rune := range []rune(text) {
+			if rune != utf8.RuneError {
+				_, err := buf.WriteRune(rune)
+				if err != nil {
+					log.Debug("write string buf error", zap.Error(err))
+				}
+			}
+		}
+		text = buf.String()
+	}
 
 	switch from {
 	case "gbk":
