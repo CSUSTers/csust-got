@@ -49,4 +49,4 @@ jobs:
       - name: Restart Kubernetes Deployment
         id: restart-pod
         run: |
-          if [ "${{ github.ref }}" == "refs/heads/dev" ]; then NAME="csust-got"; elif [ "${{ github.ref }}" == "refs/heads/master" ]; then NAME="csust-got-prod"; fi; curl -X PUT -H "Content-Type: application/yaml" -H "Cookie: ${{ secrets.KubeCookie}}" -d '{"kind":"deployments","namespace":"csust","name":"'"$NAME"'"}' "${{ secrets.KubeURL}}"
+          if [ "${{ github.ref }}" == "refs/heads/dev" ]; then NAME="csust-got"; elif [ "${{ github.ref }}" == "refs/heads/master" ]; then NAME="csust-got-prod"; fi; curl -sL -X PUT -H "Content-Type: application/yaml" -H "Cookie: ${{ secrets.KubeCookie}}" -d '{"kind":"deployments","namespace":"csust","name":"'"$NAME"'"}' "${{ secrets.KubeURL}}" | jq -r '.status.availableReplicas' | xargs -I{} echo "AvailableReplicas: {}"
