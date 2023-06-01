@@ -60,8 +60,8 @@ func Decode(ctx tb.Context) error {
 	useEncoder := true
 
 	log.Debug("decode", zap.String("from", from), zap.String("to", to), zap.String("text", text))
-
-	if from != "utf8" {
+	
+	if !util.SliceContains([]string{"utf8", "utf16le", "utf16be"}, from) {
 		var buf bytes.Buffer
 		for _, rune := range text {
 			if rune != utf8.RuneError {
