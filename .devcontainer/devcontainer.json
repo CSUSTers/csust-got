@@ -16,7 +16,7 @@
       },
       "extensions": [
         "eamodio.gitlens",
-        "lfs.vscode-emacs-friendly",
+        "tuttieee.emacs-mcx",
         "esbenp.prettier-vscode"
       ]
     }
