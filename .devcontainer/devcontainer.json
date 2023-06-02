@@ -4,9 +4,21 @@
     "ghcr.io/devcontainers/features/go:1": {},
     "ghcr.io/guiyomh/features/golangci-lint:0": {},
     "ghcr.io/devcontainers-contrib/features/zsh-plugins:0": {},
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/devcontainers/features/sshd:1": {}
+    "ghcr.io/devcontainers/features/sshd:1": {},
+    "ghcr.io/eitsupi/devcontainer-features/jq-likes:1"
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "gitlens.showWelcomeOnInstall": false,
+        "gitlens.showWhatsNewAfterUpgrades": false
+      },
+      "extensions": [
+        "eamodio.gitlens",
+        "lfs.vscode-emacs-friendly",
+        "esbenp.prettier-vscode"
+      ]
+    }
   }
 }
