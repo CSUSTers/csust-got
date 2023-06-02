@@ -6,7 +6,7 @@
     "ghcr.io/devcontainers-contrib/features/zsh-plugins:0": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/sshd:1": {},
-    "ghcr.io/eitsupi/devcontainer-features/jq-likes:1"
+    "ghcr.io/eitsupi/devcontainer-features/jq-likes:1": {}
   },
   "customizations": {
     "vscode": {
@@ -16,7 +16,7 @@
       },
       "extensions": [
         "eamodio.gitlens",
-        "tuttieee.emacs-mcx",
+        // "tuttieee.emacs-mcx",
         "esbenp.prettier-vscode"
       ]
     }
