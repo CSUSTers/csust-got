@@ -17,7 +17,8 @@
       "extensions": [
         "eamodio.gitlens",
         "esbenp.prettier-vscode",
-        "ms-python.python"
+        "ms-python.python",
+        "mutantdino.resourcemonitor"
       ]
     }
   }
