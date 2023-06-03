@@ -16,8 +16,8 @@
       },
       "extensions": [
         "eamodio.gitlens",
-        // "tuttieee.emacs-mcx",
-        "esbenp.prettier-vscode"
+        "esbenp.prettier-vscode",
+        "ms-python.python"
       ]
     }
   }
