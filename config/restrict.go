@@ -1,6 +1,10 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"time"
+
+	"github.com/spf13/viper"
+)
 
 type restrictConfig struct {
 	KillSeconds          int
@@ -27,6 +31,9 @@ type rateLimitConfig struct {
 	Cost        int
 	StickerCost int
 	CommandCost int
+
+	// in milliseconds
+	ExpireTime time.Duration
 }
 
 func (c *rateLimitConfig) readConfig() {
@@ -35,6 +42,12 @@ func (c *rateLimitConfig) readConfig() {
 	c.Cost = viper.GetInt("rate_limit.cost")
 	c.StickerCost = viper.GetInt("rate_limit.cost_sticker")
 	c.CommandCost = viper.GetInt("rate_limit.cost_command")
+
+	expire := viper.GetInt64("rate_limit.expire_time")
+	if expire <= 60*1000 {
+		expire = 60 * 1000
+	}
+	c.ExpireTime = time.Duration(expire) * time.Millisecond
 }
 
 func (c *rateLimitConfig) checkConfig() {
