@@ -82,6 +82,8 @@ type Config struct {
 	McConfig            *mcConfig
 	GithubConfig        *githubConfig
 	ContentFilterConfig *contentFilterConfig
+
+	DebugOptConfig *debugOptConfig
 }
 
 // GetBot returns Bot.
@@ -130,6 +132,9 @@ func readConfig() {
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()
+
+	// debug opt
+	BotConfig.DebugOptConfig.readConfig()
 }
 
 // check some config value is reasonable, otherwise set to default value.
@@ -157,4 +162,6 @@ func checkConfig() {
 	BotConfig.McConfig.checkConfig()
 	BotConfig.GithubConfig.checkConfig()
 	BotConfig.ContentFilterConfig.checkConfig()
+
+	BotConfig.DebugOptConfig.checkConfig()
 }
