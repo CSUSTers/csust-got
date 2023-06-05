@@ -51,6 +51,7 @@ func NewBotConfig() *Config {
 		McConfig:            new(mcConfig),
 		GithubConfig:        new(githubConfig),
 		ContentFilterConfig: new(contentFilterConfig),
+		DebugOptConfig:      new(debugOptConfig),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
