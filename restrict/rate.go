@@ -33,11 +33,18 @@ func CheckLimit(m *Message) bool {
 // return false if message should be limited.
 func checkRate(m *Message, limiter *rate.Limiter) bool {
 	rateConfig := config.BotConfig.RateLimitConfig
+
+	msgTime := m.Time()
+	checkTime := time.Now()
+	if checkTime.Sub(msgTime) > rateConfig.ExpireTime {
+		checkTime = time.Unix(msgTime.Unix(), checkTime.UnixNano())
+	}
+
 	if m.Sticker != nil {
-		return limiter.AllowN(time.Now(), rateConfig.StickerCost)
+		return limiter.AllowN(checkTime, rateConfig.StickerCost)
 	}
 	if cmd := entities.FromMessage(m); cmd != nil {
-		return limiter.AllowN(time.Now(), rateConfig.CommandCost)
+		return limiter.AllowN(checkTime, rateConfig.CommandCost)
 	}
-	return limiter.AllowN(time.Now(), rateConfig.Cost)
+	return limiter.AllowN(checkTime, rateConfig.Cost)
 }

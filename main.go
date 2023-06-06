@@ -8,6 +8,7 @@ import (
 	wordSeg "csust-got/word_seg"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -42,6 +43,10 @@ func main() {
 	bot, err := initBot()
 	if err != nil {
 		log.Panic(err.Error())
+	}
+
+	if config.BotConfig.DebugMode {
+		registerDebugHandler(bot)
 	}
 
 	registerBaseHandler(bot)
@@ -101,6 +106,21 @@ func initBot() (*Bot, error) {
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
 	return bot, nil
+}
+
+func registerDebugHandler(bot *Bot) {
+	opts := config.BotConfig.DebugOptConfig
+
+	if opts.ShowThis {
+		bot.Handle("/_show_this", func(ctx Context) error {
+			obj, err := json.Marshal(ctx.Message())
+			if err != nil {
+				return err
+			}
+			_, err = util.SendReplyWithError(ctx.Chat(), fmt.Sprintf("```%s```", obj), ctx.Message(), ModeMarkdownV2)
+			return err
+		})
+	}
 }
 
 func registerBaseHandler(bot *Bot) {

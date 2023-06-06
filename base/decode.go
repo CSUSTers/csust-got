@@ -1,7 +1,9 @@
 package base
 
 import (
+	"bytes"
 	"csust-got/entities"
+	"csust-got/log"
 	"csust-got/util"
 	"encoding/base64"
 	"encoding/hex"
@@ -10,7 +12,9 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 
+	"go.uber.org/zap"
 	exencoding "golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/japanese"
@@ -55,6 +59,22 @@ func Decode(ctx tb.Context) error {
 	var encoder *exencoding.Encoder
 	useEncoder := true
 
+	log.Debug("decode", zap.String("from", from), zap.String("to", to), zap.String("text", text))
+
+	if !util.SliceContains([]string{"utf8", "utf16le", "utf16be"}, from) {
+		var buf bytes.Buffer
+		for _, rune := range text {
+			if rune != utf8.RuneError {
+				_, err := buf.WriteRune(rune)
+				if err != nil {
+					log.Debug("write string buf error", zap.Error(err))
+				}
+			}
+		}
+		text = buf.String()
+		log.Debug("preprocess text", zap.String("text", text))
+	}
+
 	switch from {
 	case "gbk":
 		encoder = simplifiedchinese.GBK.NewEncoder()
@@ -71,7 +91,10 @@ func Decode(ctx tb.Context) error {
 	}
 
 	if useEncoder {
-		bs, _ = encoder.Bytes([]byte(text))
+		bs, err = encoder.Bytes([]byte(text))
+		if err != nil {
+			log.Debug("encode error", zap.Error(err))
+		}
 	} else {
 		switch from {
 		case "base64":
@@ -102,6 +125,7 @@ func Decode(ctx tb.Context) error {
 			}
 		}
 	}
+	log.Debug("encode result", zap.ByteString("bs", bs), zap.Binary("bytes", bs))
 
 	var result string
 	var decoder *exencoding.Decoder
@@ -123,7 +147,10 @@ func Decode(ctx tb.Context) error {
 	}
 
 	if useDecoder {
-		bs, _ = decoder.Bytes(bs)
+		bs, err = decoder.Bytes(bs)
+		if err != nil {
+			log.Debug("decode error", zap.Error(err))
+		}
 		result = string(bs)
 	} else {
 		switch to {
@@ -154,6 +181,7 @@ func Decode(ctx tb.Context) error {
 			}
 		}
 	}
+	log.Debug("decode result", zap.String("result", result))
 
 	result = fmt.Sprintf("```%s```", escapeMdReservedChars(result))
 
