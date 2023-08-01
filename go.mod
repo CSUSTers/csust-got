@@ -9,7 +9,7 @@ require (
 	github.com/meilisearch/meilisearch-go v0.25.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
-	github.com/quic-go/quic-go v0.37.0
+	github.com/quic-go/quic-go v0.37.1
 	github.com/redis/go-redis/v9 v9.0.5
 	github.com/sashabaranov/go-openai v1.14.1
 	github.com/spf13/viper v1.16.0
