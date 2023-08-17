@@ -10,7 +10,7 @@ require (
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
 	github.com/quic-go/quic-go v0.37.3
-	github.com/redis/go-redis/v9 v9.0.5
+	github.com/redis/go-redis/v9 v9.1.0
 	github.com/sashabaranov/go-openai v1.14.1
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
