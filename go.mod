@@ -9,9 +9,9 @@ require (
 	github.com/meilisearch/meilisearch-go v0.25.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/prometheus/common v0.44.0
-	github.com/redis/go-redis/v9 v9.1.0
 	github.com/quic-go/quic-go v0.38.0
-	github.com/sashabaranov/go-openai v1.14.2
+	github.com/redis/go-redis/v9 v9.1.0
+	github.com/sashabaranov/go-openai v1.15.1
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
 	go.uber.org/zap v1.25.0
