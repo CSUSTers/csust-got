@@ -37,7 +37,7 @@ type chatContext struct {
 // InitChat init chat service
 func InitChat() {
 	if config.BotConfig.ChatConfig.Key != "" {
-		clientConfig := openai.DefaultConfig(config.BotConfig.Token)
+		clientConfig := openai.DefaultConfig(config.BotConfig.ChatConfig.Key)
 		if u, err := url.Parse(config.BotConfig.Proxy); err == nil {
 			clientConfig.HTTPClient.Transport = &http.Transport{
 				Proxy: http.ProxyURL(u),
