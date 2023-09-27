@@ -158,6 +158,7 @@ func extractStatusCode(err error) int {
 }
 
 func handleStreamError(ctx *chatContext, err error) bool {
+	log.Debug("[ChatGPT] Error", zap.Error(err))
 	statusCode := extractStatusCode(err)
 	if statusCode == 429 { // 错误代码为429
 		log.Debug("[ChatGPT] Rate limit exceeded, retrying...", zap.Error(err))
