@@ -17,7 +17,7 @@ require (
 	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 	golang.org/x/net v0.16.0
-	golang.org/x/oauth2 v0.12.0
+	golang.org/x/oauth2 v0.13.0
 	golang.org/x/text v0.13.0
 	golang.org/x/time v0.3.0
 	gopkg.in/telebot.v3 v3.1.3
