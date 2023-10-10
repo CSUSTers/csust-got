@@ -7,7 +7,7 @@ require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.25.1
-	github.com/prometheus/client_golang v1.16.0
+	github.com/prometheus/client_golang v1.17.0
 	github.com/prometheus/common v0.44.0
 	github.com/quic-go/quic-go v0.39.0
 	github.com/redis/go-redis/v9 v9.2.1
@@ -51,8 +51,8 @@ require (
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_model v0.4.0 // indirect
-	github.com/prometheus/procfs v0.10.1 // indirect
+	github.com/prometheus/client_model v0.4.1-0.20230718164431-9a2bf3000d16 // indirect
+	github.com/prometheus/procfs v0.11.1 // indirect
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/qtls-go1-20 v0.3.4 // indirect
 	github.com/sagikazarmark/locafero v0.3.0 // indirect
