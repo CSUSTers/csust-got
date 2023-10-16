@@ -474,6 +474,42 @@ linters-settings:
     ignorePackageGlobs:
       - encoding/*
       - github.com/pkg/*
+  
+  depguard:
+    rules:
+      # Name of a rule.
+      main:
+        # List of file globs that will match this list of settings to compare against.
+        # Default: $all
+        files:
+          - "!$test"
+        # List of allowed packages.
+        allow:
+          - $gostd
+          - csust-got
+          - github.com/spf13/viper
+          - github.com/quic-go/quic-go
+          - github.com/huichen/sego
+          - github.com/iyear/biligo
+          - mvdan.cc/xurls
+          - github.com/meilisearch/meilisearch-go
+          - github.com/sashabaranov/go-openai
+          - github.com/redis/go-redis
+          - github.com/google/go-github
+          - github.com/prometheus/common
+          - github.com/prometheus/client_golang
+        # Packages that are not allowed where the value is a suggestion.
+        deny:
+          # - pkg: "github.com/sirupsen/logrus"
+          #   desc: not allowed
+          # - pkg: "github.com/pkg/errors"
+          #   desc: Should be replaced by standard lib errors package
+      # test:
+      #   files:
+      #     - "$test"
+      #   allow:
+      #     - $gostd
+      #     - "github.com/stretchr/testify"
 
 linters:
   enable:
