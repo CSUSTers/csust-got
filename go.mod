@@ -19,7 +19,7 @@ require (
 	golang.org/x/net v0.17.0
 	golang.org/x/oauth2 v0.13.0
 	golang.org/x/text v0.13.0
-	golang.org/x/time v0.3.0
+	golang.org/x/time v0.4.0
 	gopkg.in/telebot.v3 v3.1.4
 	mvdan.cc/xurls/v2 v2.5.0
 )
