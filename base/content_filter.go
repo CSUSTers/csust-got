@@ -95,7 +95,17 @@ func bilibiliHandler(biliUrl *url.URL) (string, error) {
 }
 
 func getOriginalURL(shortURL string) (string, error) {
-	resp, err := http.Get(shortURL)
+	// 添加一些ua头
+	client := &http.Client{}
+
+	req, err := http.NewRequest("GET", shortURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/237.84.2.178 Safari/537.36")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
