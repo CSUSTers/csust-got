@@ -3,6 +3,7 @@ package base
 import (
 	"csust-got/config"
 	"csust-got/log"
+	"csust-got/util"
 	"errors"
 	bg "github.com/iyear/biligo"
 	"go.uber.org/zap"
@@ -95,7 +96,17 @@ func bilibiliHandler(biliUrl *url.URL) (string, error) {
 }
 
 func getOriginalURL(shortURL string) (string, error) {
-	resp, err := http.Get(shortURL)
+	// 添加一些ua头
+	client := &http.Client{}
+
+	req, err := http.NewRequest("GET", shortURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", util.RandUA())
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
