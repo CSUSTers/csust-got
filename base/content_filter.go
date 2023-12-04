@@ -3,6 +3,7 @@ package base
 import (
 	"csust-got/config"
 	"csust-got/log"
+	"csust-got/util"
 	"errors"
 	bg "github.com/iyear/biligo"
 	"go.uber.org/zap"
@@ -103,7 +104,7 @@ func getOriginalURL(shortURL string) (string, error) {
 		return "", err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/237.84.2.178 Safari/537.36")
+	req.Header.Set("User-Agent", util.RandUA())
 
 	resp, err := client.Do(req)
 	if err != nil {
