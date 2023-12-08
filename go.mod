@@ -20,7 +20,7 @@ require (
 	golang.org/x/oauth2 v0.15.0
 	golang.org/x/text v0.14.0
 	golang.org/x/time v0.5.0
-	gopkg.in/telebot.v3 v3.1.4
+	gopkg.in/telebot.v3 v3.2.1
 	mvdan.cc/xurls/v2 v2.5.0
 )
 
