@@ -1,3 +1,6 @@
+// +build heap_test
+// go:build heap_test
+
 package heap
 
 import (
