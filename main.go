@@ -175,6 +175,9 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
 
+	// CIE handler
+	bot.Handle("/cie", base.GenColorCIE)
+
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
 }
