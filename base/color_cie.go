@@ -6,14 +6,22 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/gabriel-vasile/mimetype"
 	"go.uber.org/zap"
 	"golang.org/x/image/webp"
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/vg"
+	"gonum.org/v1/plot/vg/draw"
+	"gonum.org/v1/plot/vg/vgimg"
+	"gopkg.in/telebot.v3"
 	. "gopkg.in/telebot.v3"
 
 	"csust-got/log"
@@ -120,6 +128,79 @@ func GenColorCIE(ctx Context) error {
 			return
 		}
 
-		// TODO
+		out, err := plotCIEDiagram(decodeImg)
+		if err != nil {
+			log.Error("plot CIE diagram error", zap.Error(err))
+			errMsg = "plot CIE diagram error"
+			return
+		}
+
+		_, err = util.EditMessageWithError(replyMsg, telebot.Photo{File: telebot.FromReader(bytes.NewReader(out))})
+		if err != nil {
+			log.Error("send image error", zap.Error(err))
+			errMsg = "send image error"
+			return
+		}
 	}()
+
+	return nil
+}
+
+func plotCIEDiagram(img image.Image) ([]byte, error) {
+	startTime := time.Now()
+
+	bound := img.Bounds()
+	width := bound.Dx()
+	height := bound.Dy()
+	pixels := make([]color.Color, width*height)
+	for i := 0; i < width; i++ {
+		for j := 0; j < height; j++ {
+			pix := img.At(i, j)
+			pixels[i*width+j] = pix
+		}
+	}
+
+	diag := plot.New()
+	diag.Title.Text = "CIE 1931 Chromaticity Diagram"
+	diag.X.Label.Text = "CIE x"
+	diag.Y.Label.Text = "CIE y"
+	diag.X.Min = 0
+	diag.X.Max = 1
+	diag.Y.Min = 0
+	diag.Y.Max = 1
+
+	const imgW = 500
+	const imgH = 500
+	cv := image.NewRGBA(image.Rect(0, 0, imgW, imgH))
+	for _, pix := range pixels {
+		rr, gg, bb, aa := pix.RGBA()
+		if aa == 0 {
+			continue
+		}
+		r := float32(rr * 0xffff / aa)
+		g := float32(gg * 0xffff / aa)
+		b := float32(bb * 0xffff / aa)
+
+		x := r / (r + g + b)
+		y := g / (r + g + b)
+
+		cv.Set(int(x*imgW), int(y*imgH), pix)
+	}
+
+	diag.Add(plotter.NewImage(cv, 0, 0, 1, 1))
+
+	cvImg := vgimg.New(vg.Points(float64(imgW)), vg.Points(float64(imgH)))
+	dc := draw.New(cvImg)
+	dc = draw.Crop(dc, 0, -vg.Centimeter, 0, 0)
+	diag.Draw(dc)
+
+	output := bytes.NewBuffer([]byte{})
+	if _, err := (vgimg.PngCanvas{Canvas: cvImg}).WriteTo(output); err != nil {
+		log.Error("write image error", zap.Error(err))
+		return nil, err
+	}
+
+	processTime := time.Now().Sub(startTime)
+	log.Info("CIE process time", zap.Duration("process-time", processTime), zap.Int("width", width), zap.Int("height", height))
+	return output.Bytes(), nil
 }
