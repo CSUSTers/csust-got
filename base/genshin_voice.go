@@ -44,6 +44,10 @@ type genShinVoiceV3 struct {
 	Text      string `json:"text"`
 }
 
+const msgVoiceNotFoundAndArgs = "没有找到对应的语音，参数：\n"
+const msgVoiceApiServerResponError = "语音api服务器返回异常"
+const msgFailedToConnectApiServer = "连接语音api服务器失败"
+
 // GetVoice (v1版本)从api服务器拿到语音的url以及其他信息，并发送为tg的voice信息
 func GetVoice(ctx Context) error {
 	m := ctx.Message()
@@ -89,8 +93,8 @@ func GetVoiceV2(ctx Context) error {
 	resp, err := http.Get(serverAddress + "/GetVoice/v2" + arg)
 
 	if err != nil {
-		log.Error("连接语音api服务器失败", zap.Error(err))
-		err := SendErrVoice(m.Chat, "连接语音api服务器失败")
+		log.Error(msgFailedToConnectApiServer, zap.Error(err))
+		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -111,8 +115,8 @@ func GetVoiceV2(ctx Context) error {
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		log.Error("语音api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数：\n"+strings.Join(debugMsg, "\n"))
+		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
@@ -142,8 +146,8 @@ func GetVoiceV3(ctx Context) error {
 
 	resp, err := http.Get(serverAddress)
 	if err != nil {
-		log.Error("连接语音api服务器失败", zap.Error(err))
-		err := SendErrVoice(m.Chat, "连接语音api服务器失败")
+		log.Error(msgFailedToConnectApiServer, zap.Error(err))
+		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -164,8 +168,8 @@ func GetVoiceV3(ctx Context) error {
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		log.Error("语音api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数：\n"+strings.Join(debugMsg, "\n"))
+		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
@@ -198,8 +202,8 @@ func GetVoiceV3Pro(ctx Context) error {
 
 	resp, err := http.PostForm(serverAddress, values)
 	if err != nil {
-		log.Error("连接语音api服务器失败", zap.Error(err))
-		err := SendErrVoice(m.Chat, "连接语音api服务器失败")
+		log.Error(msgFailedToConnectApiServer, zap.Error(err))
+		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -220,8 +224,8 @@ func GetVoiceV3Pro(ctx Context) error {
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		log.Error("语音api服务器返回异常", zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "没有找到对应的语音，参数：\n"+strings.Join(debugMsg, "\n"))
+		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
+		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)

@@ -498,6 +498,7 @@ linters-settings:
           - github.com/google/go-github
           - github.com/prometheus/common
           - github.com/prometheus/client_golang
+          - github.com/gabriel-vasile/mimetype
         # Packages that are not allowed where the value is a suggestion.
         deny:
           # - pkg: "github.com/sirupsen/logrus"
