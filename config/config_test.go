@@ -48,6 +48,7 @@ func TestReadConfigFile(t *testing.T) {
 	req.Empty(BotConfig.RedisConfig.RedisPass)
 }
 
+// nolint:goconst
 func TestReadEnv(t *testing.T) {
 	req := testInit(t)
 

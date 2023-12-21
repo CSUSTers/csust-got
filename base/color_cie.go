@@ -21,7 +21,6 @@ import (
 	"gonum.org/v1/plot/vg"
 	"gonum.org/v1/plot/vg/draw"
 	"gonum.org/v1/plot/vg/vgimg"
-	"gopkg.in/telebot.v3"
 	. "gopkg.in/telebot.v3"
 
 	"csust-got/log"
@@ -34,25 +33,27 @@ var availableImageMimeTypes = []string{
 	"image/webp",
 }
 
+var errNoImgFile = errors.New("no img/file in message")
+var errUnsupportedImgType = errors.New("unsupported image type")
+
 func getImgFileFromMsg(msg *Message) (*File, error) {
-	if msg.Photo != nil {
+	switch {
+	case msg.Photo != nil:
 		return &msg.Photo.File, nil
-	} else if msg.Sticker != nil {
+	case msg.Sticker != nil:
 		return &msg.Sticker.File, nil
-	} else if msg.Document != nil {
+	case msg.Document != nil:
 		return &msg.Document.File, nil
-	} else {
-		return nil, errors.New("no img/file in message")
+	default:
+		return nil, errNoImgFile
 	}
 }
 
 func checkMIMEType(mime *mimetype.MIME) bool {
-	if slices.Contains(availableImageMimeTypes, mime.String()) {
-		return true
-	}
-	return false
+	return slices.Contains(availableImageMimeTypes, mime.String())
 }
 
+// GenColorCIE generate CIE diagram from image reply by message
 func GenColorCIE(ctx Context) error {
 	msg := ctx.Message()
 	if msg.ReplyTo != nil {
@@ -71,7 +72,7 @@ func GenColorCIE(ctx Context) error {
 			if errMsg != "" {
 				errMsg = "处理失败: " + errMsg
 				util.EditMessage(replyMsg, errMsg)
-			} else if context.Canceled == cancelCtx.Err() {
+			} else if errors.Is(cancelCtx.Err(), context.Canceled) {
 				util.EditMessage(replyMsg, "已取消")
 			}
 			cancel()
@@ -97,7 +98,7 @@ func GenColorCIE(ctx Context) error {
 			errMsg = "get image file error"
 			return
 		}
-		defer wtr.Close()
+		defer func() { _ = wtr.Close() }()
 		bs, err := io.ReadAll(wtr)
 		if err != nil {
 			log.Error("read image file error", zap.Error(err))
@@ -120,7 +121,7 @@ func GenColorCIE(ctx Context) error {
 		case "image/webp":
 			decodeImg, err = webp.Decode(bytes.NewReader(bs))
 		default:
-			err = fmt.Errorf("unsupported mime type: %s", mime.String())
+			err = fmt.Errorf("%w: %s", errUnsupportedImgType, mime.String())
 		}
 		if err != nil {
 			log.Error("decode image error", zap.Error(err))
@@ -135,7 +136,7 @@ func GenColorCIE(ctx Context) error {
 			return
 		}
 
-		_, err = util.EditMessageWithError(replyMsg, telebot.Photo{File: telebot.FromReader(bytes.NewReader(out))})
+		_, err = util.EditMessageWithError(replyMsg, Photo{File: FromReader(bytes.NewReader(out))})
 		if err != nil {
 			log.Error("send image error", zap.Error(err))
 			errMsg = "send image error"
@@ -200,7 +201,7 @@ func plotCIEDiagram(img image.Image) ([]byte, error) {
 		return nil, err
 	}
 
-	processTime := time.Now().Sub(startTime)
+	processTime := time.Since(startTime)
 	log.Info("CIE process time", zap.Duration("process-time", processTime), zap.Int("width", width), zap.Int("height", height))
 	return output.Bytes(), nil
 }
