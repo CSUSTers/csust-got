@@ -182,8 +182,13 @@ func plotCIEDiagram(img image.Image) ([]byte, error) {
 		g := float32(gg * 0xffff / aa)
 		b := float32(bb * 0xffff / aa)
 
-		x := r / (r + g + b)
-		y := g / (r + g + b)
+		sumrgb := r + g + b
+		if sumrgb == 0 {
+			continue
+		}
+
+		x := r / sumrgb
+		y := g / sumrgb
 
 		cv.Set(int(x*imgW), int(y*imgH), pix)
 	}
