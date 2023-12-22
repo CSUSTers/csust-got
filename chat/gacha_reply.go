@@ -9,12 +9,25 @@ import (
 
 // GachaReplyHandler reply a gpt msg determined by the gacha result
 func GachaReplyHandler(ctx telebot.Context) {
+	msg := ctx.Message()
+
+	// only apply to text message
+	var text string
+	if len(msg.Text) > 0 {
+		text = msg.Text
+	} else if len(msg.Caption) > 0 {
+		text = msg.Caption
+	}
+	if len(text) == 0 {
+		return
+	}
+
 	result, err := gacha.PerformGaCha(ctx.Chat().ID)
 	if err != nil {
 		log.Error("[GaCha]: perform gacha failed", zap.Error(err))
 		return
 	}
-	ctx.Message().Text = "/chat " + ctx.Message().Text
+	ctx.Message().Text = "/chat " + text
 	switch result {
 	case 3:
 		return
