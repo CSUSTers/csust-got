@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"io"
 	"math/rand"
 	"net/http"
 	"regexp"
@@ -97,6 +98,11 @@ func DeleteMessage(m *tb.Message) {
 	if err != nil {
 		log.Error("Can't delete message", zap.Error(err))
 	}
+}
+
+// GetFile get file from telegram.
+func GetFile(file *tb.File) (io.ReadCloser, error) {
+	return config.BotConfig.Bot.File(file)
 }
 
 // GetName can get user's name.

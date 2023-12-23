@@ -9,10 +9,10 @@ require (
 	github.com/meilisearch/meilisearch-go v0.26.0
 	github.com/prometheus/client_golang v1.17.0
 	github.com/prometheus/common v0.45.0
-	github.com/quic-go/quic-go v0.40.0
-	github.com/redis/go-redis/v9 v9.3.0
+	github.com/quic-go/quic-go v0.40.1
+	github.com/redis/go-redis/v9 v9.3.1
 	github.com/sashabaranov/go-openai v1.17.9
-	github.com/spf13/viper v1.18.0
+	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.8.4
 	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20231006140011-7918f672742d
@@ -69,7 +69,7 @@ require (
 	github.com/valyala/fasthttp v1.50.0 // indirect
 	go.uber.org/mock v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
+	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/mod v0.13.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect

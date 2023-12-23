@@ -77,7 +77,7 @@ func AddTasks(tasks ...*TaskNonced) error {
 		}
 		zs = append(zs, redis.Z{
 			Score:  float64(t.ExecTime),
-			Member: value,
+			Member: string(value),
 		})
 	}
 
