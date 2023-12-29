@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
-const regexTempl = `(?mi)((?P<schema>https?)://)?(?:(?P<domain>(?:[\w\d-]+\.)+(?P<tld>(?:%[1]s)))(?:\:(?P<port>\d{1,5}))?(?P<path>(?:/[^\s?&:]*)*))(?P<query>\?(?:\S*))?`
+const regexTempl = `(?mi)\b(?:(?P<schema>https?)://)?(?:(?P<domain>(?:[\w\d~-]+\.)+(?P<tld>(?:%[1]s)))(?:\:(?P<port>\d{1,5}))?(?P<path>(?:/[^\s\?&:()$!]*)*))(?P<query>\?(?:[^\s()^$!]*))?`
 
-var Patt = regexp.MustCompile(fmt.Sprintf(regexTempl, "("+strings.Join(TLDs, "|")+")"))
+// Patt is alias to [`UrlPatt`]
+var Patt = regexp.MustCompile(fmt.Sprintf(regexTempl, strings.Join(TLDs, "|")))
+
+var UrlPatt = Patt
+
+func init() {
+	UrlPatt.Longest()
+}
