@@ -1,6 +1,10 @@
 package urlx
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestUrlRegexMatch(t *testing.T) {
 	cases := []struct {
@@ -30,4 +34,26 @@ func TestUrlRegexMatch(t *testing.T) {
 			t.Errorf("Patt.MatchString(%q) = %v, want %v", c.text, got, c.want)
 		}
 	}
+}
+
+func TestUrlRegexSubmatch(t *testing.T) {
+	t.Run("test-1", func(t *testing.T) {
+		text := `
+abc https://example.com
+测试 http://example.com/echo 测试
+测试 example.com?abc=def 测试
+`
+
+		ms := Patt.FindAllStringSubmatchIndex(text, -1)
+		if len(ms) != 3 {
+			t.Errorf("len(matches) = %d, want %d", len(ms), 3)
+		}
+		s1 := text[ms[0][0]:ms[0][1]]
+		s2 := text[ms[1][0]:ms[1][1]]
+		s3 := text[ms[2][0]:ms[2][1]]
+		t.Log(ms)
+		assert.Equal(t, "https://example.com", s1)
+		assert.Equal(t, "http://example.com/echo", s2)
+		assert.Equal(t, "example.com?abc=def", s3)
+	})
 }
