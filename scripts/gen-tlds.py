@@ -25,8 +25,8 @@ class TrieNode:
             node.insert(s[1:])
             self.children[ch] = node
 
-    def to_regex(self, greedy=True) -> str:
-        xs = self._to_regex(greedy)
+    def to_regex(self, greedy=True, nocapture=True) -> str:
+        xs = self._to_regex(greedy, nocapture)
         match len(xs):
             case 0:
                 return ""
@@ -35,7 +35,7 @@ class TrieNode:
             case _:
                 return '|'.join(xs)
 
-    def _to_regex(self, greedy=True) -> list[str]:
+    def _to_regex(self, greedy=True, nocapture=True) -> list[str]:
         if not self.children:
             return []
         else:
@@ -43,28 +43,28 @@ class TrieNode:
             ret = []
             items = [item for item in self.children.items()]
             for ch, node in items:
-                xs = node._to_regex(greedy)
+                xs = node._to_regex(greedy, nocapture)
                 match len(xs):
                     case 0:
                         follow = ""
                     case 1:
                         follow = xs[0]
                     case _:
-                        follow = '(?:' + '|'.join(xs) + ')'
+                        follow = ('(?:' if nocapture else '(') \
+                            + '|'.join(xs) + ')'
                 ret.append(ch+follow)
             if self.leaf and ret:
                 if len(ret) == 1 and len(ret[0]) == 1:
                     return [ret[0]+suffix]
-                return [f'(?:{"|".join(ret)}){suffix}']
+                return [('(?:'if nocapture else '(')+f'{"|".join(ret)}){suffix}']
             return ret
-
 
     def dict(self):
         return {
             'leaf': self.leaf,
             'children': {ch: node.dict() for ch, node in self.children.items()}
         }
-                
+
     def __repr__(self) -> str:
         return f"TrieNode({self.leaf}, {self.children})"
 
@@ -97,27 +97,44 @@ var TLDs = []string{
 %s
 }
 
-// TLDRegex is regex pattern to match TLDs
+// TLDsAscii is similar to [`TLDs`], but it only contains ASCII characters.
+var TLDsAscii = []string{
+%s
+}
+
+// TLDRegex is regex pattern to match [`TLDs`]
 //
 //nolint:revive // it's long
 var TLDRegex = `%s`
+
+// TLDAsciiRegex is regex pattern to match [`TLDsAscii`]
+//
+//nolint:revive // it's long
+var TLDAsciiRegex = `%s`
 """
 
 
 def main():
-    tlds = fetch_tlds()
-    tlds = process_tlds(tlds)
+    tlds_raw = fetch_tlds()
+    tlds = process_tlds(tlds_raw)
+    tlds_ascii = process_tlds(tlds_raw, ascii_only=True)
 
-    root = TrieNode()
+    tlds_trie = TrieNode()
     for tld in tlds:
-        root.insert(tld)
-    tlds_regex = root.to_regex()
+        tlds_trie.insert(tld)
+    tlds_regex = tlds_trie.to_regex()
     # pprint.pprint(root.dict())
     # print(tlds_regex)
 
+    tlds_ascii_trie = TrieNode()
+    for tld in tlds_ascii:
+        tlds_ascii_trie.insert(tld)
+    tlds_ascii_regex = tlds_ascii_trie.to_regex()
+
     tlds = "\n".join(f'\t"{tld}",' for tld in tlds)
+    tlds_ascii = "\n".join(f'\t"{tld}",' for tld in tlds_ascii)
     with open("util/urlx/tlds.go", "w", encoding='utf-8') as f:
-        f.write(TEMPLATE % (tlds, tlds_regex))
+        f.write(TEMPLATE % (tlds, tlds_ascii, tlds_regex, tlds_ascii_regex))
     print("Done")
 
 
