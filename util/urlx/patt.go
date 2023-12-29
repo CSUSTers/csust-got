@@ -9,7 +9,7 @@ import (
 const regexTempl = `(?mi)(?:^|\s)(?P<url>(?:(?P<schema>https?)://)?(?:(?P<domain>(?:[\w\d~-]+\.)+(?P<tld>(?:%[1]s)))(?:\:(?P<port>\d{1,5}))?(?P<path>(?:/[^\s\?&:()$!"'#]*)*))(?P<query>\?(?:[^\s()^$!"'#]*))?(?P<hash>#(?:[^\s()^$!"']*))?)`
 
 // Patt is alias to [`UrlPatt`]
-var Patt = regexp.MustCompile(fmt.Sprintf(regexTempl, strings.Join(TLDs, "|")))
+var Patt = regexp.MustCompile(fmt.Sprintf(regexTempl, TLDRegex))
 
 var UrlPatt = Patt
 
