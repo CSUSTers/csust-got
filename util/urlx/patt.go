@@ -23,11 +23,8 @@ func SubmatchGroupString(s string, matchIndexes []int, groupIdx int) string {
 	return s[matchIndexes[groupIdx*2]:matchIndexes[groupIdx*2+1]]
 }
 
-func SubmatchGroupStringFromName(p *regexp.Regexp, s string, matchIndexes []int, groupName string) string {
+func SubmatchGroupStringByName(p *regexp.Regexp, s string, matchIndexes []int, groupName string) string {
 	groupIdx := p.SubexpIndex(groupName)
-	if groupIdx < 0 {
-		return ""
-	}
 	return SubmatchGroupString(s, matchIndexes, groupIdx)
 }
 
