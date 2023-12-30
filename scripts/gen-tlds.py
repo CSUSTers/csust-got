@@ -76,17 +76,20 @@ def fetch_tlds():
     return resp.text.splitlines()
 
 
-def process_tlds(tlds: list[str], ascii_only: bool = False):
+def process_tlds(tlds: list[str], punycode=False, ascii_only=False):
     tlds = [tld.strip().lower()
-            for tld in tlds if tld.strip() and not tld.startswith("#")]
+            for tld in tlds
+            if tld.strip() and not tld.startswith("#")]
+    if ascii_only:
+        tlds = [tld for tld in tlds if not tld.startswith('xn--')]
 
     ret = []
     for tld in tlds:
-        if not ascii_only and tld.startswith("xn--"):
+        if not punycode and tld.startswith("xn--"):
             ret.append(tld.encode().decode("idna"))
         else:
             ret.append(tld)
-    ret.sort()
+    ret.sort(key=lambda x: (999, x) if x.startswith('xn--') else (0, x))
     return ret
 
 
@@ -102,6 +105,12 @@ var TLDsAscii = []string{
 %s
 }
 
+// TLDsPunycode is similar to [`TLDs`], but it convert punycode to Unicode.
+var TLDsPunycode = []string{
+%s
+}
+
+
 // TLDRegex is regex pattern to match [`TLDs`]
 //
 //nolint:revive // it's long
@@ -111,12 +120,18 @@ var TLDRegex = `%s`
 //
 //nolint:revive // it's long
 var TLDAsciiRegex = `%s`
+
+// TLDsPunycodeRegex is regex pattern to match [`TLDsPunycode`]
+//
+//nolint:revive // it's long
+var TLDsPunycodeRegex = `%s`
 """
 
 
 def main():
     tlds_raw = fetch_tlds()
     tlds = process_tlds(tlds_raw)
+    tlds_punycode = process_tlds(tlds_raw, punycode=True)
     tlds_ascii = process_tlds(tlds_raw, ascii_only=True)
 
     tlds_trie = TrieNode()
@@ -126,15 +141,22 @@ def main():
     # pprint.pprint(root.dict())
     # print(tlds_regex)
 
+    tlds_punycode_trie = TrieNode()
+    for tld in tlds_punycode:
+        tlds_punycode_trie.insert(tld)
+    tlds_punycode_regex = tlds_punycode_trie.to_regex()
+
     tlds_ascii_trie = TrieNode()
     for tld in tlds_ascii:
         tlds_ascii_trie.insert(tld)
-    tlds_ascii_regex = tlds_ascii_trie.to_regex()
+    tlds_ascii_regex = tlds_punycode_trie.to_regex()
 
     tlds = "\n".join(f'\t"{tld}",' for tld in tlds)
+    tlds_punycode = "\n".join(f'\t"{tld}",' for tld in tlds_punycode)
     tlds_ascii = "\n".join(f'\t"{tld}",' for tld in tlds_ascii)
     with open("util/urlx/tlds.go", "w", encoding='utf-8') as f:
-        f.write(TEMPLATE % (tlds, tlds_ascii, tlds_regex, tlds_ascii_regex))
+        f.write(TEMPLATE % (tlds, tlds_ascii, tlds_punycode,
+                            tlds_regex, tlds_ascii_regex, tlds_punycode_regex))
     print("Done")
 
 
