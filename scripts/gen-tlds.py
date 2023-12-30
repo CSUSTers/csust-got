@@ -1,3 +1,7 @@
+import encodings
+from encodings import utf_8, unicode_escape
+import functools
+import itertools
 import pprint
 from typing import Self
 
@@ -95,21 +99,24 @@ def process_tlds(tlds: list[str], punycode=False, ascii_only=False):
 
 TEMPLATE = """package urlx
 
-// TLDs is generated from https://data.iana.org/TLD/tlds-alpha-by-domain.txt
-var TLDs = []string{
-%s
-}
-
 // TLDsAscii is similar to [`TLDs`], but it only contains ASCII characters.
 var TLDsAscii = []string{
 %s
 }
 
-// TLDsPunycode is similar to [`TLDs`], but it convert punycode to Unicode.
-var TLDsPunycode = []string{
+var punycodeTLDs = []string{
 %s
 }
 
+var unicodeTLDs = []string{
+%s
+}
+
+// TLDs is generated from https://data.iana.org/TLD/tlds-alpha-by-domain.txt
+var TLDs = TLDsAscii + unicodeTLDs
+
+// TLDsPunycode is similar to [`TLDs`], but it convert punycode to Unicode.
+var TLDsPunycode = TLDsAscii + punycodeTLDs
 
 // TLDRegex is regex pattern to match [`TLDs`]
 //
@@ -151,11 +158,11 @@ def main():
         tlds_ascii_trie.insert(tld)
     tlds_ascii_regex = tlds_punycode_trie.to_regex()
 
-    tlds = "\n".join(f'\t"{tld}",' for tld in tlds)
-    tlds_punycode = "\n".join(f'\t"{tld}",' for tld in tlds_punycode)
-    tlds_ascii = "\n".join(f'\t"{tld}",' for tld in tlds_ascii)
+    tlds_unicode_only = "\n".join(f'\t"{tld}",' for tld in tlds if ord(tld[0]) >= 128)
+    tlds_punycode_only = "\n".join(f'\t"{tld}",' for tld in tlds_punycode if tld.startswith('xn--'))
+    tlds_ascii_only = "\n".join(f'\t"{tld}",' for tld in tlds_ascii)
     with open("util/urlx/tlds.go", "w", encoding='utf-8') as f:
-        f.write(TEMPLATE % (tlds, tlds_ascii, tlds_punycode,
+        f.write(TEMPLATE % (tlds_ascii_only, tlds_punycode_only, tlds_unicode_only, 
                             tlds_regex, tlds_ascii_regex, tlds_punycode_regex))
     print("Done")
 
