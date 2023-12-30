@@ -2,13 +2,18 @@ package urlx
 
 import "csust-got/log"
 
+// ExtraType for [`Extra`]
 type ExtraType int
 
 const (
+	// Plain for text
 	Plain ExtraType = iota
+
+	// Url for url
 	Url
 )
 
+// Extra extracts text to [`Extra`]
 type Extra struct {
 	Type ExtraType
 
@@ -19,6 +24,7 @@ type Extra struct {
 	Url *ExtraUrl
 }
 
+// ExtraUrl is extracted url
 type ExtraUrl struct {
 	// Full url string
 	// example: `https://example.com/echo?q=hello#hash`
@@ -53,12 +59,14 @@ type ExtraUrl struct {
 	Hash string
 }
 
+// ExtractStr extracts text to [`Extra`] list
 func ExtractStr(text string) (extras []*Extra) {
 	if len(text) == 0 {
-		return
+		return []*Extra{}
 	}
 
 	cur := 0
+	extras = make([]*Extra, 0)
 	for _, m := range Patt.FindAllStringSubmatchIndex(text, -1) {
 		urlGroupIdx := Patt.SubexpIndex("url")
 		if urlGroupIdx < 0 {
@@ -96,5 +104,5 @@ func ExtractStr(text string) (extras []*Extra) {
 			Text: text[cur:],
 		})
 	}
-	return
+	return extras
 }
