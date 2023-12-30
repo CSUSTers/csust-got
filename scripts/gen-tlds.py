@@ -99,6 +99,8 @@ def process_tlds(tlds: list[str], punycode=False, ascii_only=False):
 
 TEMPLATE = """package urlx
 
+import "slices"
+
 // TLDsAscii is similar to [`TLDs`], but it only contains ASCII characters.
 var TLDsAscii = []string{
 %s
@@ -113,10 +115,10 @@ var unicodeTLDs = []string{
 }
 
 // TLDs is generated from https://data.iana.org/TLD/tlds-alpha-by-domain.txt
-var TLDs = TLDsAscii + unicodeTLDs
+var TLDs = append(slices.Clone(TLDsAscii), unicodeTLDs...)
 
 // TLDsPunycode is similar to [`TLDs`], but it convert punycode to Unicode.
-var TLDsPunycode = TLDsAscii + punycodeTLDs
+var TLDsPunycode = append(slices.Clone(TLDsAscii), punycodeTLDs...)
 
 // TLDRegex is regex pattern to match [`TLDs`]
 //
@@ -156,7 +158,7 @@ def main():
     tlds_ascii_trie = TrieNode()
     for tld in tlds_ascii:
         tlds_ascii_trie.insert(tld)
-    tlds_ascii_regex = tlds_punycode_trie.to_regex()
+    tlds_ascii_regex = tlds_ascii_trie.to_regex()
 
     tlds_unicode_only = "\n".join(f'\t"{tld}",' for tld in tlds if ord(tld[0]) >= 128)
     tlds_punycode_only = "\n".join(f'\t"{tld}",' for tld in tlds_punycode if tld.startswith('xn--'))
