@@ -1,16 +1,19 @@
 package urlx
 
-import "csust-got/log"
+import (
+	"bytes"
+	"csust-got/log"
+)
 
 // ExtraType for [`Extra`]
 type ExtraType int
 
 const (
-	// Plain for text
-	Plain ExtraType = iota
+	// TypePlain for text
+	TypePlain ExtraType = iota
 
-	// Url for url
-	Url
+	// TypeUrl for url
+	TypeUrl
 )
 
 // Extra extracts text to [`Extra`]
@@ -59,6 +62,36 @@ type ExtraUrl struct {
 	Hash string
 }
 
+func (u ExtraUrl) StringByFields() string {
+	buf := bytes.NewBufferString("")
+
+	// schema: `https://`
+	if u.Schema != "" {
+		buf.WriteString(u.Schema)
+		buf.WriteString("://")
+	}
+
+	// domain: `example.com`
+	buf.WriteString(u.Domain)
+
+	// port: `:8080`
+	if u.Port != "" {
+		buf.WriteString(":")
+		buf.WriteString(u.Port)
+	}
+
+	// path: `/echo`
+	buf.WriteString(u.Path)
+
+	// query: `?foo=bar`
+	buf.WriteString(u.Query)
+
+	// hash: `#hash`
+	buf.WriteString(u.Hash)
+
+	return buf.String()
+}
+
 // ExtractStr extracts text to [`Extra`] list
 func ExtractStr(text string) (extras []*Extra) {
 	if len(text) == 0 {
@@ -77,14 +110,14 @@ func ExtractStr(text string) (extras []*Extra) {
 
 		if begin > cur {
 			extras = append(extras, &Extra{
-				Type: Plain,
+				Type: TypePlain,
 				Text: text[cur:begin],
 			})
 		}
 		cur = end
 
 		extras = append(extras, &Extra{
-			Type: Url,
+			Type: TypeUrl,
 			Text: text[begin:end],
 			Url: &ExtraUrl{
 				Text:   text[begin:end],
@@ -100,7 +133,7 @@ func ExtractStr(text string) (extras []*Extra) {
 	}
 	if cur < len(text) {
 		extras = append(extras, &Extra{
-			Type: Plain,
+			Type: TypePlain,
 			Text: text[cur:],
 		})
 	}

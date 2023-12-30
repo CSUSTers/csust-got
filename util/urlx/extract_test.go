@@ -17,11 +17,11 @@ func TestExtractStr(t *testing.T) {
 			text: "This is a test https://example.com",
 			extras: []*Extra{
 				{
-					Type: Plain,
+					Type: TypePlain,
 					Text: "This is a test ",
 				},
 				{
-					Type: Url,
+					Type: TypeUrl,
 					Text: "https://example.com",
 					Url: &ExtraUrl{
 						Text:   "https://example.com",
@@ -42,11 +42,11 @@ func TestExtractStr(t *testing.T) {
 测试 example.com?abc=def#this?hash 测试`,
 			extras: []*Extra{
 				{
-					Type: Plain,
+					Type: TypePlain,
 					Text: "This is a test ",
 				},
 				{
-					Type: Url,
+					Type: TypeUrl,
 					Text: "http://example.com/echo?foo=bar",
 					Url: &ExtraUrl{
 						Text:   "http://example.com/echo?foo=bar",
@@ -60,11 +60,11 @@ func TestExtractStr(t *testing.T) {
 					},
 				},
 				{
-					Type: Plain,
+					Type: TypePlain,
 					Text: " 测试\n测试 ",
 				},
 				{
-					Type: Url,
+					Type: TypeUrl,
 					Text: "example.com?abc=def#this?hash",
 					Url: &ExtraUrl{
 						Text:   "example.com?abc=def#this?hash",
@@ -78,7 +78,7 @@ func TestExtractStr(t *testing.T) {
 					},
 				},
 				{
-					Type: Plain,
+					Type: TypePlain,
 					Text: " 测试",
 				},
 			},
