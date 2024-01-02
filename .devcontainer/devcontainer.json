@@ -18,7 +18,8 @@
         "eamodio.gitlens",
         "esbenp.prettier-vscode",
         "ms-python.python",
-        "mutantdino.resourcemonitor"
+        "mutantdino.resourcemonitor",
+        "ms-vscode.makefile-tools"
       ]
     }
   }
