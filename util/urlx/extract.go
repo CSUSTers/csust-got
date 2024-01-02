@@ -62,6 +62,7 @@ type ExtraUrl struct {
 	Hash string
 }
 
+// StringByFields return a URL from Extracted Fields
 func (u ExtraUrl) StringByFields() string {
 	buf := bytes.NewBufferString("")
 
