@@ -23,6 +23,7 @@ var biliDomains = []string{
 	"live.bilibili.com",
 }
 
+//nolint:revive // It's too long.
 var biliUrlRegex = `(?i)((?P<schema>https?://)?(?P<host>(?P<sub_domain>[\w\d\-]+\.)?(?P<main_domain>b23\.tv|bilibili\.com))(?P<path>(?:/[^\s\?#]*)*)?(?P<query>\?[^\s#]*)?(?P<hash>#[\S]*)?)`
 var biliPatt = regexp.MustCompile(biliUrlRegex)
 
@@ -44,41 +45,16 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		buf := bytes.NewBufferString("")
 		for _, e := range exs {
 			if e.Type == urlx.TypeUrl {
-				u := e.Url
-				if slices.Contains(biliDomains, u.Domain) {
-					if u.Query != "" {
-						continue
-					}
-
-					old, err := url.ParseQuery(u.Query[1:])
-					if err != nil {
-						log.Error("parse url query error", zap.Error(err))
-						return err
-					}
-
-					u.Query = ""
-
-					new := make(url.Values)
-					retainFields := []string{"tab", "t", "p"}
-					for _, k := range retainFields {
-						if v, ok := old[k]; ok {
-							new[k] = v
-						}
-					}
-					newQuery := new.Encode()
-					if newQuery != "" {
-						u.Query = "?" + newQuery
-					}
-					buf.WriteString(u.StringByFields())
-				} else {
-					buf.WriteString(u.Text)
+				err := writeUrl(buf, e)
+				if err != nil {
+					return err
 				}
 			} else {
 				buf.WriteString(e.Text)
 			}
 		}
 
-		ctx.Answer(&tb.QueryResponse{
+		err := ctx.Answer(&tb.QueryResponse{
 			Results: []tb.Result{
 				&tb.ResultBase{
 					Content: &tb.InputTextMessageContent{
@@ -88,6 +64,38 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 				},
 			},
 		})
+		if err != nil {
+			log.Error("inline mode answer error", zap.Error(err))
+		}
 		return nil
 	}
+}
+
+func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
+	u := e.Url
+	if slices.Contains(biliDomains, u.Domain) && u.Query != ""{
+		old, err := url.ParseQuery(u.Query[1:])
+		if err != nil {
+			log.Error("parse url query error", zap.Error(err))
+			return err
+		}
+
+		u.Query = ""
+
+		newMap := make(url.Values)
+		retainFields := []string{"tab", "t", "p"}
+		for _, k := range retainFields {
+			if v, ok := old[k]; ok {
+				newMap[k] = v
+			}
+		}
+		newQuery := newMap.Encode()
+		if newQuery != "" {
+			u.Query = "?" + newQuery
+		}
+		buf.WriteString(u.StringByFields())
+	} else {
+		buf.WriteString(u.Text)
+	}
+	return nil
 }
