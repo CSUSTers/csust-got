@@ -51,9 +51,12 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 
 		reText := buf.String()
 		err = ctx.Answer(&tb.QueryResponse{
-			Results: []tb.Result{
+			Results: tb.Results{
 				&tb.ArticleResult{
-					Title: reText,
+					ResultBase: tb.ResultBase{
+						ParseMode: tb.ModeMarkdownV2,
+					},
+					Title: "强化模式",
 					Text:  reText,
 				},
 			},
