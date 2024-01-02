@@ -43,18 +43,13 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 
 		exs := urlx.ExtractStr(text)
 		buf := bytes.NewBufferString("")
-		for _, e := range exs {
-			if e.Type == urlx.TypeUrl {
-				err := writeUrl(buf, e)
-				if err != nil {
-					return err
-				}
-			} else {
-				buf.WriteString(e.Text)
-			}
+		err := writeAll(buf, exs)
+		if err != nil {
+			log.Error("write all error", zap.Error(err))
+			return err
 		}
 
-		err := ctx.Answer(&tb.QueryResponse{
+		err = ctx.Answer(&tb.QueryResponse{
 			Results: []tb.Result{
 				&tb.ResultBase{
 					Content: &tb.InputTextMessageContent{
@@ -71,9 +66,23 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 	}
 }
 
+func writeAll(buf *bytes.Buffer, exs []*urlx.Extra) error {
+	for _, e := range exs {
+		if e.Type == urlx.TypeUrl {
+			err := writeUrl(buf, e)
+			if err != nil {
+				return err
+			}
+		} else {
+			buf.WriteString(e.Text)
+		}
+	}
+	return nil
+}
+
 func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 	u := e.Url
-	if slices.Contains(biliDomains, u.Domain) && u.Query != ""{
+	if slices.Contains(biliDomains, u.Domain) && u.Query != "" {
 		old, err := url.ParseQuery(u.Query[1:])
 		if err != nil {
 			log.Error("parse url query error", zap.Error(err))
