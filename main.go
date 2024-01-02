@@ -2,6 +2,7 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/util/gacha"
@@ -56,6 +57,9 @@ func main() {
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)
+
+	// inline mode
+	inline.RegisterInlineHandler(bot, config.BotConfig)
 
 	meili.InitMeili()
 	wordSeg.InitWordSeg()
