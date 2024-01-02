@@ -33,7 +33,7 @@ func init() {
 
 // RegisterInlineHandler regiester inline mode handler
 func RegisterInlineHandler(bot *tb.Bot, conf *config.Config) {
-	bot.Handle(tb.OnQuery, handler(conf))
+	bot.Handle(tb.OnInlineResult, handler(conf))
 }
 
 func handler(conf *config.Config) func(ctx tb.Context) error {
@@ -49,13 +49,12 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 			return err
 		}
 
+		reText := buf.String()
 		err = ctx.Answer(&tb.QueryResponse{
 			Results: []tb.Result{
-				&tb.ResultBase{
-					Content: &tb.InputTextMessageContent{
-						ParseMode: tb.ModeMarkdownV2,
-						Text:      buf.String(),
-					},
+				&tb.ArticleResult{
+					Title: reText,
+					Text:  reText,
 				},
 			},
 		})
