@@ -33,7 +33,7 @@ func init() {
 
 // RegisterInlineHandler regiester inline mode handler
 func RegisterInlineHandler(bot *tb.Bot, conf *config.Config) {
-	bot.Handle(tb.OnInlineResult, handler(conf))
+	bot.Handle(tb.OnQuery, handler(conf))
 }
 
 func handler(conf *config.Config) func(ctx tb.Context) error {
