@@ -42,6 +42,8 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		text := q.Text
 
 		exs := urlx.ExtractStr(text)
+		log.Debug("extracted urls", zap.String("origin", text), zap.Any("urls", exs))
+
 		buf := bytes.NewBufferString("")
 		err := writeAll(buf, exs)
 		if err != nil {
@@ -50,13 +52,14 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		}
 
 		reText := buf.String()
+		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
 		err = ctx.Answer(&tb.QueryResponse{
 			Results: tb.Results{
 				&tb.ArticleResult{
 					ResultBase: tb.ResultBase{
 						ParseMode: tb.ModeMarkdownV2,
 					},
-					Title: "强化模式",
+					Title: reText,
 					Text:  reText,
 				},
 			},

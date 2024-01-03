@@ -82,6 +82,11 @@ func Test_writeAll(t *testing.T) {
 			input: "感觉不如",
 			want:  "感觉不如",
 		},
+		{
+			name:  "Bilibili URL with query",
+			input: "感觉不如 https://www.bilibili.com/video/BV1fV411W7Ss/?spm_id_from=333.337.search-card.all.click",
+			want:  "感觉不如 https://www.bilibili.com/video/BV1fV411W7Ss/",
+		},
 	}
 
 	buf := bytes.NewBufferString("")
