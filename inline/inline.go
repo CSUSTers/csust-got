@@ -54,7 +54,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 
 		reText := buf.String()
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
-		reText = util.EscapeTelegramReservedChars(reText)
+		reTextEscaped := util.EscapeTelegramReservedChars(reText)
 		err = ctx.Answer(&tb.QueryResponse{
 			Results: tb.Results{
 				&tb.ArticleResult{
@@ -63,7 +63,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 					},
 					Title:       "发送",
 					Description: reText,
-					Text:        reText,
+					Text:        reTextEscaped,
 				},
 			},
 		})
