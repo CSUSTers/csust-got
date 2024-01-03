@@ -59,8 +59,9 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 					ResultBase: tb.ResultBase{
 						ParseMode: tb.ModeMarkdownV2,
 					},
-					Title: reText,
-					Text:  reText,
+					Title:       "发送",
+					Description: reText,
+					Text:        reText,
 				},
 			},
 		})
