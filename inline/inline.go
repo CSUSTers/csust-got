@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"csust-got/config"
 	"csust-got/log"
+	"csust-got/util"
 	"csust-got/util/urlx"
 	"net/url"
 	"regexp"
@@ -53,6 +54,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 
 		reText := buf.String()
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
+		reText = util.EscapeTelegramReservedChars(reText)
 		err = ctx.Answer(&tb.QueryResponse{
 			Results: tb.Results{
 				&tb.ArticleResult{
