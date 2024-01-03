@@ -77,6 +77,11 @@ func Test_writeAll(t *testing.T) {
 			input: "here is a URL https://example.com in text, and another on next line \nhttps://bilibili.com/dynamic?from=homepage",
 			want:  "here is a URL https://example.com in text, and another on next line \nhttps://bilibili.com/dynamic",
 		},
+		{
+			name:  "Unicode text",
+			input: "感觉不如",
+			want:  "感觉不如",
+		},
 	}
 
 	buf := bytes.NewBufferString("")
