@@ -1,6 +1,8 @@
 package urlx
 
 import (
+	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,7 +27,7 @@ func TestExtractStr(t *testing.T) {
 					Text: "https://example.com",
 					Url: &ExtraUrl{
 						Text:   "https://example.com",
-						Schema: "https",
+						Scheme: "https",
 						Domain: "example.com",
 						Tld:    "com",
 						Port:   "",
@@ -50,7 +52,7 @@ func TestExtractStr(t *testing.T) {
 					Text: "http://example.com/echo?foo=bar",
 					Url: &ExtraUrl{
 						Text:   "http://example.com/echo?foo=bar",
-						Schema: "http",
+						Scheme: "http",
 						Domain: "example.com",
 						Tld:    "com",
 						Port:   "",
@@ -68,7 +70,7 @@ func TestExtractStr(t *testing.T) {
 					Text: "example.com?abc=def#this?hash",
 					Url: &ExtraUrl{
 						Text:   "example.com?abc=def#this?hash",
-						Schema: "",
+						Scheme: "",
 						Domain: "example.com",
 						Tld:    "com",
 						Port:   "",
@@ -89,6 +91,40 @@ func TestExtractStr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			extras := ExtractStr(tt.text)
 			assert.Equal(t, tt.extras, extras)
+		})
+	}
+}
+
+func TestUrlToExtraUrl(t *testing.T) {
+	tests := []struct {
+		name string
+		url string
+		want *ExtraUrl
+	}{
+		{
+			name: "url test",
+			url: "https://example.com/echo?q=query#hello",
+			want: &ExtraUrl{
+				Text:   "https://example.com/echo?q=query#hello",
+				Scheme: "https",
+				Domain: "example.com",
+				Tld:    "com",
+				Port:   "",
+				Path:   "/echo",
+				Query:  "?q=query",
+				Hash:   "#hello",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			u, err := url.Parse(tt.url)
+			if err != nil {
+				t.Fatalf("error wheme parse test case url to `url.Url`: %v", err)
+			}
+			if got := UrlToExtraUrl(u); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("UrlToExtraUrl() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

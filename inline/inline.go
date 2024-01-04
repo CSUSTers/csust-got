@@ -6,27 +6,23 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"csust-got/util/urlx"
-	"net/url"
+	"errors"
 	"regexp"
 	"slices"
+	"strings"
 
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
 
-var biliDomains = []string{
-	"b23.tv",
-	"bilibili.com",
-	"www.bilibili.com",
-	"space.bilibili.com",
-	"m.bilibili.com",
-	"t.bilibili.com",
-	"live.bilibili.com",
-}
-
 //nolint:revive // It's too long.
 var biliUrlRegex = `(?i)((?P<schema>https?://)?(?P<host>(?P<sub_domain>[\w\d\-]+\.)?(?P<main_domain>b23\.tv|bilibili\.com))(?P<path>(?:/[^\s\?#]*)*)?(?P<query>\?[^\s#]*)?(?P<hash>#[\S]*)?)`
 var biliPatt = regexp.MustCompile(biliUrlRegex)
+
+var (
+	// ErrContextCanceled is returned when context is canceled
+	ErrContextCanceled = errors.New("context canceled")
+)
 
 func init() {
 	biliPatt.Longest()
@@ -90,29 +86,12 @@ func writeAll(buf *bytes.Buffer, exs []*urlx.Extra) error {
 
 func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 	u := e.Url
-	if slices.Contains(biliDomains, u.Domain) && u.Query != "" {
-		old, err := url.ParseQuery(u.Query[1:])
-		if err != nil {
-			log.Error("parse url query error", zap.Error(err))
-			return err
-		}
 
-		u.Query = ""
-
-		newMap := make(url.Values)
-		retainFields := []string{"tab", "t", "p"}
-		for _, k := range retainFields {
-			if v, ok := old[k]; ok {
-				newMap[k] = v
-			}
-		}
-		newQuery := newMap.Encode()
-		if newQuery != "" {
-			u.Query = "?" + newQuery
-		}
-		buf.WriteString(u.StringByFields())
-	} else {
-		buf.WriteString(u.Text)
+	if slices.Contains(biliDomains, strings.ToLower(u.Domain)) {
+		err := writeBiliUrl(buf, u)
+		return err
 	}
+
+	buf.WriteString(u.Text)
 	return nil
 }
