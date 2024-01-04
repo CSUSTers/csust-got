@@ -3,6 +3,8 @@ package urlx
 import (
 	"bytes"
 	"csust-got/log"
+	"net/url"
+	"strings"
 )
 
 // ExtraType for [`Extra`]
@@ -33,9 +35,9 @@ type ExtraUrl struct {
 	// example: `https://example.com/echo?q=hello#hash`
 	Text string
 
-	// Schema
+	// Scheme
 	// example: `https``
-	Schema string
+	Scheme string
 
 	// Domain
 	// example: `example.com``
@@ -62,13 +64,59 @@ type ExtraUrl struct {
 	Hash string
 }
 
+// UrlToExtraUrl convert `*url.Url` to `*ExtraUrl`
+func UrlToExtraUrl(u *url.URL) *ExtraUrl {
+	scheme := strings.TrimSuffix(u.Scheme, ":")
+	schemeStr := ""
+	if scheme != "" {
+		schemeStr = scheme + "://"
+	}
+
+	host := u.Hostname()
+	tld := ""
+	subHosts := strings.Split(host, ".")
+	if len(subHosts) > 1 {
+		tld = subHosts[len(subHosts)-1]
+	}
+
+	port := u.Port()
+	portStr := ""
+	if port != "" {
+		portStr = ":" + port
+	}
+	path := u.Path
+	if path != "" && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	query := u.Query().Encode()
+	if query != "" {
+		query = "?" + query
+	}
+	hash := u.Fragment
+	if hash != "" {
+		hash = "#" + hash
+	}
+
+	urlStr := schemeStr + host + portStr + path + query + hash
+	return &ExtraUrl{
+		Text:   urlStr,
+		Scheme: scheme,
+		Domain: host,
+		Tld:    tld,
+		Port:   port,
+		Path:   path,
+		Query:  query,
+		Hash:   hash,
+	}
+}
+
 // StringByFields return a URL from Extracted Fields
 func (u ExtraUrl) StringByFields() string {
 	buf := bytes.NewBufferString("")
 
-	// schema: `https://`
-	if u.Schema != "" {
-		buf.WriteString(u.Schema)
+	// scheme: `https://`
+	if u.Scheme != "" {
+		buf.WriteString(u.Scheme)
 		buf.WriteString("://")
 	}
 
@@ -122,7 +170,7 @@ func ExtractStr(text string) (extras []*Extra) {
 			Text: text[begin:end],
 			Url: &ExtraUrl{
 				Text:   text[begin:end],
-				Schema: SubmatchGroupStringByName(Patt, text, m, "schema"),
+				Scheme: SubmatchGroupStringByName(Patt, text, m, "scheme"),
 				Domain: SubmatchGroupStringByName(Patt, text, m, "domain"),
 				Tld:    SubmatchGroupStringByName(Patt, text, m, "tld"),
 				Port:   SubmatchGroupStringByName(Patt, text, m, "port"),

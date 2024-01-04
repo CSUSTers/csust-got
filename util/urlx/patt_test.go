@@ -99,7 +99,7 @@ test+http://example.com/echo (不匹配)
 		m6 := ms[5]
 
 		urlIdx := Patt.SubexpIndex("url")
-		schemaIdx := Patt.SubexpIndex("schema")
+		schemaIdx := Patt.SubexpIndex("scheme")
 		domainIdx := Patt.SubexpIndex("domain")
 		tldIdx := Patt.SubexpIndex("tld")
 		portIdx := Patt.SubexpIndex("port")
