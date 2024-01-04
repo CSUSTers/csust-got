@@ -134,6 +134,14 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 			return "", err
 		}
 		return e.StringByFields(), nil
+	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		curr := resp.Request.URL
+		e := urlx.UrlToExtraUrl(curr)
+		err := clearBiliUrlQuery(e)
+		if err != nil {
+			return "", err
+		}
+		return e.StringByFields(), nil
 	}
 	return u.StringByFields(), nil
 }
