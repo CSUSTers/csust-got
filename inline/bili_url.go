@@ -10,13 +10,15 @@ import (
 	"strings"
 )
 
+const b23URL = "b23.tv"
+
 var urlPathPatt = regexp.MustCompile(`(?i)(?:/)(?P<fragment>[^/\s]*)`)
 var biliVideoIdPatt = regexp.MustCompile(`(?i)^((?:av|ep)(?:\d+)|bv(?:[a-zA-Z0-9]+))$`)
 
 var startWithHttpScheme = regexp.MustCompile(`(?i)^[0-9a-z\-]+://.*`)
 
 var biliDomains = []string{
-	"b23.tv",
+	b23URL,
 	"bilibili.com",
 	"www.bilibili.com",
 	"space.bilibili.com",
@@ -69,7 +71,7 @@ func removeBiliTracingParramFromQuery(query string) (string, error) {
 }
 
 func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
-	if strings.ToLower(u.Domain) == "b23.tv" {
+	if strings.ToLower(u.Domain) == b23URL {
 		to, err := processB23Url(context.TODO(), u)
 		if err != nil {
 			return err
@@ -125,7 +127,7 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if req.URL.Hostname() != "b23.tv" {
+			if strings.ToLower(req.URL.Hostname()) != b23URL {
 				return http.ErrUseLastResponse
 			}
 			return nil
