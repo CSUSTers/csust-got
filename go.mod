@@ -7,7 +7,7 @@ require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/iyear/biligo v0.1.7
 	github.com/meilisearch/meilisearch-go v0.26.0
-	github.com/prometheus/client_golang v1.17.0
+	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/common v0.45.0
 	github.com/quic-go/quic-go v0.40.1
 	github.com/redis/go-redis/v9 v9.3.1
