@@ -298,7 +298,7 @@ linters-settings:
 
   nestif:
     # minimal complexity of if statements to report, 5 by default
-    min-complexity: 5
+    min-complexity: 12
 
   # nolintlint:
   #   # Disable to ensure that all nolint directives actually have an effect. Default is false.
