@@ -13,6 +13,8 @@ import (
 var urlPathPatt = regexp.MustCompile(`(?i)(?:/)(?P<fragment>[^/\s]*)`)
 var biliVideoIdPatt = regexp.MustCompile(`(?i)^((?:av|ep)(?:\d+)|bv(?:[a-zA-Z0-9]+))$`)
 
+var startWithHttpScheme = regexp.MustCompile(`(?i)^[0-9a-z\-]+://.*`)
+
 var biliDomains = []string{
 	"b23.tv",
 	"bilibili.com",
@@ -70,7 +72,7 @@ func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
 	if strings.ToLower(u.Domain) == "b23.tv" {
 		to, err := processB23Url(context.TODO(), u)
 		if err != nil {
-			return nil
+			return err
 		}
 		buf.WriteString(to)
 	} else {
@@ -114,6 +116,8 @@ func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 
 func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	oriUrl := u.Text
+	oriUrl = fixUrl(oriUrl)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, oriUrl, nil)
 	if err != nil {
 		return "", err
@@ -121,7 +125,10 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 
 	client := http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
+			if req.URL.Hostname() != "b23.tv" {
+				return http.ErrUseLastResponse
+			}
+			return nil
 		},
 	}
 	resp, err := client.Do(req)
@@ -167,4 +174,11 @@ func spliteUrlPath(path string) []string {
 		ret = append(ret, urlx.SubmatchGroupStringByName(urlPathPatt, path, m, "fragment"))
 	}
 	return ret
+}
+
+func fixUrl(s string) string {
+	if !startWithHttpScheme.MatchString(s) {
+		return "http://" + s
+	}
+	return s
 }
