@@ -119,31 +119,44 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 		return "", err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	client := http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
+
+	// get origin URL from a shorten URL
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		to, err := resp.Location()
 		if err != nil {
 			return "", err
 		}
 		e := urlx.UrlToExtraUrl(to)
+
+		// video URL without `p` and `t` query params
+		// use `b23.tv` domain for shorten URL
+		if strings.HasPrefix(e.Path, "/video/") {
+			pQ := to.Query().Get("p")
+			tQ := to.Query().Get("t")
+			paths := spliteUrlPath(e.Path)
+			if len(paths) >= 2 && (pQ == "" || pQ == "1") && tQ == "" {
+				e.Path = "/" + paths[1]
+				e.Domain = "b23.tv"
+				e.Query = ""
+			}
+		}
 		err = clearBiliUrlQuery(e)
 		if err != nil {
 			return "", err
 		}
 		return e.StringByFields(), nil
-	} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		curr := resp.Request.URL
-		e := urlx.UrlToExtraUrl(curr)
-		err := clearBiliUrlQuery(e)
-		if err != nil {
-			return "", err
-		}
-		return e.StringByFields(), nil
 	}
-	return u.StringByFields(), nil
+
+	return u.Text, nil
 }
 
 func spliteUrlPath(path string) []string {
