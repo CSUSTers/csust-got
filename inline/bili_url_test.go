@@ -15,6 +15,21 @@ func Test_writeBiliUrl(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
+		{
+			name: "`b23.tv` shorten URL",
+			url: "https://b23.tv/d0Hd0Ub",
+			want: "https://b23.tv/BV1DC4y1K7pt",
+		},
+		{
+			name: "`b23.tv` shorten URL with http",
+			url: "http://b23.tv/d0Hd0Ub",
+			want: "https://b23.tv/BV1DC4y1K7pt",
+		},
+		{
+			name: "`b23.tv` shorten URL without http/https",
+			url: "b23.tv/d0Hd0Ub",
+			want: "https://b23.tv/BV1DC4y1K7pt",
+		},
 	}
 
 	buf := bytes.NewBufferString("")
