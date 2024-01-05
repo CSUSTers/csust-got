@@ -6,11 +6,11 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"encoding/json"
+	"strconv"
+
 	"github.com/meilisearch/meilisearch-go"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
-	"strconv"
-	"strings"
 )
 
 type resultMsg struct {
@@ -20,17 +20,6 @@ type resultMsg struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
-}
-
-// EscapeTelegramReservedChars escape telegram reserved chars
-func EscapeTelegramReservedChars(s string) string {
-	reservedChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
-
-	for _, char := range reservedChars {
-		s = strings.ReplaceAll(s, char, "\\"+char)
-	}
-
-	return s
 }
 
 // ExtractFields extract fields from search result
@@ -138,7 +127,7 @@ func executeSearch(ctx Context) string {
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
 		rplMsg += "内容: “ `" +
-			EscapeTelegramReservedChars(respMap[item]["text"]) +
+			util.EscapeTelegramReservedChars(respMap[item]["text"]) +
 			"` ” message id: [" + respMap[item]["id"] +
 			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}

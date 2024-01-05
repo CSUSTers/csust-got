@@ -275,3 +275,14 @@ func GetAllReplyMessagesText(m *tb.Message) string {
 	}
 	return ret
 }
+
+// EscapeTelegramReservedChars escape telegram reserved chars
+func EscapeTelegramReservedChars(s string) string {
+	reservedChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+
+	for _, char := range reservedChars {
+		s = strings.ReplaceAll(s, char, "\\"+char)
+	}
+
+	return s
+}

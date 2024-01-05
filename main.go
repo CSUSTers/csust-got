@@ -2,6 +2,7 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/util/gacha"
@@ -56,6 +57,9 @@ func main() {
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)
+
+	// inline mode
+	inline.RegisterInlineHandler(bot, config.BotConfig)
 
 	meili.InitMeili()
 	wordSeg.InitWordSeg()
@@ -232,14 +236,19 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 	skipSec := config.BotConfig.SkipDuration
 	return func(ctx Context) error {
 		m := ctx.Message()
-		if m == nil {
-			return next(ctx)
+		q := ctx.Query()
+		if m == nil && q == nil {
+			log.Debug("bot skip non-message and non-query update", zap.Any("update", ctx.Update()))
 		}
-		d := time.Since(m.Time())
-		if skipSec > 0 && int64(d.Seconds()) > skipSec {
-			log.Debug("bot skip expired update", zap.Any("update", ctx.Update()))
-			return nil
+
+		if m != nil {
+			d := time.Since(m.Time())
+			if skipSec > 0 && int64(d.Seconds()) > skipSec {
+				log.Debug("bot skip expired update", zap.Any("update", ctx.Update()))
+				return nil
+			}
 		}
+
 		return next(ctx)
 	}
 }
@@ -263,8 +272,15 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 		if !isChatMessageHasSender(ctx) {
 			return next(ctx)
 		}
+
+		m := ctx.Message()
+		// continue with inline query
+		if m == nil && ctx.Query() != nil {
+			return next(ctx)
+		}
+
 		if orm.IsBanned(ctx.Chat().ID, ctx.Sender().ID) {
-			util.DeleteMessage(ctx.Message())
+			util.DeleteMessage(m)
 			log.Info("message deleted by fake ban", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
@@ -278,6 +294,12 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
 			return next(ctx)
 		}
+
+		// inline mode unlimited
+		if ctx.Query() != nil && ctx.Message() == nil {
+			return next(ctx)
+		}
+
 		if !restrict.CheckLimit(ctx.Message()) {
 			log.Info("message deleted by rate limit", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
@@ -292,6 +314,13 @@ func whiteMiddleware(next HandlerFunc) HandlerFunc {
 		if !config.BotConfig.WhiteListConfig.Enabled {
 			return next(ctx)
 		}
+
+		m := ctx.Message()
+		// continue with inline query
+		if m == nil && ctx.Query() != nil {
+			return next(ctx)
+		}
+
 		if ctx.Chat() != nil && !config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
 			log.Info("chat ignore by white list", zap.String("chat", ctx.Chat().Title))
 			return nil
@@ -302,11 +331,13 @@ func whiteMiddleware(next HandlerFunc) HandlerFunc {
 
 func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) || ctx.Message().Sticker == nil {
+		m := ctx.Message()
+		if !isChatMessageHasSender(ctx) || m.Sticker == nil {
 			return next(ctx)
 		}
+
 		if !orm.IsShutdown(ctx.Chat().ID) && orm.IsNoStickerMode(ctx.Chat().ID) {
-			util.DeleteMessage(ctx.Message())
+			util.DeleteMessage(m)
 			log.Info("message deleted by no sticker", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
@@ -335,7 +366,8 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 		if !isChatMessageHasSender(ctx) {
 			return next(ctx)
 		}
-		if ctx.Message().Text != "" {
+		m := ctx.Message()
+		if m.Text != "" {
 			cmd := entities.FromMessage(ctx.Message())
 			if cmd != nil && cmd.Name() == "boot" {
 				return next(ctx)
@@ -352,9 +384,14 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 
 func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
+		m := ctx.Message()
+		// continue with inline query
+		if m == nil && ctx.Query() != nil {
+			return next(ctx)
+		}
 		if config.BotConfig.MeiliConfig.Enabled {
 			// 将message存入 meilisearch
-			msgJSON, err := json.Marshal(ctx.Message())
+			msgJSON, err := json.Marshal(m)
 			if err != nil {
 				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
 				return next(ctx)
@@ -367,7 +404,7 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 			// 分词并存入redis
-			go wordSeg.WordSegment(ctx.Message().Text, ctx.Chat().ID)
+			go wordSeg.WordSegment(m.Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}
@@ -376,8 +413,14 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 // contentFilterMiddleware 过滤消息中的内容
 func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		text := ctx.Message().Text
-		caption := ctx.Message().Caption
+		m := ctx.Message()
+		// continue with inline query
+		if m == nil && ctx.Query() != nil {
+			return next(ctx)
+		}
+
+		text := m.Text
+		caption := m.Caption
 		if text == "" && caption != "" {
 			text = caption
 		}
