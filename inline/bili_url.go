@@ -5,7 +5,6 @@ import (
 	"context"
 	"csust-got/util/urlx"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -27,6 +26,10 @@ var biliDomains = []string{
 	"live.bilibili.com",
 }
 
+func init() {
+	registerDomainsUrlProcessConfig(biliDomains, writeBiliUrl)
+}
+
 var biliRetainQueryParams = []string{
 	"p",
 	"t",
@@ -34,40 +37,12 @@ var biliRetainQueryParams = []string{
 }
 
 func clearBiliUrlQuery(u *urlx.ExtraUrl) error {
-	q, err := removeBiliTracingParamFromQuery(u.Query)
+	q, err := filterParamFromQuery(u.Query, biliRetainQueryParams...)
 	if err != nil {
 		return err
 	}
 	u.Query = q
 	return nil
-}
-
-func removeBiliTracingParamFromQuery(query string) (string, error) {
-	if query == "" {
-		return "", nil
-	}
-
-	if query[0] == '?' {
-		query = query[1:]
-	}
-
-	old, err := url.ParseQuery(query)
-	if err != nil {
-		return "", err
-	}
-
-	newMap := make(url.Values)
-	for _, k := range biliRetainQueryParams {
-		if v, ok := old[k]; ok {
-			newMap[k] = v
-		}
-	}
-
-	ret := newMap.Encode()
-	if ret != "" {
-		ret = "?" + ret
-	}
-	return ret, nil
 }
 
 func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {

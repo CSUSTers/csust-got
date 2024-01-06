@@ -7,12 +7,9 @@ import (
 	"csust-got/util"
 	"csust-got/util/urlx"
 	"errors"
-	"regexp"
-	"slices"
-	"strings"
-
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
+	"regexp"
 )
 
 //nolint:revive // It's too long.
@@ -87,17 +84,10 @@ func writeAll(buf *bytes.Buffer, exs []*urlx.Extra) error {
 func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 	u := e.Url
 
-	if slices.Contains(biliDomains, strings.ToLower(u.Domain)) {
-		err := writeBiliUrl(buf, u)
-		return err
-	}
-
-	if slices.Contains(twDomains, strings.ToLower(u.Domain)) {
-		return writeFxTwitterUrl(buf, u)
-	}
-
-	if slices.Contains(removeAllQueryDomains, strings.ToLower(u.Domain)) {
-		return writeClearAllQuery(buf, u)
+	for _, cfg := range urlProcessConfigs {
+		if cfg.needProcess(e) {
+			return cfg.handler(buf, u)
+		}
 	}
 
 	buf.WriteString(u.Text)

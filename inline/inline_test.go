@@ -97,6 +97,13 @@ func Test_writeAll(t *testing.T) {
 			input: "感觉不如 https://x.com/nocatsnolife_m/status/1743271045698924555?s=123&t=ABCD-EFGH https://www.zhihu.com/question/34923126?sort=created",
 			want:  "感觉不如 https://fxtwitter.com/nocatsnolife_m/status/1743271045698924555 https://www.zhihu.com/question/34923126",
 		},
+		{
+			name: "jd URL with taobao URL and text",
+			input: "感觉 https://item.jd.com/100008348542.html?cu=true&utm_source=www.hao123.com&utm_medium=tuiguang&utm_campaign=t_100008348542_&utm_term=0f3b3b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9 " +
+				"不如 https://item.taobao.com/item.htm?id=100008348542&spm=a21wu.241046-tw.4691948847.1.1c4b3b3b4b5b6b7b8b9b0b1b2b3b4b5b6b7b8b9",
+			want: "感觉 https://item.jd.com/100008348542.html " +
+				"不如 https://item.taobao.com/item.htm?id=100008348542",
+		},
 	}
 
 	buf := bytes.NewBufferString("")

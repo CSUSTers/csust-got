@@ -5,11 +5,8 @@ import (
 	"csust-got/util/urlx"
 )
 
-var twDomains = []string{
-	"twitter.com",
-	"www.twitter.com",
-	"x.com",
-	"www.x.com",
+func init() {
+	registerRegexUrlProcessConfig(`^(?:www\.)?(twitter|x)\.com$`, writeFxTwitterUrl)
 }
 
 func writeFxTwitterUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
