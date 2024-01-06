@@ -28,7 +28,7 @@ func init() {
 	biliPatt.Longest()
 }
 
-// RegisterInlineHandler regiester inline mode handler
+// RegisterInlineHandler register inline mode handler
 func RegisterInlineHandler(bot *tb.Bot, conf *config.Config) {
 	bot.Handle(tb.OnQuery, handler(conf))
 }
@@ -90,6 +90,10 @@ func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 	if slices.Contains(biliDomains, strings.ToLower(u.Domain)) {
 		err := writeBiliUrl(buf, u)
 		return err
+	}
+
+	if slices.Contains(removeAllQueryDomains, strings.ToLower(u.Domain)) {
+		return writeClearAllQuery(buf, u)
 	}
 
 	buf.WriteString(u.Text)
