@@ -92,6 +92,11 @@ func Test_writeAll(t *testing.T) {
 			input: "感觉不如 https://www.bilibili.com/video/BV1fV411W7Ss/?spm_id_from=333.337.search-card.all.click https://www.zhihu.com/question/34923126?sort=created",
 			want:  "感觉不如 https://www.bilibili.com/video/BV1fV411W7Ss/ https://www.zhihu.com/question/34923126",
 		},
+		{
+			name:  "x URL with zhihu.com URL and text",
+			input: "感觉不如 https://x.com/nocatsnolife_m/status/1743271045698924555?s=123&t=ABCD-EFGH https://www.zhihu.com/question/34923126?sort=created",
+			want:  "感觉不如 https://fxtwitter.com/nocatsnolife_m/status/1743271045698924555 https://www.zhihu.com/question/34923126",
+		},
 	}
 
 	buf := bytes.NewBufferString("")

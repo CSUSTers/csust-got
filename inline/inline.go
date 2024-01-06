@@ -92,6 +92,10 @@ func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 		return err
 	}
 
+	if slices.Contains(twDomains, strings.ToLower(u.Domain)) {
+		return writeFxTwitterUrl(buf, u)
+	}
+
 	if slices.Contains(removeAllQueryDomains, strings.ToLower(u.Domain)) {
 		return writeClearAllQuery(buf, u)
 	}
