@@ -660,3 +660,33 @@ func SaveGachaSession(chatID int64, tenant config.GachaTenant) error {
 	}
 	return nil
 }
+
+// SetByeWorldDuration save bye world duration to redis.
+func SetByeWorldDuration(chatID int64, userID int64, duration time.Duration) error {
+	err := WriteBool(wrapKeyWithChatMember("bye_world", chatID, userID), true, duration)
+	if err != nil {
+		log.Error("set bye world duration to redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// DeleteByeWorldDuration delete bye world duration from redis.
+func DeleteByeWorldDuration(chatID int64, userID int64) error {
+	err := rc.Del(context.TODO(), wrapKeyWithChatMember("bye_world", chatID, userID)).Err()
+	if err != nil {
+		log.Error("delete bye world duration from redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// IsByeWorld check user is in bye world mode.
+func IsByeWorld(chatID int64, userID int64) bool {
+	ok, err := GetBool(wrapKeyWithChatMember("bye_world", chatID, userID))
+	if err != nil {
+		log.Error("get bye world duration from redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return false
+	}
+	return ok
+}
