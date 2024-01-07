@@ -86,7 +86,7 @@ func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 
 	for _, cfg := range urlProcessConfigs {
 		if cfg.needProcess(e) {
-			return cfg.handler(buf, u)
+			return cfg.writeUrl(buf, u)
 		}
 	}
 

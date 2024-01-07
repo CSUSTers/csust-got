@@ -32,7 +32,7 @@ func Test_writeFxTwitterUrl(t *testing.T) {
 		buf.Reset()
 		t.Run(tt.name, func(t *testing.T) {
 			u := urlx.ExtractStr(tt.url)[0]
-			err := writeFxTwitterUrl(buf, u.Url)
+			err := twitterProcessor.writeUrl(buf, u.Url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("writeFxTwitterUrl() error = %v, wantErr %v", err, tt.wantErr)
 				return

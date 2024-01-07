@@ -26,18 +26,44 @@ var biliDomains = []string{
 	"live.bilibili.com",
 }
 
-func init() {
-	registerDomainsUrlProcessConfig(biliDomains, writeBiliUrl)
-}
-
 var biliRetainQueryParams = []string{
 	"p",
 	"t",
 	"tab",
 }
 
-func clearBiliUrlQuery(u *urlx.ExtraUrl) error {
-	q, err := filterParamFromQuery(u.Query, biliRetainQueryParams...)
+var (
+	bProcessor = newBiliProcessor(biliDomains, biliRetainQueryParams)
+)
+
+func init() {
+	registerUrlProcessor(bProcessor)
+}
+
+// biliProcessor b站 URL 处理器
+type biliProcessor struct {
+	domainMap    map[string]struct{}
+	retainParams []string
+}
+
+func newBiliProcessor(domain []string, retainParams []string) urlProcessor {
+	proc := &biliProcessor{
+		domainMap:    make(map[string]struct{}),
+		retainParams: retainParams,
+	}
+	for _, d := range domain {
+		proc.domainMap[d] = struct{}{}
+	}
+	return proc
+}
+
+func (c *biliProcessor) needProcess(u *urlx.Extra) bool {
+	_, ok := c.domainMap[u.Url.Domain]
+	return ok
+}
+
+func (c *biliProcessor) clearBiliUrlQuery(u *urlx.ExtraUrl) error {
+	q, err := filterParamFromQuery(u.Query, c.retainParams...)
 	if err != nil {
 		return err
 	}
@@ -45,15 +71,15 @@ func clearBiliUrlQuery(u *urlx.ExtraUrl) error {
 	return nil
 }
 
-func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
+func (c *biliProcessor) writeUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
 	if strings.ToLower(u.Domain) == b23URL {
-		to, err := processB23Url(context.TODO(), u)
+		to, err := c.processB23Url(context.TODO(), u)
 		if err != nil {
 			return err
 		}
 		buf.WriteString(to)
 	} else {
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return err
 		}
@@ -62,14 +88,14 @@ func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
 	return nil
 }
 
-func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
+func (c *biliProcessor) processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	path := u.Path
 	pathFragm := splitUrlPath(path)
 	if len(pathFragm) == 0 {
 		if u.Query == "" {
 			return u.Text, nil
 		}
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return "", err
 		}
@@ -80,7 +106,7 @@ func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	firstFr := pathFragm[0]
 	if biliVideoIdPatt.MatchString(firstFr) {
 		u.Path = "/" + firstFr
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return "", err
 		}
@@ -88,10 +114,10 @@ func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	}
 
 	// process short video URL
-	return processBiliShortenUrl(ctx, u)
+	return c.processBiliShortenUrl(ctx, u)
 }
 
-func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
+func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	oriUrl := u.Text
 	oriUrl = fixUrl(oriUrl)
 
@@ -133,7 +159,7 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 				e.Query = ""
 			}
 		}
-		err = clearBiliUrlQuery(e)
+		err = c.clearBiliUrlQuery(e)
 		if err != nil {
 			return "", err
 		}
