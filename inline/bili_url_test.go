@@ -17,17 +17,17 @@ func Test_writeBiliUrl(t *testing.T) {
 	}{
 		{
 			name: "`b23.tv` shorten URL",
-			url: "https://b23.tv/d0Hd0Ub",
+			url:  "https://b23.tv/d0Hd0Ub",
 			want: "https://b23.tv/BV1DC4y1K7pt",
 		},
 		{
 			name: "`b23.tv` shorten URL with http",
-			url: "http://b23.tv/d0Hd0Ub",
+			url:  "http://b23.tv/d0Hd0Ub",
 			want: "https://b23.tv/BV1DC4y1K7pt",
 		},
 		{
 			name: "`b23.tv` shorten URL without http/https",
-			url: "b23.tv/d0Hd0Ub",
+			url:  "b23.tv/d0Hd0Ub",
 			want: "https://b23.tv/BV1DC4y1K7pt",
 		},
 	}
@@ -37,7 +37,7 @@ func Test_writeBiliUrl(t *testing.T) {
 		buf.Reset()
 		t.Run(tt.name, func(t *testing.T) {
 			u := urlx.ExtractStr(tt.url)[0]
-			err := writeBiliUrl(buf, u.Url)
+			err := bProcessor.writeUrl(buf, u.Url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("writeBiliUrl() error = %v, wantErr %v", err, tt.wantErr)
 				return

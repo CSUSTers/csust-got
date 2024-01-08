@@ -5,7 +5,6 @@ import (
 	"context"
 	"csust-got/util/urlx"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -33,8 +32,38 @@ var biliRetainQueryParams = []string{
 	"tab",
 }
 
-func clearBiliUrlQuery(u *urlx.ExtraUrl) error {
-	q, err := removeBiliTracingParramFromQuery(u.Query)
+var (
+	bProcessor = newBiliProcessor(biliDomains, biliRetainQueryParams)
+)
+
+func init() {
+	registerUrlProcessor(bProcessor)
+}
+
+// biliProcessor b站 URL 处理器
+type biliProcessor struct {
+	domainMap    map[string]struct{}
+	retainParams []string
+}
+
+func newBiliProcessor(domain []string, retainParams []string) urlProcessor {
+	proc := &biliProcessor{
+		domainMap:    make(map[string]struct{}),
+		retainParams: retainParams,
+	}
+	for _, d := range domain {
+		proc.domainMap[d] = struct{}{}
+	}
+	return proc
+}
+
+func (c *biliProcessor) needProcess(u *urlx.Extra) bool {
+	_, ok := c.domainMap[u.Url.Domain]
+	return ok
+}
+
+func (c *biliProcessor) clearBiliUrlQuery(u *urlx.ExtraUrl) error {
+	q, err := filterParamFromQuery(u.Query, c.retainParams...)
 	if err != nil {
 		return err
 	}
@@ -42,43 +71,15 @@ func clearBiliUrlQuery(u *urlx.ExtraUrl) error {
 	return nil
 }
 
-func removeBiliTracingParramFromQuery(query string) (string, error) {
-	if query == "" {
-		return "", nil
-	}
-
-	if query[0] == '?' {
-		query = query[1:]
-	}
-
-	old, err := url.ParseQuery(query)
-	if err != nil {
-		return "", err
-	}
-
-	newMap := make(url.Values)
-	for _, k := range biliRetainQueryParams {
-		if v, ok := old[k]; ok {
-			newMap[k] = v
-		}
-	}
-
-	ret := newMap.Encode()
-	if ret != "" {
-		ret = "?" + ret
-	}
-	return ret, nil
-}
-
-func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
+func (c *biliProcessor) writeUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
 	if strings.ToLower(u.Domain) == b23URL {
-		to, err := processB23Url(context.TODO(), u)
+		to, err := c.processB23Url(context.TODO(), u)
 		if err != nil {
 			return err
 		}
 		buf.WriteString(to)
 	} else {
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return err
 		}
@@ -87,14 +88,14 @@ func writeBiliUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
 	return nil
 }
 
-func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
+func (c *biliProcessor) processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	path := u.Path
-	pathFragm := spliteUrlPath(path)
+	pathFragm := splitUrlPath(path)
 	if len(pathFragm) == 0 {
 		if u.Query == "" {
 			return u.Text, nil
 		}
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return "", err
 		}
@@ -105,7 +106,7 @@ func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	firstFr := pathFragm[0]
 	if biliVideoIdPatt.MatchString(firstFr) {
 		u.Path = "/" + firstFr
-		err := clearBiliUrlQuery(u)
+		err := c.clearBiliUrlQuery(u)
 		if err != nil {
 			return "", err
 		}
@@ -113,10 +114,10 @@ func processB23Url(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	}
 
 	// process short video URL
-	return processBiliShortenUrl(ctx, u)
+	return c.processBiliShortenUrl(ctx, u)
 }
 
-func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
+func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error) {
 	oriUrl := u.Text
 	oriUrl = fixUrl(oriUrl)
 
@@ -151,14 +152,14 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 		if strings.HasPrefix(e.Path, "/video/") {
 			pQ := to.Query().Get("p")
 			tQ := to.Query().Get("t")
-			paths := spliteUrlPath(e.Path)
+			paths := splitUrlPath(e.Path)
 			if len(paths) >= 2 && (pQ == "" || pQ == "1") && tQ == "" {
 				e.Path = "/" + paths[1]
 				e.Domain = "b23.tv"
 				e.Query = ""
 			}
 		}
-		err = clearBiliUrlQuery(e)
+		err = c.clearBiliUrlQuery(e)
 		if err != nil {
 			return "", err
 		}
@@ -168,7 +169,7 @@ func processBiliShortenUrl(ctx context.Context, u *urlx.ExtraUrl) (string, error
 	return u.Text, nil
 }
 
-func spliteUrlPath(path string) []string {
+func splitUrlPath(path string) []string {
 	matches := urlPathPatt.FindAllStringSubmatchIndex(path, -1)
 
 	ret := make([]string, 0, len(matches))

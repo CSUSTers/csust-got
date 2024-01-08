@@ -7,12 +7,9 @@ import (
 	"csust-got/util"
 	"csust-got/util/urlx"
 	"errors"
-	"regexp"
-	"slices"
-	"strings"
-
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
+	"regexp"
 )
 
 //nolint:revive // It's too long.
@@ -28,7 +25,7 @@ func init() {
 	biliPatt.Longest()
 }
 
-// RegisterInlineHandler regiester inline mode handler
+// RegisterInlineHandler register inline mode handler
 func RegisterInlineHandler(bot *tb.Bot, conf *config.Config) {
 	bot.Handle(tb.OnQuery, handler(conf))
 }
@@ -87,9 +84,10 @@ func writeAll(buf *bytes.Buffer, exs []*urlx.Extra) error {
 func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
 	u := e.Url
 
-	if slices.Contains(biliDomains, strings.ToLower(u.Domain)) {
-		err := writeBiliUrl(buf, u)
-		return err
+	for _, cfg := range urlProcessConfigs {
+		if cfg.needProcess(e) {
+			return cfg.writeUrl(buf, u)
+		}
 	}
 
 	buf.WriteString(u.Text)
