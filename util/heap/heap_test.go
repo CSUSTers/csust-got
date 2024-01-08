@@ -1,6 +1,3 @@
-// +build heap_test
-// go:build heap_test
-
 package heap
 
 import (
@@ -64,6 +61,11 @@ func TestHeap(t *testing.T) {
 
 func TestNewHeapInit(t *testing.T) {
 	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skip heavy test in short mode")
+	}
+
 	for i := 0; i < len(testLen); i++ { // for each testLen
 		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
 			ti, tj := i, j
@@ -106,6 +108,11 @@ func TestNewHeapInit(t *testing.T) {
 
 func TestHeapPush(t *testing.T) {
 	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skip heavy test in short mode")
+	}
+
 	for i := 0; i < len(testLen); i++ { // for each testLen
 		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
 			ti, tj := i, j
@@ -162,6 +169,11 @@ func TestHeapPush(t *testing.T) {
 
 func TestHeapPop(t *testing.T) {
 	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skip heavy test in short mode")
+	}
+
 	for i := 0; i < len(testLen); i++ { // for each testLen
 		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
 			ti, tj := i, j
@@ -210,6 +222,11 @@ func TestHeapPop(t *testing.T) {
 
 func TestHeapInitAndPushAndPop(t *testing.T) {
 	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skip heavy test in short mode")
+	}
+
 	for i := 0; i < len(testLen); i++ { // for each testLen
 		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
 			ti, tj := i, j

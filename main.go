@@ -173,8 +173,6 @@ func registerBaseHandler(bot *Bot) {
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
 
-	bot.Handle("/slink", base.ShortUrlHandle)
-
 	// gacha handler
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
@@ -419,12 +417,6 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 			return next(ctx)
 		}
 
-		text := m.Text
-		caption := m.Caption
-		if text == "" && caption != "" {
-			text = caption
-		}
-		go base.UrlFilter(ctx, text)
 		go chat.GachaReplyHandler(ctx)
 		return next(ctx)
 	}
