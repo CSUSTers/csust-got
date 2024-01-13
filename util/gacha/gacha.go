@@ -9,10 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.uber.org/zap"
-	"gopkg.in/telebot.v3"
 	"math/rand"
 	"strconv"
+
+	"go.uber.org/zap"
+	"gopkg.in/telebot.v3"
 )
 
 var errEmptyTenant = errors.New("empty tenant")
@@ -54,7 +55,6 @@ func execute(tenant *config.GachaTenant) int64 {
 func PerformGaCha(chatID int64) (int64, error) {
 	tenant, err := orm.LoadGachaSession(chatID)
 	if err != nil {
-		log.Error("[GaCha]: load tenant session failed", zap.Error(err))
 		return 0, err
 	}
 
@@ -62,7 +62,6 @@ func PerformGaCha(chatID int64) (int64, error) {
 
 	err = orm.SaveGachaSession(chatID, tenant)
 	if err != nil {
-		log.Error("[GaCha]: save tenant session failed", zap.Error(err))
 		return 0, err
 	}
 	return result, nil
