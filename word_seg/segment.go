@@ -4,10 +4,12 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
-	"github.com/huichen/sego"
-	"go.uber.org/zap"
+	"csust-got/util"
 	"strconv"
 	"sync"
+
+	"github.com/huichen/sego"
+	"go.uber.org/zap"
 )
 
 // TextInput is a struct for word segment
@@ -33,6 +35,10 @@ func InitWordSeg() {
 // SegWorker is a worker for word segment
 func SegWorker() {
 	var seg sego.Segmenter
+	// check if the dictionary file exists, or create it
+	if err := util.CreateFileIfNotExist("./dictionary.txt"); err != nil {
+		log.Fatal("[WordSegment] create dictionary file err: ", zap.Error(err))
+	}
 	seg.LoadDictionary("./dictionary.txt")
 	for {
 		textInput := <-JiebaChan
