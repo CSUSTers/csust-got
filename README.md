@@ -85,6 +85,8 @@ provoice - <text> 使用自定义ssml生成语音
 search - [-id <chat_id>] <key word> 搜索历史记录
 gacha_setting - 设置一个json格式的配置
 gacha - 抽卡，按照你的配置
+bye_world - [duration] 向美好世界说声再见
+hello_world - 向美好世界问声好
 ```
 
 ## attachment
