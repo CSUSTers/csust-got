@@ -663,7 +663,7 @@ func SaveGachaSession(chatID int64, tenant config.GachaTenant) error {
 
 // SetByeWorldDuration save bye world duration to redis.
 func SetByeWorldDuration(chatID int64, userID int64, duration time.Duration) error {
-	err := WriteBool(wrapKeyWithChatMember("bye_world", chatID, userID), true, duration)
+	err := rc.Set(context.TODO(), wrapKeyWithChatMember("bye_world", chatID, userID), duration.String(), 7*24*time.Hour).Err()
 	if err != nil {
 		log.Error("set bye world duration to redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
 		return err
@@ -682,11 +682,28 @@ func DeleteByeWorldDuration(chatID int64, userID int64) error {
 }
 
 // IsByeWorld check user is in bye world mode.
-func IsByeWorld(chatID int64, userID int64) bool {
-	ok, err := GetBool(wrapKeyWithChatMember("bye_world", chatID, userID))
+func IsByeWorld(chatID int64, userID int64) (time.Duration, bool, error) {
+	d, err := rc.Get(context.TODO(), wrapKeyWithChatMember("bye_world", chatID, userID)).Result()
 	if err != nil {
-		log.Error("get bye world duration from redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
-		return false
+		if !errors.Is(err, redis.Nil) {
+			log.Error("get bye world duration from redis failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+			return 0, false, err
+		}
+		return 0, false, nil
 	}
-	return ok
+	duration, err := time.ParseDuration(d)
+	if err != nil {
+		log.Error("parse bye world duration failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return 0, false, err
+	}
+	return duration, true, nil
+}
+
+// KeepByeWorldDuration keep bye world duration.
+func KeepByeWorldDuration(chatID int64, userID int64) {
+	_, err := rc.Expire(context.TODO(), wrapKeyWithChatMember("bye_world", chatID, userID), 7*24*time.Hour).Result()
+	if err != nil {
+		log.Error("keep bye world duration failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return
+	}
 }

@@ -1,18 +1,21 @@
 package store
 
 import (
-	. "gopkg.in/telebot.v3"
 	"time"
+
+	. "gopkg.in/telebot.v3"
 )
 
 var (
-	ByeWorldQueue TaskQueue[*Message]
+	ByeWorldQueue TaskQueue[*Message] // ByeWorldQueue is a queue to delete message from `bye_world` command
 )
 
+// InitQueues initializes all queues
 func InitQueues(bot *Bot) {
 	ByeWorldQueue = NewDeleteMsgQueue("bye_world", bot)
 }
 
+// TaskQueue is a queue to process tasks
 type TaskQueue[T any] interface {
 	// Push adds a task to the timer.
 	Push(task T, runAt time.Time) error

@@ -3,20 +3,25 @@ package store
 import (
 	"csust-got/log"
 	"csust-got/orm"
+	"encoding/json"
+	"time"
+
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
-	"time"
 )
 
+// DeleteMsgQueue is a queue to delete message
 type DeleteMsgQueue struct {
 	bot       *Bot
 	queueName string
 }
 
+// Push a message to delete queue
 func (q *DeleteMsgQueue) Push(m *Message, delAt time.Time) error {
 	return orm.PushQueue(q.queueName, m, delAt.Unix())
 }
 
+// Cancel remove a message from delete queue
 func (q *DeleteMsgQueue) Cancel(m *Message) error {
 	return orm.RemoveFromQueue(q.queueName, m)
 }
@@ -26,10 +31,12 @@ func (q *DeleteMsgQueue) fetch() ([]*Message, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ms []*Message
+	ms := make([]*Message, 0, len(msgs))
 	for _, msg := range msgs {
-		m, ok := msg.(*Message)
-		if !ok {
+		m := new(Message)
+		err := json.Unmarshal([]byte(msg), m)
+		if err != nil {
+			log.Error("unmarshal message error", zap.Error(err))
 			continue
 		}
 		ms = append(ms, m)
@@ -39,6 +46,7 @@ func (q *DeleteMsgQueue) fetch() ([]*Message, error) {
 
 func (q *DeleteMsgQueue) process(m *Message) error {
 	// delete message
+	log.Info("delete message by byeWorld", zap.Int64("chat_id", m.Chat.ID), zap.Int("message_id", m.ID))
 	return q.bot.Delete(m)
 }
 
@@ -62,6 +70,7 @@ func (q *DeleteMsgQueue) init() error {
 	return nil
 }
 
+// NewDeleteMsgQueue creates a new delete msg queue
 func NewDeleteMsgQueue(queueName string, bot *Bot) *DeleteMsgQueue {
 	q := &DeleteMsgQueue{
 		bot:       bot,

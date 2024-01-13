@@ -108,7 +108,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware, contentFilterMiddleware)
+		messagesCollectionMiddleware, contentFilterMiddleware, byeWorldMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -424,6 +424,39 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		}
 
 		go chat.GachaReplyHandler(ctx)
+		return next(ctx)
+	}
+}
+
+// byeWorldMiddleware auto delete message.
+func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		if !isChatMessageHasSender(ctx) {
+			return next(ctx)
+		}
+
+		m := ctx.Message()
+		if m.Text != "" {
+			cmd := entities.FromMessage(ctx.Message())
+			if cmd != nil && cmd.Name() == "hello_world" {
+				return next(ctx)
+			}
+		}
+
+		deleteAfter, isBye, _ := orm.IsByeWorld(ctx.Chat().ID, ctx.Sender().ID)
+		if isBye {
+			deletedAt := m.Time().Add(deleteAfter)
+			err := store.ByeWorldQueue.Push(m, deletedAt)
+			if err != nil {
+				log.Error("bye world queue push failed", zap.String("chat", ctx.Chat().Title),
+					zap.String("user", ctx.Sender().Username), zap.String("message", m.Text), zap.Error(err))
+				return next(ctx)
+			}
+			log.Debug("message push to bye world queue", zap.String("chat", ctx.Chat().Title),
+				zap.String("user", ctx.Sender().Username), zap.String("message", m.Text))
+			orm.KeepByeWorldDuration(ctx.Chat().ID, ctx.Sender().ID)
+		}
+
 		return next(ctx)
 	}
 }
