@@ -5,6 +5,7 @@ import (
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
+	"csust-got/store"
 	"csust-got/util/gacha"
 	wordSeg "csust-got/word_seg"
 	"encoding/json"
@@ -69,6 +70,8 @@ func main() {
 	go chat.InitChat()
 
 	base.Init()
+
+	store.InitQueues(bot)
 
 	bot.Start()
 }
