@@ -1,6 +1,7 @@
 package base
 
 import (
+	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/orm"
 	"csust-got/util"
@@ -28,14 +29,26 @@ func ByeWorld(m *Message) {
 		deleteFrom = d
 	}
 
-	err := orm.SetByeWorldDuration(m.Chat.ID, m.Sender.ID, deleteFrom)
+	botInChat, err := config.BotConfig.Bot.ChatMemberOf(m.Chat, config.BotConfig.Bot.Me)
+	if err != nil {
+		util.SendReply(m.Chat, "哎呀，一不小心就在时间的湍流中迷失了自我，也许现在不是时候，让我们重新来过吧！😅", m)
+		return
+	}
+
+	if !botInChat.CanDeleteMessages {
+		util.SendReply(m.Chat, "抱歉，我好像没有足够的权力来执行这个操作。或许需要检查一下我的权限设置，或者有其他魔法师可以帮助你实现这个愿望！😅", m)
+		return
+	}
+
+	_, isBye, _ := orm.IsByeWorld(m.Chat.ID, m.Sender.ID)
+
+	err = orm.SetByeWorldDuration(m.Chat.ID, m.Sender.ID, deleteFrom)
 	if err != nil {
 		util.SendReply(m.Chat, "哎呀，咱记性不太好，没能记住你的命令，你刚才说啥来着，让我们重新来过，我相信下一次一定会成功的！😄", m)
 		return
 	}
 
-	_, isBye, err := orm.IsByeWorld(m.Chat.ID, m.Sender.ID)
-	if isBye && err == nil {
+	if isBye {
 		util.SendReply(m.Chat, "看来你是个不甘寂寞的时空探险家，参数已经得到你的精心调整，时光机继续嗖嗖嗖地前进，享受这趟奇幻之旅吧！😄", m)
 		return
 	}
