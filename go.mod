@@ -11,7 +11,7 @@ require (
 	github.com/redis/go-redis/v9 v9.5.1
 	github.com/sashabaranov/go-openai v1.20.2
 	github.com/spf13/viper v1.18.2
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/net v0.21.0
 	golang.org/x/text v0.14.0
