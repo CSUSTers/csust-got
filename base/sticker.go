@@ -29,27 +29,22 @@ func defaultOpts() stickerOpts {
 	}
 }
 
+// GetSticker will download sticker file, and convert to expected format, and send to chat
 func GetSticker(ctx tb.Context) error {
 	var msg = ctx.Message()
 	var sticker *tb.Sticker
 
 	if ctx.Chat().Private && msg.Sticker != nil {
 		sticker = msg.Sticker
-		goto ok
+	} else if replyTo := msg.ReplyTo; replyTo != nil && replyTo.Sticker != nil {
+		sticker = replyTo.Sticker
 	} else {
-		replyTo := msg.ReplyTo
-		if replyTo != nil && replyTo.Sticker != nil {
-			sticker = replyTo.Sticker
-			goto ok
-		}
+		// not found sticker error
+		log.Debug("sticker not found", zap.Any("msg", msg))
+		ctx.Reply("please use this command when reply a sticker message, or send a sticker in PM")
+		return nil
 	}
 
-	// not found sticker error
-	log.Debug("sticker not found", zap.Any("msg", msg))
-	ctx.Reply("please use this command when reply a sticker message, or send a sticker in PM")
-	return nil
-
-ok:
 	opt := defaultOpts()
 	if msg.Text != "" {
 		o, err := parseOpts(msg.Text)
@@ -103,10 +98,11 @@ ok:
 
 		sendFile := tb.FromReader(bs)
 		return ctx.Reply(sendFile)
-	} else {
-		//nolint: goerr113
-		return errors.New("not implement")
 	}
+	
+	//nolint: goerr113
+	return errors.New("not implement")
+
 }
 
 func parseOpts(text string) (stickerOpts, error) {
