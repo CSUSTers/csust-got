@@ -38,16 +38,15 @@ func FromMessage(msg *Message) *BotCommand {
 	return &BotCommand{name, args[1:]}
 }
 
-// CommandTakeArgs returns a command and rest part of text.
-// `argc` is the number of args to take, if `argc` < 0, all args will be taken.
-func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
+// CommandFromText like `CommandTakeArgs`, but from text
+func CommandFromText(text string, argc int) (cmd *BotCommand, rest string, err error) {
 	taken := argc
 	if argc >= 0 {
 		// cmd .. args .. rest
 		//  1  +  argc  +  1
 		taken = argc + 2
 	}
-	args := spaces.Split(strings.TrimSpace(msg.Text), taken)
+	args := spaces.Split(strings.TrimSpace(text), taken)
 	if len(args) == 0 {
 		err = errParseCommand
 		return
@@ -66,6 +65,12 @@ func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err 
 		rest = args[argc]
 	}
 	return cmd, rest, nil
+}
+
+// CommandTakeArgs returns a command and rest part of text.
+// `argc` is the number of args to take, if `argc` < 0, all args will be taken.
+func CommandTakeArgs(msg *Message, argc int) (cmd *BotCommand, rest string, err error) {
+	return CommandFromText(msg.Text, argc)
 }
 
 func splitText(txt string, n int) []string {
@@ -104,4 +109,9 @@ func (c BotCommand) MultiArgsFrom(idx int) []string {
 // ArgAllInOneFrom - get all args as one string.
 func (c BotCommand) ArgAllInOneFrom(idx int) string {
 	return strings.Join(c.MultiArgsFrom(idx), " ")
+}
+
+// Args get all args
+func (c BotCommand) Args() []string {
+	return c.args
 }

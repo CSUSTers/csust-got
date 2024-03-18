@@ -180,6 +180,9 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
 
+	// get sticker handler
+	bot.Handle("/iwant", base.GetSticker)
+
 	bot.Handle("/bye_world", util.GroupCommand(base.ByeWorld))
 	bot.Handle("/hello_world", util.GroupCommand(base.HelloWorld))
 
@@ -188,6 +191,9 @@ func registerBaseHandler(bot *Bot) {
 }
 
 func customHandler(ctx Context) error {
+	if ctx.Chat().Private && ctx.Message() != nil && ctx.Message().Sticker != nil {
+		return base.GetSticker(ctx)
+	}
 
 	cmd := entities.FromMessage(ctx.Message())
 	if cmd == nil {
