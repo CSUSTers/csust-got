@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"slices"
 	"strings"
 
@@ -41,7 +42,10 @@ func GetSticker(ctx tb.Context) error {
 	} else {
 		// not found sticker error
 		log.Debug("sticker not found", zap.Any("msg", msg))
-		ctx.Reply("please use this command when reply a sticker message, or send a sticker in PM")
+		err := ctx.Reply("please use this command when reply a sticker message, or send a sticker in PM")
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -50,7 +54,10 @@ func GetSticker(ctx tb.Context) error {
 		o, err := parseOpts(msg.Text)
 		if err != nil {
 			log.Error("parse command error", zap.String("text", msg.Text), zap.Error(err))
-			ctx.Reply("failed to parse command args")
+			err := ctx.Reply("failed to parse command args")
+			if err != nil {
+				return err
+			}
 			return err
 		}
 		opt = o
@@ -69,7 +76,13 @@ func GetSticker(ctx tb.Context) error {
 			err1 := ctx.Reply("failed to get sticker file")
 			return errors.Join(err, err1)
 		}
-		defer reader.Close()
+
+		defer func(reader io.ReadCloser) {
+			err = reader.Close()
+			if err != nil {
+				log.Error("failed to close reader", zap.Error(err))
+			}
+		}(reader)
 
 		img, _, err := image.Decode(reader)
 		if err != nil {
@@ -92,15 +105,15 @@ func GetSticker(ctx tb.Context) error {
 				return errors.Join(err, err1)
 			}
 		default:
-			//nolint: deadcode
+			// nolint: deadcode
 			return ctx.Reply("unknown image format")
 		}
 
 		sendFile := tb.FromReader(bs)
 		return ctx.Reply(sendFile)
 	}
-	
-	//nolint: goerr113
+
+	// nolint: goerr113
 	return errors.New("not implement")
 
 }

@@ -59,7 +59,8 @@ func runTimerTask(task *store.Task) {
 
 	hint := fmt.Sprintf("我来了, 你要我提醒你…… <code>%s</code> ,大概没错吧。", html.EscapeString(task.Info))
 	if chat.Type != ChatPrivate {
-		user, err := bot.ChatByID(task.UserId)
+		var user *Chat
+		user, err = bot.ChatByID(task.UserId)
 		if err != nil {
 			log.Error("run timer task, get user by id error", zap.Int64("user_id", task.UserId), zap.Error(err))
 			return

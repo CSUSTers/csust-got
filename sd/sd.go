@@ -176,7 +176,7 @@ func Process() {
 						}()
 						resp, err := requestStableDiffusion(ctx.UserConfig.GetServer(), &ctx.Request)
 						if err != nil {
-							err := ctx.BotContext.Reply("寄了")
+							err = ctx.BotContext.Reply("寄了")
 							if err != nil {
 								log.Error("reply stable diffusion failed", zap.Error(err))
 							}
@@ -185,7 +185,8 @@ func Process() {
 
 						photos := Album{}
 						for _, v := range resp.Images {
-							data, err := base64.StdEncoding.DecodeString(v)
+							var data []byte
+							data, err = base64.StdEncoding.DecodeString(v)
 							if err != nil {
 								log.Error("decode stable diffusion image failed", zap.Error(err))
 								continue

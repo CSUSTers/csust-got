@@ -94,7 +94,7 @@ func GetVoiceV2(ctx Context) error {
 
 	if err != nil {
 		log.Error(msgFailedToConnectApiServer, zap.Error(err))
-		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
+		err = SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -116,13 +116,13 @@ func GetVoiceV2(ctx Context) error {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
+		err = SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		log.Error("语音api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
+		err = SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
 		return err
 
 	}
@@ -147,7 +147,7 @@ func GetVoiceV3(ctx Context) error {
 	resp, err := http.Get(serverAddress)
 	if err != nil {
 		log.Error(msgFailedToConnectApiServer, zap.Error(err))
-		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
+		err = SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -169,13 +169,13 @@ func GetVoiceV3(ctx Context) error {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
+		err = SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		log.Error("语音api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
+		err = SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
 		return err
 
 	}
@@ -203,7 +203,7 @@ func GetVoiceV3Pro(ctx Context) error {
 	resp, err := http.PostForm(serverAddress, values)
 	if err != nil {
 		log.Error(msgFailedToConnectApiServer, zap.Error(err))
-		err := SendErrVoice(m.Chat, msgFailedToConnectApiServer)
+		err = SendErrVoice(m.Chat, msgFailedToConnectApiServer)
 		return err
 	}
 
@@ -225,13 +225,13 @@ func GetVoiceV3Pro(ctx Context) error {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		log.Error(msgVoiceApiServerResponError, zap.Int("status", resp.StatusCode), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
+		err = SendErrVoice(m.Chat, msgVoiceNotFoundAndArgs+strings.Join(debugMsg, "\n"))
 		return err
 	}
 	err = json.Unmarshal(body, &data)
 	if err != nil {
 		log.Error("语音api服务器json反序列化失败", zap.Error(err), zap.String("body", string(body)))
-		err := SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
+		err = SendErrVoice(m.Chat, "语音api服务器json反序列化失败")
 		return err
 
 	}

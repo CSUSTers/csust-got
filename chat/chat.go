@@ -209,14 +209,20 @@ func chatWithStream(ctx *chatContext) {
 		return
 	}
 
-	defer stream.Close()
+	defer func(stream *openai.ChatCompletionStream) {
+		err = stream.Close()
+		if err != nil {
+			log.Error("[ChatGPT] Stream close error", zap.Error(err))
+		}
+	}(stream)
 
 	content := ""
 	contentLock := sync.Mutex{}
 	done := make(chan struct{})
 	go func() {
 		for {
-			response, err := stream.Recv()
+			var response openai.ChatCompletionStreamResponse
+			response, err = stream.Recv()
 			if errors.Is(err, io.EOF) {
 				ctx.req.Messages = append(ctx.req.Messages, openai.ChatCompletionMessage{
 					Role:    openai.ChatMessageRoleAssistant,
