@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
-	github.com/meilisearch/meilisearch-go v0.26.2
+	github.com/meilisearch/meilisearch-go v0.26.3
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.53.0
 	github.com/quic-go/quic-go v0.42.0
