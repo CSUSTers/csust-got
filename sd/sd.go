@@ -67,7 +67,8 @@ func init() {
 	transport.DialContext = dialer.DialContext
 
 	h3RoundTripper := &http3.RoundTripper{
-		QuicConfig: &quic.Config{
+
+		QUICConfig: &quic.Config{
 			MaxIdleTimeout:  3 * time.Minute,
 			KeepAlivePeriod: 10 * time.Second,
 		},
