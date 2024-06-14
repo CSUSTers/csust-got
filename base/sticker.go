@@ -88,15 +88,15 @@ func GetSticker(ctx tb.Context) error {
 		// send video is sticker is video
 		if sticker.Video {
 			switch opt.format {
-			case "", "mp4":
+			case "", "webm":
 				sendFile := &tb.Document{
 					File:     tb.FromReader(reader),
 					FileName: filename + ".webp",
 					Caption:  emoji,
 				}
 				return ctx.Reply(sendFile)
-			case "gif":
-				return ctx.Reply("not implement mp4 to gif converter yet")
+			case "mp4", "gif":
+				return ctx.Reply("not implement mp4, gif converter yet")
 			}
 			return nil
 		}
@@ -174,7 +174,7 @@ func parseOpts(text string) (stickerOpts, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif"}, f) {
+			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif", "webm"}, f) {
 				opts.format = f
 			}
 		case "pack", "p":
