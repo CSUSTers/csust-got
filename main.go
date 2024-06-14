@@ -190,12 +190,19 @@ func registerBaseHandler(bot *Bot) {
 
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
+
+	// download sticker in private chat
+	bot.Handle(OnSticker, stickerDlHandler)
 }
 
-func customHandler(ctx Context) error {
+func stickerDlHandler(ctx Context) error {
 	if ctx.Chat().Private && ctx.Message() != nil && ctx.Message().Sticker != nil {
 		return base.GetSticker(ctx)
 	}
+	return nil
+}
+
+func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
 	if cmd == nil {
