@@ -180,11 +180,26 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
 	bot.Handle("/gacha", gacha.WithMsgRpl)
 
+	// get sticker handler
+	bot.Handle("/iwant", base.GetSticker)
+
 	bot.Handle("/bye_world", util.GroupCommand(base.ByeWorld))
+	bot.Handle("/byeworld", util.GroupCommand(base.ByeWorld))
 	bot.Handle("/hello_world", util.GroupCommand(base.HelloWorld))
+	bot.Handle("/helloworld", util.GroupCommand(base.HelloWorld))
 
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
+
+	// download sticker in private chat
+	bot.Handle(OnSticker, stickerDlHandler)
+}
+
+func stickerDlHandler(ctx Context) error {
+	if ctx.Chat().Private && ctx.Message() != nil && ctx.Message().Sticker != nil {
+		return base.GetSticker(ctx)
+	}
+	return nil
 }
 
 func customHandler(ctx Context) error {

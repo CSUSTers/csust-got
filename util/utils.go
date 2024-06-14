@@ -286,3 +286,14 @@ func EscapeTelegramReservedChars(s string) string {
 
 	return s
 }
+
+// ParseKeyValueMapStr parse string format like `key=value` or `key`
+func ParseKeyValueMapStr(s string) (key, value string) {
+	idx := strings.Index(s, "=")
+	if idx >= 0 {
+		key = s[:idx]
+		value = s[idx+1:]
+		return key, value
+	}
+	return s, ""
+}

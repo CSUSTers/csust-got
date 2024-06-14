@@ -3,6 +3,7 @@ package config
 import "github.com/spf13/viper"
 
 type chatConfig struct {
+	BaseUrl       string
 	Key           string
 	MaxTokens     int
 	Temperature   float32
@@ -15,6 +16,7 @@ type chatConfig struct {
 }
 
 func (c *chatConfig) readConfig() {
+	c.BaseUrl = viper.GetString("chatgpt.base_url")
 	c.Key = viper.GetString("chatgpt.key")
 	c.MaxTokens = viper.GetInt("chatgpt.max_tokens")
 	c.Temperature = float32(viper.GetFloat64("chatgpt.temperature"))

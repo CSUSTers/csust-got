@@ -65,7 +65,7 @@ func Decode(ctx tb.Context) error {
 		var buf bytes.Buffer
 		for _, rune := range text {
 			if rune != utf8.RuneError {
-				_, err := buf.WriteRune(rune)
+				_, err = buf.WriteRune(rune)
 				if err != nil {
 					log.Debug("write string buf error", zap.Error(err))
 				}
