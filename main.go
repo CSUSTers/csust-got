@@ -184,7 +184,9 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/iwant", base.GetSticker)
 
 	bot.Handle("/bye_world", util.GroupCommand(base.ByeWorld))
+	bot.Handle("/byeworld", util.GroupCommand(base.ByeWorld))
 	bot.Handle("/hello_world", util.GroupCommand(base.HelloWorld))
+	bot.Handle("/helloworld", util.GroupCommand(base.HelloWorld))
 
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
