@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"image"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -71,19 +72,6 @@ func GetSticker(ctx tb.Context) error {
 		filename := sticker.SetName
 		emoji := sticker.Emoji
 
-		// send origin file with `format=[webp]`
-		switch opt.format {
-		case "", "webp":
-			sendFile := &tb.Document{
-				File:                 *file,
-				FileName:             filename + ".webp",
-				Caption:              emoji,
-				DisableTypeDetection: true,
-			}
-			return ctx.Reply(sendFile)
-		}
-
-		// convert image format to params targeted
 		reader, err := ctx.Bot().File(file)
 		if err != nil {
 			err1 := ctx.Reply("failed to get sticker file")
@@ -97,6 +85,34 @@ func GetSticker(ctx tb.Context) error {
 			}
 		}(reader)
 
+		// send video is sticker is video
+		if sticker.Video {
+			switch opt.format {
+			case "", "mp4":
+				sendFile := &tb.Document{
+					File:     tb.FromReader(reader),
+					FileName: filename + ".webp",
+					Caption:  emoji,
+				}
+				return ctx.Reply(sendFile)
+			case "gif":
+				return ctx.Reply("not implement mp4 to gif converter yet")
+			}
+			return nil
+		}
+
+		// send origin file with `format=[webp]`
+		switch opt.format {
+		case "", "webp":
+			sendFile := &tb.Document{
+				File:     tb.FromReader(reader),
+				FileName: filename + ".webp",
+				Caption:  emoji,
+			}
+			return ctx.Reply(sendFile)
+		}
+
+		// convert image format to params targeted
 		img, _, err := image.Decode(reader)
 		if err != nil {
 			err1 := ctx.Reply("failed to convert image format")
@@ -119,16 +135,22 @@ func GetSticker(ctx tb.Context) error {
 				err1 := ctx.Reply("failed to convert image format")
 				return errors.Join(err, err1)
 			}
+		case "gif":
+			filename += ".gif"
+			err := gif.Encode(bs, img, &gif.Options{NumColors: 255})
+			if err != nil {
+				err1 := ctx.Reply("failed to convert image format")
+				return errors.Join(err, err1)
+			}
 		default:
 			// nolint: deadcode
 			return ctx.Reply("unknown image format")
 		}
 
 		sendFile := &tb.Document{
-			File:                 tb.FromReader(bs),
-			FileName:             filename,
-			Caption:              emoji,
-			DisableTypeDetection: true,
+			File:     tb.FromReader(bs),
+			FileName: filename,
+			Caption:  emoji,
 		}
 
 		return ctx.Reply(sendFile)
