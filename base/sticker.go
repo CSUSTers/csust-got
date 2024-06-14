@@ -32,7 +32,6 @@ func defaultOpts() stickerOpts {
 
 // GetSticker will download sticker file, and convert to expected format, and send to chat
 func GetSticker(ctx tb.Context) error {
-	ctx.Reply("called `iwannt` here")
 	var msg = ctx.Message()
 	var sticker *tb.Sticker
 
@@ -49,8 +48,6 @@ func GetSticker(ctx tb.Context) error {
 		}
 		return nil
 	}
-
-	ctx.Reply("I will send yout the sticker")
 
 	opt := defaultOpts()
 	if msg.Text != "" {
