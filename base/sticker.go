@@ -65,12 +65,21 @@ func GetSticker(ctx tb.Context) error {
 
 	if !opt.pack {
 		file := &sticker.File
+		filename := sticker.SetName
+		emoji := sticker.Emoji
 
+		// send origin file with `format=[webp]`
 		switch opt.format {
 		case "", "webp":
-			return ctx.Reply(file)
+			sendFile := &tb.Document{
+				File:     *file,
+				FileName: filename + ".webp",
+				Caption:  emoji,
+			}
+			return ctx.Reply(sendFile)
 		}
 
+		// convert image format to params targeted
 		reader, err := ctx.Bot().File(file)
 		if err != nil {
 			err1 := ctx.Reply("failed to get sticker file")
@@ -93,12 +102,14 @@ func GetSticker(ctx tb.Context) error {
 		bs := bytes.NewBuffer(nil)
 		switch opt.format {
 		case "jpg", "jpeg":
+			filename += ".jpg"
 			err := jpeg.Encode(bs, img, &jpeg.Options{Quality: 100})
 			if err != nil {
 				err1 := ctx.Reply("failed to convert image format")
 				return errors.Join(err, err1)
 			}
 		case "png":
+			filename += ".png"
 			err := png.Encode(bs, img)
 			if err != nil {
 				err1 := ctx.Reply("failed to convert image format")
@@ -109,7 +120,12 @@ func GetSticker(ctx tb.Context) error {
 			return ctx.Reply("unknown image format")
 		}
 
-		sendFile := tb.FromReader(bs)
+		sendFile := &tb.Document{
+			File:     tb.FromReader(bs),
+			FileName: filename,
+			Caption:  emoji,
+		}
+
 		return ctx.Reply(sendFile)
 	}
 
