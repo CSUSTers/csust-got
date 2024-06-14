@@ -174,7 +174,7 @@ func parseOpts(text string) (stickerOpts, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png"}, f) {
+			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif"}, f) {
 				opts.format = f
 			}
 		case "pack", "p":
