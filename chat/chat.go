@@ -46,6 +46,12 @@ func InitChat() {
 			log.Error("[chat] failed to parse proxy url", zap.Error(err))
 		}
 
+		if baseApiUrl, err := url.Parse(config.BotConfig.ChatConfig.BaseUrl); err == nil && baseApiUrl.Host != "" {
+			clientConfig.BaseURL = baseApiUrl.String()
+		} else {
+			log.Error("[chat] failed to set custom api url", zap.Error(err))
+		}
+
 		client = openai.NewClientWithConfig(clientConfig)
 		go chatService()
 	}

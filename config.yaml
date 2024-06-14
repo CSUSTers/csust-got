@@ -50,6 +50,7 @@ genshin_voice:
   err_audio_addr: "https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg"
 
 chatgpt:
+  base_url: ""
   key: ""
   max_tokens: 1000
   temperature: 1
