@@ -75,6 +75,7 @@ func GetSticker(ctx tb.Context) error {
 				File:     *file,
 				FileName: filename + ".webp",
 				Caption:  emoji,
+				DisableTypeDetection: true,
 			}
 			return ctx.Reply(sendFile)
 		}
@@ -124,6 +125,7 @@ func GetSticker(ctx tb.Context) error {
 			File:     tb.FromReader(bs),
 			FileName: filename,
 			Caption:  emoji,
+			DisableTypeDetection: true,
 		}
 
 		return ctx.Reply(sendFile)
