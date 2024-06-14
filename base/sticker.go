@@ -108,6 +108,7 @@ func GetSticker(ctx tb.Context) error {
 			sendFile := &tb.Document{
 				File:                 tb.FromReader(reader),
 				FileName:             filename + ".webp",
+				Thumbnail:            sticker.Thumbnail,
 				Caption:              emoji,
 				DisableTypeDetection: true,
 			}
