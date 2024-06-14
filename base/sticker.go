@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	_ "golang.org/x/image/webp"
+
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 
@@ -72,9 +74,9 @@ func GetSticker(ctx tb.Context) error {
 		switch opt.format {
 		case "", "webp":
 			sendFile := &tb.Document{
-				File:     *file,
-				FileName: filename + ".webp",
-				Caption:  emoji,
+				File:                 *file,
+				FileName:             filename + ".webp",
+				Caption:              emoji,
 				DisableTypeDetection: true,
 			}
 			return ctx.Reply(sendFile)
@@ -122,9 +124,9 @@ func GetSticker(ctx tb.Context) error {
 		}
 
 		sendFile := &tb.Document{
-			File:     tb.FromReader(bs),
-			FileName: filename,
-			Caption:  emoji,
+			File:                 tb.FromReader(bs),
+			FileName:             filename,
+			Caption:              emoji,
 			DisableTypeDetection: true,
 		}
 
