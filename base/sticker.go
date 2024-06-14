@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	//nolint: revive
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
