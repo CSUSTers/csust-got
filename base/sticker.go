@@ -91,7 +91,7 @@ func GetSticker(ctx tb.Context) error {
 			case "", "webm":
 				sendFile := &tb.Document{
 					File:                 tb.FromReader(reader),
-					FileName:             filename + ".webp",
+					FileName:             filename + ".webm",
 					Caption:              emoji,
 					DisableTypeDetection: true,
 				}
