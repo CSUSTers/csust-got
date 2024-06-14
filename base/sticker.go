@@ -90,9 +90,10 @@ func GetSticker(ctx tb.Context) error {
 			switch opt.format {
 			case "", "webm":
 				sendFile := &tb.Document{
-					File:     tb.FromReader(reader),
-					FileName: filename + ".webp",
-					Caption:  emoji,
+					File:                 tb.FromReader(reader),
+					FileName:             filename + ".webp",
+					Caption:              emoji,
+					DisableTypeDetection: true,
 				}
 				return ctx.Reply(sendFile)
 			case "mp4", "gif":
@@ -105,9 +106,10 @@ func GetSticker(ctx tb.Context) error {
 		switch opt.format {
 		case "", "webp":
 			sendFile := &tb.Document{
-				File:     tb.FromReader(reader),
-				FileName: filename + ".webp",
-				Caption:  emoji,
+				File:                 tb.FromReader(reader),
+				FileName:             filename + ".webp",
+				Caption:              emoji,
+				DisableTypeDetection: true,
 			}
 			return ctx.Reply(sendFile)
 		}
@@ -148,9 +150,10 @@ func GetSticker(ctx tb.Context) error {
 		}
 
 		sendFile := &tb.Document{
-			File:     tb.FromReader(bs),
-			FileName: filename,
-			Caption:  emoji,
+			File:                 tb.FromReader(bs),
+			FileName:             filename,
+			Caption:              emoji,
+			DisableTypeDetection: true,
 		}
 
 		return ctx.Reply(sendFile)
