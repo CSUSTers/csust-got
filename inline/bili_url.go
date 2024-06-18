@@ -158,7 +158,7 @@ func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.Extra
 			e.Query = getBiliVideoUrlQuery(q)
 
 			paths := splitUrlPath(e.Path)
-			if len(paths) >= 2 {
+			if len(paths) >= 2 && e.Query == "" {
 				e.Path = "/" + paths[1]
 				e.Domain = "b23.tv"
 			}
