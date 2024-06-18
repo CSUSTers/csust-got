@@ -12,6 +12,7 @@ func init() {
 		newRetainQueryProcessor(`^(?:.*\.)?tb\.cn$`, "id"),
 		newRetainQueryProcessor(`^(?:www\.)?(?:cn\.)?bing\.com$`, "q"),
 		newRetainQueryProcessor(`^(?:www\.)?google\.com$`, "q"),
+		newRetainQueryProcessor(`^(?:(?:(?:www|m)\.)?(youtube)\.com|youtu\.be)$`),
 	)
 }
 

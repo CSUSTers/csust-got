@@ -3,10 +3,15 @@ package inline
 import (
 	"bytes"
 	"context"
+	"csust-got/log"
 	"csust-got/util/urlx"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 const b23URL = "b23.tv"
@@ -30,6 +35,7 @@ var biliRetainQueryParams = []string{
 	"p",
 	"t",
 	"tab",
+	"start_progress",
 }
 
 var (
@@ -147,22 +153,20 @@ func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.Extra
 		}
 		e := urlx.UrlToExtraUrl(to)
 
-		// video URL without `p` and `t` query params
-		// use `b23.tv` domain for shorten URL
 		if strings.HasPrefix(e.Path, "/video/") {
-			pQ := to.Query().Get("p")
-			tQ := to.Query().Get("t")
+			q := to.Query()
+			e.Query = getBiliVideoUrlQuery(q)
+
 			paths := splitUrlPath(e.Path)
-			if len(paths) >= 2 && (pQ == "" || pQ == "1") && tQ == "" {
+			if len(paths) >= 2 {
 				e.Path = "/" + paths[1]
 				e.Domain = "b23.tv"
-				e.Query = ""
 			}
 		}
-		err = c.clearBiliUrlQuery(e)
-		if err != nil {
-			return "", err
-		}
+		// err = c.clearBiliUrlQuery(e)
+		// if err != nil {
+		// 	return "", err
+		// }
 		return e.StringByFields(), nil
 	}
 
@@ -184,4 +188,39 @@ func fixUrl(s string) string {
 		return "http://" + s
 	}
 	return s
+}
+
+// video URL without `p` and `t` query params
+// use `b23.tv` domain for shorten URL
+//
+// P.S. sometimes `start_progress` is used for marking video time
+//
+//	e.g. `start_progress=71527` may mean `t=71.5`
+//	replace it with `t` query param in current version
+func getBiliVideoUrlQuery(q url.Values) string {
+
+	pQ := q.Get("p")
+	tQ := q.Get("t")
+	stpQ := q.Get("start_progress")
+	if stpQ != "" {
+		ts, err := strconv.ParseFloat(stpQ, 32)
+		if err == nil {
+			tQ = strconv.FormatFloat(ts/1000, 'f', 1, 32)
+		} else {
+			log.Error("convert video `start_progress` failed", zap.String("string", stpQ), zap.Error(err))
+		}
+	}
+
+	clear(q)
+	if pQ != "" && pQ != "1" {
+		q.Set("p", pQ)
+	}
+	if tQ != "" {
+		q.Set("t", tQ)
+	}
+
+	if len(q) == 0 {
+		return ""
+	}
+	return "?" + q.Encode()
 }
