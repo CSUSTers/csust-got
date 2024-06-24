@@ -190,14 +190,20 @@ func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
 
 // AddBanDuration add ban duration.
 func AddBanDuration(chatID int64, bannerID, bannedID int64, ad time.Duration) bool {
-	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID != 0 {
+		MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
+	}
 	d := GetBannedDuration(chatID, bannedID)
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
 // Ban ban someone.
 func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
-	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID != 0 {
+		MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
+	}
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
 	if err != nil {
 		log.Error("Ban failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannedID), zap.Error(err))
@@ -208,6 +214,10 @@ func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 
 // MakeBannerCD make banner in cd.
 func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID == 0 {
+		return true
+	}
 	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
 		log.Error("Ban set CD failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannerID), zap.Error(err))
