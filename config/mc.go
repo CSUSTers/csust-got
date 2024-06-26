@@ -16,11 +16,18 @@ type mcConfig struct {
 
 	// Odds is applied to sacrifice for who `reburn`ed me.
 	Odds int
+
+	// Timout means how long nobody call `mc` to cancel context, in seconds
+	Timout int
 }
 
 func (c *mcConfig) readConfig() {
 	c.MaxCount = viper.GetInt("mc.max_count")
 	c.Mc2Dead = viper.GetInt("mc.mc2dead")
+
+	c.Sacrifices = viper.GetIntSlice("mc.sacrifices")
+	c.Odds = viper.GetInt("mc.odds")
+	c.Timout = viper.GetInt("mc.timeout")
 }
 
 func (c *mcConfig) checkConfig() {
@@ -40,5 +47,11 @@ func (c *mcConfig) checkConfig() {
 		if sacrifice < 30 || sacrifice > 600 {
 			zap.L().Fatal("mc config: `Sacrifices` must in [30, 600]", zap.Int("Sacrifices", sacrifice))
 		}
+	}
+
+	if c.Timout <= 0 {
+		c.Timout = 24 * 3600
+	} else if c.Timout < 60 {
+		c.Timout = 60
 	}
 }

@@ -717,3 +717,32 @@ func KeepByeWorldDuration(chatID int64, userID int64) {
 		return
 	}
 }
+
+// McRaiseSoul raise a soul to chips area.
+// return true if endgame, and get all souls in the area.
+func McRaiseSoul(chatID int64, userID int64) (endgame bool, souls []string, err error) {
+	expireTime := time.Duration(config.BotConfig.McConfig.Timout) * time.Second
+	maxCount := config.BotConfig.McConfig.MaxCount
+
+	rKey := wrapKeyWithChat("mc_souls", chatID)
+
+	count, err := rc.RPush(context.TODO(), rKey, userID).Result()
+	if err != nil {
+		log.Error("raise soul failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return false, nil, err
+	}
+
+	if count >= int64(maxCount) {
+		defer func() {
+			_, _ = rc.Del(context.TODO(), rKey).Result()
+		}()
+		souls, err = rc.LRange(context.TODO(), rKey, 0, -1).Result()
+		if err != nil {
+			log.Error("get souls failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+			return false, nil, err
+		}
+		return true, souls, nil
+	}
+	err = rc.Expire(context.TODO(), rKey, expireTime).Err()
+	return false, nil, err
+}
