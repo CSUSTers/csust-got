@@ -747,6 +747,7 @@ func McRaiseSoul(chatID int64, userID int64) (endgame bool, souls []string, err 
 	return false, nil, err
 }
 
+// McDead add dead user to dead list.
 func McDead[E interface{ ~string | ~int | ~int64 }](chatID int64, users []E) error {
 	rKey := wrapKeyWithChat("mc_dead", chatID)
 
@@ -758,6 +759,7 @@ func McDead[E interface{ ~string | ~int | ~int64 }](chatID int64, users []E) err
 	return nil
 }
 
+// IsMcDead check if bot is dead.
 func IsMcDead(chatID int64) (bool, error) {
 	rKey := wrapKeyWithChat("mc_dead", chatID)
 
@@ -769,6 +771,7 @@ func IsMcDead(chatID int64) (bool, error) {
 	return ret > 0, nil
 }
 
+// GetMcDead get dead users.
 func GetMcDead(chatID int64) ([]string, error) {
 	rKey := wrapKeyWithChat("mc_dead", chatID)
 
@@ -780,6 +783,7 @@ func GetMcDead(chatID int64) ([]string, error) {
 	return ret, nil
 }
 
+// ClearMcDead clear dead list.
 func ClearMcDead(chatID int64) error {
 	rKey := wrapKeyWithChat("mc_dead", chatID)
 
@@ -791,6 +795,7 @@ func ClearMcDead(chatID int64) error {
 	return nil
 }
 
+// IsPrayerInPost check if user is prayed in post.
 func IsPrayerInPost(chatID int64, userID int64) (bool, error) {
 	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
 
@@ -802,6 +807,7 @@ func IsPrayerInPost(chatID int64, userID int64) (bool, error) {
 	return ret > 0, nil
 }
 
+// SetPrayer set user to be prayed in post.
 func SetPrayer(chatID int64, userID int64) error {
 	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
 
@@ -813,6 +819,7 @@ func SetPrayer(chatID int64, userID int64) error {
 	return nil
 }
 
+// ClearPrayer clear user to be prayed in post.
 func ClearPrayer(chatID int64, userID int64) error {
 	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
 

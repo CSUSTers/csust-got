@@ -81,7 +81,7 @@ import (
 // 	return text
 // }
 
-type McSascrfice struct {
+type mcSascrfice struct {
 	ChatID int64
 	UserID int64
 
@@ -98,7 +98,7 @@ func computeSas(idx int) int {
 	return baseSas[idx]
 }
 
-func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
+func reburnHelper(chatID, prayer int64) (bool, []*mcSascrfice, error) {
 	// check bot dead or not
 	souls, err := orm.GetMcDead(chatID)
 	if err != nil {
@@ -109,10 +109,11 @@ func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
 	}
 
 	// compute sascrifces
-	sascrfices := make([]*McSascrfice, 0, len(souls))
+	sascrfices := make([]*mcSascrfice, 0, len(souls))
 	for i, soul := range souls {
 		idx := len(souls) - 1 - i
-		userID, err := strconv.ParseInt(soul, 10, 64)
+		var userID int64
+		userID, err = strconv.ParseInt(soul, 10, 64)
 		if err != nil {
 			log.Error("reburn parse userID failed", zap.Int64("chat", chatID), zap.Error(err))
 			continue
@@ -120,8 +121,8 @@ func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
 
 		sas := computeSas(idx)
 
-		var currSas *McSascrfice
-		for i, _ := range sascrfices {
+		var currSas *mcSascrfice
+		for i := range sascrfices {
 			if sascrfices[i].UserID == userID {
 				currSas = sascrfices[i]
 				currSas.TotalSascrfice += sas
@@ -136,7 +137,7 @@ func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
 			}
 		}
 		if currSas == nil {
-			currSas = &McSascrfice{
+			currSas = &mcSascrfice{
 				ChatID:         chatID,
 				UserID:         userID,
 				TotalSascrfice: sas,
@@ -149,7 +150,8 @@ func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
 
 	// check sascrfice odds
 	for _, sascrfice := range sascrfices {
-		isPrayed, err := orm.IsPrayerInPost(sascrfice.ChatID, sascrfice.UserID)
+		var isPrayed bool
+		isPrayed, err = orm.IsPrayerInPost(sascrfice.ChatID, sascrfice.UserID)
 		if err != nil {
 			log.Error("reburn check pray failed", zap.Int64("chat", chatID), zap.Error(err))
 			continue
@@ -174,6 +176,7 @@ func reburnHelper(chatID, prayer int64) (bool, []*McSascrfice, error) {
 	return true, sascrfices, nil
 }
 
+// MC handle `/mc` command
 func MC(ctx tb.Context) error {
 	chatID := ctx.Chat().ID
 	userID := ctx.Sender().ID
@@ -181,24 +184,25 @@ func MC(ctx tb.Context) error {
 	ok, souls, err := orm.McRaiseSoul(chatID, userID)
 	if err != nil {
 		log.Error("mc raise soul failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
-		ctx.Reply("哪里出错了呢")
+		_ = ctx.Reply("哪里出错了呢")
 		return err
 	}
 	if !ok {
-		ctx.Reply("再MC自杀")
+		_ = ctx.Reply("再MC自杀")
 		return nil
 	}
 
 	err = orm.McDead(chatID, souls)
 	if err != nil {
 		log.Error("mc dead failed", zap.Int64("chat", chatID), zap.Strings("users", souls), zap.Error(err))
-		ctx.Reply("哪里出错了呢")
+		_ = ctx.Reply("哪里出错了呢")
 		return err
 	}
 
 	return ctx.Reply("啊，我死了。来个好心的大魔术师使用 /reburn 复活我吧。")
 }
 
+// Reburn handle `/reburn` command
 func Reburn(ctx tb.Context) error {
 	chatID := ctx.Chat().ID
 	userID := ctx.Sender().ID
@@ -206,12 +210,12 @@ func Reburn(ctx tb.Context) error {
 	ok, sascrfices, err := reburnHelper(chatID, userID)
 	if err != nil {
 		log.Error("reburn failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
-		ctx.Reply("哪里出错了呢")
+		_ = ctx.Reply("哪里出错了呢")
 		return err
 	}
 
 	if !ok {
-		ctx.Reply("？？？")
+		_ = ctx.Reply("？？？")
 		return nil
 	}
 
@@ -254,6 +258,10 @@ func Reburn(ctx tb.Context) error {
 			text := fmt.Sprintf(`%s 不知为何没能献祭 %v 作为祭品`, userString, d)
 			replyText2 = append(replyText2, text)
 		}
+	}
+
+	if len(missingUsers) > 0 {
+		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
 	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"))
 }
