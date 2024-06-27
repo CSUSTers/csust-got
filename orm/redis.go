@@ -746,3 +746,80 @@ func McRaiseSoul(chatID int64, userID int64) (endgame bool, souls []string, err 
 	err = rc.Expire(context.TODO(), rKey, expireTime).Err()
 	return false, nil, err
 }
+
+func McDead[E interface{ ~string | ~int | ~int64 }](chatID int64, users []E) error {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	err := rc.RPush(context.TODO(), rKey, util.AnySlice(users)...).Err()
+	if err != nil {
+		log.Error("mc_dead failed", zap.Int64("chat", chatID), zap.Any("users", users), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func IsMcDead(chatID int64) (bool, error) {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	ret, err := rc.Exists(context.TODO(), rKey).Result()
+	if err != nil {
+		log.Error("check mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return false, err
+	}
+	return ret > 0, nil
+}
+
+func GetMcDead(chatID int64) ([]string, error) {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	ret, err := rc.LRange(context.TODO(), rKey, 0, -1).Result()
+	if err != nil {
+		log.Error("get mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return nil, err
+	}
+	return ret, nil
+}
+
+func ClearMcDead(chatID int64) error {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	err := rc.Del(context.TODO(), rKey).Err()
+	if err != nil {
+		log.Error("clear mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func IsPrayerInPost(chatID int64, userID int64) (bool, error) {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	ret, err := rc.Exists(context.TODO(), prayerKey).Result()
+	if err != nil {
+		log.Error("check mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return false, err
+	}
+	return ret > 0, nil
+}
+
+func SetPrayer(chatID int64, userID int64) error {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	err := rc.Set(context.TODO(), prayerKey, config.BotConfig.McConfig.Odds, 0).Err()
+	if err != nil {
+		log.Error("set mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func ClearPrayer(chatID int64, userID int64) error {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	err := rc.Del(context.TODO(), prayerKey).Err()
+	if err != nil {
+		log.Error("clear mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}

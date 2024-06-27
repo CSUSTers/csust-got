@@ -297,3 +297,12 @@ func ParseKeyValueMapStr(s string) (key, value string) {
 	}
 	return s, ""
 }
+
+// AnySlice convert `[]E` to `[]any`(`[]interface{}`).
+func AnySlice[E any](s []E) []any {
+	ret := make([]any, 0, len(s))
+	for _, v := range s {
+		ret = append(ret, v)
+	}
+	return ret
+}
