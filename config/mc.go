@@ -49,4 +49,8 @@ func (c *mcConfig) checkConfig() {
 	} else if c.Timout < 60 {
 		c.Timout = 60
 	}
+
+	if c.Odds <= 1 {
+		c.Odds = 2
+	}
 }
