@@ -3,7 +3,7 @@
 
 # options for analysis running
 run:
-  go: "1.20"
+  go: "1.21"
   # default concurrency is an available CPU number
   concurrency: 16
 
@@ -18,7 +18,7 @@ run:
 
   # default is true. Enables skipping of directories:
   #   vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs-use-default: true
+  # skip-dirs-use-default: true
 
   # Allow multiple parallel golangci-lint instances running.
   # If false (default) - golangci-lint acquires file lock on start.
@@ -29,7 +29,8 @@ run:
 output:
   # colored-line-number|line-number|json|tab|checkstyle|code-climate|junit-xml|github-actions
   # default is "colored-line-number"
-  format: colored-line-number
+  formats: 
+    - format: colored-line-number
 
   # print lines of code with issue, default is true
   print-issued-lines: true
@@ -178,7 +179,7 @@ linters-settings:
         debug: 'emptyDecl'
         # Deprecated, use 'failOn' param.
         # If set to true, identical to failOn='all', otherwise failOn=''
-        failOnError: false
+        # failOnError: false
         # Determines the behavior when an error occurs while parsing ruleguard files.
         # If flag is not set, log error and skip rule files that contain an error.
         # If flag is set, the value must be a comma-separated list of error conditions.
@@ -215,8 +216,6 @@ linters-settings:
   #   simplify: true
 
   gofumpt:
-    lang-version: "1.20"
-
     # Choose whether or not to use the extra rules that are disabled
     # by default
     extra-rules: false
@@ -263,13 +262,10 @@ linters-settings:
         truncate: "32"
 
   gosimple:
-    go: "1.20"
     # https://staticcheck.io/docs/options#checks
     checks: [ "all" ]
 
   govet:
-    # report about shadowed variables
-    check-shadowing: true
 
     # settings per analyzer
     settings:
@@ -286,7 +282,6 @@ linters-settings:
     #   - atomicalign
     enable-all: true
     disable:
-      - shadow
       - nilness
       - unusedwrite
       - fieldalignment
@@ -404,12 +399,10 @@ linters-settings:
       - name: waitgroup-by-value
 
   staticcheck:
-    go: "1.20"
     # https://staticcheck.io/docs/options#checks
     checks: ["all", "-ST1001"]
 
   stylecheck:
-    go: "1.20"
     # https://staticcheck.io/docs/options#checks
     checks: [ "all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022" ]
     # https://staticcheck.io/docs/options#dot_import_whitelist
@@ -527,7 +520,7 @@ linters:
     - goconst
     - gocritic
     - godox
-    - goerr113
+    - err113
     # - gofmt
     # - goimports
     - gomoddirectives
@@ -553,7 +546,6 @@ linters:
     # - whitespace
   disable:
     - typecheck
-    - structcheck
   fast: false
 
 

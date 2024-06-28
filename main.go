@@ -108,7 +108,8 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware, contentFilterMiddleware, byeWorldMiddleware)
+		messagesCollectionMiddleware, contentFilterMiddleware, byeWorldMiddleware,
+		mcMiddleware)
 
 	config.BotConfig.Bot = bot
 	log.Info("Success Authorized", zap.String("botUserName", bot.Me.Username))
@@ -142,7 +143,8 @@ func registerBaseHandler(bot *Bot) {
 
 	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", util.GroupCommand(base.Forward))
-	bot.Handle("/mc", util.GroupCommand(base.MC))
+	bot.Handle("/mc", util.GroupCommandCtx(base.MC))
+	bot.Handle("/reburn", util.GroupCommandCtx(base.Reburn))
 
 	bot.Handle("/sleep", base.Sleep)
 	bot.Handle("/no_sleep", base.NoSleep)
@@ -472,6 +474,36 @@ func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 			orm.KeepByeWorldDuration(ctx.Chat().ID, ctx.Sender().ID)
 		}
 
+		return next(ctx)
+	}
+}
+
+func mcMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		chat := ctx.Chat()
+		if chat == nil || (chat.Type != ChatGroup && chat.Type != ChatSuperGroup) {
+			return next(ctx)
+		}
+
+		m := ctx.Message()
+		// continue with inline query
+		if m == nil && ctx.Query() != nil {
+			return next(ctx)
+		}
+
+		if ok, err := orm.IsMcDead(chat.ID); err != nil || !ok {
+			return next(ctx)
+		}
+
+		cmd, _, err := entities.CommandTakeArgs(m, 0)
+		if err != nil {
+			log.Error("parse command failed", zap.String("text", m.Text), zap.Error(err))
+			return next(ctx)
+		}
+
+		if cmd.Name() != "reburn" {
+			return nil
+		}
 		return next(ctx)
 	}
 }
