@@ -146,7 +146,6 @@ func GetSticker(ctx tb.Context) error {
 				return errors.Join(err, err1)
 			}
 		default:
-			// nolint: deadcode
 			return ctx.Reply("unknown image format")
 		}
 
