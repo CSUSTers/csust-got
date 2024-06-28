@@ -39,7 +39,7 @@ func GetSticker(ctx tb.Context) error {
 	var msg = ctx.Message()
 	var sticker *tb.Sticker
 
-	if ctx.Chat().Private && msg.Sticker != nil {
+	if ctx.Chat().Type == tb.ChatPrivate && msg.Sticker != nil {
 		sticker = msg.Sticker
 	} else if replyTo := msg.ReplyTo; replyTo != nil && replyTo.Sticker != nil {
 		sticker = replyTo.Sticker

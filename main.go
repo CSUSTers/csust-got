@@ -198,7 +198,7 @@ func registerBaseHandler(bot *Bot) {
 }
 
 func stickerDlHandler(ctx Context) error {
-	if ctx.Chat().Private && ctx.Message() != nil && ctx.Message().Sticker != nil {
+	if ctx.Chat().Type == ChatPrivate && ctx.Message() != nil && ctx.Message().Sticker != nil {
 		return base.GetSticker(ctx)
 	}
 	return nil
