@@ -479,6 +479,12 @@ func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 }
 
 func mcMiddleware(next HandlerFunc) HandlerFunc {
+	if config.BotConfig.McConfig.Mc2Dead <= 0 {
+		return func(ctx Context) error {
+			return next(ctx)
+		}
+	}
+
 	return func(ctx Context) error {
 		chat := ctx.Chat()
 		if chat == nil || (chat.Type != ChatGroup && chat.Type != ChatSuperGroup) {

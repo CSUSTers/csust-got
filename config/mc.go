@@ -6,8 +6,7 @@ import (
 )
 
 type mcConfig struct {
-	MaxCount int
-	Mc2Dead  int
+	Mc2Dead int
 
 	// Sacrifices is a list of sacrifices with number of seconds.
 	// e.g. [300, 60, 10] means the last on sacrifice will be 300 seconds,
@@ -22,7 +21,7 @@ type mcConfig struct {
 }
 
 func (c *mcConfig) readConfig() {
-	c.MaxCount = viper.GetInt("mc.max_count")
+	c.Mc2Dead = viper.GetInt("mc.max_count")
 	c.Mc2Dead = viper.GetInt("mc.mc2dead")
 
 	c.Sacrifices = viper.GetIntSlice("mc.sacrifices")
@@ -31,10 +30,6 @@ func (c *mcConfig) readConfig() {
 }
 
 func (c *mcConfig) checkConfig() {
-	if c.MaxCount < 0 || c.MaxCount > 10 {
-		zap.L().Fatal("mc config: `MaxCount` must in [0, 10]", zap.Int("MaxCount", c.MaxCount))
-	}
-
 	if c.Mc2Dead > 10 {
 		zap.L().Fatal("mc config: `Mc2Dead` must in [0, 10], negative means 0, 0 means off", zap.Int("Mc2Dead", c.Mc2Dead))
 	}

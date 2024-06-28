@@ -722,7 +722,7 @@ func KeepByeWorldDuration(chatID int64, userID int64) {
 // return true if endgame, and get all souls in the area.
 func McRaiseSoul(chatID int64, userID int64) (endgame bool, souls []string, err error) {
 	expireTime := time.Duration(config.BotConfig.McConfig.Timout) * time.Second
-	maxCount := config.BotConfig.McConfig.MaxCount
+	maxCount := config.BotConfig.McConfig.Mc2Dead
 
 	rKey := wrapKeyWithChat("mc_souls", chatID)
 

@@ -178,6 +178,10 @@ func reburnHelper(chatID, prayer int64) (bool, []*mcSascrfice, error) {
 
 // MC handle `/mc` command
 func MC(ctx tb.Context) error {
+	if config.BotConfig.McConfig.Mc2Dead <= 0 {
+		return ctx.Reply("再mc自杀（也不一定）")
+	}
+
 	chatID := ctx.Chat().ID
 	userID := ctx.Sender().ID
 
@@ -204,6 +208,10 @@ func MC(ctx tb.Context) error {
 
 // Reburn handle `/reburn` command
 func Reburn(ctx tb.Context) error {
+	if config.BotConfig.McConfig.Mc2Dead <= 0 {
+		return nil
+	}
+
 	chatID := ctx.Chat().ID
 	userID := ctx.Sender().ID
 
