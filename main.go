@@ -236,7 +236,7 @@ func registerEventHandler(bot *Bot) {
 	bot.Handle(OnUserJoined, base.WelcomeNewMember)
 	// bot.Handle(OnUserLeft, base.LeftMember)
 	// bot.Handle(OnText, base.DoNothing)
-	bot.Handle(OnSticker, base.DoNothing)
+	// bot.Handle(OnSticker, base.DoNothing)
 	bot.Handle(OnAnimation, base.DoNothing)
 	bot.Handle(OnMedia, base.DoNothing)
 	bot.Handle(OnPhoto, base.DoNothing)
