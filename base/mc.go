@@ -10,6 +10,7 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"csust-got/util/restrict"
 
 	"go.uber.org/zap"
@@ -250,13 +251,13 @@ func Reburn(ctx tb.Context) error {
 
 		var userString string
 		if m.User.Username != "" {
-			userString = fmt.Sprintf("@%s", m.User.Username)
+			userString = fmt.Sprintf("@%s", util.EscapeTelegramReservedChars(m.User.Username))
 		} else {
-			userString = fmt.Sprintf(`[%s %s](tg://user?id=%d)`, m.User.FirstName, m.User.LastName, m.User.ID)
+			userString = fmt.Sprintf(`[%s %s](tg://user?id=%d)`, util.EscapeTelegramReservedChars(m.User.FirstName),
+				util.EscapeTelegramReservedChars(m.User.LastName), m.User.ID)
 		}
 
 		if res.Success {
-
 			text := fmt.Sprintf(`%s 献祭了 %v 作为祭品`, userString, d)
 			if s.Odds > 1 {
 				text += fmt.Sprintf("，因为他背叛了我，所以需要额外献上%d倍", s.Odds)
@@ -271,5 +272,6 @@ func Reburn(ctx tb.Context) error {
 	if len(missingUsers) > 0 {
 		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
-	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"), tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
+	return ctx.Send(util.EscapeTelegramReservedChars(strings.Join(append(replyText, replyText2...), "\n")),
+		tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 }
