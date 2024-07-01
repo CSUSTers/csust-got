@@ -252,7 +252,7 @@ func Reburn(ctx tb.Context) error {
 		if m.User.Username != "" {
 			userString = fmt.Sprintf("@%s", m.User.Username)
 		} else {
-			userString = fmt.Sprintf(`[%s %s](https://t.me/%d)`, m.User.FirstName, m.User.LastName, m.User.ID)
+			userString = fmt.Sprintf(`[%s %s](tg://user?id=%d)`, m.User.FirstName, m.User.LastName, m.User.ID)
 		}
 
 		if res.Success {
@@ -271,5 +271,5 @@ func Reburn(ctx tb.Context) error {
 	if len(missingUsers) > 0 {
 		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
-	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"))
+	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"), tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 }
