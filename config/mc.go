@@ -21,7 +21,6 @@ type mcConfig struct {
 }
 
 func (c *mcConfig) readConfig() {
-	c.Mc2Dead = viper.GetInt("mc.max_count")
 	c.Mc2Dead = viper.GetInt("mc.mc2dead")
 
 	c.Sacrifices = viper.GetIntSlice("mc.sacrifices")
