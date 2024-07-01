@@ -2,6 +2,7 @@ package base
 
 import (
 	"fmt"
+	"html"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
-	"csust-got/util"
 	"csust-got/util/restrict"
 
 	"go.uber.org/zap"
@@ -251,10 +251,11 @@ func Reburn(ctx tb.Context) error {
 
 		var userString string
 		if m.User.Username != "" {
-			userString = fmt.Sprintf("@%s", util.EscapeTelegramReservedChars(m.User.Username))
+			userString = html.EscapeString(fmt.Sprintf("@%s", m.User.Username))
 		} else {
-			userString = fmt.Sprintf(`[%s %s](tg://user?id=%d)`, util.EscapeTelegramReservedChars(m.User.FirstName),
-				util.EscapeTelegramReservedChars(m.User.LastName), m.User.ID)
+			userString = fmt.Sprintf(`<a href="tg://user?id=%d">%s %s</a>`, m.User.ID,
+				html.EscapeString(m.User.FirstName),
+				html.EscapeString(m.User.LastName))
 		}
 
 		if res.Success {
@@ -272,6 +273,6 @@ func Reburn(ctx tb.Context) error {
 	if len(missingUsers) > 0 {
 		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
-	return ctx.Send(util.EscapeTelegramReservedChars(strings.Join(append(replyText, replyText2...), "\n")),
-		tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
+	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"),
+		tb.SendOptions{ParseMode: tb.ModeHTML})
 }
