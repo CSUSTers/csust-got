@@ -1,6 +1,7 @@
 package ffconv
 
 import (
+	"bufio"
 	"csust-got/log"
 	"errors"
 	"io"
@@ -32,7 +33,8 @@ func (c *FFConv) Convert2GifFromReader(r io.Reader, inputFileType string) (io.Re
 		"f":   "gif",
 	}
 	pipeR, pipeW := io.Pipe()
-	bufOut := NewReadBuffer(pipeR, 1*1024*1024)
+	// bufOut := NewReadBuffer(pipeR, 1*1024*1024)
+	bufIn := bufio.NewWriterSize(pipeW, 1*1024*1024)
 	stderr := io.Discard
 	var stderrCloser io.Closer
 	if c.DebugFile != "" {
@@ -42,7 +44,7 @@ func (c *FFConv) Convert2GifFromReader(r io.Reader, inputFileType string) (io.Re
 			stderrCloser = f
 		}
 	}
-	runner := vf.Output("pipe:", outputArgs).Silent(true).WithInput(r).WithOutput(pipeW, stderr)
+	runner := vf.Output("pipe:", outputArgs).Silent(true).WithInput(r).WithOutput(bufIn, stderr)
 	if c.LogCmd {
 		cmd := runner.Compile()
 		log.Info("ffmpeg command", zap.String("cmd", cmd.Path), zap.Strings("args", cmd.Args))
@@ -59,5 +61,5 @@ func (c *FFConv) Convert2GifFromReader(r io.Reader, inputFileType string) (io.Re
 		err1 := pipeW.Close()
 		resultCh <- errors.Join(err, err1)
 	}()
-	return bufOut, resultCh
+	return pipeR, resultCh
 }
