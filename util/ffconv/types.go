@@ -38,7 +38,7 @@ func (o *OutputFileReaderImpl) Close() error {
 	var err1, err2 error
 	if o.file != nil {
 		err1 = o.file.Close()
-		if err1 == fs.ErrClosed {
+		if errors.Is(err1, fs.ErrClosed) {
 			err1 = nil
 		}
 	}
