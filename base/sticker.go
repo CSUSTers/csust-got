@@ -3,6 +3,7 @@ package base
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -75,6 +76,9 @@ func GetSticker(ctx tb.Context) error {
 		file := &sticker.File
 		filename := sticker.SetName
 		emoji := sticker.Emoji
+		if sticker.CustomEmoji != "" {
+			emoji += " " + sticker.CustomEmoji
+		}
 
 		reader, err := ctx.Bot().File(file)
 		if err != nil {
@@ -141,9 +145,32 @@ func GetSticker(ctx tb.Context) error {
 				}
 				return ctx.Reply(sendFile)
 			case "mp4":
-				return ctx.Reply("not implement mp4 yet")
+				ff := ffconv.FFConv{LogCmd: true}
+				r, errCh := ff.ConvertPipe2File(reader, "webm", filename+".mp4")
+				defer func() {
+					_ = r.Close()
+				}()
+				select {
+				case err = <-errCh:
+					if err != nil {
+						log.Error("failed to convert", zap.Error(err))
+						err1 := ctx.Reply("convert to mp4 failed")
+						return errors.Join(err, err1)
+					}
+				case <-time.After(time.Second * 30):
+					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", opt.format))
+					return ctx.Reply("convert to mp4 failed")
+				}
+				sendFile := &tb.Document{
+					File:                 tb.FromReader(r),
+					FileName:             filename + ".mp4",
+					Caption:              emoji,
+					DisableTypeDetection: true,
+				}
+				return ctx.Reply(sendFile)
+			default:
+				return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", opt.format))
 			}
-			return nil
 		}
 
 		// send origin file with `format=[webp]`

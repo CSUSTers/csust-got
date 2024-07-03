@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 )
 
@@ -17,18 +18,29 @@ type FFConv struct {
 // OutputFileReaderImpl is a [io.ReadCloser], when close it will remove temp work dir
 type OutputFileReaderImpl struct {
 	TempWorkDir string
-	*os.File
+	File        string
+	file        *os.File
 }
 
 func (o *OutputFileReaderImpl) Read(p []byte) (n int, err error) {
-	return o.File.Read(p)
+	if o.file == nil {
+		o.file, err = os.Open(o.File)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return o.file.Read(p)
 }
 
 // Close close the file, and remove temp work dir
 func (o *OutputFileReaderImpl) Close() error {
 	var err1, err2 error
-	if o.File != nil {
-		err1 = o.File.Close()
+	if o.file != nil {
+		err1 = o.file.Close()
+		if err1 == fs.ErrClosed {
+			err1 = nil
+		}
 	}
 	if o.TempWorkDir != "" {
 		err2 = os.RemoveAll(o.TempWorkDir)
