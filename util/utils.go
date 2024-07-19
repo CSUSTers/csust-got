@@ -208,6 +208,16 @@ func GroupCommand(fn func(m *tb.Message)) tb.HandlerFunc {
 	}
 }
 
+// GroupCommandCtx warp command to group call only.
+func GroupCommandCtx(fn tb.HandlerFunc) tb.HandlerFunc {
+	return func(ctx tb.Context) error {
+		if ctx.Chat().Type == tb.ChatPrivate {
+			return ctx.Reply("这个命令不支持私聊使用哦")
+		}
+		return fn(ctx)
+	}
+}
+
 // IsNumber check rune is number.
 func IsNumber(r rune) bool {
 	return unicode.IsNumber(r)
@@ -278,7 +288,7 @@ func GetAllReplyMessagesText(m *tb.Message) string {
 
 // EscapeTelegramReservedChars escape telegram reserved chars
 func EscapeTelegramReservedChars(s string) string {
-	reservedChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+	reservedChars := []string{"_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!", "\\"}
 
 	for _, char := range reservedChars {
 		s = strings.ReplaceAll(s, char, "\\"+char)
@@ -296,4 +306,13 @@ func ParseKeyValueMapStr(s string) (key, value string) {
 		return key, value
 	}
 	return s, ""
+}
+
+// AnySlice convert `[]E` to `[]any`(`[]interface{}`).
+func AnySlice[E any](s []E) []any {
+	ret := make([]any, 0, len(s))
+	for _, v := range s {
+		ret = append(ret, v)
+	}
+	return ret
 }

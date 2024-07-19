@@ -190,14 +190,20 @@ func ResetBannedDuration(chatID int64, bannedID int64, d time.Duration) bool {
 
 // AddBanDuration add ban duration.
 func AddBanDuration(chatID int64, bannerID, bannedID int64, ad time.Duration) bool {
-	MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID != 0 {
+		MakeBannerCD(chatID, bannerID, util.GetBanCD(ad))
+	}
 	d := GetBannedDuration(chatID, bannedID)
 	return d != 0 && ResetBannedDuration(chatID, bannedID, ad+d)
 }
 
 // Ban ban someone.
 func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
-	MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID != 0 {
+		MakeBannerCD(chatID, bannerID, util.GetBanCD(d))
+	}
 	err := WriteBool(wrapKeyWithChatMember("banned", chatID, bannedID), true, d)
 	if err != nil {
 		log.Error("Ban failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannedID), zap.Error(err))
@@ -208,6 +214,10 @@ func Ban(chatID int64, bannerID, bannedID int64, d time.Duration) bool {
 
 // MakeBannerCD make banner in cd.
 func MakeBannerCD(chatID int64, bannerID int64, d time.Duration) bool {
+	// SYSTEM has SUPER SUPER POWER, so no need to CD
+	if bannerID == 0 {
+		return true
+	}
 	err := WriteBool(wrapKeyWithChatMember("banner", chatID, bannerID), true, d)
 	if err != nil {
 		log.Error("Ban set CD failed", zap.Int64("chatID", chatID), zap.Int64("userID", bannerID), zap.Error(err))
@@ -706,4 +716,117 @@ func KeepByeWorldDuration(chatID int64, userID int64) {
 		log.Error("keep bye world duration failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
 		return
 	}
+}
+
+// McRaiseSoul raise a soul to chips area.
+// return true if endgame, and get all souls in the area.
+func McRaiseSoul(chatID int64, userID int64) (endgame bool, souls []string, err error) {
+	expireTime := time.Duration(config.BotConfig.McConfig.Timout) * time.Second
+	maxCount := config.BotConfig.McConfig.Mc2Dead
+
+	rKey := wrapKeyWithChat("mc_souls", chatID)
+
+	count, err := rc.RPush(context.TODO(), rKey, userID).Result()
+	if err != nil {
+		log.Error("raise soul failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return false, nil, err
+	}
+
+	if count >= int64(maxCount) {
+		defer func() {
+			_, _ = rc.Del(context.TODO(), rKey).Result()
+		}()
+		souls, err = rc.LRange(context.TODO(), rKey, 0, -1).Result()
+		if err != nil {
+			log.Error("get souls failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+			return false, nil, err
+		}
+		return true, souls, nil
+	}
+	err = rc.Expire(context.TODO(), rKey, expireTime).Err()
+	return false, nil, err
+}
+
+// McDead add dead user to dead list.
+func McDead[E interface{ ~string | ~int | ~int64 }](chatID int64, users []E) error {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	err := rc.RPush(context.TODO(), rKey, util.AnySlice(users)...).Err()
+	if err != nil {
+		log.Error("mc_dead failed", zap.Int64("chat", chatID), zap.Any("users", users), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// IsMcDead check if bot is dead.
+func IsMcDead(chatID int64) (bool, error) {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	ret, err := rc.Exists(context.TODO(), rKey).Result()
+	if err != nil {
+		log.Error("check mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return false, err
+	}
+	return ret > 0, nil
+}
+
+// GetMcDead get dead users.
+func GetMcDead(chatID int64) ([]string, error) {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	ret, err := rc.LRange(context.TODO(), rKey, 0, -1).Result()
+	if err != nil {
+		log.Error("get mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return nil, err
+	}
+	return ret, nil
+}
+
+// ClearMcDead clear dead list.
+func ClearMcDead(chatID int64) error {
+	rKey := wrapKeyWithChat("mc_dead", chatID)
+
+	err := rc.Del(context.TODO(), rKey).Err()
+	if err != nil {
+		log.Error("clear mc_dead failed", zap.Int64("chat", chatID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// IsPrayerInPost check if user is prayed in post.
+func IsPrayerInPost(chatID int64, userID int64) (bool, error) {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	ret, err := rc.Exists(context.TODO(), prayerKey).Result()
+	if err != nil {
+		log.Error("check mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return false, err
+	}
+	return ret > 0, nil
+}
+
+// SetPrayer set user to be prayed in post.
+func SetPrayer(chatID int64, userID int64) error {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	err := rc.Set(context.TODO(), prayerKey, config.BotConfig.McConfig.Odds, 0).Err()
+	if err != nil {
+		log.Error("set mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// ClearPrayer clear user to be prayed in post.
+func ClearPrayer(chatID int64, userID int64) error {
+	prayerKey := wrapKeyWithChatMember("mc_prayer", chatID, userID)
+
+	err := rc.Del(context.TODO(), prayerKey).Err()
+	if err != nil {
+		log.Error("clear mc_prayer failed", zap.Int64("chat", chatID), zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
 }

@@ -6,12 +6,10 @@ import (
 	"strconv"
 	"time"
 
-	"csust-got/config"
 	"csust-got/entities"
-	"csust-got/log"
 	"csust-got/util"
+	"csust-got/util/restrict"
 
-	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
 
@@ -24,7 +22,7 @@ they are considered to be restricted forever.
 func BanMyself(m *Message) {
 	sec := time.Duration(rand.Intn(80)+40) * time.Second
 	text := "太强了，我居然ban不掉您，您TQL!"
-	if BanSomeone(m.Chat, m.Sender, true, sec) {
+	if restrict.Ban(m.Chat, m.Sender, true, sec).Success {
 		text = "我实现了你的愿望! 现在好好享用这" + strconv.FormatInt(int64(sec.Seconds()), 10) + "秒~"
 	}
 	util.SendReply(m.Chat, text, m)
@@ -71,7 +69,7 @@ func banAndGetMessage(m *Message, banTarget *User, hard bool, banTime time.Durat
 		banTarget = m.ReplyTo.Sender
 	}
 
-	if !BanSomeone(m.Chat, banTarget, hard, banTime) {
+	if !restrict.Ban(m.Chat, banTarget, hard, banTime).Success {
 		return text
 	}
 
@@ -88,41 +86,4 @@ func banAndGetMessage(m *Message, banTarget *User, hard bool, banTime time.Durat
 	}
 
 	return text
-}
-
-// BanSomeone Use to ban someone, return true if success.
-func BanSomeone(chat *Chat, user *User, hard bool, duration time.Duration) bool {
-	member, err := config.BotConfig.Bot.ChatMemberOf(chat, user)
-	if err != nil {
-		log.Error("get ChatMemberOf failed", zap.Int64("chatID", chat.ID),
-			zap.Int64("userID", user.ID), zap.Error(err))
-		return false
-	}
-	member.RestrictedUntil = time.Now().Add(duration).Unix()
-	if hard {
-		return hardBan(chat, member)
-	}
-	return softBan(chat, member)
-}
-
-// only allow text or media message.
-func softBan(chat *Chat, member *ChatMember) bool {
-	member.Rights = NoRights()
-	member.CanSendMessages = true
-	member.CanSendMedia = true
-	return ban(chat, member)
-}
-
-// can't send anything.
-func hardBan(chat *Chat, member *ChatMember) bool {
-	member.Rights = NoRights()
-	return ban(chat, member)
-}
-
-func ban(chat *Chat, member *ChatMember) bool {
-	err := config.BotConfig.Bot.Restrict(chat, member)
-	if err != nil {
-		log.Warn("Can't restrict chat member.", zap.Error(err))
-	}
-	return err == nil
 }

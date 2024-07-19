@@ -3,13 +3,16 @@ package base
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
+	"os"
 	"slices"
 	"strings"
+	"time"
 
 	//nolint: revive
 	_ "golang.org/x/image/webp"
@@ -20,6 +23,7 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/util"
+	"csust-got/util/ffconv"
 )
 
 type stickerOpts struct {
@@ -39,7 +43,7 @@ func GetSticker(ctx tb.Context) error {
 	var msg = ctx.Message()
 	var sticker *tb.Sticker
 
-	if ctx.Chat().Private && msg.Sticker != nil {
+	if ctx.Chat().Type == tb.ChatPrivate && msg.Sticker != nil {
 		sticker = msg.Sticker
 	} else if replyTo := msg.ReplyTo; replyTo != nil && replyTo.Sticker != nil {
 		sticker = replyTo.Sticker
@@ -67,10 +71,14 @@ func GetSticker(ctx tb.Context) error {
 		opt = o
 	}
 
+	// nolint: nestif // will fix in future
 	if !opt.pack {
 		file := &sticker.File
 		filename := sticker.SetName
 		emoji := sticker.Emoji
+		if sticker.CustomEmoji != "" {
+			emoji += " " + sticker.CustomEmoji
+		}
 
 		reader, err := ctx.Bot().File(file)
 		if err != nil {
@@ -96,10 +104,73 @@ func GetSticker(ctx tb.Context) error {
 					DisableTypeDetection: true,
 				}
 				return ctx.Reply(sendFile)
-			case "mp4", "gif":
-				return ctx.Reply("not implement mp4, gif converter yet")
+			case "gif":
+				ff := ffconv.FFConv{LogCmd: true}
+				r, errCh := ff.Convert2GifFromReader(reader, "webm")
+				tempFile, err0 := os.CreateTemp("", "*.gif")
+				if err0 != nil {
+					log.Error("failed to create temp file", zap.Error(err))
+					err1 := ctx.Reply("convert to gif failed")
+					return errors.Join(err0, err1)
+				}
+				defer func() {
+					_ = tempFile.Close()
+					_ = os.Remove(tempFile.Name())
+				}()
+
+				_, err0 = io.Copy(tempFile, r)
+				if err0 != nil {
+					log.Error("failed to copy", zap.Error(err))
+					err1 := ctx.Reply("convert to gif failed")
+					return errors.Join(err0, err1)
+				}
+
+				select {
+				case err = <-errCh:
+					if err != nil {
+						log.Error("failed to convert", zap.Error(err))
+						err1 := ctx.Reply("convert to gif failed")
+						return errors.Join(err, err1)
+					}
+				case <-time.After(time.Second * 5):
+					log.Error("wait ffmpeg exec result timeout")
+					return ctx.Reply("convert to gif failed")
+				}
+
+				sendFile := &tb.Document{
+					File:                 tb.FromDisk(tempFile.Name()),
+					FileName:             filename + ".gif",
+					Caption:              emoji,
+					DisableTypeDetection: true,
+				}
+				return ctx.Reply(sendFile)
+			case "mp4":
+				ff := ffconv.FFConv{LogCmd: true}
+				r, errCh := ff.ConvertPipe2File(reader, "webm", filename+".mp4")
+				defer func() {
+					_ = r.Close()
+				}()
+				select {
+				case err = <-errCh:
+					if err != nil {
+						log.Error("failed to convert", zap.Error(err))
+						err1 := ctx.Reply("convert to mp4 failed")
+						return errors.Join(err, err1)
+					}
+				case <-time.After(time.Second * 30):
+					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", opt.format))
+					return ctx.Reply("convert to mp4 failed")
+				}
+				sendFile := &tb.Document{
+					File:                 tb.FromReader(r),
+					FileName:             filename + ".mp4",
+					Caption:              emoji,
+					DisableTypeDetection: true,
+				}
+				return ctx.Reply(sendFile)
+			default:
+				return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", opt.format))
 			}
-			return nil
 		}
 
 		// send origin file with `format=[webp]`
@@ -146,7 +217,6 @@ func GetSticker(ctx tb.Context) error {
 				return errors.Join(err, err1)
 			}
 		default:
-			// nolint: deadcode
 			return ctx.Reply("unknown image format")
 		}
 
