@@ -274,5 +274,5 @@ func Reburn(ctx tb.Context) error {
 		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
 	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"),
-		tb.SendOptions{ParseMode: tb.ModeHTML})
+		&tb.SendOptions{ParseMode: tb.ModeHTML})
 }
