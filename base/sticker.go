@@ -376,7 +376,7 @@ func SetStickerConfig(ctx tb.Context) error {
 			_ = ctx.Reply("failed to clear iwant config")
 			return err
 		}
-		return nil
+		return ctx.Reply("iwant config cleared")
 	}
 
 	if len(m) == 0 {
