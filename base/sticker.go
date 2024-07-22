@@ -337,9 +337,9 @@ func normalizeParams(k, v string) (bool, string, string) {
 	case "pack", "p":
 		k = "pack"
 	case "vf", "videoformat":
-		k = "format"
+		k = "videoformat"
 	case "sf", "stickerformat":
-		k = "format"
+		k = "stickerformat"
 	default:
 		return false, k, v
 	}
