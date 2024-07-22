@@ -20,7 +20,8 @@ RUN make deploy
 # deploy image
 FROM --platform=$BUILDPLATFORM alpine
 
-RUN apk add --no-cache tzdata ffmpeg
+RUN apk add --no-cache tzdata
+COPY --from=mwader/static-ffmpeg:7.0.1 /ffmpeg /usr/local/bin/ffmpeg
 
 WORKDIR /app
 COPY --from=buildenv /go/src/app/got .
