@@ -832,10 +832,10 @@ func ClearPrayer(chatID int64, userID int64) error {
 }
 
 // SetIWantConfig set iwant config.
-func SetIWantConfig(userID int64, config map[string]string) error {
+func SetIWantConfig(userID int64, m map[string]string) error {
 	key := wrapKeyWithUser("iwant_config", userID)
 
-	err := rc.HSet(context.TODO(), key, config).Err()
+	err := rc.HSet(context.TODO(), key, m).Err()
 	if err != nil {
 		log.Error("set iwant config to redis failed", zap.Int64("user", userID), zap.Error(err))
 		return err

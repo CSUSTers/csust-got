@@ -1,3 +1,4 @@
+// nolint: goconst
 package base
 
 import (
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	//nolint: revive
-
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
@@ -347,10 +347,11 @@ func normalizeParams(k, v string) (bool, string, string) {
 	return true, k, v
 }
 
+// SetStickerConfig is command for set sticker config
 func SetStickerConfig(ctx tb.Context) error {
 	cmd, _, err := entities.CommandFromText(ctx.Message().Text, -1)
 	if err != nil {
-		ctx.Reply("failed to parse params")
+		_ = ctx.Reply("failed to parse params")
 		return err
 	}
 
@@ -370,22 +371,21 @@ func SetStickerConfig(ctx tb.Context) error {
 	}
 
 	if clear {
-		err := orm.ClearIWantConfig(userID)
+		err = orm.ClearIWantConfig(userID)
 		if err != nil {
-			ctx.Reply("failed to clear iwant config")
+			_ = ctx.Reply("failed to clear iwant config")
 			return err
 		}
 		return nil
 	}
 
 	if len(m) == 0 {
-		ctx.Reply("no params applied")
-		return nil
+		return ctx.Reply("no params applied")
 	}
 
 	err = orm.SetIWantConfig(userID, m)
 	if err != nil {
-		ctx.Reply("failed to set iwant config")
+		_ = ctx.Reply("failed to set iwant config")
 		return err
 	}
 
@@ -393,6 +393,5 @@ func SetStickerConfig(ctx tb.Context) error {
 	for k, v := range m {
 		ss = append(ss, fmt.Sprintf("%s=%s", k, v))
 	}
-	ctx.Reply("iwant config set: " + strings.Join(ss, " "))
-	return nil
+	return ctx.Reply("iwant config set: " + strings.Join(ss, " "))
 }
