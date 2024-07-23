@@ -49,11 +49,32 @@ func defaultOptsWithConfig(m map[string]string) stickerOpts {
 }
 
 func (o stickerOpts) merge(m map[string]string) stickerOpts {
+	sets := make(map[string]struct{}, len(m))
+	for k := range m {
+		ok, kk, _ := normalizeParams(k, "")
+		if ok {
+			sets[kk] = struct{}{}
+		}
+	}
+
+	if _, ok := sets["format"]; ok {
+		if _, ok = sets["videoformat"]; !ok {
+			o.vf = ""
+		}
+
+		if _, ok = sets["stickerformat"]; !ok {
+			o.sf = ""
+		}
+	}
+
 	for k, v := range m {
 		k = strings.ToLower(k)
 		switch k {
 		case "format", "f":
 			o.format = v
+			// clear videoformat and stickerformat
+			o.vf = v
+			o.sf = v
 		case "pack", "p":
 			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
 				o.pack = true
@@ -357,12 +378,12 @@ func SetStickerConfig(ctx tb.Context) error {
 
 	userID := ctx.Sender().ID
 	m := make(map[string]string)
-	clear := false
+	clearConf := false
 	for _, arg := range cmd.Args() {
 		k, v := util.ParseKeyValueMapStr(arg)
 		if k == "~clear" {
-			clear = true
-			break
+			clearConf = true
+			clear(m)
 		}
 		ok, k, v := normalizeParams(k, v)
 		if ok {
@@ -370,22 +391,23 @@ func SetStickerConfig(ctx tb.Context) error {
 		}
 	}
 
-	if clear {
+	msg := ""
+	if clearConf {
 		err = orm.ClearIWantConfig(userID)
 		if err != nil {
 			_ = ctx.Reply("failed to clear iwant config")
 			return err
 		}
-		return ctx.Reply("iwant config cleared")
+		msg = "config cleared, "
 	}
 
 	if len(m) == 0 {
-		return ctx.Reply("no params applied")
+		return ctx.Reply(msg + "no params applied")
 	}
 
 	err = orm.SetIWantConfig(userID, m)
 	if err != nil {
-		_ = ctx.Reply("failed to set iwant config")
+		_ = ctx.Reply(msg + "failed to set iwant config")
 		return err
 	}
 
@@ -393,5 +415,5 @@ func SetStickerConfig(ctx tb.Context) error {
 	for k, v := range m {
 		ss = append(ss, fmt.Sprintf("%s=%s", k, v))
 	}
-	return ctx.Reply("iwant config set: " + strings.Join(ss, " "))
+	return ctx.Reply(msg + "iwant config set: " + strings.Join(ss, " "))
 }
