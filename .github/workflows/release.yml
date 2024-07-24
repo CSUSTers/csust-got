@@ -6,16 +6,13 @@ on:
       - published
 
 jobs:
-
   lint:
     name: Lint
     uses: CSUSTers/csust-got/.github/workflows/lint.yml@master
 
-
   test:
     name: Test
     uses: CSUSTers/csust-got/.github/workflows/test.yml@master
-
 
   build:
     name: Build and Push
@@ -29,7 +26,7 @@ jobs:
         uses: redhat-actions/buildah-build@v2
         with:
           image: csust/csust-got-hoo
-          tags: |  
+          tags: |
             latest
             latest-${{ github.ref_name }}
           containerfiles: |
@@ -37,6 +34,8 @@ jobs:
           build-args: |
             TAG=${{ github.ref_name }}
             BRANCH=release
+          layers: true
+
       - name: Push To harbor
         id: push-to-harbor
         uses: CSUSTers/push-to-registry@main

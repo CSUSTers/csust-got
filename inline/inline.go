@@ -7,9 +7,10 @@ import (
 	"csust-got/util"
 	"csust-got/util/urlx"
 	"errors"
+	"regexp"
+
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
-	"regexp"
 )
 
 //nolint:revive // It's too long.
@@ -46,6 +47,11 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		}
 
 		reText := buf.String()
+
+		if reText == "" {
+			return ctx.Answer(&tb.QueryResponse{})
+		}
+
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
 		reTextEscaped := util.EscapeTelegramReservedChars(reText)
 		err = ctx.Answer(&tb.QueryResponse{

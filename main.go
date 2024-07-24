@@ -184,6 +184,8 @@ func registerBaseHandler(bot *Bot) {
 
 	// get sticker handler
 	bot.Handle("/iwant", base.GetSticker)
+	bot.Handle("/setiwant", base.SetStickerConfig)
+	bot.Handle("/iwant_config", base.SetStickerConfig)
 
 	bot.Handle("/bye_world", util.GroupCommand(base.ByeWorld))
 	bot.Handle("/byeworld", util.GroupCommand(base.ByeWorld))

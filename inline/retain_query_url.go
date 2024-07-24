@@ -8,11 +8,11 @@ import (
 
 func init() {
 	registerUrlProcessor(
-		newRetainQueryProcessor(`^(?:.*\.)?taobao\.com$`, "id"),
-		newRetainQueryProcessor(`^(?:.*\.)?tb\.cn$`, "id"),
-		newRetainQueryProcessor(`^(?:www\.)?(?:cn\.)?bing\.com$`, "q"),
-		newRetainQueryProcessor(`^(?:www\.)?google\.com$`, "q"),
-		newRetainQueryProcessor(`^(?:(?:(?:www|m)\.)?(youtube)\.com|youtu\.be)$`),
+		newRetainQueryProcessor(`^(?i)(?:.*\.)?taobao\.com$`, "id"),
+		newRetainQueryProcessor(`^(?i)(?:.*\.)?tb\.cn$`, "id"),
+		newRetainQueryProcessor(`^(?i)(?:www\.)?(?:cn\.)?bing\.com$`, "q"),
+		newRetainQueryProcessor(`^(?i)(?:www\.)?google\.com$`, "q"),
+		newRetainQueryProcessor(`^(?i)(?:(?:(?:www|m)\.)?(youtube)\.com|youtu\.be)$`),
 	)
 }
 

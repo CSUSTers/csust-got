@@ -5,6 +5,7 @@ import (
 	"context"
 	"csust-got/log"
 	"csust-got/util/urlx"
+	"errors"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -39,7 +40,7 @@ var biliRetainQueryParams = []string{
 }
 
 var (
-	bProcessor = newBiliProcessor(biliDomains, biliRetainQueryParams)
+	bProcessor = newBiliProcessor(biliDomains, biliRetainQueryParams, defaultProcessConfig)
 )
 
 func init() {
@@ -50,12 +51,15 @@ func init() {
 type biliProcessor struct {
 	domainMap    map[string]struct{}
 	retainParams []string
+
+	processConfig
 }
 
-func newBiliProcessor(domain []string, retainParams []string) urlProcessor {
+func newBiliProcessor(domain []string, retainParams []string, c processConfig) urlProcessor {
 	proc := &biliProcessor{
-		domainMap:    make(map[string]struct{}),
-		retainParams: retainParams,
+		domainMap:     make(map[string]struct{}),
+		retainParams:  retainParams,
+		processConfig: c,
 	}
 	for _, d := range domain {
 		proc.domainMap[d] = struct{}{}
@@ -64,7 +68,8 @@ func newBiliProcessor(domain []string, retainParams []string) urlProcessor {
 }
 
 func (c *biliProcessor) needProcess(u *urlx.Extra) bool {
-	_, ok := c.domainMap[u.Url.Domain]
+	d := strings.ToLower(u.Url.Domain)
+	_, ok := c.domainMap[d]
 	return ok
 }
 
@@ -78,9 +83,15 @@ func (c *biliProcessor) clearBiliUrlQuery(u *urlx.ExtraUrl) error {
 }
 
 func (c *biliProcessor) writeUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
+	ctx, cancel := context.WithTimeout(context.Background(), c.processConfig.Timeout)
+	defer cancel()
+
 	if strings.ToLower(u.Domain) == b23URL {
-		to, err := c.processB23Url(context.TODO(), u)
+		to, err := c.processB23Url(ctx, u)
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Error("bili url request timeout", zap.Error(err), zap.String("url", u.Text))
+			}
 			return err
 		}
 		buf.WriteString(to)

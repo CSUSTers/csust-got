@@ -1,3 +1,4 @@
+// nolint: goconst
 package base
 
 import (
@@ -22,6 +23,7 @@ import (
 
 	"csust-got/entities"
 	"csust-got/log"
+	"csust-got/orm"
 	"csust-got/util"
 	"csust-got/util/ffconv"
 )
@@ -29,6 +31,8 @@ import (
 type stickerOpts struct {
 	format string
 	pack   bool
+	vf     string
+	sf     string
 }
 
 func defaultOpts() stickerOpts {
@@ -36,6 +40,69 @@ func defaultOpts() stickerOpts {
 		format: "",
 		pack:   false,
 	}
+}
+
+func defaultOptsWithConfig(m map[string]string) stickerOpts {
+	o := defaultOpts()
+	o = o.merge(m)
+	return o
+}
+
+func (o stickerOpts) merge(m map[string]string) stickerOpts {
+	sets := make(map[string]struct{}, len(m))
+	for k := range m {
+		ok, kk, _ := normalizeParams(k, "")
+		if ok {
+			sets[kk] = struct{}{}
+		}
+	}
+
+	if _, ok := sets["format"]; ok {
+		if _, ok = sets["videoformat"]; !ok {
+			o.vf = ""
+		}
+
+		if _, ok = sets["stickerformat"]; !ok {
+			o.sf = ""
+		}
+	}
+
+	for k, v := range m {
+		k = strings.ToLower(k)
+		switch k {
+		case "format", "f":
+			o.format = v
+			// clear videoformat and stickerformat
+			o.vf = v
+			o.sf = v
+		case "pack", "p":
+			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
+				o.pack = true
+			} else if strings.ToLower(v) == "false" {
+				o.pack = false
+			}
+		case "vf", "videoformat":
+			o.vf = v
+		case "sf", "stickerformat":
+			o.sf = v
+		}
+	}
+
+	return o
+}
+
+func (o stickerOpts) VideoFormat() string {
+	if o.vf != "" {
+		return o.vf
+	}
+	return o.format
+}
+
+func (o stickerOpts) StickerFormat() string {
+	if o.sf != "" {
+		return o.sf
+	}
+	return o.format
 }
 
 // GetSticker will download sticker file, and convert to expected format, and send to chat
@@ -57,7 +124,13 @@ func GetSticker(ctx tb.Context) error {
 		return nil
 	}
 
+	userID := msg.Sender.ID
 	opt := defaultOpts()
+	userConfig, err := orm.GetIWantConfig(userID)
+	if err == nil {
+		opt = defaultOptsWithConfig(userConfig)
+	}
+
 	if msg.Text != "" {
 		o, err := parseOpts(msg.Text)
 		if err != nil {
@@ -68,7 +141,7 @@ func GetSticker(ctx tb.Context) error {
 			}
 			return err
 		}
-		opt = o
+		opt = opt.merge(o)
 	}
 
 	// nolint: nestif // will fix in future
@@ -95,7 +168,7 @@ func GetSticker(ctx tb.Context) error {
 
 		// send video is sticker is video
 		if sticker.Video {
-			switch opt.format {
+			switch opt.VideoFormat() {
 			case "", "webm":
 				sendFile := &tb.Document{
 					File:                 tb.FromReader(reader),
@@ -174,7 +247,7 @@ func GetSticker(ctx tb.Context) error {
 		}
 
 		// send origin file with `format=[webp]`
-		switch opt.format {
+		switch opt.StickerFormat() {
 		case "", "webp":
 			sendFile := &tb.Document{
 				File:                 tb.FromReader(reader),
@@ -194,7 +267,7 @@ func GetSticker(ctx tb.Context) error {
 		}
 
 		bs := bytes.NewBuffer(nil)
-		switch opt.format {
+		switch opt.StickerFormat() {
 		case "jpg", "jpeg":
 			filename += ".jpg"
 			err := jpeg.Encode(bs, img, &jpeg.Options{Quality: 100})
@@ -235,29 +308,112 @@ func GetSticker(ctx tb.Context) error {
 
 }
 
-func parseOpts(text string) (stickerOpts, error) {
-	opts := defaultOpts()
-
+func parseOpts(text string) (map[string]string, error) {
 	cmd, _, err := entities.CommandFromText(text, -1)
 	if err != nil {
-		return opts, err
+		return nil, err
 	}
 
+	ret := make(map[string]string, 4)
 	for _, arg := range cmd.Args() {
 		k, v := util.ParseKeyValueMapStr(arg)
+
+		ok, k, v := normalizeParams(k, v)
+		if !ok {
+			continue
+		}
+
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
 			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif", "webm"}, f) {
-				opts.format = f
+				ret[k] = v
 			}
 		case "pack", "p":
 			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
-				opts.pack = true
+				ret[k] = "true"
 			} else if strings.ToLower(v) == "false" {
-				opts.pack = false
+				ret[k] = "false"
+			}
+		case "vf", "videoformat":
+			f := strings.ToLower(v)
+			if slices.Contains([]string{"", "mp4", "gif", "webm"}, f) {
+				ret[k] = v
+			}
+		case "sf", "stickerformat":
+			f := strings.ToLower(v)
+			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "gif"}, f) {
+				ret[k] = v
 			}
 		}
 	}
-	return opts, nil
+	return ret, nil
+}
+
+func normalizeParams(k, v string) (bool, string, string) {
+	k = strings.ToLower(k)
+	switch k {
+	case "format", "f":
+		k = "format"
+	case "pack", "p":
+		k = "pack"
+	case "vf", "videoformat":
+		k = "videoformat"
+	case "sf", "stickerformat":
+		k = "stickerformat"
+	default:
+		return false, k, v
+	}
+
+	return true, k, v
+}
+
+// SetStickerConfig is command for set sticker config
+func SetStickerConfig(ctx tb.Context) error {
+	cmd, _, err := entities.CommandFromText(ctx.Message().Text, -1)
+	if err != nil {
+		_ = ctx.Reply("failed to parse params")
+		return err
+	}
+
+	userID := ctx.Sender().ID
+	m := make(map[string]string)
+	clearConf := false
+	for _, arg := range cmd.Args() {
+		k, v := util.ParseKeyValueMapStr(arg)
+		if k == "~clear" {
+			clearConf = true
+			clear(m)
+		}
+		ok, k, v := normalizeParams(k, v)
+		if ok {
+			m[k] = v
+		}
+	}
+
+	msg := ""
+	if clearConf {
+		err = orm.ClearIWantConfig(userID)
+		if err != nil {
+			_ = ctx.Reply("failed to clear iwant config")
+			return err
+		}
+		msg = "config cleared, "
+	}
+
+	if len(m) == 0 {
+		return ctx.Reply(msg + "no params applied")
+	}
+
+	err = orm.SetIWantConfig(userID, m)
+	if err != nil {
+		_ = ctx.Reply(msg + "failed to set iwant config")
+		return err
+	}
+
+	ss := make([]string, 0, len(m))
+	for k, v := range m {
+		ss = append(ss, fmt.Sprintf("%s=%s", k, v))
+	}
+	return ctx.Reply(msg + "iwant config set: " + strings.Join(ss, " "))
 }

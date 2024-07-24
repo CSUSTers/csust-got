@@ -830,3 +830,42 @@ func ClearPrayer(chatID int64, userID int64) error {
 	}
 	return nil
 }
+
+// SetIWantConfig set iwant config.
+func SetIWantConfig(userID int64, m map[string]string) error {
+	key := wrapKeyWithUser("iwant_config", userID)
+
+	err := rc.HSet(context.TODO(), key, m).Err()
+	if err != nil {
+		log.Error("set iwant config to redis failed", zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// GetIWantConfig get iwant config.
+func GetIWantConfig(userID int64, fields ...string) (map[string]string, error) {
+	key := wrapKeyWithUser("iwant_config", userID)
+
+	if len(fields) == 0 {
+		return rc.HGetAll(context.TODO(), key).Result()
+	}
+
+	ret := make(map[string]string)
+	for _, k := range fields {
+		ret[k] = rc.HGet(context.TODO(), key, k).Val()
+	}
+	return ret, nil
+}
+
+// ClearIWantConfig clear iwant config.
+func ClearIWantConfig(userID int64) error {
+	key := wrapKeyWithUser("iwant_config", userID)
+
+	err := rc.Del(context.TODO(), key).Err()
+	if err != nil {
+		log.Error("clear iwant config to redis failed", zap.Int64("user", userID), zap.Error(err))
+		return err
+	}
+	return nil
+}
