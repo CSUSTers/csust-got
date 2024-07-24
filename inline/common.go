@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"csust-got/util/urlx"
 	"net/url"
+	"time"
 )
 
 func filterParamFromQuery(query string, keepParams ...string) (string, error) {
@@ -43,4 +44,12 @@ var urlProcessConfigs []urlProcessor
 
 func registerUrlProcessor(processor ...urlProcessor) {
 	urlProcessConfigs = append(urlProcessConfigs, processor...)
+}
+
+type processConfig struct {
+	Timeout time.Duration
+}
+
+var defaultProcessConfig = processConfig{
+	Timeout: 10 * time.Second,
 }
