@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	twitterProcessor = newFixTwitterProcessor(`^(?:www\.)?(twitter|x)\.com$`)
+	twitterDomainPatt = regexp.MustCompile(`(?i)^(?:www\.)?(twitter|x)\.com$`)
+	twitterProcessor  = newFixTwitterProcessor(twitterDomainPatt)
 )
 
 func init() {
@@ -19,9 +20,9 @@ type fixTwitterProcessor struct {
 	reg *regexp.Regexp
 }
 
-func newFixTwitterProcessor(regex string) urlProcessor {
+func newFixTwitterProcessor(regex *regexp.Regexp) urlProcessor {
 	return &fixTwitterProcessor{
-		reg: regexp.MustCompile(regex),
+		reg: regex,
 	}
 }
 
