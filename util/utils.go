@@ -13,6 +13,7 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
@@ -286,14 +287,13 @@ func GetAllReplyMessagesText(m *tb.Message) string {
 	return ret
 }
 
+var reservedChars = []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
+var reservedCharsPairs = lo.FlatMap(reservedChars, func(char string, _ int) []string { return []string{char, "\\" + char} })
+var escapeReplacer = strings.NewReplacer(reservedCharsPairs...)
+
 // EscapeTelegramReservedChars escape telegram reserved chars
 func EscapeTelegramReservedChars(s string) string {
-	reservedChars := []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
-
-	for _, char := range reservedChars {
-		s = strings.ReplaceAll(s, char, "\\"+char)
-	}
-
+	s = escapeReplacer.Replace(s)
 	return s
 }
 
