@@ -44,26 +44,28 @@ func defaultOpts() stickerOpts {
 
 func defaultOptsWithConfig(m map[string]string) stickerOpts {
 	o := defaultOpts()
-	o = o.merge(m)
+	o = o.merge(m, false)
 	return o
 }
 
-func (o stickerOpts) merge(m map[string]string) stickerOpts {
-	sets := make(map[string]struct{}, len(m))
-	for k := range m {
-		ok, kk, _ := normalizeParams(k, "")
-		if ok {
-			sets[kk] = struct{}{}
-		}
-	}
-
-	if _, ok := sets["format"]; ok {
-		if _, ok = sets["videoformat"]; !ok {
-			o.vf = ""
+func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
+	if final {
+		sets := make(map[string]struct{}, len(m))
+		for k := range m {
+			ok, kk, _ := normalizeParams(k, "")
+			if ok {
+				sets[kk] = struct{}{}
+			}
 		}
 
-		if _, ok = sets["stickerformat"]; !ok {
-			o.sf = ""
+		if _, ok := sets["format"]; ok {
+			if _, ok = sets["videoformat"]; !ok {
+				o.vf = ""
+			}
+
+			if _, ok = sets["stickerformat"]; !ok {
+				o.sf = ""
+			}
 		}
 	}
 
@@ -72,9 +74,6 @@ func (o stickerOpts) merge(m map[string]string) stickerOpts {
 		switch k {
 		case "format", "f":
 			o.format = v
-			// clear videoformat and stickerformat
-			o.vf = v
-			o.sf = v
 		case "pack", "p":
 			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
 				o.pack = true
@@ -141,7 +140,7 @@ func GetSticker(ctx tb.Context) error {
 			}
 			return err
 		}
-		opt = opt.merge(o)
+		opt = opt.merge(o, true)
 	}
 
 	// nolint: nestif // will fix in future
