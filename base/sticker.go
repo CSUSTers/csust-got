@@ -167,7 +167,8 @@ func GetSticker(ctx tb.Context) error {
 
 		// send video is sticker is video
 		if sticker.Video {
-			switch opt.VideoFormat() {
+			f := opt.VideoFormat()
+			switch f {
 			case "", "webm":
 				sendFile := &tb.Document{
 					File:                 tb.FromReader(reader),
@@ -230,7 +231,7 @@ func GetSticker(ctx tb.Context) error {
 						return errors.Join(err, err1)
 					}
 				case <-time.After(time.Second * 30):
-					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", opt.format))
+					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
 					return ctx.Reply("convert to mp4 failed")
 				}
 				sendFile := &tb.Document{
@@ -241,7 +242,7 @@ func GetSticker(ctx tb.Context) error {
 				}
 				return ctx.Reply(sendFile)
 			default:
-				return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", opt.format))
+				return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", f))
 			}
 		}
 
