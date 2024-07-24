@@ -49,8 +49,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		reText := buf.String()
 
 		if reText == "" {
-			ctx.Answer(&tb.QueryResponse{})
-			return nil
+			return ctx.Answer(&tb.QueryResponse{})
 		}
 
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
