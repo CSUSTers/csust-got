@@ -61,7 +61,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 						ParseMode: tb.ModeMarkdownV2,
 					},
 					Title:       "发送",
-					Description: reTextEscaped,
+					Description: reText,
 					Text:        reTextEscaped,
 				},
 			},
