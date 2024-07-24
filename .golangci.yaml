@@ -493,6 +493,7 @@ linters-settings:
           - github.com/prometheus/client_golang
           - github.com/gabriel-vasile/mimetype
           - github.com/u2takey/ffmpeg-go
+          - github.com/samber/lo
         # Packages that are not allowed where the value is a suggestion.
         deny:
           # - pkg: "github.com/sirupsen/logrus"
