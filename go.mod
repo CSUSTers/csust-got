@@ -18,7 +18,7 @@ require (
 	golang.org/x/net v0.27.0
 	golang.org/x/text v0.17.0
 	golang.org/x/time v0.5.0
-	gopkg.in/telebot.v3 v3.3.6
+	gopkg.in/telebot.v3 v3.3.8
 )
 
 require (
