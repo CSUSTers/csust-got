@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
-	github.com/meilisearch/meilisearch-go v0.27.2
+	github.com/meilisearch/meilisearch-go v0.28.0
 	github.com/prometheus/client_golang v1.20.1
 	github.com/prometheus/common v0.55.0
 	github.com/quic-go/quic-go v0.46.0
@@ -23,7 +23,6 @@ require (
 
 require (
 	github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
-	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/aws/aws-sdk-go v1.38.20 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -59,8 +58,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/u2takey/go-utils v0.3.1 // indirect
-	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.50.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
