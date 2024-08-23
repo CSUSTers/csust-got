@@ -33,7 +33,7 @@ var (
 	searchChan = make(chan searchQuery, 100)
 	// resultChan is used to pass the search results back.
 	resultChan = make(chan searchResult, 100)
-	client     *meilisearch.Client
+	client     meilisearch.ServiceManager
 	clientMux  sync.Mutex
 	// once init meili at bot start.
 	once sync.Once
@@ -46,14 +46,11 @@ func InitMeili() {
 	})
 }
 
-func getClient() *meilisearch.Client {
+func getClient() meilisearch.ServiceManager {
 	clientMux.Lock()
 	defer clientMux.Unlock()
 	if client == nil {
-		client = meilisearch.NewClient(meilisearch.ClientConfig{
-			Host:   config.BotConfig.MeiliConfig.HostAddr,
-			APIKey: config.BotConfig.MeiliConfig.ApiKey,
-		})
+		client = meilisearch.New(config.BotConfig.MeiliConfig.HostAddr, meilisearch.WithAPIKey(config.BotConfig.MeiliConfig.ApiKey))
 	}
 	return client
 }
