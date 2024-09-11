@@ -91,12 +91,12 @@ func executeSearch(ctx Context) string {
 			return "Not a member of the specified group"
 		}
 	}
-	query := searchQuery{}
+	query := &searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
 			Limit: 10,
 		}
-		query = searchQuery{
+		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
 			IndexName:     config.BotConfig.MeiliConfig.IndexPrefix + strconv.FormatInt(chatId, 10),
 			SearchRequest: searchRequest,

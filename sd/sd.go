@@ -150,7 +150,6 @@ func Process() {
 			continue
 		}
 
-		ctx := ctx
 		server := ctx.UserConfig.GetServer()
 
 		lock.Lock()

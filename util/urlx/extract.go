@@ -111,7 +111,7 @@ func UrlToExtraUrl(u *url.URL) *ExtraUrl {
 }
 
 // StringByFields return a URL from Extracted Fields
-func (u ExtraUrl) StringByFields() string {
+func (u *ExtraUrl) StringByFields() string {
 	buf := bytes.NewBufferString("")
 
 	// scheme: `https://`

@@ -30,7 +30,7 @@ var (
 	// dataChan pushes data to meili search.
 	dataChan = make(chan meiliData, 100)
 	// searchChan is used to pass search queries.
-	searchChan = make(chan searchQuery, 100)
+	searchChan = make(chan *searchQuery, 100)
 	// resultChan is used to pass the search results back.
 	resultChan = make(chan searchResult, 100)
 	client     meilisearch.ServiceManager
@@ -118,7 +118,7 @@ func AddData2Meili(data map[string]interface{}, chatID int64) {
 }
 
 // SearchMeili performs a search query and returns results or error.
-func SearchMeili(query searchQuery) (interface{}, error) {
+func SearchMeili(query *searchQuery) (interface{}, error) {
 	searchChan <- query
 	result := <-resultChan
 	return result.Result, result.Error

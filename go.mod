@@ -1,6 +1,6 @@
 module csust-got
 
-go 1.21
+go 1.23
 
 require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76

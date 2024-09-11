@@ -3,7 +3,7 @@
 
 # options for analysis running
 run:
-  go: "1.21"
+  go: "1.23"
   # default concurrency is an available CPU number
   concurrency: 16
 
@@ -134,10 +134,10 @@ linters-settings:
       - truncateCmp
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
-    disabled-checks:
-      - regexpMust
-      - hugeParam
-      - rangeValCopy
+    # disabled-checks:
+    #   - regexpMust
+    #   - hugeParam
+    #   - rangeValCopy
 
     # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
@@ -335,7 +335,7 @@ linters-settings:
 
   predeclared:
     # comma-separated list of predeclared identifiers to not report on
-    ignore: ""
+    ignore: "min,max"
     # include method names and field names (i.e., qualified names) in checks
     q: false
 
@@ -348,8 +348,6 @@ linters-settings:
     ignore-generated-header: true
     severity: warning
     confidence: 0.8
-    error-code: 0
-    warning-code: 0
     rules:
       - name: atomic
         # - name: bare-return
@@ -507,6 +505,9 @@ linters-settings:
       #     - $gostd
       #     - "github.com/stretchr/testify"
 
+  copyloopvar:
+    check-alias: false
+
 linters:
   enable:
     - bidichk
@@ -516,7 +517,8 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exportloopref
+    - copyloopvar
+    # - exportloopref
     # - forbidigo
     # - gocognit
     - goconst
