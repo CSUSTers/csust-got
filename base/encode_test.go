@@ -1,8 +1,10 @@
 package base
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,8 +22,9 @@ func Test_encode(t *testing.T) {
 		{"FAKERo0oO0", "h0oFAKEROo"},
 		{"h0o0o0OFAKERo0oO0", "h0oFAKEROo"},
 	}
+	replacer := strings.NewReplacer(lo.FlatMap[string, string]([]string{"0", "o", "O"}, func(item string, _ int) []string { return []string{item, "o"} })...)
 	for _, tt := range tests {
 		got := hooEncode(tt.args)
-		require.Equalf(t, tt.want, got, "encode(%s)", tt.args)
+		require.Equalf(t, replacer.Replace(tt.want), replacer.Replace(got), "encode(%s)", tt.args)
 	}
 }

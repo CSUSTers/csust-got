@@ -1,7 +1,9 @@
 package base
 
 import (
+	"bytes"
 	"csust-got/entities"
+	"math/rand/v2"
 	"regexp"
 
 	. "gopkg.in/telebot.v3"
@@ -10,6 +12,7 @@ import (
 var (
 	hooPrePatt = regexp.MustCompile(`(?i)^h[o0]*`)
 	hooSufPatt = regexp.MustCompile(`(?i)[o0]*$`)
+	hooRunes   = []rune("o0O")
 )
 
 // HooEncoder encode 'XXX' to 'hooXXXoo'.
@@ -39,5 +42,17 @@ func hooEncode(s string) string {
 		return "h0oOo"
 	}
 
-	return "h0o" + s[i1:i2] + "Oo"
+	bs := bytes.NewBufferString("h")
+
+	for _ = range 2 {
+		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
+	}
+
+	bs.WriteString(s[i1:i2])
+
+	for _ = range 2 {
+		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
+	}
+
+	return bs.String()
 }
