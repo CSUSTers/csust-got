@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type stickerOpts struct {
 	pack   bool
 	vf     string
 	sf     string
+
+	// pack format
+	pf string
 }
 
 func defaultOpts() stickerOpts {
@@ -84,6 +88,8 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 			o.vf = v
 		case "sf", "stickerformat":
 			o.sf = v
+		case "pf", "packformat":
+			o.pf = v
 		}
 	}
 
@@ -143,7 +149,6 @@ func GetSticker(ctx tb.Context) error {
 		opt = opt.merge(o, true)
 	}
 
-	// nolint: nestif // will fix in future
 	if !opt.pack {
 		filename := sticker.SetName
 		emoji := sticker.Emoji
@@ -158,8 +163,7 @@ func GetSticker(ctx tb.Context) error {
 
 		return sendImageSticker(ctx, sticker, filename, emoji, opt)
 	}
-	// nolint: goerr113
-	return errors.New("not implement")
+	return sendStickerPack(ctx, sticker, opt)
 }
 
 func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt stickerOpts) error {
@@ -327,6 +331,86 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	default:
 		return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", f))
 	}
+}
+
+func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error {
+	stickerSet, err := ctx.Bot().StickerSet(sticker.SetName)
+	if err != nil {
+		ctx.Reply("failed to get sticker set")
+		return err
+	}
+
+	var f string
+	if stickerSet.Animated {
+		f = opt.VideoFormat()
+		if f == "" {
+			f = "webm"
+		}
+	} else {
+		f = opt.StickerFormat()
+		if f == "" {
+			f = "webp"
+		}
+	}
+
+	var ext string
+	switch f {
+	case "jpeg", "jpg":
+		ext = ".jpg"
+	default:
+		ext = "." + f
+	}
+
+	pf := opt.pf
+	if pf == "" {
+		pf = "zip"
+	}
+
+	tempDir, err := os.MkdirTemp("", "telebot")
+	if err != nil {
+		ctx.Reply("process failed")
+		return err
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	outputFiles := make([]string, 0, len(stickerSet.Stickers))
+	for i, s := range stickerSet.Stickers {
+		emoji := s.Emoji
+		if emoji != "" {
+			emoji = "_" + emoji
+		}
+		filename := fmt.Sprintf("%s_%03d%s%s", stickerSet.Name, i+1, emoji, ext)
+		outputFiles = append(outputFiles, filename)
+
+		if s.Animated && f == "webm" || !s.Animated && f == "webp" {
+			of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
+			if err != nil {
+				ctx.Reply("process failed")
+				return err
+			}
+
+			err = func() error {
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					return err
+				}
+
+				_, err = io.Copy(of, fileR)
+				return err
+			}()
+			if err != nil {
+				ctx.Reply("process failed")
+				return err
+			}
+
+			// TODO: pack archive
+		}
+
+		// TODO: convert media format
+	}
+	return nil
 }
 
 func parseOpts(text string) (map[string]string, error) {
