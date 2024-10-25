@@ -17,7 +17,7 @@ var (
 
 // HooEncoder encode 'XXX' to 'hooXXXoo'.
 func HooEncoder(ctx Context) error {
-	_, s, err := entities.CommandTakeArgs(ctx.Message(), -1)
+	_, s, err := entities.CommandTakeArgs(ctx.Message(), 0)
 	if err != nil {
 		return ctx.Reply("h0oOo")
 	}
