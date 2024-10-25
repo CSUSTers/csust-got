@@ -68,3 +68,4 @@ func Min[T Ordered](args ...T) T {
 	}
 	return temp
 }
+

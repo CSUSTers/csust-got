@@ -3,7 +3,7 @@ package base
 import (
 	"bytes"
 	"csust-got/entities"
-	"math/rand"
+	"math/rand/v2"
 	"regexp"
 
 	. "gopkg.in/telebot.v3"
@@ -41,20 +41,20 @@ func hooEncode(s string) string {
 	bs := bytes.NewBufferString("h")
 
 	if i1 >= i2-1 {
-		for i := 0; i < 4; i++ { // Corrected the range to an explicit integer
-			bs.WriteRune(hooRunes[rand.Intn(len(hooRunes))]) // Changed rand.N to rand.Intn
+		for range 4 {
+			bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 		}
 		return bs.String()
 	}
 
-	for i := 0; i < 2; i++ { // Corrected the range to an explicit integer
-		bs.WriteRune(hooRunes[rand.Intn(len(hooRunes))])
+	for range 2 {
+		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
 	bs.WriteString(s[i1:i2])
 
-	for i := 0; i < 2; i++ { // Corrected the range to an explicit integer
-		bs.WriteRune(hooRunes[rand.Intn(len(hooRunes))])
+	for range 2 {
+		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
 	return bs.String()

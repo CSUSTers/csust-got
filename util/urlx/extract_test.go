@@ -98,12 +98,12 @@ func TestExtractStr(t *testing.T) {
 func TestUrlToExtraUrl(t *testing.T) {
 	tests := []struct {
 		name string
-		url  string
+		url string
 		want *ExtraUrl
 	}{
 		{
 			name: "url test",
-			url:  "https://example.com/echo?q=query#hello",
+			url: "https://example.com/echo?q=query#hello",
 			want: &ExtraUrl{
 				Text:   "https://example.com/echo?q=query#hello",
 				Scheme: "https",
