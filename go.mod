@@ -14,9 +14,9 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.19.0
+	golang.org/x/image v0.21.0
 	golang.org/x/net v0.29.0
-	golang.org/x/text v0.18.0
+	golang.org/x/text v0.19.0
 	golang.org/x/time v0.7.0
 	gopkg.in/telebot.v3 v3.3.8
 )
