@@ -31,7 +31,7 @@ var errInvalidCmd = errors.New("invalid command")
 // Decode decode text command
 // nolint:goconst
 func Decode(ctx tb.Context) error {
-	cmd, text, err := entities.CommandTakeArgs(ctx.Message(), 0)
+	cmd, text, err := entities.CommandTakeArgs(ctx.Message(), -1)
 	if err != nil {
 		return err
 	}
