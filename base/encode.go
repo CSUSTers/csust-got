@@ -41,19 +41,19 @@ func hooEncode(s string) string {
 	bs := bytes.NewBufferString("h")
 
 	if i1 >= i2-1 {
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 		}
 		return bs.String()
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 4 {
 		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
 	bs.WriteString(s[i1:i2])
 
-	for i := 0; i < 2; i++ {
+	for range 4 {
 		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
