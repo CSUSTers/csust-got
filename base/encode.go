@@ -47,13 +47,13 @@ func hooEncode(s string) string {
 		return bs.String()
 	}
 
-	for range 4 {
+	for range 2 {
 		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
 	bs.WriteString(s[i1:i2])
 
-	for range 4 {
+	for range 2 {
 		bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 	}
 
