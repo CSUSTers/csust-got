@@ -30,10 +30,10 @@ var (
 	// dataChan pushes data to meili search.
 	dataChan = make(chan meiliData, 100)
 	// searchChan is used to pass search queries.
-	searchChan = make(chan searchQuery, 100)
+	searchChan = make(chan *searchQuery, 100)
 	// resultChan is used to pass the search results back.
 	resultChan = make(chan searchResult, 100)
-	client     *meilisearch.Client
+	client     meilisearch.ServiceManager
 	clientMux  sync.Mutex
 	// once init meili at bot start.
 	once sync.Once
@@ -46,14 +46,11 @@ func InitMeili() {
 	})
 }
 
-func getClient() *meilisearch.Client {
+func getClient() meilisearch.ServiceManager {
 	clientMux.Lock()
 	defer clientMux.Unlock()
 	if client == nil {
-		client = meilisearch.NewClient(meilisearch.ClientConfig{
-			Host:   config.BotConfig.MeiliConfig.HostAddr,
-			APIKey: config.BotConfig.MeiliConfig.ApiKey,
-		})
+		client = meilisearch.New(config.BotConfig.MeiliConfig.HostAddr, meilisearch.WithAPIKey(config.BotConfig.MeiliConfig.ApiKey))
 	}
 	return client
 }
@@ -121,7 +118,7 @@ func AddData2Meili(data map[string]interface{}, chatID int64) {
 }
 
 // SearchMeili performs a search query and returns results or error.
-func SearchMeili(query searchQuery) (interface{}, error) {
+func SearchMeili(query *searchQuery) (interface{}, error) {
 	searchChan <- query
 	result := <-resultChan
 	return result.Result, result.Error

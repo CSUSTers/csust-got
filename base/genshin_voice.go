@@ -126,7 +126,7 @@ func GetVoiceV2(ctx Context) error {
 		return err
 
 	}
-	err = SendVoice(m.Chat, data)
+	err = SendVoice(m.Chat, &data)
 	return err
 }
 
@@ -179,7 +179,7 @@ func GetVoiceV3(ctx Context) error {
 		return err
 
 	}
-	err = SendVoiceV3(m.Chat, data)
+	err = SendVoiceV3(m.Chat, &data)
 	return err
 }
 
@@ -235,7 +235,7 @@ func GetVoiceV3Pro(ctx Context) error {
 		return err
 
 	}
-	err = SendVoiceV3(m.Chat, data)
+	err = SendVoiceV3(m.Chat, &data)
 	return err
 }
 
@@ -313,7 +313,7 @@ func SendErrVoice(chat *Chat, errStr string) error {
 }
 
 // SendVoice 发音频消息
-func SendVoice(chat *Chat, v genShinVoiceV2) error {
+func SendVoice(chat *Chat, v *genShinVoiceV2) error {
 	audioCaption := fmt.Sprintf("%s \n\n #%s  %s", v.Text, v.NpcNameLocal, v.Topic)
 	voice := Voice{File: FromURL(v.AudioURL), Caption: audioCaption}
 	_, err := voice.Send(config.BotConfig.Bot, chat, nil)
@@ -321,7 +321,7 @@ func SendVoice(chat *Chat, v genShinVoiceV2) error {
 }
 
 // SendVoiceV3 发音频消息 - 适用于v3版api（合成语音）
-func SendVoiceV3(chat *Chat, v genShinVoiceV3) error {
+func SendVoiceV3(chat *Chat, v *genShinVoiceV3) error {
 	audioCaption := fmt.Sprintf("%s \n\n #%s", v.Text, v.Character)
 	voice := Voice{File: FromURL(v.VoiceUrl), Caption: audioCaption}
 	_, err := voice.Send(config.BotConfig.Bot, chat, nil)

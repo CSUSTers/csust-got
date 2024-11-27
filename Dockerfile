@@ -1,5 +1,5 @@
 # build
-FROM --platform=$BUILDPLATFORM golang:1.21-alpine AS buildenv
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS buildenv
 ARG TARGETARCH
 
 RUN apk add make git tzdata
@@ -21,7 +21,7 @@ RUN make deploy
 FROM --platform=$BUILDPLATFORM alpine
 
 RUN apk add --no-cache tzdata
-COPY --from=hugefiver/ffmpeg:7.0.1 /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=hugefiver/ffmpeg:7.0.1-2 /ffmpeg /usr/local/bin/ffmpeg
 # COPY --from=hugefiver/ffmpeg:7.0.1 /ffprobe /usr/local/bin/ffprobe
 
 WORKDIR /app

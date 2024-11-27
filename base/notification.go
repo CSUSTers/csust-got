@@ -11,8 +11,10 @@ import (
 // WelcomeNewMember is handle for welcome new member.
 // when someone new join group, bot will send welcome message.
 func WelcomeNewMember(ctx Context) error {
-	for _, member := range ctx.Message().UsersJoined {
-		text := config.BotConfig.MessageConfig.WelcomeMessage + util.GetName(&member)
+	usersJoined := ctx.Message().UsersJoined
+	for idx := range usersJoined {
+		member := &usersJoined[idx]
+		text := config.BotConfig.MessageConfig.WelcomeMessage + util.GetName(member)
 		prom.NewMember(ctx.Chat().Title)
 		if err := ctx.Send(text); err != nil {
 			return err

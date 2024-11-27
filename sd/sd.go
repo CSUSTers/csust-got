@@ -37,7 +37,7 @@ type mixRoundTripper struct {
 	H3RoundTripper          http.RoundTripper
 }
 
-func newMixRoundTripper(t http.RoundTripper, h3 *http3.RoundTripper) *mixRoundTripper {
+func newMixRoundTripper(t http.RoundTripper, h3 *http3.Transport) *mixRoundTripper {
 	return &mixRoundTripper{
 		TraditionalRoundTripper: t,
 		H3RoundTripper:          h3,
@@ -66,8 +66,7 @@ func init() {
 	}
 	transport.DialContext = dialer.DialContext
 
-	h3RoundTripper := &http3.RoundTripper{
-
+	h3RoundTripper := &http3.Transport{
 		QUICConfig: &quic.Config{
 			MaxIdleTimeout:  3 * time.Minute,
 			KeepAlivePeriod: 10 * time.Second,
@@ -150,7 +149,6 @@ func Process() {
 			continue
 		}
 
-		ctx := ctx
 		server := ctx.UserConfig.GetServer()
 
 		lock.Lock()
