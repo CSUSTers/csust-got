@@ -46,13 +46,13 @@ func CommandFromText(text string, argc int) (cmd *BotCommand, rest string, err e
 		//  1  +  argc  +  1
 		taken = argc + 2
 	}
-	args := spaces.Split(strings.TrimSpace(text), taken)
-	if len(args) == 0 {
+	orig := spaces.Split(strings.TrimSpace(text), taken)
+	if len(orig) == 0 {
 		err = errParseCommand
 		return
 	}
 
-	name, args := args[0], args[1:]
+	name, args := orig[0], orig[1:]
 	m := cmdRegex.FindStringSubmatch(name)
 	if len(m) == 0 {
 		return nil, "", errParseCommandName
