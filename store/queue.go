@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	ByeWorldQueue TaskQueue[*Message] // ByeWorldQueue is a queue to delete message from `bye_world` command
+	// ByeWorldQueue is a queue to delete message from `bye_world` command
+	ByeWorldQueue TaskQueue[*Message]
 )
 
 // InitQueues initializes all queues
