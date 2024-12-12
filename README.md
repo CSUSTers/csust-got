@@ -74,8 +74,8 @@ boot - 将bot开机
 sleep - 该睡觉了
 no_sleep - 别睡了
 run_after - <duration> <msg> 提醒自己多久之后做什么事
-hugencoder - <text> huge编码
-hugedecoder - <text> huge解码
+hoocoder - <text> Hoo编码
+decode - _[decoding]_[encoding] <text> 解个码
 getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 
 getvoice_old - getvoice的旧版入口，没有查询功能，数据来源于mys爬虫
 chat - <text> 聊会天呗
@@ -87,6 +87,8 @@ gacha_setting - 设置一个json格式的配置
 gacha - 抽卡，按照你的配置
 bye_world - [duration] 向美好世界说声再见
 hello_world - 向美好世界问声好
+iwant - f=<format> 我要Sticker
+setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 ```
 
 ## attachment

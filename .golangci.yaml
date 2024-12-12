@@ -395,6 +395,8 @@ linters-settings:
       - name: unreachable-code
       - name: useless-break
       - name: waitgroup-by-value
+      - name: redefines-builtin-id
+        disabled: true
 
   staticcheck:
     # https://staticcheck.io/docs/options#checks

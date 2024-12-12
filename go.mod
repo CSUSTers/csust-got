@@ -6,17 +6,17 @@ require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/meilisearch/meilisearch-go v0.29.0
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/common v0.60.1
+	github.com/prometheus/common v0.61.0
 	github.com/quic-go/quic-go v0.48.2
 	github.com/redis/go-redis/v9 v9.7.0
-	github.com/sashabaranov/go-openai v1.35.7
+	github.com/sashabaranov/go-openai v1.36.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.22.0
-	golang.org/x/net v0.31.0
-	golang.org/x/text v0.20.0
+	golang.org/x/image v0.23.0
+	golang.org/x/net v0.32.0
+	golang.org/x/text v0.21.0
 	golang.org/x/time v0.8.0
 	gopkg.in/telebot.v3 v3.3.8
 )
@@ -24,7 +24,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	golang.org/x/sync v0.9.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
 )
 
 require (
@@ -65,12 +65,12 @@ require (
 	github.com/u2takey/go-utils v0.3.1 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.29.0 // indirect
+	golang.org/x/crypto v0.30.0 // indirect
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c // indirect
 	golang.org/x/mod v0.21.0 // indirect
-	golang.org/x/sys v0.27.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
-	google.golang.org/protobuf v1.35.1 // indirect
+	google.golang.org/protobuf v1.35.2 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
