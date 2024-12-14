@@ -441,8 +441,13 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 			return next(ctx)
 		}
 
+		if err := next(ctx); err != nil {
+			return err
+		}
+
+		// TODO: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
 		go chat.GachaReplyHandler(ctx)
-		return next(ctx)
+		return nil
 	}
 }
 
