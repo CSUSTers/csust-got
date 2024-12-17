@@ -172,7 +172,6 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
 	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-	bot.Handle("/qiuchat", chat.CustomModelChat, whiteMiddleware)
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
@@ -441,7 +440,12 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 			return next(ctx)
 		}
 
-		go chat.GachaReplyHandler(ctx)
+		// DONE: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
+		// 2024-12-17 [dawu]: 已经重构
+		if m.Text != "" {
+			go chat.GachaReplyHandler(ctx)
+		}
+
 		return next(ctx)
 	}
 }

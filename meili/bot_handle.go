@@ -6,6 +6,8 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/meilisearch/meilisearch-go"
@@ -65,7 +67,7 @@ func executeSearch(ctx Context) string {
 	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
 	// parse option
 	searchKeywordIdx := 0
-	if command.Argc() > 2 {
+	if command.Argc() >= 2 {
 		option := command.Arg(0)
 		if option == "-id" {
 			// when search by id, index 0 arg is "-id", 1 arg is id, pass rest to query
@@ -73,19 +75,22 @@ func executeSearch(ctx Context) string {
 			chatId, err = strconv.ParseInt(command.Arg(1), 10, 64)
 			if err != nil {
 				log.Error("[MeiliSearch]: Parse chat id failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-				return err.Error()
+				return "Invalid chat id"
 			}
 			searchKeywordIdx = 2
 		}
 	}
 	if searchKeywordIdx > 0 {
 		// check if user is a member of chat_id group
-		member, err := util.GetChatMember(ctx.Bot(), chatId, ctx.Sender().Recipient())
+		member, err := ctx.Bot().ChatMemberOf(ChatID(chatId), ctx.Sender())
 		if err != nil {
+			if errors.Is(err, ErrChatNotFound) {
+				return "Chat not found"
+			}
 			log.Error("[MeiliSearch]: Error in GetChatMember", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
-			return "Error when getting chat member"
+			return "Not sure if you are a member of the specified group"
 		}
-		if member.Result.Status == "left" {
+		if member.Role == Left || member.Role == Kicked {
 			log.Error("[MeiliSearch]: Not a member of the specified group", zap.String("Search args", command.ArgAllInOneFrom(0)),
 				zap.Int64("chatId", chatId), zap.String("user", ctx.Sender().Recipient()))
 			return "Not a member of the specified group"
@@ -102,6 +107,11 @@ func executeSearch(ctx Context) string {
 			SearchRequest: searchRequest,
 		}
 	}
+
+	if query.Query == "" {
+		return fmt.Sprintf("search keyword is empty, use `%s <keyword>` to search", ctx.Message().Text)
+	}
+
 	result, err := SearchMeili(query)
 	if err != nil {
 		log.Error("[MeiliSearch]: search failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))

@@ -22,5 +22,3 @@ jobs:
           version: v1.62
           args: --issues-exit-code=1
           only-new-issues: false
-          skip-pkg-cache: true
-          skip-build-cache: true
