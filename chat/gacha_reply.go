@@ -3,6 +3,7 @@ package chat
 import (
 	"csust-got/log"
 	"csust-got/util/gacha"
+	"strings"
 
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v3"
@@ -19,7 +20,7 @@ func GachaReplyHandler(ctx telebot.Context) {
 	} else if len(msg.Caption) > 0 {
 		text = msg.Caption
 	}
-	if len(text) == 0 {
+	if len(text) == 0 || strings.HasPrefix(text, "/") {
 		return
 	}
 
