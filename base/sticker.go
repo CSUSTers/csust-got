@@ -17,6 +17,7 @@ import (
 	"time"
 
 	//nolint: revive
+	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
@@ -375,6 +376,11 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 		_ = os.RemoveAll(tempDir)
 	}()
 
+	if len(stickerSet.Stickers) == 0 {
+		return ctx.Reply("sticker set is empty")
+	}
+	_ = ctx.Notify(tb.UploadingDocument)
+
 	outputFiles := make([]string, 0, len(stickerSet.Stickers))
 	for i, s := range stickerSet.Stickers {
 		emoji := s.Emoji
@@ -385,31 +391,71 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 		outputFiles = append(outputFiles, filename)
 
 		if s.Animated && f == "webm" || !s.Animated && f == "webp" {
-			of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
-			if err != nil {
-				ctx.Reply("process failed")
-				return err
-			}
-
-			err = func() error {
-				fileR, err := ctx.Bot().File(&s.File)
+			err := func() error {
+				of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
 				if err != nil {
 					return err
 				}
+				defer of.Close()
 
-				_, err = io.Copy(of, fileR)
+				err = func() error {
+					fileR, err := ctx.Bot().File(&s.File)
+					if err != nil {
+						return err
+					}
+
+					_, err = io.Copy(of, fileR)
+					return err
+				}()
 				return err
 			}()
 			if err != nil {
 				ctx.Reply("process failed")
 				return err
 			}
+		} else {
+			if s.Animated {
+				ff := ffconv.FFConv{LogCmd: true}
+				var input *ffmpeg_go.Stream
+				var outputArgs []ffmpeg_go.KwArgs
 
-			// TODO: pack archive
+				switch f {
+				case "gif":
+					input = ffconv.GetGifPaletteVfStream(input)
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "gif",
+						"f":    "gif",
+					})
+				case "mp4":
+					// nothing to do
+				}
+				r, errCh := ff.ConvertPipe2File(s.FileReader, "webm", input, path.Join(tempDir, filename), outputArgs...)
+				defer func() {
+					_ = r.Close()
+				}()
+				select {
+				case err := <-errCh:
+					if err != nil {
+						log.Error("failed to convert", zap.Error(err))
+						err1 := ctx.Reply("convert video sticker failed")
+						return errors.Join(err, err1)
+					}
+				case <-time.After(time.Second * 30):
+					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
+					return ctx.Reply("convert video sticker failed")
+				}
+			} else {
+				// TODO
+				switch f {
+				case "webp":
+				case "jpg", "jpeg":
+				case "png":
+				}
+			}
 		}
-
-		// TODO: convert media format
 	}
+	// TODO: send sticker pack
 	return nil
 }
 
