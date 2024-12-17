@@ -34,6 +34,33 @@ type chatContext struct {
 	msg *Message
 }
 
+// ChatInfo is input of ChatWith
+// nolint: revive
+type ChatInfo struct {
+	Setting
+
+	Text string
+}
+
+// Setting is settings of ChatWith
+type Setting struct {
+	Stream bool
+	Reply  bool
+
+	Placeholder string
+
+	Model  string
+	Prompt string
+}
+
+// GetPlaceholder get message placeholder
+func (s *Setting) GetPlaceholder() string {
+	if s.Placeholder == "" {
+		return "正在思考..."
+	}
+	return s.Placeholder
+}
+
 // InitChat init chat service
 func InitChat() {
 	if config.BotConfig.ChatConfig.Key != "" {
@@ -61,38 +88,54 @@ func InitChat() {
 
 // GPTChat is handler for chat with GPT
 func GPTChat(ctx Context) error {
-	return chat(ctx, false)
+	return chatHandler(ctx, false)
 }
 
 // GPTChatWithStream is handler for chat with GPT, and use stream api
 func GPTChatWithStream(ctx Context) error {
-	return chat(ctx, true)
+	return chatHandler(ctx, true)
 }
 
-func chat(ctx Context, stream bool) error {
-	if client == nil {
-		return nil
-	}
-
-	_, arg, err := entities.CommandTakeArgs(ctx.Message(), 0)
+func chatHandler(ctx Context, stream bool) error {
+	_, text, err := entities.CommandTakeArgs(ctx.Message(), 0)
 	if err != nil {
 		log.Error("[ChatGPT] Can't take args", zap.Error(err))
 		return ctx.Reply("嗦啥呢？")
 	}
 
-	if len(arg) == 0 {
+	if len(text) == 0 {
 		return ctx.Reply("您好，有什么问题可以为您解答吗？")
 	}
-	if len(arg) > config.BotConfig.ChatConfig.PromptLimit {
+	if len(text) > config.BotConfig.ChatConfig.PromptLimit {
 		return ctx.Reply("TLDR")
 	}
+	return ChatWith(ctx, &ChatInfo{
+		Text: text,
+		Setting: Setting{
+			Stream: stream,
+			Reply:  true,
+		},
+	})
+}
 
-	req, err := generateRequest(ctx, arg, stream)
+// ChatWith chat with GPT
+// nolint: revive
+func ChatWith(ctx Context, info *ChatInfo) error {
+	if client == nil {
+		return nil
+	}
+
+	req, err := generateRequest(ctx, info)
 	if err != nil {
 		return err
 	}
 
-	msg, err := util.SendReplyWithError(ctx.Chat(), "正在思考...", ctx.Message())
+	var msg *Message
+	if info.Reply {
+		msg, err = util.SendReplyWithError(ctx.Chat(), info.GetPlaceholder(), ctx.Message())
+	} else {
+		msg, err = util.SendMessageWithError(ctx.Chat(), info.GetPlaceholder(), ctx.Message())
+	}
 	if err != nil {
 		return err
 	}
@@ -107,24 +150,30 @@ func chat(ctx Context, stream bool) error {
 	}
 }
 
-func generateRequest(ctx Context, arg string, stream bool) (*openai.ChatCompletionRequest, error) {
+func generateRequest(ctx Context, info *ChatInfo) (*openai.ChatCompletionRequest, error) {
 	chatCfg := config.BotConfig.ChatConfig
 	req := openai.ChatCompletionRequest{
 		Model:       openai.GPT3Dot5Turbo,
 		MaxTokens:   chatCfg.MaxTokens,
 		Messages:    []openai.ChatCompletionMessage{},
-		Stream:      stream,
+		Stream:      info.Stream,
 		Temperature: chatCfg.Temperature,
 	}
 
-	if chatCfg.Model != "" {
+	if info.Model != "" {
+		req.Model = info.Model
+	} else if chatCfg.Model != "" {
 		req.Model = chatCfg.Model
 	}
 
 	if len(req.Messages) == 0 && chatCfg.SystemPrompt != "" {
+		prompt := info.Prompt
+		if prompt == "" {
+			prompt = chatCfg.SystemPrompt
+		}
 		req.Messages = append(req.Messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
-			Content: chatCfg.SystemPrompt,
+			Content: prompt,
 		})
 	}
 
@@ -139,7 +188,7 @@ func generateRequest(ctx Context, arg string, stream bool) (*openai.ChatCompleti
 		}
 	}
 
-	req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: arg})
+	req.Messages = append(req.Messages, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: info.Text})
 
 	return &req, nil
 }

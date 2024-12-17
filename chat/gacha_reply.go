@@ -3,6 +3,7 @@ package chat
 import (
 	"csust-got/log"
 	"csust-got/util/gacha"
+
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v3"
 )
@@ -27,17 +28,17 @@ func GachaReplyHandler(ctx telebot.Context) {
 		log.Error("[GaCha]: perform gacha failed", zap.Error(err))
 		return
 	}
-	ctx.Message().Text = "/chat " + text
+
 	switch result {
 	case 3:
 		return
 	case 4:
-		err = CustomModelChat(ctx)
-		if err != nil {
-			log.Error("[ChatGPT]: get a answer failed", zap.Error(err))
-		}
+		// TODO: `ChatWith` a different prompt
 	case 5:
-		err = GPTChat(ctx)
+		err = ChatWith(ctx, &ChatInfo{
+			Text:    text,
+			Setting: Setting{Stream: false, Reply: true},
+		})
 		if err != nil {
 			log.Error("[ChatGPT]: get a answer failed", zap.Error(err))
 		}

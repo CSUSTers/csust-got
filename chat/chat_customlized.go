@@ -6,19 +6,33 @@ import (
 	"csust-got/log"
 	"csust-got/util"
 	"encoding/json"
-	"go.uber.org/zap"
-	. "gopkg.in/telebot.v3"
 	"io"
 	"net/http"
 	"net/url"
+
+	"go.uber.org/zap"
+	tb "gopkg.in/telebot.v3"
 )
 
+// Deprecated: no longer used. if you want to use it, please refactor.
 type chatCustModel struct {
 	Text string `json:"text"`
 }
 
+// CustomChatInfo deprecated
+type CustomChatInfo struct {
+	ChatInfo
+}
+
+// WithText deprecated
+func (c *CustomChatInfo) WithText(s string) *CustomChatInfo {
+	c.ChatInfo.Text = s
+	return c
+}
+
 // CustomModelChat 自定义的大语言模型
-func CustomModelChat(ctx Context) error {
+// Deprecated: no longer used. if you want to use it, please refactor.
+func CustomModelChat(ctx tb.Context, info CustomChatInfo) error {
 	if client == nil {
 		return nil
 	}
@@ -46,7 +60,8 @@ func CustomModelChat(ctx Context) error {
 
 }
 
-func generateRequestCustomModelChat(arg string, msg *Message) error {
+// Deprecated: no longer used. if you want to use it, please refactor.
+func generateRequestCustomModelChat(arg string, msg *tb.Message) error {
 	serverAddress := config.BotConfig.GenShinConfig.ApiServer + "/Chat" + "?text=" + url.QueryEscape(arg)
 	log.Info(serverAddress)
 
