@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 
 	ff "github.com/u2takey/ffmpeg-go"
 	"go.uber.org/zap"
@@ -12,12 +13,11 @@ import (
 
 // ConvertPipe2File read media file from reader `r` and convert it to file with default/provided options
 // return the converted data readcloser and a channel of run error, and delete the temp work dir when readcloser closed
-func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, outputFilename string, outputArgs ...ff.KwArgs) (io.ReadCloser, <-chan error) {
-	inputArgs := ff.KwArgs{}
-	if inputFileType != "" {
-		inputArgs["f"] = inputFileType
+func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, input *ff.Stream,
+	outputFilename string, outputArgs ...ff.KwArgs) (io.ReadCloser, <-chan error) {
+	if input == nil {
+		input = GetPipeInputStream(inputFileType)
 	}
-	input := ff.Input("pipe:", inputArgs)
 
 	stderr := io.Discard
 	var stderrCloser io.Closer
@@ -31,14 +31,19 @@ func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, outputFilen
 
 	resultCh := make(chan error, 1)
 
-	workdir, err := os.MkdirTemp(c.TempDir, "ffconv-")
-	if err != nil {
-		log.Error("ffconv: failed to create temp dir", zap.Error(err))
-		resultCh <- err
-		return nil, resultCh
+	outputFile := outputFilename
+	var workdir string
+	if (!path.IsAbs(outputFilename)) && (!strings.HasPrefix(outputFilename, ".") && path.Dir(outputFilename) == ".") {
+		var err error
+		workdir, err = os.MkdirTemp(c.TempDir, "ffconv-")
+		if err != nil {
+			log.Error("ffconv: failed to create temp dir", zap.Error(err))
+			resultCh <- err
+			return nil, resultCh
+		}
+		outputFile = path.Join(workdir, path.Base(outputFilename))
 	}
 
-	outputFile := path.Join(workdir, outputFilename)
 	runner := input.Output(outputFile, outputArgs...).Silent(true).WithInput(r).WithErrorOutput(stderr)
 	if c.LogCmd {
 		cmd := runner.Compile()
@@ -58,4 +63,14 @@ func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, outputFilen
 		TempWorkDir: workdir,
 		File:        outputFile,
 	}, resultCh
+}
+
+// GetPipeInputStream get pipe input stream
+func GetPipeInputStream(fileType string) *ff.Stream {
+	inputArgs := ff.KwArgs{}
+	if fileType != "" {
+		inputArgs["f"] = fileType
+	}
+	input := ff.Input("pipe:", inputArgs)
+	return input
 }

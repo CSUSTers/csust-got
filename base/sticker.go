@@ -2,6 +2,7 @@
 package base
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
 	"fmt"
@@ -11,10 +12,12 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"time"
 
+	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	//nolint: revive
 	_ "golang.org/x/image/webp"
 
@@ -33,6 +36,9 @@ type stickerOpts struct {
 	pack   bool
 	vf     string
 	sf     string
+
+	// pack format
+	pf string
 }
 
 func defaultOpts() stickerOpts {
@@ -84,6 +90,8 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 			o.vf = v
 		case "sf", "stickerformat":
 			o.sf = v
+		case "pf", "packformat":
+			o.pf = v
 		}
 	}
 
@@ -143,7 +151,6 @@ func GetSticker(ctx tb.Context) error {
 		opt = opt.merge(o, true)
 	}
 
-	// nolint: nestif // will fix in future
 	if !opt.pack {
 		filename := sticker.SetName
 		emoji := sticker.Emoji
@@ -158,8 +165,7 @@ func GetSticker(ctx tb.Context) error {
 
 		return sendImageSticker(ctx, sticker, filename, emoji, opt)
 	}
-	// nolint: goerr113
-	return errors.New("not implement")
+	return sendStickerPack(ctx, sticker, opt)
 }
 
 func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt stickerOpts) error {
@@ -302,7 +308,7 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		return ctx.Reply(sendFile)
 	case "mp4":
 		ff := ffconv.FFConv{LogCmd: true}
-		r, errCh := ff.ConvertPipe2File(reader, "webm", filename+".mp4")
+		r, errCh := ff.ConvertPipe2File(reader, "webm", nil, filename+".mp4")
 		defer func() {
 			_ = r.Close()
 		}()
@@ -327,6 +333,239 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	default:
 		return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", f))
 	}
+}
+
+func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error {
+	stickerSet, err := ctx.Bot().StickerSet(sticker.SetName)
+	if err != nil {
+		err2 := ctx.Reply("failed to get sticker set")
+		return errors.Join(err, err2)
+	}
+
+	var f string
+	if stickerSet.Animated {
+		f = opt.VideoFormat()
+		if f == "" {
+			f = "webm"
+		}
+	} else {
+		f = opt.StickerFormat()
+		if f == "" {
+			f = "webp"
+		}
+	}
+
+	var ext string
+	switch f {
+	case "jpeg", "jpg":
+		ext = ".jpg"
+	default:
+		ext = "." + f
+	}
+
+	// TODO support other compression format
+	// pf := opt.pf
+	// if pf == "" {
+	// 	pf = "zip"
+	// }
+
+	tempDir, err := os.MkdirTemp("", "telebot")
+	if err != nil {
+		err2 := ctx.Reply("process failed")
+		return errors.Join(err, err2)
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	if len(stickerSet.Stickers) == 0 {
+		return ctx.Reply("sticker set is empty")
+	}
+	_ = ctx.Notify(tb.UploadingDocument)
+
+	outputFiles := make([]string, 0, len(stickerSet.Stickers))
+	for i := range stickerSet.Stickers {
+		s := &stickerSet.Stickers[i]
+		emoji := s.Emoji
+		if emoji != "" {
+			emoji = "_" + emoji
+		}
+		filename := fmt.Sprintf("%s_%03d%s%s", stickerSet.Name, i+1, emoji, ext)
+		outputFiles = append(outputFiles, filename)
+
+		// TODO reduce complexity by move some code to function
+		// nolint: nestif
+		if s.Animated && f == "webm" || !s.Animated && f == "webp" {
+			err := func() error {
+				of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = of.Close() }()
+
+				err = func() error {
+					fileR, err := ctx.Bot().File(&s.File)
+					if err != nil {
+						return err
+					}
+
+					_, err = io.Copy(of, fileR)
+					return err
+				}()
+				return err
+			}()
+			if err != nil {
+				err2 := ctx.Reply("process failed")
+				return errors.Join(err, err2)
+			}
+		} else {
+			if s.Animated {
+				ff := ffconv.FFConv{LogCmd: true}
+				var input *ffmpeg_go.Stream
+				var outputArgs []ffmpeg_go.KwArgs
+
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					err2 := ctx.Reply("failed to get sticker file")
+					return errors.Join(err, err2)
+				}
+
+				err = func() error {
+					defer func() {
+						_ = fileR.Close()
+					}()
+					switch f {
+					case "gif":
+						input = ffconv.GetGifPaletteVfStream(input)
+						outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+							"loop": "0",
+							"c:v":  "gif",
+							"f":    "gif",
+						})
+					case "mp4":
+						// nothing to do
+					}
+					r, errCh := ff.ConvertPipe2File(s.FileReader, "webm", input, path.Join(tempDir, filename), outputArgs...)
+					defer func() {
+						_ = r.Close()
+					}()
+					select {
+					case err := <-errCh:
+						if err != nil {
+							log.Error("failed to convert", zap.Error(err))
+							err1 := ctx.Reply("convert video sticker failed")
+							return errors.Join(err, err1)
+						}
+						return nil
+					case <-time.After(time.Second * 30):
+						log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
+						err2 := ctx.Reply("convert video sticker failed")
+						// TODO use static error
+						// nolint: err113
+						return errors.Join(errors.New("wait ffmpeg exec result timeout"), err2)
+					}
+				}()
+
+				if err != nil {
+					return err
+				}
+			} else {
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					err2 := ctx.Reply("failed to get sticker file")
+					return errors.Join(err, err2)
+				}
+
+				err = func() error {
+					defer func() {
+						_ = fileR.Close()
+					}()
+
+					img, _, err1 := image.Decode(fileR)
+					if err1 != nil {
+						err2 := ctx.Reply("failed to decode image")
+						return errors.Join(err1, err2)
+					}
+					const ErrConvertMsg = "failed to convert image format"
+
+					of, err1 := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_WRONLY, 0o640)
+					if err1 != nil {
+						return errors.Join(err1, ctx.Reply(ErrConvertMsg))
+					}
+					defer func() { _ = of.Close() }()
+
+					switch f {
+					case "jpg", "jpeg":
+						err2 := jpeg.Encode(of, img, &jpeg.Options{Quality: 100})
+						if err2 != nil {
+							err1 := ctx.Reply(ErrConvertMsg)
+							return errors.Join(err2, err1)
+						}
+					case "png":
+						err2 := png.Encode(of, img)
+						if err2 != nil {
+							err1 := ctx.Reply(ErrConvertMsg)
+							return errors.Join(err2, err1)
+						}
+					case "gif":
+						err := gif.Encode(of, img, &gif.Options{NumColors: 255})
+						if err != nil {
+							err1 := ctx.Reply(ErrConvertMsg)
+							return errors.Join(err, err1)
+						}
+					default:
+						// TODO use static error
+						// nolint: err113
+						return errors.Join(errors.New("unknown target image format"),
+							ctx.Reply(fmt.Sprintf("unknown target image format: %s", f)))
+					}
+					return nil
+				}()
+
+				if err != nil {
+					return err
+				}
+
+			}
+		}
+	}
+
+	packFile, err := os.CreateTemp("", "*.zip")
+	if err != nil {
+		err2 := ctx.Reply("process failed")
+		return errors.Join(err, err2)
+	}
+	defer func() {
+		_ = packFile.Close()
+	}()
+	compress := zip.NewWriter(packFile)
+	for _, f := range outputFiles {
+		w, err1 := compress.Create(f)
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+
+		file, err1 := os.Open(path.Join(tempDir, f))
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+
+		_, err1 = io.Copy(w, file)
+		_ = file.Close()
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+	}
+	_ = compress.Close()
+
+	err = ctx.Reply(&tb.Document{
+		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
+		File:     tb.FromReader(packFile),
+	})
+	return err
 }
 
 func parseOpts(text string) (map[string]string, error) {
