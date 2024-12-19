@@ -51,6 +51,7 @@ func (c *FFConv) Convert2GifFromReader(r io.Reader, inputFileType string) (io.Re
 	return bufOut, resultCh
 }
 
+// GetGifPaletteVfStream get gif palette vfilter stream
 func GetGifPaletteVfStream(input *ff.Stream) *ff.Stream {
 	split := input.Split()
 	ori, s1 := split.Get("ori"), split.Get("s1")

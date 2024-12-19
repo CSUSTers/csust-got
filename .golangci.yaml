@@ -285,6 +285,7 @@ linters-settings:
       - nilness
       - unusedwrite
       - fieldalignment
+      - shadow
     # disable-all: false
 
   nakedret:
