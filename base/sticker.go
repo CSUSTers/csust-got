@@ -463,14 +463,13 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 
 				fileR, err := ctx.Bot().File(&s.File)
 				if err != nil {
-					errCh <- errors.Join(err /* ctx.Reply("failed to get sticker file") */)
+					errCh <- err
 					return
 				}
 				defer func() { _ = fileR.Close() }()
 
 				_, err = io.Copy(of, fileR)
 				if err != nil {
-					// err2 := ctx.Reply("process failed")
 					errCh <- err
 				}
 			} else if s.Video {
@@ -514,12 +513,10 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 				case err := <-errCh2:
 					if err != nil {
 						log.Error("failed to convert", zap.Error(err))
-						// err1 := ctx.Reply("convert video sticker failed")
 						errCh <- err
 					}
 				case <-time.After(time.Second * 30):
 					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
-					// err2 := ctx.Reply("convert video sticker failed")
 
 					replyMsgLock.Lock()
 					if replyMsg == "" {
@@ -546,8 +543,6 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 
 				img, _, err1 := image.Decode(fileR)
 				if err1 != nil {
-					// err2 := ctx.Reply("failed to decode image")
-
 					replyMsgLock.Lock()
 					if replyMsg == "" {
 						replyMsg = "failed to decode image"
@@ -588,8 +583,6 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 				}
 
 				if err2 != nil {
-					// err1 := ctx.Reply(ErrConvertMsg)
-
 					replyMsgLock.Lock()
 					if replyMsg == "" {
 						replyMsg = ErrConvertMsg
@@ -750,7 +743,10 @@ func SetStickerConfig(ctx tb.Context) error {
 				_ = ctx.Reply("failed to marshal iwant config")
 				return err
 			}
-			return ctx.Reply(fmt.Sprintf("iwant config: ```\n%s```", util.EscapeTelegramReservedChars(string(cs))), &tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
+			return ctx.Reply(
+				fmt.Sprintf("iwant config: ```\n%s```",
+					util.EscapeTelegramReservedChars(string(cs))),
+				&tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 		}
 
 		ok, k, v := normalizeParams(k, v)
