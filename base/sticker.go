@@ -750,7 +750,7 @@ func SetStickerConfig(ctx tb.Context) error {
 				_ = ctx.Reply("failed to marshal iwant config")
 				return err
 			}
-			return ctx.Reply(fmt.Sprintf("iwant config: ```\n%s```", string(cs)), tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
+			return ctx.Reply(fmt.Sprintf("iwant config: ```\n%s```", util.EscapeTelegramReservedChars(string(cs))), &tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 		}
 
 		ok, k, v := normalizeParams(k, v)
