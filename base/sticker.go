@@ -404,6 +404,9 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 	}
 
 	outputFiles := make([]string, 0, len(stickerSet.Stickers))
+
+	// TODO: use go routine
+
 	for i := range stickerSet.Stickers {
 		s := &stickerSet.Stickers[i]
 
