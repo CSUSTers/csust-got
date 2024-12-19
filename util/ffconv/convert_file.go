@@ -1,6 +1,7 @@
 package ffconv
 
 import (
+	"context"
 	"csust-got/log"
 	"io"
 	"os"
@@ -13,7 +14,7 @@ import (
 
 // ConvertPipe2File read media file from reader `r` and convert it to file with default/provided options
 // return the converted data readcloser and a channel of run error, and delete the temp work dir when readcloser closed
-func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, input *ff.Stream,
+func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, inputFileType string, input *ff.Stream,
 	outputFilename string, outputArgs ...ff.KwArgs) (io.ReadCloser, <-chan error) {
 	if input == nil {
 		input = GetPipeInputStream(inputFileType)
@@ -51,6 +52,10 @@ func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, input *ff.S
 	}
 
 	go func() {
+		if ctx != nil {
+			runner.Context = ctx
+		}
+
 		if stderrCloser != nil {
 			defer func() {
 				_ = stderrCloser.Close()
@@ -59,6 +64,7 @@ func (c *FFConv) ConvertPipe2File(r io.Reader, inputFileType string, input *ff.S
 		err := runner.Run()
 		resultCh <- err
 	}()
+
 	return &OutputFileReaderImpl{
 		TempWorkDir: workdir,
 		File:        outputFile,
