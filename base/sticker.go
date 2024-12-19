@@ -2,6 +2,7 @@
 package base
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
 	"fmt"
@@ -11,15 +12,19 @@ import (
 	"image/png"
 	"io"
 	"os"
+	"path"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
+	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	//nolint: revive
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
+	"gopkg.in/yaml.v3"
 
 	"csust-got/entities"
 	"csust-got/log"
@@ -33,6 +38,9 @@ type stickerOpts struct {
 	pack   bool
 	vf     string
 	sf     string
+
+	// pack format
+	pf string
 }
 
 func defaultOpts() stickerOpts {
@@ -84,6 +92,8 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 			o.vf = v
 		case "sf", "stickerformat":
 			o.sf = v
+		case "pf", "packformat":
+			o.pf = v
 		}
 	}
 
@@ -104,6 +114,40 @@ func (o stickerOpts) StickerFormat() string {
 	return o.format
 }
 
+func (o stickerOpts) FileExt(video bool) string {
+	if video {
+		f := o.VideoFormat()
+		if f == "" {
+			f = "webm"
+		}
+		return "." + f
+	}
+	f := o.StickerFormat()
+	switch f {
+	case "":
+		f = "webp"
+	case "jpg", "jpeg":
+		f = "jpg"
+	}
+	return "." + f
+}
+
+func (o stickerOpts) NotConvert(s *tb.Sticker) bool {
+	if s.Video {
+		switch o.VideoFormat() {
+		case "", "webm":
+			return true
+		}
+	} else {
+		switch o.StickerFormat() {
+		case "", "webp":
+			return true
+		}
+	}
+
+	return false
+}
+
 // GetSticker will download sticker file, and convert to expected format, and send to chat
 func GetSticker(ctx tb.Context) error {
 	var msg = ctx.Message()
@@ -121,6 +165,13 @@ func GetSticker(ctx tb.Context) error {
 			return err
 		}
 		return nil
+	}
+
+	if sticker.Animated {
+		return ctx.Reply("animated sticker is not supported")
+	} else if sticker.PremiumAnimation != nil {
+		// TODO: I dont know how to handle premium animation sticker
+		return ctx.Reply("premium animation sticker is not supported")
 	}
 
 	userID := msg.Sender.ID
@@ -143,7 +194,6 @@ func GetSticker(ctx tb.Context) error {
 		opt = opt.merge(o, true)
 	}
 
-	// nolint: nestif // will fix in future
 	if !opt.pack {
 		filename := sticker.SetName
 		emoji := sticker.Emoji
@@ -158,8 +208,7 @@ func GetSticker(ctx tb.Context) error {
 
 		return sendImageSticker(ctx, sticker, filename, emoji, opt)
 	}
-	// nolint: goerr113
-	return errors.New("not implement")
+	return sendStickerPack(ctx, sticker, opt)
 }
 
 func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt stickerOpts) error {
@@ -302,7 +351,7 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		return ctx.Reply(sendFile)
 	case "mp4":
 		ff := ffconv.FFConv{LogCmd: true}
-		r, errCh := ff.ConvertPipe2File(reader, "webm", filename+".mp4")
+		r, errCh := ff.ConvertPipe2File(reader, "webm", nil, filename+".mp4")
 		defer func() {
 			_ = r.Close()
 		}()
@@ -327,6 +376,282 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	default:
 		return ctx.Reply(fmt.Sprintf("not implement `%s` format for video sticker yet", f))
 	}
+}
+
+func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error {
+	stickerSet, err := ctx.Bot().StickerSet(sticker.SetName)
+	if err != nil {
+		err2 := ctx.Reply("failed to get sticker set")
+		return errors.Join(err, err2)
+	}
+
+	// TODO support other compression format
+	// pf := opt.pf
+	// if pf == "" {
+	// 	pf = "zip"
+	// }
+
+	tempDir, err := os.MkdirTemp("", "telebot")
+	if err != nil {
+		err2 := ctx.Reply("process failed")
+		return errors.Join(err, err2)
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	if len(stickerSet.Stickers) == 0 {
+		return ctx.Reply("sticker set is empty")
+	}
+
+	outputFiles := make([]string, 0, len(stickerSet.Stickers))
+
+	lastNotify := time.Now()
+	_ = ctx.Notify(tb.ChoosingSticker)
+
+	const MaxTask = 5
+	taskGroup := sync.WaitGroup{}
+	limitCh := make(chan struct{}, MaxTask)
+	errCh := make(chan error)
+
+	replyMsg := ""
+	replyMsgLock := sync.Mutex{}
+
+	for i := range stickerSet.Stickers {
+		s := &stickerSet.Stickers[i]
+
+		now := time.Now()
+		if now.Sub(lastNotify) > time.Second*3 {
+			_ = ctx.Notify(tb.ChoosingSticker)
+			lastNotify = now
+		}
+
+		emoji := s.Emoji
+		if emoji != "" {
+			emoji = "_" + emoji
+		}
+		filename := fmt.Sprintf("%s_%03d%s%s", stickerSet.Name, i+1, emoji, opt.FileExt(s.Video))
+		outputFiles = append(outputFiles, filename)
+
+		// limit concurrency
+		limitCh <- struct{}{}
+		taskGroup.Add(1)
+
+		if len(errCh) > 0 {
+			<-limitCh
+			taskGroup.Done()
+
+			break
+		}
+
+		go func() {
+			defer func() {
+				<-limitCh
+				taskGroup.Done()
+			}()
+
+			// TODO reduce complexity by move some code to function
+			// nolint: nestif,gocritic
+			if opt.NotConvert(s) {
+
+				of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				defer func() { _ = of.Close() }()
+
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				defer func() { _ = fileR.Close() }()
+
+				_, err = io.Copy(of, fileR)
+				if err != nil {
+					errCh <- err
+				}
+			} else if s.Video {
+				f := opt.VideoFormat()
+
+				ff := ffconv.FFConv{LogCmd: true}
+				var outputArgs []ffmpeg_go.KwArgs
+
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					// err2 := ctx.Reply("failed to get sticker file")
+					errCh <- err
+					return
+				}
+
+				input := ffconv.GetPipeInputStream("webm")
+				defer func() {
+					_ = fileR.Close()
+				}()
+				switch f {
+				case "gif":
+					input = ffconv.GetGifPaletteVfStream(input)
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "gif",
+						"f":    "gif",
+					})
+				case "mp4":
+					// nothing to do
+				}
+				r, errCh2 := ff.ConvertPipe2File(fileR, "", input, path.Join(tempDir, filename), outputArgs...)
+				defer func() {
+					_ = r.Close()
+				}()
+				select {
+				case othersErr := <-errCh:
+					// exit when other process failed
+					if othersErr != nil {
+						errCh <- othersErr
+					}
+				case err := <-errCh2:
+					if err != nil {
+						log.Error("failed to convert", zap.Error(err))
+						errCh <- err
+					}
+				case <-time.After(time.Second * 30):
+					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
+
+					replyMsgLock.Lock()
+					if replyMsg == "" {
+						replyMsg = "convert video sticker failed"
+					}
+					replyMsgLock.Unlock()
+
+					// TODO use static error
+					// nolint: err113
+					errCh <- errors.New("wait ffmpeg exec result timeout")
+				}
+			} else {
+				f := opt.StickerFormat()
+
+				fileR, err := ctx.Bot().File(&s.File)
+				if err != nil {
+					// err2 := ctx.Reply("failed to get sticker file")
+					errCh <- err
+				}
+
+				defer func() {
+					_ = fileR.Close()
+				}()
+
+				img, _, err1 := image.Decode(fileR)
+				if err1 != nil {
+					replyMsgLock.Lock()
+					if replyMsg == "" {
+						replyMsg = "failed to decode image"
+					}
+					replyMsgLock.Unlock()
+
+					errCh <- err1
+					return
+				}
+				const ErrConvertMsg = "failed to convert image format"
+
+				of, err1 := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_WRONLY, 0o640)
+				if err1 != nil {
+					errCh <- errors.Join(err1 /* ctx.Reply(ErrConvertMsg) */)
+					return
+				}
+				defer func() { _ = of.Close() }()
+
+				var err2 error
+				switch f {
+				case "jpg", "jpeg":
+					err2 = jpeg.Encode(of, img, &jpeg.Options{Quality: 100})
+				case "png":
+					err2 = png.Encode(of, img)
+				case "gif":
+					err2 = gif.Encode(of, img, &gif.Options{NumColors: 255})
+				default:
+					replyMsgLock.Lock()
+					if replyMsg == "" {
+						replyMsg = fmt.Sprintf("unknown target image format: %s", f)
+					}
+					replyMsgLock.Unlock()
+
+					// TODO use static error
+					// nolint: err113
+					errCh <- errors.New("unknown target image format")
+					return
+				}
+
+				if err2 != nil {
+					replyMsgLock.Lock()
+					if replyMsg == "" {
+						replyMsg = ErrConvertMsg
+					}
+					replyMsgLock.Unlock()
+
+					errCh <- err2
+				}
+			}
+		}()
+	}
+
+	taskGroup.Wait()
+
+	if len(errCh) > 0 {
+		errs := make([]error, 0, len(errCh))
+		for err := range errCh {
+			errs = append(errs, err)
+		}
+		if replyMsg == "" {
+			replyMsg = "process failed"
+		}
+		_ = ctx.Reply(replyMsg)
+		return errors.Join(errs...)
+	}
+
+	if len(outputFiles) == 0 {
+		return ctx.Reply("no files found, maybe something error")
+	}
+
+	_ = ctx.Notify(tb.UploadingDocument)
+
+	packFile, err := os.CreateTemp("", "*.zip")
+	if err != nil {
+		err2 := ctx.Reply("process failed")
+		return errors.Join(err, err2)
+	}
+	defer func() {
+		_ = os.Remove(packFile.Name())
+	}()
+	compress := zip.NewWriter(packFile)
+	for _, f := range outputFiles {
+		w, err1 := compress.Create(f)
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+
+		file, err1 := os.Open(path.Join(tempDir, f))
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+
+		_, err1 = io.Copy(w, file)
+		_ = file.Close()
+		if err1 != nil {
+			err2 := ctx.Reply("process failed")
+			return errors.Join(err1, err2)
+		}
+	}
+	_ = compress.Close()
+	_ = packFile.Close()
+
+	err = ctx.Reply(&tb.Document{
+		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
+		File:     tb.FromDisk(packFile.Name()),
+	})
+	return err
 }
 
 func parseOpts(text string) (map[string]string, error) {
@@ -402,10 +727,28 @@ func SetStickerConfig(ctx tb.Context) error {
 	clearConf := false
 	for _, arg := range cmd.Args() {
 		k, v := util.ParseKeyValueMapStr(arg)
-		if k == "~clear" {
+		switch k {
+		case "~clear":
 			clearConf = true
 			clear(m)
+		case "~show":
+			c, err := orm.GetIWantConfig(userID)
+			if err != nil {
+				_ = ctx.Reply("failed to get iwant config")
+				return err
+			}
+
+			cs, err := yaml.Marshal(c)
+			if err != nil {
+				_ = ctx.Reply("failed to marshal iwant config")
+				return err
+			}
+			return ctx.Reply(
+				fmt.Sprintf("iwant config: ```\n%s```",
+					util.EscapeTelegramReservedChars(string(cs))),
+				&tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 		}
+
 		ok, k, v := normalizeParams(k, v)
 		if ok {
 			m[k] = v
