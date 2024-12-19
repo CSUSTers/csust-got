@@ -413,7 +413,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 	lastNotify := time.Now()
 	_ = ctx.Notify(tb.ChoosingSticker)
 
-	const MaxTask = 2
+	const MaxTask = 5
 	// const FFmpegThreadsPerTask = 2
 	taskGroup := sync.WaitGroup{}
 	limitCh := make(chan struct{}, MaxTask)
@@ -442,12 +442,12 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 		limitCh <- struct{}{}
 		taskGroup.Add(1)
 
-		if cc.Err() != nil {
-			<-limitCh
-			taskGroup.Done()
+		// if cc.Err() != nil {
+		// 	<-limitCh
+		// 	taskGroup.Done()
 
-			break
-		}
+		// 	break
+		// }
 
 		now := time.Now()
 		if now.Sub(lastNotify) > time.Second*3 {
@@ -662,13 +662,21 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 			return errors.Join(err1, err2)
 		}
 	}
+	fileInfo, _ := packFile.Stat()
 	_ = compress.Close()
 	_ = packFile.Close()
 
+	cpFile := tb.FromDisk(packFile.Name())
 	err = ctx.Reply(&tb.Document{
 		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
-		File:     tb.FromDisk(packFile.Name()),
+		File:     cpFile,
 	})
+	if errors.Is(err, tb.ErrTooLarge) {
+		if fileInfo != nil {
+			return ctx.Reply(fmt.Sprintf("太...太大了...有%.2fMB辣么大", float64(fileInfo.Size())/1024/1024))
+		}
+		return ctx.Reply("太大了，反正就是大")
+	}
 	return err
 }
 

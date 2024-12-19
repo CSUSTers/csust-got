@@ -78,7 +78,7 @@ func main() {
 
 func initBot() (*Bot, error) {
 	errorHandler := func(err error, c Context) {
-		log.Error("bot has error", zap.Any("context", c), zap.Error(err))
+		log.Error("bot has error", zap.Any("update", c.Update()), zap.Error(err))
 	}
 
 	httpClient := http.DefaultClient

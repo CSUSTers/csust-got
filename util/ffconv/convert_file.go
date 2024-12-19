@@ -18,6 +18,9 @@ func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, inputFileTyp
 	outputFilename string, outputArgs ...ff.KwArgs) (io.ReadCloser, <-chan error) {
 	if input == nil {
 		input = GetPipeInputStream(inputFileType)
+		if ctx != nil {
+			input.Context = ctx
+		}
 	}
 
 	stderr := io.Discard
@@ -52,9 +55,6 @@ func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, inputFileTyp
 	}
 
 	go func() {
-		if ctx != nil {
-			runner.Context = ctx
-		}
 
 		if stderrCloser != nil {
 			defer func() {
