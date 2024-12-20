@@ -249,6 +249,7 @@ func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	}
 
 	bs := bytes.NewBuffer(nil)
+	f = strings.ToLower(f)
 	switch f {
 	case "jpg", "jpeg":
 		filename += ".jpg"
@@ -301,6 +302,7 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		}
 	}(reader)
 
+	f = strings.ToLower(f)
 	switch f {
 	case "", "webm":
 		sendFile := &tb.Document{
@@ -548,7 +550,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 						"f":    "webp",
 					})
 				}
-				ccc, cancel := context.WithTimeout(cc, time.Second*30)
+				ccc, cancel := context.WithTimeout(cc, time.Second*120)
 				defer cancel()
 				_, errCh2 := ff.ConvertPipe2File(ccc, fileR, "", input, path.Join(tempDir, filename), outputArgs...)
 				select {
