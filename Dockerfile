@@ -8,12 +8,14 @@ ARG BRANCH
 ARG TAG
 ARG RELEASE
 
+WORKDIR /go/src/app
+COPY . .
+RUN make deps
+
 ENV BRANCH=$BRANCH
 ENV TAG=$TAG
 ENV GOARCH=$TARGETARCH
 
-WORKDIR /go/src/app
-COPY . .
 RUN make deploy
 
 
