@@ -350,11 +350,26 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 			DisableTypeDetection: true,
 		}
 		return ctx.Reply(sendFile)
-	case "mp4":
+	case "mp4", "png", "apng", "webp":
 		ff := ffconv.FFConv{LogCmd: true}
+		outputArgs := []ffmpeg_go.KwArgs{}
+		if f == "png" || f == "apng" {
+			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+				"plays": "0",
+				"f":     "apng",
+				"c:v":   "apng",
+			})
+		} else if f == "webp" {
+			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+				"plays": "0",
+				"f":     "webp",
+				"c:v":   "libwebp",
+			})
+		}
+
 		cc, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		r, errCh := ff.ConvertPipe2File(cc, reader, "webm", nil, filename+".mp4")
+		r, errCh := ff.ConvertPipe2File(cc, reader, "webm", nil, filename+"."+f, outputArgs...)
 		defer func() {
 			_ = r.Close()
 		}()
@@ -372,7 +387,7 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		}
 		sendFile := &tb.Document{
 			File:                 tb.FromReader(r),
-			FileName:             filename + ".mp4",
+			FileName:             filename + "." + f,
 			Caption:              emoji,
 			DisableTypeDetection: true,
 		}
@@ -520,6 +535,18 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 					})
 				case "mp4":
 					// nothing to do
+				case "png", "apng":
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "apng",
+						"f":    "apng",
+					})
+				case "webp":
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "libwebp",
+						"f":    "webp",
+					})
 				}
 				ccc, cancel := context.WithTimeout(cc, time.Second*30)
 				defer cancel()
@@ -698,7 +725,7 @@ func parseOpts(text string) (map[string]string, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif", "webm"}, f) {
+			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "apng", "mp4", "gif", "webm"}, f) {
 				ret[k] = v
 			}
 		case "pack", "p":
@@ -709,7 +736,7 @@ func parseOpts(text string) (map[string]string, error) {
 			}
 		case "vf", "videoformat":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "mp4", "gif", "webm"}, f) {
+			if slices.Contains([]string{"", "mp4", "gif", "webm", "webp", "png", "apng"}, f) {
 				ret[k] = v
 			}
 		case "sf", "stickerformat":
