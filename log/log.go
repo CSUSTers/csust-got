@@ -3,6 +3,7 @@ package log
 import (
 	"csust-got/config"
 	"csust-got/prom"
+	"os"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -19,6 +20,10 @@ func InitLogger() {
 // NewLogger new logger.
 func NewLogger() *zap.Logger {
 	var logConfig zap.Config
+	// create log dir if not exists
+	if err := os.MkdirAll(config.BotConfig.LogFileDir, 0755); err != nil {
+		zap.L().Fatal("Create log dir failed", zap.Error(err))
+	}
 	if config.BotConfig.DebugMode {
 		logConfig = devConfig()
 	} else {
@@ -37,7 +42,7 @@ func devConfig() zap.Config {
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.DebugLevel),
 		Development: true,
-		Encoding:    "console",
+		Encoding:    "json",
 		EncoderConfig: zapcore.EncoderConfig{
 			TimeKey:        "ts",
 			LevelKey:       "level",
@@ -47,13 +52,13 @@ func devConfig() zap.Config {
 			MessageKey:     "msg",
 			StacktraceKey:  "stacktrace",
 			LineEnding:     zapcore.DefaultLineEnding,
-			EncodeLevel:    zapcore.CapitalColorLevelEncoder,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
 			EncodeTime:     zapcore.ISO8601TimeEncoder,
 			EncodeDuration: zapcore.StringDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      []string{"stderr"},
-		ErrorOutputPaths: []string{"stderr"},
+		OutputPaths:      []string{"stderr", config.BotConfig.LogFileDir + "/got.log"},
+		ErrorOutputPaths: []string{"stderr", config.BotConfig.LogFileDir + "/got_err.log"},
 	}
 }
 
@@ -75,13 +80,13 @@ func prodConfig() zap.Config {
 			MessageKey:     "msg",
 			StacktraceKey:  "stacktrace",
 			LineEnding:     zapcore.DefaultLineEnding,
-			EncodeLevel:    zapcore.LowercaseLevelEncoder,
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
 			EncodeTime:     zapcore.EpochTimeEncoder,
 			EncodeDuration: zapcore.SecondsDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      []string{"stderr"},
-		ErrorOutputPaths: []string{"stderr"},
+		OutputPaths:      []string{"stderr", config.BotConfig.LogFileDir + "/got.log"},
+		ErrorOutputPaths: []string{"stderr", config.BotConfig.LogFileDir + "/got_err.log"},
 	}
 }
 

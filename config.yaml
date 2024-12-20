@@ -7,6 +7,7 @@ token: ""
 proxy: "" # [http:// | socks5://] host:port
 listen: ":7777"
 skip_duration: 0 # skip expired message, duration in seconds, set to 0 to disable [int]
+log_file_dir: "logs"
 
 black_list:
   enabled: true

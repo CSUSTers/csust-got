@@ -69,6 +69,7 @@ type Config struct {
 	Listen       string
 	DebugMode    bool
 	SkipDuration int64
+	LogFileDir   string
 
 	RedisConfig         *redisConfig
 	RestrictConfig      *restrictConfig
@@ -116,6 +117,7 @@ func readConfig() {
 	BotConfig.Proxy = viper.GetString("proxy")
 	BotConfig.Listen = viper.GetString("listen")
 	BotConfig.SkipDuration = viper.GetInt64("skip_duration")
+	BotConfig.LogFileDir = viper.GetString("log_file_dir")
 
 	// other
 	BotConfig.RedisConfig.readConfig()
@@ -149,6 +151,10 @@ func checkConfig() {
 	if BotConfig.SkipDuration < 0 {
 		BotConfig.SkipDuration = 0
 	}
+	if BotConfig.LogFileDir == "" {
+		BotConfig.LogFileDir = "logs"
+	}
+	BotConfig.LogFileDir = strings.TrimRight(BotConfig.LogFileDir, "/")
 
 	BotConfig.RedisConfig.checkConfig()
 	BotConfig.RestrictConfig.checkConfig()
