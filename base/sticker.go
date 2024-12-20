@@ -438,12 +438,13 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 	replyMsg := ""
 	replyMsgLock := sync.Mutex{}
 
+loop:
 	for i := range stickerSet.Stickers {
 		s := &stickerSet.Stickers[i]
 
 		select {
 		case <-cc.Done():
-			break
+			break loop
 		default:
 		}
 
