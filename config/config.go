@@ -64,6 +64,7 @@ func NewBotConfig() *Config {
 type Config struct {
 	Bot *Bot
 
+	URL          string
 	Token        string
 	Proxy        string
 	Listen       string
@@ -113,6 +114,7 @@ func initViper(configFile, envPrefix string) {
 func readConfig() {
 	// base config
 	BotConfig.DebugMode = viper.GetBool("debug")
+	BotConfig.URL = viper.GetString("url")
 	BotConfig.Token = viper.GetString("token")
 	BotConfig.Proxy = viper.GetString("proxy")
 	BotConfig.Listen = viper.GetString("listen")

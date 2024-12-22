@@ -3,6 +3,7 @@ debug: false
 worker: 4               # number of goroutine to recv update [int]
 
 # bot config
+url: "" # optional, leave empty to use telegram official api
 token: ""
 proxy: "" # [http:// | socks5://] host:port
 listen: ":7777"

@@ -101,6 +101,10 @@ func initBot() (*Bot, error) {
 		Verbose:   false,
 	}
 
+	if config.BotConfig.URL != "" {
+		settings.URL = config.BotConfig.URL
+	}
+
 	bot, err := NewBot(settings)
 	if err != nil {
 		return nil, err
