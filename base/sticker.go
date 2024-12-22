@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -431,7 +432,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 	lastNotify := time.Now()
 	_ = ctx.Notify(tb.ChoosingSticker)
 
-	const MaxTask = 5
+	var MaxTask = runtime.NumCPU() + 2
 	taskGroup, cc := errgroup.WithContext(context.Background())
 	taskGroup.SetLimit(MaxTask)
 
