@@ -9,7 +9,6 @@ import (
 	"csust-got/util/gacha"
 	wordSeg "csust-got/word_seg"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -27,8 +26,6 @@ import (
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
-
-var errInvalidCmd = errors.New("invalid command")
 
 func main() {
 	config.InitConfig("config.yaml", "BOT")
