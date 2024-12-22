@@ -212,7 +212,9 @@ func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
 	if cmd == nil {
-		return errInvalidCmd
+		// all text message will be handled by this handler,
+		// but only command should be processed, so return nil for non-command message
+		return nil
 	}
 	cmdText := cmd.Name()
 
