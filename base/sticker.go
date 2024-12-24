@@ -4,8 +4,10 @@ package base
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -13,13 +15,14 @@ import (
 	"io"
 	"os"
 	"path"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	ffmpeg_go "github.com/u2takey/ffmpeg-go"
-	//nolint: revive
+	// nolint: revive
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
@@ -248,6 +251,7 @@ func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	}
 
 	bs := bytes.NewBuffer(nil)
+	f = strings.ToLower(f)
 	switch f {
 	case "jpg", "jpeg":
 		filename += ".jpg"
@@ -300,8 +304,9 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		}
 	}(reader)
 
+	f = strings.ToLower(f)
 	switch f {
-	case "webm":
+	case "", "webm":
 		sendFile := &tb.Document{
 			File:                 tb.FromReader(reader),
 			FileName:             filename + ".webm",
@@ -349,9 +354,26 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 			DisableTypeDetection: true,
 		}
 		return ctx.Reply(sendFile)
-	case "mp4":
+	case "mp4", "png", "apng", "webp":
 		ff := ffconv.FFConv{LogCmd: true}
-		r, errCh := ff.ConvertPipe2File(reader, "webm", nil, filename+".mp4")
+		outputArgs := []ffmpeg_go.KwArgs{}
+		if f == "png" || f == "apng" {
+			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+				"plays": "0",
+				"f":     "apng",
+				"c:v":   "apng",
+			})
+		} else if f == "webp" {
+			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+				"plays": "0",
+				"f":     "webp",
+				"c:v":   "libwebp",
+			})
+		}
+
+		cc, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r, errCh := ff.ConvertPipe2File(cc, reader, "webm", nil, filename+"."+f, outputArgs...)
 		defer func() {
 			_ = r.Close()
 		}()
@@ -363,12 +385,13 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 				return errors.Join(err, err1)
 			}
 		case <-time.After(time.Second * 30):
+			cancel()
 			log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
 			return ctx.Reply("convert to mp4 failed")
 		}
 		sendFile := &tb.Document{
 			File:                 tb.FromReader(r),
-			FileName:             filename + ".mp4",
+			FileName:             filename + "." + f,
 			Caption:              emoji,
 			DisableTypeDetection: true,
 		}
@@ -409,16 +432,22 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 	lastNotify := time.Now()
 	_ = ctx.Notify(tb.ChoosingSticker)
 
-	const MaxTask = 5
-	taskGroup := sync.WaitGroup{}
-	limitCh := make(chan struct{}, MaxTask)
-	errCh := make(chan error)
+	var MaxTask = runtime.NumCPU() + 2
+	taskGroup, cc := errgroup.WithContext(context.Background())
+	taskGroup.SetLimit(MaxTask)
 
 	replyMsg := ""
 	replyMsgLock := sync.Mutex{}
 
+loop:
 	for i := range stickerSet.Stickers {
 		s := &stickerSet.Stickers[i]
+
+		select {
+		case <-cc.Done():
+			break loop
+		default:
+		}
 
 		now := time.Now()
 		if now.Sub(lastNotify) > time.Second*3 {
@@ -433,22 +462,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 		filename := fmt.Sprintf("%s_%03d%s%s", stickerSet.Name, i+1, emoji, opt.FileExt(s.Video))
 		outputFiles = append(outputFiles, filename)
 
-		// limit concurrency
-		limitCh <- struct{}{}
-		taskGroup.Add(1)
-
-		if len(errCh) > 0 {
-			<-limitCh
-			taskGroup.Done()
-
-			break
-		}
-
-		go func() {
-			defer func() {
-				<-limitCh
-				taskGroup.Done()
-			}()
+		taskGroup.Go(func() error {
 
 			// TODO reduce complexity by move some code to function
 			// nolint: nestif,gocritic
@@ -456,21 +470,19 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 
 				of, err := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_RDWR, 0o640)
 				if err != nil {
-					errCh <- err
-					return
+					return err
 				}
 				defer func() { _ = of.Close() }()
 
 				fileR, err := ctx.Bot().File(&s.File)
 				if err != nil {
-					errCh <- err
-					return
+					return err
 				}
 				defer func() { _ = fileR.Close() }()
 
 				_, err = io.Copy(of, fileR)
 				if err != nil {
-					errCh <- err
+					return err
 				}
 			} else if s.Video {
 				f := opt.VideoFormat()
@@ -478,11 +490,13 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 				ff := ffconv.FFConv{LogCmd: true}
 				var outputArgs []ffmpeg_go.KwArgs
 
+				// limit ffmpeg threads
+				// outputArgs = append(outputArgs,
+				// 	ffmpeg_go.KwArgs{"threads": FFmpegThreadsPerTask})
+
 				fileR, err := ctx.Bot().File(&s.File)
 				if err != nil {
-					// err2 := ctx.Reply("failed to get sticker file")
-					errCh <- err
-					return
+					return err
 				}
 
 				input := ffconv.GetPipeInputStream("webm")
@@ -499,42 +513,47 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 					})
 				case "mp4":
 					// nothing to do
+				case "png", "apng":
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "apng",
+						"f":    "apng",
+					})
+				case "webp":
+					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
+						"loop": "0",
+						"c:v":  "libwebp",
+						"f":    "webp",
+					})
 				}
-				r, errCh2 := ff.ConvertPipe2File(fileR, "", input, path.Join(tempDir, filename), outputArgs...)
-				defer func() {
-					_ = r.Close()
-				}()
+				ccc, cancel := context.WithTimeout(cc, time.Second*120)
+				defer cancel()
+				_, errCh := ff.ConvertPipe2File(ccc, fileR, "", input, path.Join(tempDir, filename), outputArgs...)
 				select {
-				case othersErr := <-errCh:
-					// exit when other process failed
-					if othersErr != nil {
-						errCh <- othersErr
-					}
-				case err := <-errCh2:
+				case err := <-errCh:
 					if err != nil {
 						log.Error("failed to convert", zap.Error(err))
-						errCh <- err
 					}
-				case <-time.After(time.Second * 30):
-					log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
+					return err
+				case <-ccc.Done():
+					if errors.Is(ccc.Err(), context.DeadlineExceeded) {
+						log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
 
-					replyMsgLock.Lock()
-					if replyMsg == "" {
-						replyMsg = "convert video sticker failed"
+						replyMsgLock.Lock()
+						if replyMsg == "" {
+							replyMsg = "convert video sticker failed"
+						}
+						replyMsgLock.Unlock()
+
+						return ccc.Err()
 					}
-					replyMsgLock.Unlock()
-
-					// TODO use static error
-					// nolint: err113
-					errCh <- errors.New("wait ffmpeg exec result timeout")
 				}
 			} else {
 				f := opt.StickerFormat()
 
 				fileR, err := ctx.Bot().File(&s.File)
 				if err != nil {
-					// err2 := ctx.Reply("failed to get sticker file")
-					errCh <- err
+					return err
 				}
 
 				defer func() {
@@ -549,15 +568,12 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 					}
 					replyMsgLock.Unlock()
 
-					errCh <- err1
-					return
+					return err
 				}
-				const ErrConvertMsg = "failed to convert image format"
 
 				of, err1 := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_WRONLY, 0o640)
 				if err1 != nil {
-					errCh <- errors.Join(err1 /* ctx.Reply(ErrConvertMsg) */)
-					return
+					return err
 				}
 				defer func() { _ = of.Close() }()
 
@@ -578,35 +594,30 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 
 					// TODO use static error
 					// nolint: err113
-					errCh <- errors.New("unknown target image format")
-					return
+					return errors.New("unknown target image format")
 				}
 
 				if err2 != nil {
 					replyMsgLock.Lock()
 					if replyMsg == "" {
-						replyMsg = ErrConvertMsg
+						replyMsg = "failed to convert image format"
 					}
 					replyMsgLock.Unlock()
 
-					errCh <- err2
+					return err
 				}
 			}
-		}()
+
+			return nil
+		})
 	}
 
-	taskGroup.Wait()
-
-	if len(errCh) > 0 {
-		errs := make([]error, 0, len(errCh))
-		for err := range errCh {
-			errs = append(errs, err)
-		}
+	if err := taskGroup.Wait(); err != nil {
+		log.Error("failed to convert sticker", zap.Error(err))
 		if replyMsg == "" {
 			replyMsg = "process failed"
 		}
-		_ = ctx.Reply(replyMsg)
-		return errors.Join(errs...)
+		return ctx.Reply(replyMsg)
 	}
 
 	if len(outputFiles) == 0 {
@@ -644,13 +655,21 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error
 			return errors.Join(err1, err2)
 		}
 	}
+	fileInfo, _ := packFile.Stat()
 	_ = compress.Close()
 	_ = packFile.Close()
 
+	cpFile := tb.FromDisk(packFile.Name())
 	err = ctx.Reply(&tb.Document{
 		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
-		File:     tb.FromDisk(packFile.Name()),
+		File:     cpFile,
 	})
+	if errors.Is(err, tb.ErrTooLarge) {
+		if fileInfo != nil {
+			return ctx.Reply(fmt.Sprintf("太...太大了...有%.2fMB辣么大", float64(fileInfo.Size())/1024/1024))
+		}
+		return ctx.Reply("太大了，反正就是大")
+	}
 	return err
 }
 
@@ -672,7 +691,7 @@ func parseOpts(text string) (map[string]string, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "mp4", "gif", "webm"}, f) {
+			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "apng", "mp4", "gif", "webm"}, f) {
 				ret[k] = v
 			}
 		case "pack", "p":
@@ -683,7 +702,7 @@ func parseOpts(text string) (map[string]string, error) {
 			}
 		case "vf", "videoformat":
 			f := strings.ToLower(v)
-			if slices.Contains([]string{"", "mp4", "gif", "webm"}, f) {
+			if slices.Contains([]string{"", "mp4", "gif", "webm", "webp", "png", "apng"}, f) {
 				ret[k] = v
 			}
 		case "sf", "stickerformat":

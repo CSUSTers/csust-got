@@ -3,6 +3,8 @@ package chat
 import (
 	"csust-got/log"
 	"csust-got/util/gacha"
+	"errors"
+	"github.com/redis/go-redis/v9"
 	"strings"
 
 	"go.uber.org/zap"
@@ -26,7 +28,10 @@ func GachaReplyHandler(ctx telebot.Context) {
 
 	result, err := gacha.PerformGaCha(ctx.Chat().ID)
 	if err != nil {
-		log.Error("[GaCha]: perform gacha failed", zap.Error(err))
+		// gacha may not be enabled, redis.Nil is expected, ignore it
+		if !errors.Is(err, redis.Nil) {
+			log.Error("[GaCha]: perform gacha failed", zap.Error(err))
+		}
 		return
 	}
 

@@ -29,6 +29,14 @@ func Info(ctx Context) error {
 	msg += fmt.Sprintf("Build Time:  %s\n", buildTime)
 	msg += fmt.Sprintf("Last Boot:   %s\n", lastBoot)
 	msg += fmt.Sprintf("Go Version:  %s\n", runtime.Version())
+	if ctx.Bot().URL != DefaultApiURL {
+		msg += "API Server:  CUSTOM\n"
+	} else {
+		msg += "API Server:  OFFICIAL\n"
+	}
+	if config.BotConfig.DebugMode {
+		msg += "Debug Mode:  YES\n"
+	}
 	msg += "```"
 
 	return ctx.Send(msg, ModeMarkdownV2)

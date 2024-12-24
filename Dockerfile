@@ -8,12 +8,14 @@ ARG BRANCH
 ARG TAG
 ARG RELEASE
 
+WORKDIR /go/src/app
+COPY . .
+RUN make deps
+
 ENV BRANCH=$BRANCH
 ENV TAG=$TAG
 ENV GOARCH=$TARGETARCH
 
-WORKDIR /go/src/app
-COPY . .
 RUN make deploy
 
 
@@ -21,7 +23,7 @@ RUN make deploy
 FROM --platform=$BUILDPLATFORM alpine
 
 RUN apk add --no-cache tzdata
-COPY --from=hugefiver/ffmpeg:7.0.1-2 /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=hugefiver/ffmpeg:7.1 /ffmpeg /usr/local/bin/ffmpeg
 # COPY --from=hugefiver/ffmpeg:7.0.1 /ffprobe /usr/local/bin/ffprobe
 
 WORKDIR /app

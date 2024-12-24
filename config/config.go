@@ -64,11 +64,13 @@ func NewBotConfig() *Config {
 type Config struct {
 	Bot *Bot
 
+	URL          string
 	Token        string
 	Proxy        string
 	Listen       string
 	DebugMode    bool
 	SkipDuration int64
+	LogFileDir   string
 
 	RedisConfig         *redisConfig
 	RestrictConfig      *restrictConfig
@@ -112,10 +114,12 @@ func initViper(configFile, envPrefix string) {
 func readConfig() {
 	// base config
 	BotConfig.DebugMode = viper.GetBool("debug")
+	BotConfig.URL = viper.GetString("url")
 	BotConfig.Token = viper.GetString("token")
 	BotConfig.Proxy = viper.GetString("proxy")
 	BotConfig.Listen = viper.GetString("listen")
 	BotConfig.SkipDuration = viper.GetInt64("skip_duration")
+	BotConfig.LogFileDir = viper.GetString("log_file_dir")
 
 	// other
 	BotConfig.RedisConfig.readConfig()
@@ -149,6 +153,10 @@ func checkConfig() {
 	if BotConfig.SkipDuration < 0 {
 		BotConfig.SkipDuration = 0
 	}
+	if BotConfig.LogFileDir == "" {
+		BotConfig.LogFileDir = "logs"
+	}
+	BotConfig.LogFileDir = strings.TrimRight(BotConfig.LogFileDir, "/")
 
 	BotConfig.RedisConfig.checkConfig()
 	BotConfig.RestrictConfig.checkConfig()

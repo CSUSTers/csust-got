@@ -9,7 +9,6 @@ import (
 	"csust-got/util/gacha"
 	wordSeg "csust-got/word_seg"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -27,8 +26,6 @@ import (
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
-
-var errInvalidCmd = errors.New("invalid command")
 
 func main() {
 	config.InitConfig("config.yaml", "BOT")
@@ -78,7 +75,7 @@ func main() {
 
 func initBot() (*Bot, error) {
 	errorHandler := func(err error, c Context) {
-		log.Error("bot has error", zap.Any("context", c), zap.Error(err))
+		log.Error("bot has error", zap.Any("update", c.Update()), zap.Error(err))
 	}
 
 	httpClient := http.DefaultClient
@@ -99,6 +96,10 @@ func initBot() (*Bot, error) {
 		Poller:    &LongPoller{Timeout: 10 * time.Second},
 		Client:    httpClient,
 		Verbose:   false,
+	}
+
+	if config.BotConfig.URL != "" {
+		settings.URL = config.BotConfig.URL
 	}
 
 	bot, err := NewBot(settings)
@@ -208,7 +209,9 @@ func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
 	if cmd == nil {
-		return errInvalidCmd
+		// all text message will be handled by this handler,
+		// but only command should be processed, so return nil for non-command message
+		return nil
 	}
 	cmdText := cmd.Name()
 
