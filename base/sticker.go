@@ -39,7 +39,7 @@ import (
 )
 
 // var illegalFilenameChars = []string{"\\", "/", ":", "*", "?", "\"", "'", "<", ">", "|", "\t", "\n", "\r", "\u0000", "\ufffd"}
-var illegalFilenameCharsPatt = regexp.MustCompile(`[\\/:*?"'<>|\t\n\r\x00\xfffd]+`)
+var illegalFilenameCharsPatt = regexp.MustCompile(`[\\/:*?"'<>|\t\n\r\x00\x{fffd}]+`)
 
 func replaceIllegalFilenameChars(s string, replacer func(in string) string) string {
 	if illegalFilenameCharsPatt.FindStringIndex(s) == nil {
@@ -714,14 +714,15 @@ func parseOpts(text string) (map[string]string, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
+			// check available formats
 			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "apng", "mp4", "gif", "webm"}, f) {
 				ret[k] = v
 			}
 		case "pack", "p":
-			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
-				ret[k] = "true"
-			} else if strings.ToLower(v) == "false" {
+			if v == "false" {
 				ret[k] = "false"
+			} else {
+				ret[k] = "true"
 			}
 		case "vf", "videoformat":
 			f := strings.ToLower(v)
@@ -743,12 +744,22 @@ func normalizeParams(k, v string) (bool, string, string) {
 	switch k {
 	case "format", "f":
 		k = "format"
+	case "!pack", "!p", "nopack", "pack!", "p!":
+		v = "false"
+		fallthrough
 	case "pack", "p":
 		k = "pack"
+		if strings.ToLower(v) == "false" {
+			v = "false"
+		} else {
+			v = "true"
+		}
 	case "vf", "videoformat":
 		k = "videoformat"
 	case "sf", "stickerformat":
 		k = "stickerformat"
+	case "pf", "packformat":
+		k = "packformat"
 	default:
 		return false, k, v
 	}
