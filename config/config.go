@@ -153,9 +153,7 @@ func checkConfig() {
 	if BotConfig.SkipDuration < 0 {
 		BotConfig.SkipDuration = 0
 	}
-	if BotConfig.LogFileDir == "" {
-		BotConfig.LogFileDir = "logs"
-	}
+
 	BotConfig.LogFileDir = strings.TrimRight(BotConfig.LogFileDir, "/")
 
 	BotConfig.RedisConfig.checkConfig()
