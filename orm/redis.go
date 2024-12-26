@@ -869,3 +869,52 @@ func ClearIWantConfig(userID int64) error {
 	}
 	return nil
 }
+
+// FileCache file cache in redis.
+type FileCache struct {
+	FileId   string `redis:"file_id"`
+	Filename string `redis:"filename"`
+}
+
+// SetFileCache set file cache to redis.
+func SetFileCache(keys []string, file *FileCache, expire time.Duration) error {
+	keys = append([]string{"file_cache"}, keys...)
+	key := wrapKey(strings.Join(keys, ":"))
+
+	err := rc.HSet(context.TODO(), key, file, expire).Err()
+	if err != nil {
+		log.Error("set file cache to redis failed", zap.String("key", key), zap.Any("file", file), zap.Error(err))
+		return err
+	}
+	err = rc.Expire(context.TODO(), key, expire).Err()
+	if err != nil {
+		log.Error("set file cache expire to redis failed", zap.String("key", key), zap.Error(err))
+	}
+	return nil
+}
+
+// GetFileCache get file cache from redis.
+func GetFileCache(keys []string, expire ...time.Duration) (*FileCache, error) {
+	keys = append([]string{"file_cache"}, keys...)
+	key := wrapKey(strings.Join(keys, ":"))
+
+	file := new(FileCache)
+	ret := rc.HGetAll(context.TODO(), key)
+	if err := ret.Err(); err != nil && errors.Is(err, redis.Nil) {
+		log.Debug("file cache not found in redis", zap.String("key", key), zap.Error(err))
+		return nil, nil
+	}
+	err := ret.Scan(file)
+	if err != nil {
+		log.Error("get file cache from redis failed", zap.String("key", key), zap.Error(err))
+		return nil, err
+	}
+
+	if len(expire) > 0 {
+		err = rc.Expire(context.TODO(), key, expire[0]).Err()
+		if err != nil {
+			log.Error("set file cache expire to redis failed", zap.String("key", key), zap.Error(err))
+		}
+	}
+	return file, nil
+}
