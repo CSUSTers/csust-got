@@ -43,9 +43,12 @@ var illegalFilenameCharsPatt = regexp.MustCompile(`[\\/:*?"'<>|\t\n\r\x00\xfffd]
 
 func replaceIllegalFilenameChars(s string, replacer func(in string) string) string {
 	if illegalFilenameCharsPatt.FindStringIndex(s) == nil {
+		log.Debug("no illegal filename chars found in string", zap.String("s", s))
 		return s
 	}
-	return illegalFilenameCharsPatt.ReplaceAllStringFunc(s, replacer)
+	r := illegalFilenameCharsPatt.ReplaceAllStringFunc(s, replacer)
+	log.Debug("replace illegal filename chars", zap.String("s", s), zap.String("ret", r))
+	return r
 }
 
 func replaceIllegalFilenameCharsWithString(s string, r string) string {
