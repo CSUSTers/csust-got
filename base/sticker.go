@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -15,11 +14,14 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 	// nolint: revive
@@ -35,6 +37,22 @@ import (
 	"csust-got/util"
 	"csust-got/util/ffconv"
 )
+
+// var illegalFilenameChars = []string{"\\", "/", ":", "*", "?", "\"", "'", "<", ">", "|", "\t", "\n", "\r", "\u0000", "\ufffd"}
+var illegalFilenameCharsPatt = regexp.MustCompile(`[\\/:*?"'<>|\t\n\r\x00\xfffd]+`)
+
+func replaceIllegalFilenameChars(s string, replacer func(in string) string) string {
+	if illegalFilenameCharsPatt.FindStringIndex(s) == nil {
+		return s
+	}
+	return illegalFilenameCharsPatt.ReplaceAllStringFunc(s, replacer)
+}
+
+func replaceIllegalFilenameCharsWithString(s string, r string) string {
+	return replaceIllegalFilenameChars(s, func(in string) string {
+		return r
+	})
+}
 
 type stickerOpts struct {
 	format string
@@ -198,7 +216,7 @@ func GetSticker(ctx tb.Context) error {
 	}
 
 	if !opt.pack {
-		filename := sticker.SetName
+		filename := replaceIllegalFilenameCharsWithString(sticker.SetName, "_")
 		emoji := sticker.Emoji
 		if sticker.CustomEmoji != "" {
 			emoji += " " + sticker.CustomEmoji
@@ -660,8 +678,10 @@ loop:
 	_ = packFile.Close()
 
 	cpFile := tb.FromDisk(packFile.Name())
+	setName := replaceIllegalFilenameCharsWithString(stickerSet.Name, "_")
+	setTitle := replaceIllegalFilenameCharsWithString(stickerSet.Title, "_")
 	err = ctx.Reply(&tb.Document{
-		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
+		FileName: fmt.Sprintf("%s-%s%s", setName, setTitle, ".zip"),
 		File:     cpFile,
 	})
 	if errors.Is(err, tb.ErrTooLarge) {
