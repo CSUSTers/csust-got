@@ -28,7 +28,7 @@ jobs:
           image: csusters/csust-got
           tags: |
             latest
-            latest-${{ github.ref_name }}
+            ${{ github.ref_name }}
           containerfiles: |
             ./Dockerfile
           build-args: |
