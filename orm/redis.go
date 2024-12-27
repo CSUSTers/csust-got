@@ -881,7 +881,7 @@ func SetFileCache(keys []string, file *FileCache, expire time.Duration) error {
 	keys = append([]string{"file_cache"}, keys...)
 	key := wrapKey(strings.Join(keys, ":"))
 
-	err := rc.HSet(context.TODO(), key, file, expire).Err()
+	err := rc.HSet(context.TODO(), key, file).Err()
 	if err != nil {
 		log.Error("set file cache to redis failed", zap.String("key", key), zap.Any("file", file), zap.Error(err))
 		return err
