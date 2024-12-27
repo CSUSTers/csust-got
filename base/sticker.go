@@ -447,7 +447,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt *stickerOpts) erro
 	}
 
 	if !opt.nocache {
-		keys, err := getFileCacheKeys(stickerSet.Name, opt)
+		keys, err := getFileCacheKeys(stickerSet, opt)
 		if err != nil {
 			log.Error("failed to get file cache keys", zap.Error(err))
 			goto process
@@ -747,7 +747,7 @@ loop:
 			Filename: doc.FileName,
 		}
 
-		keys, err := getFileCacheKeys(setName, opt)
+		keys, err := getFileCacheKeys(stickerSet, opt)
 		if err != nil {
 			log.Error("failed to get file cache keys", zap.Error(err))
 			return err
@@ -764,7 +764,18 @@ loop:
 	return err
 }
 
-func getFileCacheKeys(setName string, opt *stickerOpts) ([]string, error) {
+func getFileCacheKeys(set *tb.StickerSet, opt *stickerOpts) ([]string, error) {
+	setName := set.Name
+
+	o := *opt
+	if set.Video {
+		o.Format = o.VideoFormat()
+	} else {
+		o.Format = o.StickerFormat()
+	}
+	o.Sf = ""
+	o.Vf = ""
+
 	keys := make([]string, 0, 2)
 
 	// key 1: sticker id
@@ -772,11 +783,12 @@ func getFileCacheKeys(setName string, opt *stickerOpts) ([]string, error) {
 
 	// key 2: hash of opt json string
 	hash := xxhash.New()
-	optStr, err := json.MarshalIndent(opt, "", "")
+	optStr, err := json.MarshalIndent(o, "", "")
 	if err != nil {
 		log.Error("failed to marshal opt", zap.Error(err))
 		return nil, err
 	}
+	log.Debug("opt json", zap.ByteString("opt", optStr))
 	_, err = hash.Write(optStr)
 	if err != nil {
 		log.Error("failed to write to hasher", zap.Error(err))
