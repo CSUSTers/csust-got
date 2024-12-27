@@ -112,11 +112,14 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 		switch k {
 		case "format", "f":
 			o.Format = v
+		case "!pack", "!p", "nopack", "pack!", "p!":
+			v = "false"
+			fallthrough
 		case "pack", "p":
-			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
-				o.Pack = true
-			} else if strings.ToLower(v) == "false" {
+			if v == "false" {
 				o.Pack = false
+			} else {
+				o.Pack = true
 			}
 		case "vf", "videoformat":
 			o.Vf = v
