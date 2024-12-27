@@ -5,6 +5,7 @@ import (
 	"csust-got/prom"
 	"os"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -21,8 +22,10 @@ func InitLogger() {
 func NewLogger() *zap.Logger {
 	var logConfig zap.Config
 	// create log dir if not exists
-	if err := os.MkdirAll(config.BotConfig.LogFileDir, 0755); err != nil {
-		zap.L().Fatal("Create log dir failed", zap.Error(err))
+	if config.BotConfig.LogFileDir != "" {
+		if err := os.MkdirAll(config.BotConfig.LogFileDir, 0755); err != nil {
+			zap.L().Fatal("Create log dir failed", zap.Error(err))
+		}
 	}
 	if config.BotConfig.DebugMode {
 		logConfig = devConfig()
@@ -39,6 +42,9 @@ func NewLogger() *zap.Logger {
 }
 
 func devConfig() zap.Config {
+	logPath := lo.FilterMap([]string{config.BotConfig.LogFileDir}, func(p string, _ int) (string, bool) {
+		return p, p != ""
+	})
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.DebugLevel),
 		Development: true,
@@ -57,12 +63,15 @@ func devConfig() zap.Config {
 			EncodeDuration: zapcore.StringDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      []string{"stderr", config.BotConfig.LogFileDir + "/got.log"},
-		ErrorOutputPaths: []string{"stderr", config.BotConfig.LogFileDir + "/got_err.log"},
+		OutputPaths:      append(lo.Map(logPath, func(p string, _ int) string { return p + "/got.log" }), "stderr"),
+		ErrorOutputPaths: append(lo.Map(logPath, func(p string, _ int) string { return p + "/got_err.log" }), "stderr"),
 	}
 }
 
 func prodConfig() zap.Config {
+	logPath := lo.FilterMap([]string{config.BotConfig.LogFileDir}, func(p string, _ int) (string, bool) {
+		return p, p != ""
+	})
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
 		Development: false,
@@ -85,8 +94,8 @@ func prodConfig() zap.Config {
 			EncodeDuration: zapcore.SecondsDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      []string{"stderr", config.BotConfig.LogFileDir + "/got.log"},
-		ErrorOutputPaths: []string{"stderr", config.BotConfig.LogFileDir + "/got_err.log"},
+		OutputPaths:      append(lo.Map(logPath, func(p string, _ int) string { return p + "/got.log" }), "stderr"),
+		ErrorOutputPaths: append(lo.Map(logPath, func(p string, _ int) string { return p + "/got_err.log" }), "stderr"),
 	}
 }
 

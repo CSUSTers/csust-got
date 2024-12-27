@@ -495,6 +495,7 @@ linters-settings:
           - github.com/gabriel-vasile/mimetype
           - github.com/u2takey/ffmpeg-go
           - github.com/samber/lo
+          - github.com/cespare/xxhash/v2
         # Packages that are not allowed where the value is a suggestion.
         deny:
           # - pkg: "github.com/sirupsen/logrus"

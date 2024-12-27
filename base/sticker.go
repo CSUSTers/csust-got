@@ -5,9 +5,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/errgroup"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -15,13 +15,18 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/cespare/xxhash/v2"
 	ffmpeg_go "github.com/u2takey/ffmpeg-go"
+
 	// nolint: revive
 	_ "golang.org/x/image/webp"
 
@@ -36,20 +41,41 @@ import (
 	"csust-got/util/ffconv"
 )
 
+// var illegalFilenameChars = []string{"\\", "/", ":", "*", "?", "\"", "'", "<", ">", "|", "\t", "\n", "\r", "\u0000", "\ufffd"}
+var illegalFilenameCharsPatt = regexp.MustCompile(`[\\/:*?"'<>|\t\n\r\x00\x{fffd}]+`)
+
+func replaceIllegalFilenameChars(s string, replacer func(in string) string) string {
+	if illegalFilenameCharsPatt.FindStringIndex(s) == nil {
+		log.Debug("no illegal filename chars found in string", zap.String("s", s))
+		return s
+	}
+	r := illegalFilenameCharsPatt.ReplaceAllStringFunc(s, replacer)
+	log.Debug("replace illegal filename chars", zap.String("s", s), zap.String("ret", r))
+	return r
+}
+
+func replaceIllegalFilenameCharsWithString(s string, r string) string {
+	return replaceIllegalFilenameChars(s, func(in string) string {
+		return r
+	})
+}
+
 type stickerOpts struct {
-	format string
-	pack   bool
-	vf     string
-	sf     string
+	Format string `json:"format"`
+	Pack   bool   `json:"pack"`
+	Vf     string `json:"videoformat"`
+	Sf     string `json:"stickerformat"`
 
 	// pack format
 	pf string
+
+	nocache bool
 }
 
 func defaultOpts() stickerOpts {
 	return stickerOpts{
-		format: "",
-		pack:   false,
+		Format: "",
+		Pack:   false,
 	}
 }
 
@@ -59,6 +85,7 @@ func defaultOptsWithConfig(m map[string]string) stickerOpts {
 	return o
 }
 
+// nolint: gocritic
 func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 	if final {
 		sets := make(map[string]struct{}, len(m))
@@ -71,11 +98,11 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 
 		if _, ok := sets["format"]; ok {
 			if _, ok = sets["videoformat"]; !ok {
-				o.vf = ""
+				o.Vf = ""
 			}
 
 			if _, ok = sets["stickerformat"]; !ok {
-				o.sf = ""
+				o.Sf = ""
 			}
 		}
 	}
@@ -84,39 +111,52 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 		k = strings.ToLower(k)
 		switch k {
 		case "format", "f":
-			o.format = v
+			o.Format = v
+		case "!pack", "!p", "nopack", "pack!", "p!":
+			v = "false"
+			fallthrough
 		case "pack", "p":
-			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
-				o.pack = true
-			} else if strings.ToLower(v) == "false" {
-				o.pack = false
+			if v == "false" {
+				o.Pack = false
+			} else {
+				o.Pack = true
 			}
 		case "vf", "videoformat":
-			o.vf = v
+			o.Vf = v
 		case "sf", "stickerformat":
-			o.sf = v
+			o.Sf = v
 		case "pf", "packformat":
 			o.pf = v
+		case "nocache":
+			if strings.ToLower(v) == "false" {
+				o.nocache = false
+			} else if final {
+				// only final can do
+				o.nocache = true
+			}
 		}
 	}
 
 	return o
 }
 
+// nolint: gocritic
 func (o stickerOpts) VideoFormat() string {
-	if o.vf != "" {
-		return o.vf
+	if o.Vf != "" {
+		return o.Vf
 	}
-	return o.format
+	return o.Format
 }
 
+// nolint: gocritic
 func (o stickerOpts) StickerFormat() string {
-	if o.sf != "" {
-		return o.sf
+	if o.Sf != "" {
+		return o.Sf
 	}
-	return o.format
+	return o.Format
 }
 
+// nolint: gocritic
 func (o stickerOpts) FileExt(video bool) string {
 	if video {
 		f := o.VideoFormat()
@@ -135,6 +175,7 @@ func (o stickerOpts) FileExt(video bool) string {
 	return "." + f
 }
 
+// nolint: gocritic
 func (o stickerOpts) NotConvert(s *tb.Sticker) bool {
 	if s.Video {
 		switch o.VideoFormat() {
@@ -197,8 +238,8 @@ func GetSticker(ctx tb.Context) error {
 		opt = opt.merge(o, true)
 	}
 
-	if !opt.pack {
-		filename := sticker.SetName
+	if !opt.Pack {
+		filename := replaceIllegalFilenameCharsWithString(sticker.SetName, "_")
 		emoji := sticker.Emoji
 		if sticker.CustomEmoji != "" {
 			emoji += " " + sticker.CustomEmoji
@@ -206,15 +247,15 @@ func GetSticker(ctx tb.Context) error {
 
 		// send video is sticker is video
 		if sticker.Video {
-			return sendVideoSticker(ctx, sticker, filename, emoji, opt)
+			return sendVideoSticker(ctx, sticker, filename, emoji, &opt)
 		}
 
-		return sendImageSticker(ctx, sticker, filename, emoji, opt)
+		return sendImageSticker(ctx, sticker, filename, emoji, &opt)
 	}
-	return sendStickerPack(ctx, sticker, opt)
+	return sendStickerPack(ctx, sticker, &opt)
 }
 
-func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt stickerOpts) error {
+func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt *stickerOpts) error {
 	f := opt.StickerFormat()
 
 	reader, err := ctx.Bot().File(&sticker.File)
@@ -288,7 +329,7 @@ func sendImageSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	return ctx.Reply(sendFile)
 }
 
-func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt stickerOpts) error {
+func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoji string, opt *stickerOpts) error {
 	f := opt.VideoFormat()
 
 	reader, err := ctx.Bot().File(&sticker.File)
@@ -401,12 +442,43 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	}
 }
 
-func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt stickerOpts) error {
+func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt *stickerOpts) error {
 	stickerSet, err := ctx.Bot().StickerSet(sticker.SetName)
 	if err != nil {
 		err2 := ctx.Reply("failed to get sticker set")
 		return errors.Join(err, err2)
 	}
+
+	if !opt.nocache {
+		keys, err := getFileCacheKeys(stickerSet, opt)
+		if err != nil {
+			log.Error("failed to get file cache keys", zap.Error(err))
+			goto process
+		}
+
+		fileCache, err := orm.GetFileCache(keys, time.Hour*24*7)
+		if err == nil && fileCache != nil && fileCache.FileId != "" {
+			// file, err := ctx.Bot().FileByID(fileCache.FileId)
+			// if err != nil {
+			// 	log.Error("failed to get file by id", zap.Error(err))
+			// 	goto process
+			// }
+			file := tb.File{FileID: fileCache.FileId}
+			err = ctx.Reply(&tb.Document{
+				FileName: fileCache.Filename,
+				File:     file,
+			})
+			if err != nil {
+				log.Error("failed to send cloud file", zap.Error(err))
+				goto process
+			}
+
+			return nil
+		}
+		log.Info("failed to get file cache, continue process", zap.Error(err))
+	}
+
+process:
 
 	// TODO support other compression format
 	// pf := opt.pf
@@ -660,17 +732,73 @@ loop:
 	_ = packFile.Close()
 
 	cpFile := tb.FromDisk(packFile.Name())
-	err = ctx.Reply(&tb.Document{
-		FileName: fmt.Sprintf("%s-%s%s", stickerSet.Name, stickerSet.Title, ".zip"),
+	setName := replaceIllegalFilenameCharsWithString(stickerSet.Name, "_")
+	setTitle := replaceIllegalFilenameCharsWithString(stickerSet.Title, "_")
+	respMsg, err := ctx.Bot().Send(ctx.Recipient(), &tb.Document{
+		FileName: fmt.Sprintf("%s-%s%s", setName, setTitle, ".zip"),
 		File:     cpFile,
-	})
+	}, &tb.SendOptions{ReplyTo: ctx.Message(), AllowWithoutReply: true})
 	if errors.Is(err, tb.ErrTooLarge) {
 		if fileInfo != nil {
 			return ctx.Reply(fmt.Sprintf("太...太大了...有%.2fMB辣么大", float64(fileInfo.Size())/1024/1024))
 		}
 		return ctx.Reply("太大了，反正就是大")
 	}
+	if doc := respMsg.Document; doc != nil {
+		fileCache := &orm.FileCache{
+			FileId:   doc.FileID,
+			Filename: doc.FileName,
+		}
+
+		keys, err := getFileCacheKeys(stickerSet, opt)
+		if err != nil {
+			log.Error("failed to get file cache keys", zap.Error(err))
+			return err
+		}
+
+		err = orm.SetFileCache(keys, fileCache, time.Hour*24*7)
+		if err != nil {
+			log.Error("failed to set file cache", zap.Error(err))
+			return err
+		}
+	} else {
+		log.Info("cannot get file of sent document", zap.Any("respMsg", respMsg))
+	}
 	return err
+}
+
+func getFileCacheKeys(set *tb.StickerSet, opt *stickerOpts) ([]string, error) {
+	setName := set.Name
+
+	o := *opt
+	if set.Video {
+		o.Format = o.VideoFormat()
+	} else {
+		o.Format = o.StickerFormat()
+	}
+	o.Sf = ""
+	o.Vf = ""
+
+	keys := make([]string, 0, 2)
+
+	// key 1: sticker id
+	keys = append(keys, setName)
+
+	// key 2: hash of opt json string
+	hash := xxhash.New()
+	optStr, err := json.MarshalIndent(o, "", "")
+	if err != nil {
+		log.Error("failed to marshal opt", zap.Error(err))
+		return nil, err
+	}
+	log.Debug("opt json", zap.ByteString("opt", optStr))
+	_, err = hash.Write(optStr)
+	if err != nil {
+		log.Error("failed to write to hasher", zap.Error(err))
+		return nil, err
+	}
+	keys = append(keys, fmt.Sprintf("%x", hash.Sum64()))
+	return keys, nil
 }
 
 func parseOpts(text string) (map[string]string, error) {
@@ -691,14 +819,15 @@ func parseOpts(text string) (map[string]string, error) {
 		switch strings.ToLower(k) {
 		case "format", "f":
 			f := strings.ToLower(v)
+			// check available formats
 			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "apng", "mp4", "gif", "webm"}, f) {
 				ret[k] = v
 			}
 		case "pack", "p":
-			if slices.Contains([]string{"", "true", "1"}, strings.ToLower(v)) {
-				ret[k] = "true"
-			} else if strings.ToLower(v) == "false" {
+			if v == "false" {
 				ret[k] = "false"
+			} else {
+				ret[k] = "true"
 			}
 		case "vf", "videoformat":
 			f := strings.ToLower(v)
@@ -720,12 +849,29 @@ func normalizeParams(k, v string) (bool, string, string) {
 	switch k {
 	case "format", "f":
 		k = "format"
+	case "!pack", "!p", "nopack", "pack!", "p!":
+		v = "false"
+		fallthrough
 	case "pack", "p":
 		k = "pack"
+		if strings.ToLower(v) == "false" {
+			v = "false"
+		} else {
+			v = "true"
+		}
 	case "vf", "videoformat":
 		k = "videoformat"
 	case "sf", "stickerformat":
 		k = "stickerformat"
+	case "pf", "packformat":
+		k = "packformat"
+	case "nocache":
+		k = "nocache"
+		if strings.ToLower(v) == "false" {
+			v = "false"
+		} else {
+			v = "true"
+		}
 	default:
 		return false, k, v
 	}
