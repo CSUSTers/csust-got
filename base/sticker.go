@@ -455,18 +455,19 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt *stickerOpts) erro
 
 		fileCache, err := orm.GetFileCache(keys, time.Hour*24*7)
 		if err == nil && fileCache != nil && fileCache.FileId != "" {
-			file, err := ctx.Bot().FileByID(fileCache.FileId)
-			if err != nil {
-				log.Error("failed to get file by id", zap.Error(err))
-				goto process
-			}
+			// file, err := ctx.Bot().FileByID(fileCache.FileId)
+			// if err != nil {
+			// 	log.Error("failed to get file by id", zap.Error(err))
+			// 	goto process
+			// }
+			file := tb.File{FileID: fileCache.FileId}
 			err = ctx.Reply(&tb.Document{
 				FileName: fileCache.Filename,
 				File:     file,
 			})
 			if err != nil {
-				log.Error("failed to send file", zap.Error(err))
-				return ctx.Reply("failed to send file")
+				log.Error("failed to send cloud file", zap.Error(err))
+				goto process
 			}
 
 			return nil
