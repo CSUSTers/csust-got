@@ -823,7 +823,11 @@ func parseOpts(text string) (map[string]string, error) {
 			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "apng", "mp4", "gif", "webm"}, f) {
 				ret[k] = v
 			}
+		case "!pack", "!p", "nopack", "pack!", "p!":
+			v = "false"
+			fallthrough
 		case "pack", "p":
+			k = "pack"
 			if v == "false" {
 				ret[k] = "false"
 			} else {
@@ -839,6 +843,9 @@ func parseOpts(text string) (map[string]string, error) {
 			if slices.Contains([]string{"", "webp", "jpg", "jpeg", "png", "gif"}, f) {
 				ret[k] = v
 			}
+		// other available params without check
+		case "nocache":
+			ret[k] = v
 		}
 	}
 	return ret, nil
