@@ -475,7 +475,7 @@ func sendStickerPack(ctx tb.Context, sticker *tb.Sticker, opt *stickerOpts) erro
 
 			return nil
 		}
-		log.Error("failed to get file cache, continue process", zap.Error(err))
+		log.Info("failed to get file cache, continue process", zap.Error(err))
 	}
 
 process:
