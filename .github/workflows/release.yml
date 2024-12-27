@@ -25,7 +25,7 @@ jobs:
         id: build-image
         uses: redhat-actions/buildah-build@v2
         with:
-          image: csusters/csust-got-hoo
+          image: csusters/csust-got
           tags: |
             latest
             latest-${{ github.ref_name }}
