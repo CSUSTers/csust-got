@@ -173,11 +173,13 @@ func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.Extra
 				e.Path = "/" + paths[1]
 				e.Domain = "b23.tv"
 			}
+		} else {
+			err = c.clearBiliUrlQuery(e)
+			if err != nil {
+				return "", err
+			}
 		}
-		err = c.clearBiliUrlQuery(e)
-		if err != nil {
-			return "", err
-		}
+
 		return e.StringByFields(), nil
 	}
 
