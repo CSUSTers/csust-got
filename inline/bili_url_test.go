@@ -17,18 +17,18 @@ func Test_writeBiliUrl(t *testing.T) {
 	}{
 		{
 			name: "`b23.tv` shorten URL",
-			url:  "https://b23.tv/d0Hd0Ub",
-			want: "https://b23.tv/BV1DC4y1K7pt",
+			url:  "https://b23.tv/F6HmLCU",
+			want: "https://b23.tv/BV1hD4y1X7Rm",
 		},
 		{
 			name: "`b23.tv` shorten URL with http",
-			url:  "http://b23.tv/d0Hd0Ub",
-			want: "https://b23.tv/BV1DC4y1K7pt",
+			url:  "http://b23.tv/F6HmLCU",
+			want: "https://b23.tv/BV1hD4y1X7Rm",
 		},
 		{
 			name: "`b23.tv` shorten URL without http/https",
-			url:  "b23.tv/d0Hd0Ub",
-			want: "https://b23.tv/BV1DC4y1K7pt",
+			url:  "b23.tv/F6HmLCU",
+			want: "https://b23.tv/BV1hD4y1X7Rm",
 		},
 	}
 
