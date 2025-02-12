@@ -21,6 +21,9 @@ func Test_encode(t *testing.T) {
 		{"h0o0o0OFAKER", "h0oFAKEROo"},
 		{"FAKERo0oO0", "h0oFAKEROo"},
 		{"h0o0o0OFAKERo0oO0", "h0oFAKEROo"},
+
+		// case from Hoo self
+		{"h0oaOo", "h0oaOo"},
 	}
 	replacer := strings.NewReplacer(lo.FlatMap[string, string]([]string{"0", "o", "O"}, func(item string, _ int) []string { return []string{item, "o"} })...)
 	for _, tt := range tests {

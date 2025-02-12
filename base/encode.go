@@ -40,7 +40,7 @@ func hooEncode(s string) string {
 
 	bs := bytes.NewBufferString("h")
 
-	if i1 >= i2-1 {
+	if i1 >= i2 {
 		for range 4 {
 			bs.WriteRune(hooRunes[rand.N(len(hooRunes))])
 		}
