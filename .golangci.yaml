@@ -498,7 +498,7 @@ linters-settings:
           - github.com/samber/lo
           - github.com/cespare/xxhash/v2
         # Packages that are not allowed where the value is a suggestion.
-        deny:
+        # deny:
           # - pkg: "github.com/sirupsen/logrus"
           #   desc: not allowed
           # - pkg: "github.com/pkg/errors"
