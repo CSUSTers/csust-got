@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/common v0.62.0
 	github.com/quic-go/quic-go v0.50.0
 	github.com/redis/go-redis/v9 v9.7.1
-	github.com/sashabaranov/go-openai v1.37.0
+	github.com/sashabaranov/go-openai v1.38.0
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
 	github.com/u2takey/ffmpeg-go v0.5.0
