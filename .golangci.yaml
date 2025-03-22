@@ -477,38 +477,13 @@ linters-settings:
         # List of file globs that will match this list of settings to compare against.
         # Default: $all
         files:
-          - "!$test"
-        # List of allowed packages.
-        allow:
-          - $gostd
-          - csust-got
-          - github.com/spf13/viper
-          - github.com/quic-go/quic-go
-          - github.com/huichen/sego
-          - github.com/iyear/biligo
-          - mvdan.cc/xurls
-          - github.com/meilisearch/meilisearch-go
-          - github.com/sashabaranov/go-openai
-          - github.com/redis/go-redis
-          - github.com/google/go-github
-          - github.com/prometheus/common
-          - github.com/prometheus/client_golang
-          - github.com/gabriel-vasile/mimetype
-          - github.com/u2takey/ffmpeg-go
-          - github.com/samber/lo
-          - github.com/cespare/xxhash/v2
+          - "$all"
         # Packages that are not allowed where the value is a suggestion.
-        # deny:
-          # - pkg: "github.com/sirupsen/logrus"
-          #   desc: not allowed
-          # - pkg: "github.com/pkg/errors"
-          #   desc: Should be replaced by standard lib errors package
-      # test:
-      #   files:
-      #     - "$test"
-      #   allow:
-      #     - $gostd
-      #     - "github.com/stretchr/testify"
+        deny:
+          - pkg: "github.com/sirupsen/logrus"
+            desc: not allowed
+          - pkg: "github.com/pkg/errors"
+            desc: Should be replaced by standard lib errors package
 
   copyloopvar:
     check-alias: false
