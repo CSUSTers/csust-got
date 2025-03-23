@@ -3,7 +3,7 @@
 
 # options for analysis running
 run:
-  go: "1.23"
+  go: "1.24"
   # default concurrency is an available CPU number
   concurrency: 16
 
@@ -37,9 +37,6 @@ output:
 
   # print linter name in the end of issue text, default is true
   print-linter-name: true
-
-  # make issues output unique by line, default is true
-  uniq-by-line: true
 
   # add a prefix to the output file references; default is no prefix
   path-prefix: ""
@@ -156,48 +153,48 @@ linters-settings:
       elseif:
         # whether to skip balanced if-else pairs (default true)
         skipBalanced: true
-      nestingReduce:
-        # min number of statements inside a branch to trigger a warning (default 5)
-        bodyWidth: 5
+      # nestingReduce:
+      #   # min number of statements inside a branch to trigger a warning (default 5)
+      #   bodyWidth: 5
       rangeExprCopy:
         # size in bytes that makes the warning trigger (default 512)
         sizeThreshold: 512
         # whether to check test functions (default true)
         skipTestFuncs: true
-      ruleguard:
-        # Enable debug to identify which 'Where' condition was rejected.
-        # The value of the parameter is the name of a function in a ruleguard file.
-        #
-        # When a rule is evaluated:
-        # If:
-        #   The Match() clause is accepted; and
-        #   One of the conditions in the Where() clause is rejected,
-        # Then:
-        #   ruleguard prints the specific Where() condition that was rejected.
-        #
-        # The flag is passed to the ruleguard 'debug-group' argument.
-        debug: 'emptyDecl'
-        # Deprecated, use 'failOn' param.
-        # If set to true, identical to failOn='all', otherwise failOn=''
-        # failOnError: false
-        # Determines the behavior when an error occurs while parsing ruleguard files.
-        # If flag is not set, log error and skip rule files that contain an error.
-        # If flag is set, the value must be a comma-separated list of error conditions.
-        # - 'all':    fail on all errors.
-        # - 'import': ruleguard rule imports a package that cannot be found.
-        # - 'dsl':    gorule file does not comply with the ruleguard DSL.
-        failOn: dsl
-        # Comma-separated list of file paths containing ruleguard rules.
-        # If a path is relative, it is relative to the directory where the golangci-lint command is executed.
-        # The special '${configDir}' variable is substituted with the absolute directory containing the golangci config file.
-        # Glob patterns such as 'rules-*.go' may be specified.
-        # rules: '${configDir}/ruleguard/rules-*.go,${configDir}/myrule1.go'
+      # ruleguard:
+      #   # Enable debug to identify which 'Where' condition was rejected.
+      #   # The value of the parameter is the name of a function in a ruleguard file.
+      #   #
+      #   # When a rule is evaluated:
+      #   # If:
+      #   #   The Match() clause is accepted; and
+      #   #   One of the conditions in the Where() clause is rejected,
+      #   # Then:
+      #   #   ruleguard prints the specific Where() condition that was rejected.
+      #   #
+      #   # The flag is passed to the ruleguard 'debug-group' argument.
+      #   debug: 'emptyDecl'
+      #   # Deprecated, use 'failOn' param.
+      #   # If set to true, identical to failOn='all', otherwise failOn=''
+      #   # failOnError: false
+      #   # Determines the behavior when an error occurs while parsing ruleguard files.
+      #   # If flag is not set, log error and skip rule files that contain an error.
+      #   # If flag is set, the value must be a comma-separated list of error conditions.
+      #   # - 'all':    fail on all errors.
+      #   # - 'import': ruleguard rule imports a package that cannot be found.
+      #   # - 'dsl':    gorule file does not comply with the ruleguard DSL.
+      #   failOn: dsl
+      #   # Comma-separated list of file paths containing ruleguard rules.
+      #   # If a path is relative, it is relative to the directory where the golangci-lint command is executed.
+      #   # The special '${configDir}' variable is substituted with the absolute directory containing the golangci config file.
+      #   # Glob patterns such as 'rules-*.go' may be specified.
+      #   # rules: '${configDir}/ruleguard/rules-*.go,${configDir}/myrule1.go'
       # tooManyResultsChecker:
       #   # maximum number of results (default 5)
       #   maxResults: 10
-      truncateCmp:
-        # whether to skip int/uint/uintptr types (default true)
-        skipArchDependent: true
+      # truncateCmp:
+      #   # whether to skip int/uint/uintptr types (default true)
+      #   skipArchDependent: true
       underef:
         # whether to skip (*x).method() calls where x is a pointer receiver (default true)
         skipRecvDeref: true
@@ -414,10 +411,14 @@ linters-settings:
     # https://staticcheck.io/docs/options#http_status_code_whitelist
     http-status-code-whitelist: [ "200", "400", "404", "500" ]
 
-  tenv:
-    # The option `all` will run against whole test files (`_test.go`) regardless of method/function signatures.
-    # By default, only methods that take `*testing.T`, `*testing.B`, and `testing.TB` as arguments are checked.
-    all: false
+  usetesting:
+    context-background: true
+    context-todo: true
+    os-chdir: true
+    os-mkdir-temp: true
+    os-setenv: true
+    os-create-temp: true
+    os-temp-dir: false
 
   varnamelen:
     # The longest distance, in source lines, that is being considered a "small scope." (defaults to 5)
@@ -476,38 +477,13 @@ linters-settings:
         # List of file globs that will match this list of settings to compare against.
         # Default: $all
         files:
-          - "!$test"
-        # List of allowed packages.
-        allow:
-          - $gostd
-          - csust-got
-          - github.com/spf13/viper
-          - github.com/quic-go/quic-go
-          - github.com/huichen/sego
-          - github.com/iyear/biligo
-          - mvdan.cc/xurls
-          - github.com/meilisearch/meilisearch-go
-          - github.com/sashabaranov/go-openai
-          - github.com/redis/go-redis
-          - github.com/google/go-github
-          - github.com/prometheus/common
-          - github.com/prometheus/client_golang
-          - github.com/gabriel-vasile/mimetype
-          - github.com/u2takey/ffmpeg-go
-          - github.com/samber/lo
-          - github.com/cespare/xxhash/v2
+          - "$all"
         # Packages that are not allowed where the value is a suggestion.
         deny:
-          # - pkg: "github.com/sirupsen/logrus"
-          #   desc: not allowed
-          # - pkg: "github.com/pkg/errors"
-          #   desc: Should be replaced by standard lib errors package
-      # test:
-      #   files:
-      #     - "$test"
-      #   allow:
-      #     - $gostd
-      #     - "github.com/stretchr/testify"
+          - pkg: "github.com/sirupsen/logrus"
+            desc: not allowed
+          - pkg: "github.com/pkg/errors"
+            desc: Should be replaced by standard lib errors package
 
   copyloopvar:
     check-alias: false
@@ -540,7 +516,6 @@ linters:
     - prealloc
     - predeclared
     - revive
-    - tenv
     - unconvert
     # disabled by not supported in go
     # - bodyclose
@@ -552,6 +527,7 @@ linters:
     # - unparam
     # - wastedassign
     # - whitespace
+    - usetesting
   disable:
     - typecheck
   fast: false
@@ -618,6 +594,8 @@ issues:
 
   # Fix found issues (if it's supported by the linter)
   fix: true
+
+  uniq-by-line: true
 
 severity:
   # Default value is empty string.
