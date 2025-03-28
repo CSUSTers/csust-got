@@ -109,7 +109,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware, contentFilterMiddleware, byeWorldMiddleware,
+		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
 	config.BotConfig.Bot = bot
@@ -447,6 +447,13 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		// 2024-12-17 [dawu]: 已经重构
 		if m.Text != "" {
 			go chat.GachaReplyHandler(ctx)
+			// 添加对"...是什么"格式的处理
+			go func() {
+				err := chat.WhatIsHandler(ctx)
+				if err != nil {
+					log.Debug("[WhatIs] Handler error", zap.Error(err))
+				}
+			}()
 		}
 
 		return next(ctx)
@@ -517,6 +524,22 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 
 		if cmd.Name() != "reburn" {
 			return nil
+		}
+		return next(ctx)
+	}
+}
+
+func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		m := ctx.Message()
+		if m != nil && m.Text != "" {
+			// 异步存储消息文本到Redis
+			go func() {
+				err := orm.SetMessageText(m.Chat.ID, m.ID, m.Text)
+				if err != nil {
+					log.Error("Store message text to Redis failed", zap.Error(err))
+				}
+			}()
 		}
 		return next(ctx)
 	}

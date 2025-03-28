@@ -51,6 +51,8 @@ type Setting struct {
 
 	Model  string
 	Prompt string
+
+	Temperature float32
 }
 
 // GetPlaceholder get message placeholder
@@ -160,17 +162,22 @@ func generateRequest(ctx Context, info *ChatInfo) (*openai.ChatCompletionRequest
 		Temperature: chatCfg.Temperature,
 	}
 
+	if info.Setting.Temperature > 0 {
+		req.Temperature = info.Setting.Temperature
+	}
+
 	if info.Model != "" {
 		req.Model = info.Model
 	} else if chatCfg.Model != "" {
 		req.Model = chatCfg.Model
 	}
 
-	if len(req.Messages) == 0 && chatCfg.SystemPrompt != "" {
-		prompt := info.Prompt
-		if prompt == "" {
-			prompt = chatCfg.SystemPrompt
-		}
+	prompt := info.Prompt
+	if len(req.Messages) == 0 && chatCfg.SystemPrompt != "" && prompt == "" {
+		prompt = chatCfg.SystemPrompt
+	}
+
+	if prompt != "" {
 		req.Messages = append(req.Messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
 			Content: prompt,
@@ -374,12 +381,10 @@ func chatWithoutStream(ctx *chatContext) {
 	}
 
 	if config.BotConfig.DebugMode {
-		content += fmt.Sprintf("\n\nusage: %d + %d = %d\nCredits spent (US$) : \n    %.2f (gpt-4) ; \n    %.3f (gpt-3.5)\n",
+		content += fmt.Sprintf("\n\nusage: %d + %d = %d tokens\n",
 			resp.Usage.PromptTokens,
 			resp.Usage.CompletionTokens,
-			resp.Usage.TotalTokens,
-			(float32(resp.Usage.PromptTokens)*0.03+float32(resp.Usage.CompletionTokens)*0.06)/1000,
-			float32(resp.Usage.TotalTokens)*0.002/1000)
+			resp.Usage.TotalTokens)
 		content += fmt.Sprintf("time cost: %v\n", time.Since(start))
 	}
 	replyMsg, err := util.EditMessageWithError(ctx.msg, content)
