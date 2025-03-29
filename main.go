@@ -265,8 +265,11 @@ func registerChatConfigHandler(bot *Bot) {
 	for _, v := range *config.BotConfig.ChatConfigV2 {
 		for _, tr := range v.Trigger {
 			if tr.Command != "" {
-				bot.Handle("/"+tr.Command, func(ctx Context) error {
-					return chat_v2.Chat(ctx, v, tr)
+				// 创建局部副本以避免闭包捕获循环变量
+				vCopy := v
+				trCopy := tr
+				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
+					return chat_v2.Chat(ctx, vCopy, trCopy)
 				})
 			}
 		}
@@ -282,11 +285,13 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 	for _, v := range v2 {
 		for _, tr := range v.Trigger {
 			if tr.Regex != "" {
+				vCopy := v   // 创建局部副本
+				trCopy := tr // 创建局部副本
 				regexHandlers = append(regexHandlers, struct {
 					Regex *regexp.Regexp
 					Func  func(Context) error
-				}{Regex: regexp.MustCompile(tr.Regex), Func: func(context Context) error {
-					return chat_v2.Chat(context, v, tr)
+				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
+					return chat_v2.Chat(context, vCopy, trCopy)
 				}})
 			}
 		}
