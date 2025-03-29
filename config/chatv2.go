@@ -32,7 +32,7 @@ type ChatConfigSingle struct {
 	MessageContext int            `mapstructure:"message_context"`
 	Temperature    *float32       `mapstructure:"temperature"`
 	PlaceHolder    string         `mapstructure:"place_holder"`
-	Steam          bool           `mapstructure:"steam"`
+	Steam          bool           `mapstructure:"stream"`
 	SystemPrompt   string         `mapstructure:"system_prompt"`
 	PromptTemplate string         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
