@@ -2,6 +2,7 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/chat_v2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	"csust-got/base"
@@ -37,6 +39,9 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
+	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
+
 	// go iwatch.WatchService()
 
 	bot, err := initBot()
@@ -51,6 +56,7 @@ func main() {
 	registerBaseHandler(bot)
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
+	registerChatConfigHandler(bot)
 	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
@@ -208,17 +214,23 @@ func stickerDlHandler(ctx Context) error {
 func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
-	if cmd == nil {
-		// all text message will be handled by this handler,
-		// but only command should be processed, so return nil for non-command message
+	if cmd != nil {
+		cmdText := cmd.Name()
+
+		if base.DecodeCommandPatt.MatchString(cmdText) {
+			return base.Decode(ctx)
+		}
 		return nil
 	}
-	cmdText := cmd.Name()
 
-	if base.DecodeCommandPatt.MatchString(cmdText) {
-		return base.Decode(ctx)
+	for _, v := range regexHandlers {
+		if v.Regex.MatchString(ctx.Message().Text) {
+			return v.Func(ctx)
+		}
 	}
 
+	// all text message will be handled by this handler,
+	// but only command should be processed, so return nil for non-command message
 	return nil
 }
 
@@ -247,6 +259,39 @@ func registerEventHandler(bot *Bot) {
 	bot.Handle(OnVoice, base.DoNothing)
 	bot.Handle(OnVideoNote, base.DoNothing)
 	bot.Handle(OnDocument, base.DoNothing)
+}
+
+func registerChatConfigHandler(bot *Bot) {
+	for _, v := range *config.BotConfig.ChatConfigV2 {
+		for _, tr := range v.Trigger {
+			if tr.Command != "" {
+				bot.Handle("/"+tr.Command, func(ctx Context) error {
+					return chat_v2.Chat(ctx, v, tr)
+				})
+			}
+		}
+	}
+}
+
+var regexHandlers []struct {
+	Regex *regexp.Regexp
+	Func  func(Context) error
+}
+
+func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
+	for _, v := range v2 {
+		for _, tr := range v.Trigger {
+			if tr.Regex != "" {
+				regexHandlers = append(regexHandlers, struct {
+					Regex *regexp.Regexp
+					Func  func(Context) error
+				}{Regex: regexp.MustCompile(tr.Regex), Func: func(context Context) error {
+					return chat_v2.Chat(context, v, tr)
+				}})
+			}
+		}
+	}
+
 }
 
 func loggerMiddleware(next HandlerFunc) HandlerFunc {
@@ -447,13 +492,6 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		// 2024-12-17 [dawu]: 已经重构
 		if m.Text != "" {
 			go chat.GachaReplyHandler(ctx)
-			// 添加对"...是什么"格式的处理
-			go func() {
-				err := chat.WhatIsHandler(ctx)
-				if err != nil {
-					log.Debug("[WhatIs] Handler error", zap.Error(err))
-				}
-			}()
 		}
 
 		return next(ctx)

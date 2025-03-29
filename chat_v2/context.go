@@ -1,4 +1,4 @@
-package chat
+package chat_v2
 
 import (
 	"csust-got/log"
@@ -9,12 +9,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	. "gopkg.in/telebot.v3"
-)
-
-const (
-	// MaxContextMessages 最大上下文消息数量
-	MaxContextMessages = 6
+	tb "gopkg.in/telebot.v3"
 )
 
 // ContextMessage 用于存储格式化后的上下文消息
@@ -25,26 +20,13 @@ type ContextMessage struct {
 
 // GetMessageContext 获取消息的上下文
 // 返回的消息数组按照时间顺序排列，最早的消息在前，最新的消息在后
-func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
+func GetMessageContext(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessage, error) {
 	var messages []ContextMessage
 	var result []ContextMessage
 
-	// 当前消息存入列表
-	text := msg.Text
-	if text == "" {
-		text = msg.Caption
-	}
-	if text != "" {
-		currentMsg := ContextMessage{
-			Text: text,
-			ID:   msg.ID,
-		}
-		messages = append(messages, currentMsg)
-	}
-
 	// 如果存在回复链，收集回复链上的消息
 	if msg.ReplyTo != nil {
-		replyChain, err := getReplyChain(bot, msg.ReplyTo)
+		replyChain, err := getReplyChain(bot, msg.ReplyTo, maxContext)
 		if err != nil {
 			log.Error("[MessageContext] Failed to get reply chain", zap.Error(err))
 			// 继续执行，只是回复链获取失败而已
@@ -53,13 +35,13 @@ func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
 		}
 	}
 
-	// 如果消息数量不足MaxContextMessages，通过消息ID向前查找
+	// 如果消息数量不足maxContext，通过消息ID向前查找
 	curMsgID := msg.ID
 	if len(messages) > 0 {
 		curMsgID = messages[0].ID
 	}
-	if len(messages) < MaxContextMessages {
-		additionalMessages, err := getPreviousMessages(msg.Chat.ID, curMsgID, MaxContextMessages-len(messages))
+	if len(messages) < maxContext {
+		additionalMessages, err := getPreviousMessages(msg.Chat.ID, curMsgID, maxContext-len(messages))
 		if err != nil {
 			log.Error("[MessageContext] Failed to get previous messages", zap.Error(err))
 		} else {
@@ -67,9 +49,9 @@ func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
 		}
 	}
 
-	// 取最多MaxContextMessages条消息
-	if len(messages) > MaxContextMessages {
-		result = messages[len(messages)-MaxContextMessages:]
+	// 取最多maxContext条消息
+	if len(messages) > maxContext {
+		result = messages[len(messages)-maxContext:]
 	} else {
 		result = messages
 	}
@@ -78,13 +60,13 @@ func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
 }
 
 // getReplyChain 获取回复链上的所有消息，按照时间顺序排列（最早的消息在前）
-func getReplyChain(bot *Bot, msg *Message) ([]ContextMessage, error) {
+func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessage, error) {
 	var chain []ContextMessage
 	currentMsg := msg
 	visited := make(map[int]bool) // 避免出现回复循环
 
 	// 向上追溯回复链
-	for currentMsg != nil && len(chain) < MaxContextMessages-1 {
+	for currentMsg != nil && len(chain) < maxContext-1 {
 		if visited[currentMsg.ID] {
 			// 检测到循环引用，跳出循环
 			break
