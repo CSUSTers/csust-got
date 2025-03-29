@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/viper"
 )
 
+// Model is the model configuration for chat
 type Model struct {
 	Name          string `mapstructure:"name"`
 	BaseUrl       string `mapstructure:"base_url"`
@@ -15,13 +16,16 @@ type Model struct {
 	Proxy         string `mapstructure:"proxy"`
 }
 
+// ChatTrigger is the configuration for chat
 type ChatTrigger struct {
 	Command string `mapstructure:"command"`
 	Regex   string `mapstructure:"regex"`
 }
 
+// ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
+// ChatConfigSingle is the configuration for a single chat
 type ChatConfigSingle struct {
 	Name           string         `mapstructure:"name"`
 	Model          *Model         `mapstructure:"model"`
@@ -34,6 +38,7 @@ type ChatConfigSingle struct {
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
 }
 
+// GetTemperature returns the temperature for the chat model
 func (ccs *ChatConfigSingle) GetTemperature() float32 {
 	if ccs.Temperature != nil {
 		return *ccs.Temperature
@@ -48,7 +53,4 @@ func (c *ChatConfigV2) readConfig() {
 		panic(err)
 	}
 
-}
-
-type GachaConfig struct {
 }

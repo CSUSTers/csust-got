@@ -18,11 +18,12 @@ import (
 var clients map[string]*openai.Client
 var templates map[string]*template.Template
 
-func InitAiClients(config []*config.ChatConfigSingle) {
+// InitAiClients 初始化AI客户端
+func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	templates = make(map[string]*template.Template)
 
-	for _, c := range config {
+	for _, c := range configs {
 		// 初始化模板
 		if _, ok := templates[c.Name]; !ok {
 			templates[c.Name] = template.Must(template.New(c.Name).Parse(c.PromptTemplate))
@@ -53,6 +54,7 @@ func InitAiClients(config []*config.ChatConfigSingle) {
 	}
 }
 
+// Chat 处理聊天请求
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
 
 	input := ctx.Message().Text
