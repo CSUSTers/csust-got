@@ -50,7 +50,7 @@ func WhatIsHandler(ctx Context) error {
 	}
 
 	// 概念太长，可能不是正常问题，忽略
-	if len(concept) > 20 {
+	if len(concept) > 30 {
 		return nil
 	}
 
@@ -71,14 +71,21 @@ func WhatIsHandler(ctx Context) error {
 			contextText + "\n\n用户问题：" + msg.Text
 	}
 
+	systemPrompt := `你需要帮用户解释指定的概念是什么。请遵循以下规则：
+	1、回答应当尽可能简短，直接陈述结论，不要进行多余的解释。
+	2、不要使用markdown格式进行回答。
+	3、尽可能避免在回答中使用特殊字符。
+	4、上下文中可能包含一些不相关的信息，请自行判断后忽略。
+	5、在回答中不要引用消息编号。`
+
 	// 调用ChatGPT解答
 	err = ChatWith(ctx, &ChatInfo{
 		Text: prompt,
 		Setting: Setting{
-			Stream:      false,
-			Reply:       true,
-			Prompt:      "1、回答应当尽可能简短，直接陈述结论，不要进行多余的解释。2、不要使用markdown格式进行回答。3、尽可能避免在回答中使用特殊字符。",
-			Temperature: 0.5,
+			Stream:       false,
+			Reply:        true,
+			SystemPrompt: systemPrompt,
+			Temperature:  0.5,
 		},
 	})
 

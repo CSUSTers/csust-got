@@ -4,6 +4,7 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"errors"
+	"strconv"
 	"strings"
 
 	"github.com/redis/go-redis/v9"
@@ -18,6 +19,7 @@ const (
 
 // ContextMessage 用于存储格式化后的上下文消息
 type ContextMessage struct {
+	ID   int // 消息ID
 	Text string
 }
 
@@ -28,9 +30,14 @@ func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
 	var result []ContextMessage
 
 	// 当前消息存入列表
-	if msg.Text != "" {
+	text := msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+	if text != "" {
 		currentMsg := ContextMessage{
-			Text: msg.Text,
+			Text: text,
+			ID:   msg.ID,
 		}
 		messages = append(messages, currentMsg)
 	}
@@ -47,8 +54,12 @@ func GetMessageContext(bot *Bot, msg *Message) ([]ContextMessage, error) {
 	}
 
 	// 如果消息数量不足MaxContextMessages，通过消息ID向前查找
-	if len(messages) < MaxContextMessages && msg.ID > 1 {
-		additionalMessages, err := getPreviousMessages(msg.Chat.ID, msg.ID, MaxContextMessages-len(messages))
+	curMsgID := msg.ID
+	if len(messages) > 0 {
+		curMsgID = messages[0].ID
+	}
+	if len(messages) < MaxContextMessages {
+		additionalMessages, err := getPreviousMessages(msg.Chat.ID, curMsgID, MaxContextMessages-len(messages))
 		if err != nil {
 			log.Error("[MessageContext] Failed to get previous messages", zap.Error(err))
 		} else {
@@ -80,9 +91,14 @@ func getReplyChain(bot *Bot, msg *Message) ([]ContextMessage, error) {
 		}
 
 		visited[currentMsg.ID] = true
-		if currentMsg.Text != "" {
+		currentMsgText := currentMsg.Text
+		if currentMsgText == "" {
+			currentMsgText = currentMsg.Caption
+		}
+		if currentMsgText != "" {
 			contextMsg := ContextMessage{
-				Text: currentMsg.Text,
+				Text: currentMsgText,
+				ID:   currentMsg.ID,
 			}
 			// 将消息添加到链的前面，这样链就是按时间顺序排列的
 			chain = append([]ContextMessage{contextMsg}, chain...)
@@ -102,13 +118,14 @@ func getReplyChain(bot *Bot, msg *Message) ([]ContextMessage, error) {
 func getPreviousMessages(chatID int64, messageID int, count int) ([]ContextMessage, error) {
 	var messages []ContextMessage
 
-	for i := 1; i <= count*2 && len(messages) < count; i++ { // 查询的范围扩大一倍，以应对一些消息可能被删除的情况
+	for i := 1; i <= 50 && len(messages) < count; i++ { // 最多扫描50条消息
 		prevMsgID := messageID - i
 		if prevMsgID <= 0 {
 			break
 		}
 
-		text, err := orm.GetMessageText(chatID, prevMsgID)
+		// 获取完整消息
+		msg, err := orm.GetMessage(chatID, prevMsgID)
 		if err != nil {
 			if errors.Is(err, redis.Nil) {
 				// 消息不存在或已被删除，继续查找
@@ -117,8 +134,14 @@ func getPreviousMessages(chatID int64, messageID int, count int) ([]ContextMessa
 			return messages, err
 		}
 
-		if text != "" {
-			messages = append([]ContextMessage{{Text: text}}, messages...)
+		// 从完整消息中提取文本
+		msgText := msg.Text
+		if msgText == "" {
+			msgText = msg.Caption
+		}
+
+		if msgText != "" {
+			messages = append([]ContextMessage{{Text: msgText, ID: msg.ID}}, messages...)
 		}
 	}
 
@@ -136,7 +159,7 @@ func FormatContextMessages(messages []ContextMessage) string {
 	for i, msg := range messages {
 		// 添加序号而不是用户名
 		result.WriteString("消息 ")
-		result.WriteString(string(rune('1' + i)))
+		result.WriteString(strconv.Itoa(msg.ID))
 		result.WriteString(": ")
 		result.WriteString(msg.Text)
 

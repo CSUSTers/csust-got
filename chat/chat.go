@@ -49,8 +49,8 @@ type Setting struct {
 
 	Placeholder string
 
-	Model  string
-	Prompt string
+	Model        string
+	SystemPrompt string
 
 	Temperature float32
 }
@@ -172,7 +172,7 @@ func generateRequest(ctx Context, info *ChatInfo) (*openai.ChatCompletionRequest
 		req.Model = chatCfg.Model
 	}
 
-	prompt := info.Prompt
+	prompt := info.SystemPrompt
 	if len(req.Messages) == 0 && chatCfg.SystemPrompt != "" && prompt == "" {
 		prompt = chatCfg.SystemPrompt
 	}

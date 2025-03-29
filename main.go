@@ -532,12 +532,12 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
-		if m != nil && m.Text != "" {
-			// 异步存储消息文本到Redis
+		if m != nil && (m.Text != "" || m.Caption != "") {
+			// 异步存储完整消息结构体到Redis
 			go func() {
-				err := orm.SetMessageText(m.Chat.ID, m.ID, m.Text)
+				err := orm.SetMessage(m)
 				if err != nil {
-					log.Error("Store message text to Redis failed", zap.Error(err))
+					log.Error("Store message to Redis failed", zap.Error(err))
 				}
 			}()
 		}
