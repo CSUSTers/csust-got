@@ -6,13 +6,14 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/util"
-	"github.com/sashabaranov/go-openai"
-	"go.uber.org/zap"
-	tb "gopkg.in/telebot.v3"
 	"net/http"
 	"net/url"
 	"strings"
 	"text/template"
+
+	"github.com/sashabaranov/go-openai"
+	"go.uber.org/zap"
+	tb "gopkg.in/telebot.v3"
 )
 
 var clients map[string]*openai.Client
