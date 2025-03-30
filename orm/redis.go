@@ -32,17 +32,6 @@ func NewClient() *redis.Client {
 	})
 }
 
-// Ping can ping a redis client.
-// return true if ping success.
-func Ping(c *redis.Client) bool {
-	// TODO: replace ctx with real ctx
-	if _, err := c.Ping(context.TODO()).Result(); err != nil {
-		log.Error("ping redis failed", zap.Error(err))
-		return false
-	}
-	return true
-}
-
 func wrapKey(key string) string {
 	return config.BotConfig.RedisConfig.KeyPrefix + key
 }
@@ -83,15 +72,15 @@ func loadSpecialList(key string) []string {
 // LoadWhiteList load white list.
 func LoadWhiteList() {
 	chats := util.StringsToInts(loadSpecialList("white_list"))
-	log.Info("White List has load.", zap.Int("length", len(chats)))
-	config.BotConfig.WhiteListConfig.Chats = chats
+	config.BotConfig.WhiteListConfig.Chats = append(config.BotConfig.WhiteListConfig.Chats, chats...)
+	log.Info("White List has load.", zap.Int("length", len(config.BotConfig.WhiteListConfig.Chats)))
 }
 
 // LoadBlockList load black list.
 func LoadBlockList() {
 	chats := util.StringsToInts(loadSpecialList("black_list"))
-	log.Info("Block List has load.", zap.Int("length", len(chats)))
-	config.BotConfig.BlockListConfig.Chats = chats
+	config.BotConfig.BlockListConfig.Chats = append(config.BotConfig.BlockListConfig.Chats, chats...)
+	log.Info("Block List has load.", zap.Int("length", len(config.BotConfig.BlockListConfig.Chats)))
 }
 
 // IsNoStickerMode check group in NoSticker mode.

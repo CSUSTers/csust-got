@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -219,4 +220,30 @@ func TestChatConfigV2(t *testing.T) {
 	req.Len(*BotConfig.ChatConfigV2, 1)
 	req.NotNil((*BotConfig.ChatConfigV2)[0].Model)
 	req.NotEmpty((*BotConfig.ChatConfigV2)[0].Model.Model)
+}
+
+func TestCustomConfig(t *testing.T) {
+	req := testInit(t)
+
+	// 创建临时配置文件
+	tempDir := t.TempDir()
+
+	// 创建基础配置文件
+	baseConfigPath := filepath.Join(tempDir, "config.yaml")
+	err := os.WriteFile(baseConfigPath, []byte("debug: false\ntoken: base-token"), 0644)
+	req.NoError(err)
+
+	// 创建自定义配置文件
+	customConfigPath := filepath.Join(tempDir, "custom.yaml")
+	err = os.WriteFile(customConfigPath, []byte("debug: true\ntoken: custom-token"), 0644)
+	req.NoError(err)
+
+	// 初始化配置
+	BotConfig = NewBotConfig()
+	initViper(baseConfigPath, "")
+	readConfig()
+
+	// 检查custom.yaml是否覆盖了config.yaml中的配置
+	req.True(BotConfig.DebugMode)
+	req.Equal("custom-token", BotConfig.Token)
 }

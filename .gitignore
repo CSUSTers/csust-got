@@ -128,3 +128,6 @@ a.http
 .idea/GitLink.xml
 dictionary.txt
 /logs
+
+# 自定义配置文件，避免意外提交敏感信息
+custom.yaml
