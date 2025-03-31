@@ -1,28 +1,33 @@
 package chat_v2
 
 import (
+	"bytes"
 	"csust-got/log"
 	"csust-got/orm"
-	"errors"
+	"fmt"
+	"html"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
 
 // ContextMessage 用于存储格式化后的上下文消息
 type ContextMessage struct {
-	ID   int // 消息ID
-	Text string
+	ID      int // 消息ID
+	ReplyTo *int
+	User    string
+	Text    string
 }
 
 // GetMessageContext 获取消息的上下文
 // 返回的消息数组按照时间顺序排列，最早的消息在前，最新的消息在后
-func GetMessageContext(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessage, error) {
-	var messages []ContextMessage
-	var result []ContextMessage
+func GetMessageContext(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMessage, error) {
+	var messages []*ContextMessage
+	var result []*ContextMessage
 
 	// 如果存在回复链，收集回复链上的消息
 	if msg.ReplyTo != nil {
@@ -60,8 +65,8 @@ func GetMessageContext(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextM
 }
 
 // getReplyChain 获取回复链上的所有消息，按照时间顺序排列（最早的消息在前）
-func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessage, error) {
-	var chain []ContextMessage
+func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMessage, error) {
+	var chain []*ContextMessage
 	currentMsg := msg
 	visited := make(map[int]bool) // 避免出现回复循环
 
@@ -78,12 +83,18 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessa
 			currentMsgText = currentMsg.Caption
 		}
 		if currentMsgText != "" {
-			contextMsg := ContextMessage{
-				Text: currentMsgText,
-				ID:   currentMsg.ID,
+			var replyID *int
+			if currentMsg.ReplyTo != nil {
+				replyID = &currentMsg.ReplyTo.ID
+			}
+			contextMsg := &ContextMessage{
+				Text:    currentMsgText,
+				ID:      currentMsg.ID,
+				ReplyTo: replyID,
+				User:    currentMsg.Sender.Username,
 			}
 			// 将消息添加到链的前面，这样链就是按时间顺序排列的
-			chain = append([]ContextMessage{contextMsg}, chain...)
+			chain = append(chain, contextMsg)
 		}
 
 		// 继续向上追溯
@@ -92,46 +103,40 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]ContextMessa
 		}
 		currentMsg = currentMsg.ReplyTo
 	}
+	slices.Reverse(chain)
 
 	return chain, nil
 }
 
 // getPreviousMessages 通过消息ID获取之前的消息
-func getPreviousMessages(chatID int64, messageID int, count int) ([]ContextMessage, error) {
-	var messages []ContextMessage
+func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMessage, error) {
+	var messages []*ContextMessage
 
-	for i := 1; i <= 50 && len(messages) < count; i++ { // 最多扫描50条消息
-		prevMsgID := messageID - i
-		if prevMsgID <= 0 {
-			break
-		}
+	msgs, err := orm.GetMessagesFromStream(chatID, fmt.Sprintf("(%d", messageID), strconv.Itoa(messageID-50), int64(count), true)
 
-		// 获取完整消息
-		msg, err := orm.GetMessage(chatID, prevMsgID)
-		if err != nil {
-			if errors.Is(err, redis.Nil) {
-				// 消息不存在或已被删除，继续查找
-				continue
-			}
-			return messages, err
-		}
-
-		// 从完整消息中提取文本
-		msgText := msg.Text
-		if msgText == "" {
-			msgText = msg.Caption
-		}
-
-		if msgText != "" {
-			messages = append([]ContextMessage{{Text: msgText, ID: msg.ID}}, messages...)
-		}
+	if err != nil {
+		return messages, err
 	}
+	slices.Reverse(msgs)
+	messages = lo.Map(msgs, func(msg *tb.Message, _ int) *ContextMessage {
+		var replyId *int
+		if msg.ReplyTo != nil {
+			replyId = &msg.ReplyTo.ID
+		}
+
+		return &ContextMessage{
+			Text:    msg.Text,
+			ID:      msg.ID,
+			ReplyTo: replyId,
+			User:    msg.Sender.Username,
+		}
+	})
 
 	return messages, nil
 }
 
 // FormatContextMessages 将上下文消息格式化为字符串
-func FormatContextMessages(messages []ContextMessage) string {
+func FormatContextMessages(messages []*ContextMessage) string {
 	if len(messages) == 0 {
 		return ""
 	}
@@ -151,4 +156,35 @@ func FormatContextMessages(messages []ContextMessage) string {
 	}
 
 	return result.String()
+}
+
+// FormatContextMessagesWithXml 将上下文消息格式化为XML
+//
+// ```xml
+// <messages>
+//
+//	<message id="1" user="user1"> msg1 escaped</message>
+//	<message id="2" user="user2" replyTo="1"> msg2 escaped</message>
+//
+// </messages>
+// ```
+func FormatContextMessagesWithXml(messages []*ContextMessage) string {
+	buf := bytes.NewBuffer(nil)
+
+	buf.WriteString("<messages>\n")
+
+	for _, msg := range messages {
+		buf.WriteString(fmt.Sprintf("<message id=\"%d\" user=\"%s\"", msg.ID, html.EscapeString(msg.User)))
+		if msg.ReplyTo != nil {
+			buf.WriteString(fmt.Sprintf(" replyTo=\"%d\"", msg.ReplyTo))
+		}
+		buf.WriteString(">\n")
+		// 将消息文本转义
+		buf.WriteString(html.EscapeString(msg.Text))
+		buf.WriteString("\n</message>\n")
+	}
+
+	buf.WriteString("</messages>\n")
+
+	return buf.String()
 }

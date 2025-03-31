@@ -79,8 +79,10 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 
 	// 使用template处理prompt模板
 	type PromptData struct {
-		Input   string
-		Context string
+		Input           string
+		ContextMessages []*ContextMessage
+		ContextText     string
+		ContextXml      string
 	}
 
 	contextMsgs, err := GetMessageContext(ctx.Bot(), ctx.Message(), v2.MessageContext)
@@ -90,8 +92,10 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 
 	// 准备模板数据
 	data := PromptData{
-		Input:   input,
-		Context: FormatContextMessages(contextMsgs),
+		Input:           input,
+		ContextMessages: contextMsgs,
+		ContextText:     FormatContextMessages(contextMsgs),
+		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
 	}
 
 	var promptBuf bytes.Buffer

@@ -578,7 +578,7 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 		if m != nil && (m.Text != "" || m.Caption != "") {
 			// 异步存储完整消息结构体到Redis
 			go func() {
-				err := orm.SetMessage(m)
+				err := orm.PushMessageToStream(m)
 				if err != nil {
 					log.Error("Store message to Redis failed", zap.Error(err))
 				}
