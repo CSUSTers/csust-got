@@ -5,6 +5,8 @@ import (
 	"context"
 	"csust-got/config"
 	"csust-got/entities"
+	"csust-got/log"
+	"csust-got/orm"
 	"csust-got/util"
 	"net/http"
 	"net/url"
@@ -127,9 +129,19 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		// 移除可能的空行
 		response = strings.TrimSpace(response)
 		response = util.EscapeTelegramReservedChars(response)
+		log.Debug("Chat response", zap.String("response", response))
 
 		// 发送回复
-		_, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
+		var replyMsg *tb.Message
+		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
+		if err != nil {
+			log.Error("Failed to send reply", zap.Error(err))
+			return err
+		}
+		err = orm.PushMessageToStream(replyMsg)
+		if err != nil {
+			log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
+		}
 		return err
 	}
 
