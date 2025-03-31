@@ -60,8 +60,8 @@ func PushMessageToStream(msg *Message) error {
 		Values: []any{"message", jsonData},
 	})
 	if resp.Err() != nil {
-		log.Error("push message to redis stream failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
-		return err
+		log.Error("push message to redis stream failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(resp.Err()))
+		return resp.Err()
 	}
 	_ = rc.Expire(context.TODO(), key, 24*time.Hour)
 	return nil

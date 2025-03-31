@@ -83,10 +83,14 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMess
 			currentMsgText = currentMsg.Caption
 		}
 		if currentMsgText != "" {
+			var replyID *int
+			if currentMsg.ReplyTo != nil {
+				replyID = &currentMsg.ReplyTo.ID
+			}
 			contextMsg := &ContextMessage{
 				Text:    currentMsgText,
 				ID:      currentMsg.ID,
-				ReplyTo: &currentMsg.ReplyTo.ID,
+				ReplyTo: replyID,
 				User:    currentMsg.Sender.Username,
 			}
 			// 将消息添加到链的前面，这样链就是按时间顺序排列的
@@ -114,7 +118,7 @@ func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMess
 		return messages, err
 	}
 	slices.Reverse(msgs)
-	lo.Map(msgs, func(msg *tb.Message, _ int) *ContextMessage {
+	messages = lo.Map(msgs, func(msg *tb.Message, _ int) *ContextMessage {
 		var replyId *int
 		if msg.ReplyTo != nil {
 			replyId = &msg.ReplyTo.ID
