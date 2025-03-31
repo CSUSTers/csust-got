@@ -104,11 +104,11 @@ func GetMessagesFromStream(chatID int64, beginID, endID string, count int64, rev
 		return nil, resp.Err()
 	}
 
-	messages := make([]*Message, len(resp.Val()))
+	messages := make([]*Message, 0, len(resp.Val()))
 
 	for _, msg := range resp.Val() {
 		var message Message
-		err := json.Unmarshal(msg.Values["message"].([]byte), &message)
+		err := json.Unmarshal([]byte(msg.Values["message"].(string)), &message)
 		if err != nil {
 			log.Error("unmarshal message failed", zap.Int64("chat", chatID), zap.Any("message", msg), zap.Error(err))
 			return nil, err

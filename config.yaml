@@ -82,11 +82,11 @@ llm_models:
 chats:
   - name: 什么是bot
     model: *gpt
-    message_context: 3 # reply msg上下文数量
+    message_context: 6 # reply msg上下文数量
     trigger:
       - command: "chat_whatis" # 使用 `/chat_whatis` 命令触发
       - command: "whatis" # 使用 `/whatis` 命令触发
-      - regex: "^((?:什么是).*|.*(?:是什么|就会怎么样))[啊呢呀]?[?？]*$" # 使用regex匹配触发
+      - regex: "^((?:什么是).*|.*(?:是什么|就会怎么样|是啥))[啊呢呀]?[?？]*$" # 使用regex匹配触发
     temperature: 0.5
     place_holder: "正在思考⌛"
     stream: false
