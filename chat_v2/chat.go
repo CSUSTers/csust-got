@@ -8,7 +8,6 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,6 +26,32 @@ var templates *xsync.MapOf[string, chatTemplate]
 type chatTemplate struct {
 	PromptTemplate       *template.Template
 	SystemPromptTemplate *template.Template
+}
+
+func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
+	tpl, ok := templates.Load(c.Name)
+	if ok {
+		return tpl, nil
+	}
+	var ret chatTemplate
+	if c.SystemPrompt != "" {
+		p, err := template.New("system-prompt").Parse(c.SystemPrompt)
+		if err != nil {
+			return ret, err
+		}
+		ret.SystemPromptTemplate = p
+	}
+
+	p, err := template.New("prompt").Parse(c.PromptTemplate)
+	if err != nil {
+		return ret, err
+	}
+	ret.PromptTemplate = p
+
+	if cache && (ret.PromptTemplate != nil || ret.SystemPromptTemplate != nil) {
+		templates.Store(c.Name, ret)
+	}
+	return ret, nil
 }
 
 // var templates map[string]*template.Template
@@ -84,8 +109,6 @@ type promptData struct {
 	ContextXml      string
 }
 
-var errPromptTemplateNotFound = errors.New("prompt template not found")
-
 // Chat 处理聊天请求
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
 
@@ -113,10 +136,10 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextText:     FormatContextMessages(contextMsgs),
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
 	}
-	templs, ok := templates.Load(v2.Name)
-	if !ok {
-		log.Error("Chat prompt template not found", zap.String("name", v2.Name))
-		return errPromptTemplateNotFound
+	templs, err := getTemplate(v2, false)
+	if err != nil {
+		log.Error("chat: parse template failed", zap.String("name", v2.Name))
+		return err
 	}
 
 	var promptBuf bytes.Buffer
