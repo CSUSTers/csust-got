@@ -41,8 +41,8 @@ func InitAiClients(configs []*config.ChatConfigSingle) {
 		// 初始化模板
 		if _, ok := templates.Load(c.Name); !ok {
 			var sysPrompt *template.Template
-			if c.PromptTemplate != "" {
-				template.Must(template.New("systemPrompt").Parse(c.SystemPrompt))
+			if c.SystemPrompt != "" {
+				sysPrompt = template.Must(template.New("systemPrompt").Parse(c.SystemPrompt))
 			}
 			templates.Store(c.Name, chatTemplate{
 				PromptTemplate:       template.Must(template.New("prompt").Parse(c.PromptTemplate)),
