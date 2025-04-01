@@ -20,6 +20,7 @@ require (
 	golang.org/x/text v0.23.0
 	golang.org/x/time v0.11.0
 	gopkg.in/telebot.v3 v3.3.8
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 )
 
 require (

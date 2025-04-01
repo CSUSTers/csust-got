@@ -12,24 +12,67 @@ import (
 	"net/url"
 	"strings"
 	"text/template"
+	"time"
 
+	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
 
 var clients map[string]*openai.Client
-var templates map[string]*template.Template
+var templates *xsync.MapOf[string, chatTemplate]
+
+type chatTemplate struct {
+	PromptTemplate       *template.Template
+	SystemPromptTemplate *template.Template
+}
+
+func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
+	tpl, ok := templates.Load(c.Name)
+	if ok {
+		return tpl, nil
+	}
+	var ret chatTemplate
+	if c.SystemPrompt != "" {
+		p, err := template.New("system-prompt").Parse(c.SystemPrompt)
+		if err != nil {
+			return ret, err
+		}
+		ret.SystemPromptTemplate = p
+	}
+
+	p, err := template.New("prompt").Parse(c.PromptTemplate)
+	if err != nil {
+		return ret, err
+	}
+	ret.PromptTemplate = p
+
+	if cache && (ret.PromptTemplate != nil || ret.SystemPromptTemplate != nil) {
+		templates.Store(c.Name, ret)
+	}
+	return ret, nil
+}
+
+// var templates map[string]*template.Template
 
 // InitAiClients 初始化AI客户端
 func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
-	templates = make(map[string]*template.Template)
+	// templates = make(map[string]*template.Template)
+	templates = xsync.NewMapOf[string, chatTemplate](xsync.WithPresize(len(configs)))
 
 	for _, c := range configs {
 		// 初始化模板
-		if _, ok := templates[c.Name]; !ok {
-			templates[c.Name] = template.Must(template.New(c.Name).Parse(c.PromptTemplate))
+		if _, ok := templates.Load(c.Name); !ok {
+			var sysPrompt *template.Template
+			if c.SystemPrompt != "" {
+				sysPrompt = template.Must(template.New("systemPrompt").Parse(c.SystemPrompt))
+			}
+			templates.Store(c.Name, chatTemplate{
+				PromptTemplate:       template.Must(template.New("prompt").Parse(c.PromptTemplate)),
+				SystemPromptTemplate: sysPrompt,
+			})
 		}
 
 		if _, ok := clients[c.Model.Name]; ok {
@@ -57,6 +100,15 @@ func InitAiClients(configs []*config.ChatConfigSingle) {
 	}
 }
 
+// 使用template处理prompt模板
+type promptData struct {
+	DateTime        string
+	Input           string
+	ContextMessages []*ContextMessage
+	ContextText     string
+	ContextXml      string
+}
+
 // Chat 处理聊天请求
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
 
@@ -71,37 +123,45 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		}
 	}
 
-	messages := make([]openai.ChatCompletionMessage, 0)
-	if v2.SystemPrompt != "" {
-		messages = append(messages, openai.ChatCompletionMessage{
-			Role:    openai.ChatMessageRoleSystem,
-			Content: v2.SystemPrompt,
-		})
-	}
-
-	// 使用template处理prompt模板
-	type PromptData struct {
-		Input           string
-		ContextMessages []*ContextMessage
-		ContextText     string
-		ContextXml      string
-	}
-
 	contextMsgs, err := GetMessageContext(ctx.Bot(), ctx.Message(), v2.MessageContext)
 	if err != nil {
 		zap.L().Warn("[Chat] Failed to get message context", zap.Error(err))
 	}
 
 	// 准备模板数据
-	data := PromptData{
+	data := promptData{
+		DateTime:        time.Now().Format(time.RFC3339),
 		Input:           input,
 		ContextMessages: contextMsgs,
 		ContextText:     FormatContextMessages(contextMsgs),
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
 	}
+	templs, err := getTemplate(v2, false)
+	if err != nil {
+		log.Error("chat: parse template failed", zap.String("name", v2.Name))
+		return err
+	}
 
 	var promptBuf bytes.Buffer
-	if err := templates[v2.Name].Execute(&promptBuf, data); err != nil {
+	systemPrompt := v2.SystemPrompt
+
+	if templs.SystemPromptTemplate != nil {
+		if err := templs.SystemPromptTemplate.Execute(&promptBuf, data); err != nil {
+			return err
+		}
+		systemPrompt = promptBuf.String()
+		promptBuf.Reset()
+	}
+
+	messages := make([]openai.ChatCompletionMessage, 0)
+	if systemPrompt != "" {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: systemPrompt,
+		})
+	}
+
+	if err := templs.PromptTemplate.Execute(&promptBuf, data); err != nil {
 		return err
 	}
 
