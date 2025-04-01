@@ -1,7 +1,6 @@
 package chat_v2
 
 import (
-	"bytes"
 	"csust-got/log"
 	"csust-got/orm"
 	"fmt"
@@ -17,10 +16,37 @@ import (
 
 // ContextMessage 用于存储格式化后的上下文消息
 type ContextMessage struct {
-	ID      int // 消息ID
-	ReplyTo *int
-	User    string
-	Text    string
+	ID        int // 消息ID
+	ReplyTo   *int
+	User      string
+	UserNames userNames
+	Text      string
+}
+
+type userNames struct {
+	First string
+	Last  string
+}
+
+func (u *userNames) ShowName() string {
+	bs := strings.Builder{}
+
+	if u.First != "" {
+		bs.WriteString(u.First)
+	}
+
+	if u.Last != "" {
+		if u.First != "" {
+			bs.WriteString(" ")
+		}
+		bs.WriteString(u.Last)
+	}
+
+	return bs.String()
+}
+
+func (u *userNames) String() string {
+	return u.ShowName()
 }
 
 // GetMessageContext 获取消息的上下文
@@ -87,11 +113,16 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMess
 			if currentMsg.ReplyTo != nil {
 				replyID = &currentMsg.ReplyTo.ID
 			}
+
 			contextMsg := &ContextMessage{
 				Text:    currentMsgText,
 				ID:      currentMsg.ID,
 				ReplyTo: replyID,
 				User:    currentMsg.Sender.Username,
+				UserNames: userNames{
+					First: currentMsg.Sender.FirstName,
+					Last:  currentMsg.Sender.LastName,
+				},
 			}
 			// 将消息添加到链的前面，这样链就是按时间顺序排列的
 			chain = append(chain, contextMsg)
@@ -129,6 +160,10 @@ func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMess
 			ID:      msg.ID,
 			ReplyTo: replyId,
 			User:    msg.Sender.Username,
+			UserNames: userNames{
+				First: msg.Sender.FirstName,
+				Last:  msg.Sender.LastName,
+			},
 		}
 	})
 
@@ -145,9 +180,20 @@ func FormatContextMessages(messages []*ContextMessage) string {
 
 	for i, msg := range messages {
 		// 添加序号而不是用户名
-		result.WriteString("消息 ")
+		result.WriteString("[消息 ")
 		result.WriteString(strconv.Itoa(msg.ID))
-		result.WriteString(": ")
+		if msg.User != "" {
+			result.WriteString(" from ")
+			result.WriteString(msg.User)
+			result.WriteString("(")
+			result.WriteString(msg.UserNames.ShowName())
+			result.WriteString(")")
+		}
+		if msg.ReplyTo != nil {
+			result.WriteString(" reply to ")
+			result.WriteString(strconv.Itoa(*msg.ReplyTo))
+		}
+		result.WriteString("]: ")
 		result.WriteString(msg.Text)
 
 		if i < len(messages)-1 {
@@ -169,12 +215,13 @@ func FormatContextMessages(messages []*ContextMessage) string {
 // </messages>
 // ```
 func FormatContextMessagesWithXml(messages []*ContextMessage) string {
-	buf := bytes.NewBuffer(nil)
+	buf := strings.Builder{}
 
 	buf.WriteString("<messages>\n")
 
 	for _, msg := range messages {
-		buf.WriteString(fmt.Sprintf("<message id=\"%d\" user=\"%s\"", msg.ID, html.EscapeString(msg.User)))
+		buf.WriteString(fmt.Sprintf(`<message id="%d" username="%s" showname="%s"`, msg.ID,
+			html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName())))
 		if msg.ReplyTo != nil {
 			buf.WriteString(fmt.Sprintf(" replyTo=\"%d\"", msg.ReplyTo))
 		}
