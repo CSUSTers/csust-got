@@ -107,6 +107,7 @@ type promptData struct {
 	ContextMessages []*ContextMessage
 	ContextText     string
 	ContextXml      string
+	BotUsername     string // 添加 Bot 用户名字段
 }
 
 // Chat 处理聊天请求
@@ -135,6 +136,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextMessages: contextMsgs,
 		ContextText:     FormatContextMessages(contextMsgs),
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
+		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
 	}
 	templs, err := getTemplate(v2, false)
 	if err != nil {
