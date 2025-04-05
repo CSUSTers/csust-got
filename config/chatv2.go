@@ -32,6 +32,7 @@ type ChatConfigSingle struct {
 	MessageContext int            `mapstructure:"message_context"`
 	Temperature    *float32       `mapstructure:"temperature"`
 	PlaceHolder    string         `mapstructure:"place_holder"`
+	ErrorMessage   string         `mapstructure:"error_message"` // 添加错误提示消息配置
 	Steam          bool           `mapstructure:"stream"`
 	SystemPrompt   string         `mapstructure:"system_prompt"`
 	PromptTemplate string         `mapstructure:"prompt_template"`
@@ -44,6 +45,14 @@ func (ccs *ChatConfigSingle) GetTemperature() float32 {
 		return *ccs.Temperature
 	}
 	return 1.0
+}
+
+// GetErrorMessage returns the error message for the chat model
+func (ccs *ChatConfigSingle) GetErrorMessage() string {
+	if ccs.ErrorMessage != "" {
+		return ccs.ErrorMessage
+	}
+	return "😔很抱歉，我无法处理您的请求"
 }
 
 func (c *ChatConfigV2) readConfig() {
