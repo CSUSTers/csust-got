@@ -138,6 +138,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
 		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
 	}
+
 	templs, err := getTemplate(v2, false)
 	if err != nil {
 		log.Error("chat: parse template failed", zap.String("name", v2.Name))
@@ -175,13 +176,33 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	zap.L().Debug("Chat context messages", zap.Any("messages", messages))
 
 	client := clients[v2.Model.Name]
+
+	// 处理place_holder功能
+	var placeholderMsg *tb.Message
+	if v2.PlaceHolder != "" {
+		// 如果有place_holder，先发送placeholder消息
+		var placeHolderErr error
+		placeholderMsg, placeHolderErr = ctx.Bot().Reply(ctx.Message(), v2.PlaceHolder, tb.ModeMarkdownV2)
+		if placeHolderErr != nil {
+			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
+			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
+		}
+	}
+
 	resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
 		Model:       v2.Model.Model,
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
 	})
 
-	if err != nil {
+	// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
+	if placeholderMsg != nil && err != nil {
+		_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
+		if editErr != nil {
+			log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
+		}
+		return err
+	} else if err != nil {
 		return err
 	}
 
@@ -193,18 +214,31 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		response = util.EscapeTelegramReservedChars(response)
 		log.Debug("Chat response", zap.String("response", response))
 
-		// 发送回复
+		// 根据是否有placeholder选择更新或发送新消息
 		var replyMsg *tb.Message
-		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
-		if err != nil {
-			log.Error("Failed to send reply", zap.Error(err))
-			return err
+		var err error
+
+		if placeholderMsg != nil {
+			// 如果使用了placeholder，更新消息
+			replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
+			if err != nil {
+				log.Error("Failed to edit placeholder message", zap.Error(err))
+				return err
+			}
+		} else {
+			// 如果没有使用placeholder，直接发送响应
+			replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
+			if err != nil {
+				log.Error("Failed to send reply", zap.Error(err))
+				return err
+			}
 		}
+
 		err = orm.PushMessageToStream(replyMsg)
 		if err != nil {
 			log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
 		}
-		return err
+		return nil
 	}
 
 	return nil
