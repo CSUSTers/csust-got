@@ -8,6 +8,9 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
+	"encoding/base64"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +20,8 @@ import (
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
+	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -168,10 +173,56 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		return err
 	}
 
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: promptBuf.String(),
-	})
+	multiPartContent := false
+	var contents []openai.ChatMessagePart
+	if v2.Model.Features.Image && v2.Features.Image {
+		// TODO handle multi photos album
+		imgs := ctx.Message().Photo
+		if imgs == nil && ctx.Message().ReplyTo != nil {
+			imgs = ctx.Message().ReplyTo.Photo
+		}
+		if imgs != nil {
+			multiPartContent = true
+			contents = make([]openai.ChatMessagePart, 0, 2)
+			w, h := imgs.Width, imgs.Height
+			ori, _, err := image.Decode(imgs.MediaFile().FileReader)
+			if err != nil {
+				log.Error("Failed to decode image", zap.Error(err))
+			}
+
+			w, h = v2.Features.ImageResize(w, h)
+			img := image.NewRGBA(image.Rect(0, 0, w, h))
+			draw.ApproxBiLinear.Scale(img, img.Rect, ori, ori.Bounds(), draw.Over, nil)
+
+			buf := bytes.NewBuffer(nil)
+			jpeg.Encode(buf, img, &jpeg.Options{Quality: 90})
+			base64Img := []byte("data:image/jpeg;base64,")
+			base64Img = base64.StdEncoding.AppendEncode(base64Img, buf.Bytes())
+			contents = append(contents,
+				openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: string(base64Img),
+					},
+				},
+				openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: promptBuf.String(),
+				})
+		}
+	}
+
+	if !multiPartContent {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: promptBuf.String(),
+		})
+	} else {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:         openai.ChatMessageRoleUser,
+			MultiContent: contents,
+		})
+	}
 
 	zap.L().Debug("Chat context messages", zap.Any("messages", messages))
 

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"math"
+
 	"github.com/spf13/viper"
 )
 
@@ -14,6 +16,13 @@ type Model struct {
 	RetryNums     int    `mapstructure:"retry_nums"`
 	RetryInterval int    `mapstructure:"retry_interval"`
 	Proxy         string `mapstructure:"proxy"`
+
+	Features ModelFeatures `mapstructure:"features"`
+}
+
+// ModelFeatures is the model features switch
+type ModelFeatures struct {
+	Image bool `mapstructure:"image"`
 }
 
 // ChatTrigger is the configuration for chat
@@ -37,6 +46,53 @@ type ChatConfigSingle struct {
 	SystemPrompt   string         `mapstructure:"system_prompt"`
 	PromptTemplate string         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
+
+	Features FeatureSetting `mapstructure:"features"`
+}
+
+// FeatureSetting is the ~~Nintendo~~ switch and setting for model features
+type FeatureSetting struct {
+	Image              bool `mapstructure:"image"`
+	ImageResizeSetting struct {
+		MaxWidth     int  `mapstructure:"max_width"`
+		MaxHeight    int  `mapstructure:"max_height"`
+		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
+	} `mapstructure:"image_resize"`
+}
+
+// ImageResize return the resized width and height for image
+func (f *FeatureSetting) ImageResize(w, h int) (int, int) {
+	mw, mh := f.ImageResizeSetting.MaxWidth, f.ImageResizeSetting.MaxHeight
+	if mw <= 0 {
+		mw = 512
+	}
+	if mh <= 0 {
+		mh = 512
+	}
+
+	if f.ImageResizeSetting.NotKeepRatio {
+		if w > mw {
+			w = mw
+		}
+		if h > mh {
+			h = mh
+		}
+	} else {
+		ratio := float64(w) / float64(h)
+
+		wOversize := float64(w) / float64(mw)
+		hOversize := float64(h) / float64(mh)
+		if wOversize > 1. || hOversize > 1. {
+			if wOversize > hOversize {
+				w = mw
+				h = int(math.Round(float64(mw) / ratio))
+			} else {
+				h = mh
+				w = int(math.Round(float64(mh) * ratio))
+			}
+		}
+	}
+	return w, h
 }
 
 // GetTemperature returns the temperature for the chat model

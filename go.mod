@@ -7,6 +7,7 @@ require (
 	github.com/meilisearch/meilisearch-go v0.31.0
 	github.com/prometheus/client_golang v1.21.1
 	github.com/prometheus/common v0.63.0
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/quic-go/quic-go v0.50.1
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sashabaranov/go-openai v1.38.1
@@ -14,13 +15,12 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.25.0
+	golang.org/x/image v0.26.0
 	golang.org/x/net v0.38.0
-	golang.org/x/sync v0.12.0
-	golang.org/x/text v0.23.0
+	golang.org/x/sync v0.13.0
+	golang.org/x/text v0.24.0
 	golang.org/x/time v0.11.0
 	gopkg.in/telebot.v3 v3.3.8
-	github.com/puzpuzpuz/xsync/v3 v3.5.1
 )
 
 require (
