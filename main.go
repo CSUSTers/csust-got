@@ -223,8 +223,12 @@ func customHandler(ctx Context) error {
 		return nil
 	}
 
+	text := ctx.Message().Text
+	if text == "" {
+		text = ctx.Message().Caption
+	}
 	for _, v := range regexHandlers {
-		if v.Regex.MatchString(ctx.Message().Text) {
+		if v.Regex.MatchString(text) {
 			return v.Func(ctx)
 		}
 	}
@@ -254,7 +258,7 @@ func registerEventHandler(bot *Bot) {
 	// bot.Handle(OnSticker, base.DoNothing)
 	bot.Handle(OnAnimation, base.DoNothing)
 	bot.Handle(OnMedia, base.DoNothing)
-	bot.Handle(OnPhoto, base.DoNothing)
+	bot.Handle(OnPhoto, customHandler)
 	bot.Handle(OnVideo, base.DoNothing)
 	bot.Handle(OnVoice, base.DoNothing)
 	bot.Handle(OnVideoNote, base.DoNothing)
