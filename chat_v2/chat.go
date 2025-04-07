@@ -8,6 +8,9 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
+	"encoding/base64"
+	"image"
+	"image/jpeg"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +20,9 @@ import (
 	"github.com/puzpuzpuz/xsync/v3"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
+	"golang.org/x/image/draw"
+	// nolint:revive // import for registering webp decoder to image package
+	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -168,12 +174,75 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		return err
 	}
 
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: promptBuf.String(),
-	})
+	multiPartContent := false
+	var contents []openai.ChatMessagePart
+	if v2.Model.Features.Image && v2.Features.Image {
+		// TODO handle multi photos album
+		msg := ctx.Message()
+		for msg.ReplyTo != nil {
+			if msg.Photo != nil {
+				break
+			}
+			msg = msg.ReplyTo
+		}
+		imgs := msg.Photo
+		if imgs != nil {
+			contents = make([]openai.ChatMessagePart, 0, 2)
+			w, h := imgs.Width, imgs.Height
+			file, _ := ctx.Bot().File(imgs.MediaFile())
+			ori, _, err := image.Decode(file)
+			if err != nil {
+				log.Error("Failed to decode image", zap.Error(err))
+				// TODO handle error
+				goto final
+			}
 
-	zap.L().Debug("Chat context messages", zap.Any("messages", messages))
+			w, h = v2.Features.ImageResize(w, h)
+			img := image.NewRGBA(image.Rect(0, 0, w, h))
+			log.Info("convert image size", zap.Any("from", ori.Bounds().Size()), zap.Any("to", img.Bounds().Size()))
+			draw.ApproxBiLinear.Scale(img, img.Rect, ori, ori.Bounds(), draw.Over, nil)
+
+			buf := bytes.NewBuffer(nil)
+			err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 90})
+			if err != nil {
+				log.Error("Failed to encode image to jpeg", zap.Error(err))
+				// TODO handle error
+				goto final
+			}
+			log.Info("encoded jpeg image size", zap.Int("size", buf.Len()))
+			base64Img := []byte("data:image/jpeg;base64,")
+			base64Img = base64.StdEncoding.AppendEncode(base64Img, buf.Bytes())
+			log.Info("encoded base64 image data url size", zap.Int("size", len(base64Img)))
+			contents = append(contents,
+				openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeImageURL,
+					ImageURL: &openai.ChatMessageImageURL{
+						URL: string(base64Img),
+					},
+				},
+				openai.ChatMessagePart{
+					Type: openai.ChatMessagePartTypeText,
+					Text: promptBuf.String(),
+				})
+
+			multiPartContent = true
+		}
+	}
+
+final:
+	if !multiPartContent {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: promptBuf.String(),
+		})
+	} else {
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:         openai.ChatMessageRoleUser,
+			MultiContent: contents,
+		})
+	}
+
+	// zap.L().Debug("Chat context messages", zap.Any("messages", messages))
 
 	client := clients[v2.Model.Name]
 
@@ -194,6 +263,10 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
 	})
+
+	if err != nil {
+		log.Error("Failed to send chat completion message", zap.Error(err))
+	}
 
 	// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
 	if placeholderMsg != nil && err != nil {
@@ -220,6 +293,9 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 
 		if placeholderMsg != nil {
 			// 如果使用了placeholder，更新消息
+			if response == "" {
+				response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
+			}
 			replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
 			if err != nil {
 				log.Error("Failed to edit placeholder message", zap.Error(err))
