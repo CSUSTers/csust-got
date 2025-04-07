@@ -177,27 +177,39 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	var contents []openai.ChatMessagePart
 	if v2.Model.Features.Image && v2.Features.Image {
 		// TODO handle multi photos album
-		imgs := ctx.Message().Photo
-		if imgs == nil && ctx.Message().ReplyTo != nil {
-			imgs = ctx.Message().ReplyTo.Photo
+		msg := ctx.Message()
+		for msg.ReplyTo != nil {
+			if msg.Photo != nil {
+				break
+			}
+			msg = msg.ReplyTo
 		}
+		imgs := msg.Photo
 		if imgs != nil {
-			multiPartContent = true
 			contents = make([]openai.ChatMessagePart, 0, 2)
 			w, h := imgs.Width, imgs.Height
-			ori, _, err := image.Decode(imgs.MediaFile().FileReader)
+			file, err := ctx.Bot().File(imgs.MediaFile())
+			ori, _, err := image.Decode(file)
 			if err != nil {
 				log.Error("Failed to decode image", zap.Error(err))
 			}
 
 			w, h = v2.Features.ImageResize(w, h)
 			img := image.NewRGBA(image.Rect(0, 0, w, h))
+			log.Info("convert image size", zap.Any("from", ori.Bounds().Size()), zap.Any("to", img.Bounds().Size()))
 			draw.ApproxBiLinear.Scale(img, img.Rect, ori, ori.Bounds(), draw.Over, nil)
 
 			buf := bytes.NewBuffer(nil)
-			jpeg.Encode(buf, img, &jpeg.Options{Quality: 90})
+			err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 90})
+			if err != nil {
+				log.Error("Failed to encode image to jpeg", zap.Error(err))
+				// TODO handle error
+				goto final
+			}
+			log.Info("encoded jpeg image size", zap.Int("size", buf.Len()))
 			base64Img := []byte("data:image/jpeg;base64,")
 			base64Img = base64.StdEncoding.AppendEncode(base64Img, buf.Bytes())
+			log.Info("encoded base64 image data url size", zap.Int("size", len(base64Img)))
 			contents = append(contents,
 				openai.ChatMessagePart{
 					Type: openai.ChatMessagePartTypeImageURL,
@@ -209,9 +221,12 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 					Type: openai.ChatMessagePartTypeText,
 					Text: promptBuf.String(),
 				})
+
+			multiPartContent = true
 		}
 	}
 
+final:
 	if !multiPartContent {
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleUser,
@@ -224,7 +239,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		})
 	}
 
-	zap.L().Debug("Chat context messages", zap.Any("messages", messages))
+	// zap.L().Debug("Chat context messages", zap.Any("messages", messages))
 
 	client := clients[v2.Model.Name]
 
@@ -245,6 +260,10 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
 	})
+
+	if err != nil {
+		log.Error("Failed to send chat completion message", zap.Error(err))
+	}
 
 	// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
 	if placeholderMsg != nil && err != nil {
@@ -271,6 +290,9 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 
 		if placeholderMsg != nil {
 			// 如果使用了placeholder，更新消息
+			if response == "" {
+				response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
+			}
 			replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
 			if err != nil {
 				log.Error("Failed to edit placeholder message", zap.Error(err))

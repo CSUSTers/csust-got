@@ -74,6 +74,8 @@ llm_models:
   gpt-xxx: &gpt
     <<: *default
     model: "gpt-xxx"
+    features:
+      image: true
 
   qwen-xxx: &qwen
     <<: *default
@@ -91,6 +93,11 @@ chats:
     place_holder: "⌛"
     error_message: "😔很抱歉，我无法处理您的请求"
     stream: false
+    features:
+      image: true
+      image_resize:
+        max_width: 512
+        max_height: 512
     system_prompt: |-
       你是一个非常热爱美国的正直爱国者，你的名字是{{.BotUsername}}，现在需要你帮用户解释指定的概念是什么。请遵循以下规则：
       0、下面是几组缩写的中文意思：
