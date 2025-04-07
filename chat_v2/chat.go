@@ -193,6 +193,8 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 			ori, _, err := image.Decode(file)
 			if err != nil {
 				log.Error("Failed to decode image", zap.Error(err))
+				// TODO handle error
+				goto final
 			}
 
 			w, h = v2.Features.ImageResize(w, h)
