@@ -188,7 +188,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		if imgs != nil {
 			contents = make([]openai.ChatMessagePart, 0, 2)
 			w, h := imgs.Width, imgs.Height
-			file, err := ctx.Bot().File(imgs.MediaFile())
+			file, _ := ctx.Bot().File(imgs.MediaFile())
 			ori, _, err := image.Decode(file)
 			if err != nil {
 				log.Error("Failed to decode image", zap.Error(err))
