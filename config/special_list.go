@@ -11,6 +11,10 @@ type specialListConfig struct {
 func (c *specialListConfig) readConfig() {
 	c.Chats = make([]int64, 0)
 	c.Enabled = viper.GetBool(c.Name + ".enabled")
+	chats := viper.GetIntSlice(c.Name + ".chats")
+	for _, v := range chats {
+		c.Chats = append(c.Chats, int64(v))
+	}
 }
 
 func (c *specialListConfig) checkConfig() {

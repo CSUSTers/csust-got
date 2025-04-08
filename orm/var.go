@@ -4,5 +4,6 @@ import "errors"
 
 // redis process errors
 var (
-	ErrWrongType = errors.New("wrong type")
+	ErrWrongType    = errors.New("wrong type")
+	ErrMessageIsNil = errors.New("message is nil")
 )

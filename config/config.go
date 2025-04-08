@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -52,6 +53,7 @@ func NewBotConfig() *Config {
 		GithubConfig:        new(githubConfig),
 		ContentFilterConfig: new(contentFilterConfig),
 		DebugOptConfig:      new(debugOptConfig),
+		ChatConfigV2:        new(ChatConfigV2),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -81,6 +83,7 @@ type Config struct {
 	PromConfig          *promConfig
 	GenShinConfig       *genShinConfig
 	ChatConfig          *chatConfig
+	ChatConfigV2        *ChatConfigV2
 	MeiliConfig         *meiliConfig
 	McConfig            *mcConfig
 	GithubConfig        *githubConfig
@@ -100,6 +103,19 @@ func initViper(configFile, envPrefix string) {
 		if err := viper.ReadInConfig(); err != nil {
 			zap.L().Warn("an error was produced when reading config!", zap.String("configFile", configFile), zap.Error(err))
 			return
+		}
+
+		// 检查同一目录下是否存在custom.yaml文件
+		customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+		v := viper.New()
+		v.SetConfigFile(customConfigFile)
+		if err := v.ReadInConfig(); err == nil {
+			// 成功读取了custom.yaml，合并配置
+			if err := viper.MergeConfigMap(v.AllSettings()); err != nil {
+				zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+			} else {
+				zap.L().Info("custom config merged successfully", zap.String("customConfigFile", customConfigFile))
+			}
 		}
 	}
 	viper.SetEnvPrefix(envPrefix)
@@ -134,6 +150,7 @@ func readConfig() {
 	BotConfig.McConfig.readConfig()
 	BotConfig.GithubConfig.readConfig()
 	BotConfig.ContentFilterConfig.readConfig()
+	BotConfig.ChatConfigV2.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()

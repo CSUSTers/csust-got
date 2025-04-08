@@ -2,6 +2,7 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/chat_v2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	"csust-got/base"
@@ -37,6 +39,9 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
+	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
+
 	// go iwatch.WatchService()
 
 	bot, err := initBot()
@@ -51,6 +56,7 @@ func main() {
 	registerBaseHandler(bot)
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
+	registerChatConfigHandler(bot)
 	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
@@ -109,7 +115,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware, contentFilterMiddleware, byeWorldMiddleware,
+		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
 	config.BotConfig.Bot = bot
@@ -208,17 +214,27 @@ func stickerDlHandler(ctx Context) error {
 func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
-	if cmd == nil {
-		// all text message will be handled by this handler,
-		// but only command should be processed, so return nil for non-command message
+	if cmd != nil {
+		cmdText := cmd.Name()
+
+		if base.DecodeCommandPatt.MatchString(cmdText) {
+			return base.Decode(ctx)
+		}
 		return nil
 	}
-	cmdText := cmd.Name()
 
-	if base.DecodeCommandPatt.MatchString(cmdText) {
-		return base.Decode(ctx)
+	text := ctx.Message().Text
+	if text == "" {
+		text = ctx.Message().Caption
+	}
+	for _, v := range regexHandlers {
+		if v.Regex.MatchString(text) {
+			return v.Func(ctx)
+		}
 	}
 
+	// all text message will be handled by this handler,
+	// but only command should be processed, so return nil for non-command message
 	return nil
 }
 
@@ -242,11 +258,49 @@ func registerEventHandler(bot *Bot) {
 	// bot.Handle(OnSticker, base.DoNothing)
 	bot.Handle(OnAnimation, base.DoNothing)
 	bot.Handle(OnMedia, base.DoNothing)
-	bot.Handle(OnPhoto, base.DoNothing)
+	bot.Handle(OnPhoto, customHandler)
 	bot.Handle(OnVideo, base.DoNothing)
 	bot.Handle(OnVoice, base.DoNothing)
 	bot.Handle(OnVideoNote, base.DoNothing)
 	bot.Handle(OnDocument, base.DoNothing)
+}
+
+func registerChatConfigHandler(bot *Bot) {
+	for _, v := range *config.BotConfig.ChatConfigV2 {
+		for _, tr := range v.Trigger {
+			if tr.Command != "" {
+				// 创建局部副本以避免闭包捕获循环变量
+				vCopy := v
+				trCopy := tr
+				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
+					return chat_v2.Chat(ctx, vCopy, trCopy)
+				})
+			}
+		}
+	}
+}
+
+var regexHandlers []struct {
+	Regex *regexp.Regexp
+	Func  func(Context) error
+}
+
+func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
+	for _, v := range v2 {
+		for _, tr := range v.Trigger {
+			if tr.Regex != "" {
+				vCopy := v   // 创建局部副本
+				trCopy := tr // 创建局部副本
+				regexHandlers = append(regexHandlers, struct {
+					Regex *regexp.Regexp
+					Func  func(Context) error
+				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
+					return chat_v2.Chat(context, vCopy, trCopy)
+				}})
+			}
+		}
+	}
+
 }
 
 func loggerMiddleware(next HandlerFunc) HandlerFunc {
@@ -517,6 +571,22 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 
 		if cmd.Name() != "reburn" {
 			return nil
+		}
+		return next(ctx)
+	}
+}
+
+func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		m := ctx.Message()
+		if m != nil && (m.Text != "" || m.Caption != "") {
+			// 异步存储完整消息结构体到Redis
+			go func() {
+				err := orm.PushMessageToStream(m)
+				if err != nil {
+					log.Error("Store message to Redis failed", zap.Error(err))
+				}
+			}()
 		}
 		return next(ctx)
 	}
