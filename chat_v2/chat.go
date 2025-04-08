@@ -21,6 +21,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
+
 	// nolint:revive // import for registering webp decoder to image package
 	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
@@ -113,6 +114,7 @@ type promptData struct {
 	ContextMessages []*ContextMessage
 	ContextText     string
 	ContextXml      string
+	ReplyToXml      string
 	BotUsername     string // 添加 Bot 用户名字段
 }
 
@@ -142,6 +144,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextMessages: contextMsgs,
 		ContextText:     FormatContextMessages(contextMsgs),
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
+		ReplyToXml:      FormatSingleTbMessage(ctx.Message().ReplyTo, "REPLY_TO"),
 		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
 	}
 
