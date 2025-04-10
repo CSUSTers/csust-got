@@ -268,8 +268,7 @@ func TestHeapInitAndPushAndPop(t *testing.T) {
 func BenchmarkHeapInit10K(b *testing.B) {
 	heap := TakeAsHeap(s10K, funLess, funEqual)
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		b.StopTimer()
 		randSlice(s10K, bMin, bMax)
 		b.StartTimer()
@@ -295,8 +294,7 @@ func BenchmarkHeapPopPush10K(b *testing.B) {
 	heap := TakeAsHeap(s10K, funLess, funEqual)
 	heap.Init()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		heap.Pop()
 		heap.Push(<-randNum)
 	}
@@ -307,8 +305,7 @@ func BenchmarkHeapPopPush10M(b *testing.B) {
 	heap := TakeAsHeap(s10M, funLess, funEqual)
 	heap.Init()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		heap.Pop()
 		heap.Push(<-randNum)
 	}
