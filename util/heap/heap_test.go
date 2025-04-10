@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"slices"
 )
 
 const (
@@ -66,15 +67,15 @@ func TestNewHeapInit(t *testing.T) {
 		t.Skip("skip heavy test in short mode")
 	}
 
-	for i := 0; i < len(testLen); i++ { // for each testLen
-		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
+	for i := range testLen { // for each testLen
+		for j := range maxInt { // for each minInt ~ maxInt
 			ti, tj := i, j
 			tName := fmt.Sprintf("TestNewHeapInit len=%d, min=%d, max=%d", testLen[i], minInt[j], maxInt[j])
 			t.Run(tName, func(t *testing.T) {
 				t.Parallel()
 				ass := assert.New(t)
 				// run each test multiple times
-				for k := 0; k < 2*testLen[ti]+1; k++ {
+				for range 2*testLen[ti] + 1 {
 					d := make([]int, testLen[ti])
 					for v := range d {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
@@ -94,7 +95,7 @@ func TestNewHeapInit(t *testing.T) {
 					ass.True(ok)
 					ass.Equal(len(d), h.Len())
 					// test Init can be called multiple times
-					for v := 0; v < 3; v++ {
+					for range 3 {
 						ass.NotPanics(func() { h.Init() })
 						ass.NotPanics(func() { ok = h.IsHeap() })
 						ass.True(ok)
@@ -113,14 +114,14 @@ func TestHeapPush(t *testing.T) {
 		t.Skip("skip heavy test in short mode")
 	}
 
-	for i := 0; i < len(testLen); i++ { // for each testLen
-		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
+	for i := range testLen { // for each testLen
+		for j := range maxInt { // for each minInt ~ maxInt
 			ti, tj := i, j
 			tName := fmt.Sprintf("TestHeapPush len=%d, min=%d, max=%d", testLen[i], minInt[j], maxInt[j])
 			t.Run(tName, func(t *testing.T) {
 				t.Parallel()
 				ass := assert.New(t)
-				for k := 0; k < 20; k++ {
+				for range 20 {
 					d := make([]int, testLen[ti])
 					for v := range d {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
@@ -129,7 +130,7 @@ func TestHeapPush(t *testing.T) {
 					h := NewHeapInit(d, funLess, funEqual)
 					// test push
 					var ok bool
-					for v := 0; v < testLen[ti]/2+1; v++ {
+					for v := range testLen[ti]/2 + 1 {
 						// push random value
 						rd := minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 						ass.NotPanics(func() { h.Push(rd) })
@@ -174,23 +175,21 @@ func TestHeapPop(t *testing.T) {
 		t.Skip("skip heavy test in short mode")
 	}
 
-	for i := 0; i < len(testLen); i++ { // for each testLen
-		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
+	for i := range testLen { // for each testLen
+		for j := range maxInt { // for each minInt ~ maxInt
 			ti, tj := i, j
 			tName := fmt.Sprintf("TestHeapPop len=%d, min=%d, max=%d", testLen[i], minInt[j], maxInt[j])
 			t.Run(tName, func(t *testing.T) {
 				t.Parallel()
 				ass := assert.New(t)
-				for k := 0; k < 20; k++ {
+				for range 20 {
 					d := make([]int, testLen[ti])
 					for v := range d {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 					}
 					// test NewHeapInit
 					h := NewHeapInit(d, funLess, funEqual)
-					sort.Slice(d, func(i, j int) bool {
-						return d[i] < d[j]
-					})
+					slices.Sort(d)
 					// test pop
 					for _, v := range d {
 						var u int
@@ -227,14 +226,14 @@ func TestHeapInitAndPushAndPop(t *testing.T) {
 		t.Skip("skip heavy test in short mode")
 	}
 
-	for i := 0; i < len(testLen); i++ { // for each testLen
-		for j := 0; j < len(maxInt); j++ { // for each minInt ~ maxInt
+	for i := range testLen { // for each testLen
+		for j := range maxInt { // for each minInt ~ maxInt
 			ti, tj := i, j
 			tName := fmt.Sprintf("TestHeapInitAndPushAndPop len=%d, min=%d, max=%d", testLen[i], minInt[j], maxInt[j])
 			t.Run(tName, func(t *testing.T) {
 				t.Parallel()
 				ass := assert.New(t)
-				for k := 0; k < 20; k++ {
+				for range 20 {
 					d := make([]int, testLen[ti])
 					for v := range d {
 						d[v] = minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
@@ -243,7 +242,7 @@ func TestHeapInitAndPushAndPop(t *testing.T) {
 					h := NewHeapInit(d, funLess, funEqual)
 					// test push
 					var ok bool
-					for v := 0; v < testLen[ti]+1; v++ {
+					for range testLen[ti] + 1 {
 						// push random value
 						rd := minInt[tj] + rand.Intn(maxInt[tj]-minInt[tj]+1)
 						ass.NotPanics(func() { h.Push(rd) })
@@ -270,7 +269,7 @@ func BenchmarkHeapInit10K(b *testing.B) {
 	heap := TakeAsHeap(s10K, funLess, funEqual)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		b.StopTimer()
 		randSlice(s10K, bMin, bMax)
 		b.StartTimer()
@@ -282,8 +281,7 @@ func BenchmarkHeapInit10K(b *testing.B) {
 func BenchmarkHeapInit10M(b *testing.B) {
 	heap := TakeAsHeap(s10M, funLess, funEqual)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		randSlice(s10M, bMin, bMax)
 		b.StartTimer()
@@ -298,7 +296,7 @@ func BenchmarkHeapPopPush10K(b *testing.B) {
 	heap.Init()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		heap.Pop()
 		heap.Push(<-randNum)
 	}
@@ -310,7 +308,7 @@ func BenchmarkHeapPopPush10M(b *testing.B) {
 	heap.Init()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		heap.Pop()
 		heap.Push(<-randNum)
 	}

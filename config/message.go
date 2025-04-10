@@ -31,7 +31,7 @@ func (c *messageConfig) readConfig() {
 
 func (c *messageConfig) checkConfig() {
 	v := reflect.ValueOf(c).Elem()
-	for i := 0; i < v.NumField(); i++ {
+	for i := range v.NumField() {
 		s := v.Field(i).String()
 		if s == "" {
 			zap.L().Warn("message config not set, use default value",

@@ -34,74 +34,74 @@ type StableDiffusionConfig struct {
 
 // GetValueByKey get value by key.
 func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
-	switch {
-	case key == "server":
+	switch key {
+	case "server":
 		return "🤫"
-	case key == "prompt":
+	case "prompt":
 		if c.Prompt == "" {
 			return "masterpiece, best quality"
 		}
 		return c.Prompt
-	case key == "negative_prompt":
+	case "negative_prompt":
 		if c.NegativePrompt == "" {
 			return "nsfw, lowres, bad anatomy, bad hands, (((deformed))), [blurry], (poorly drawn hands), (poorly drawn feet), " +
 				"text, error, missing fingers, extra digit, " +
 				"fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
 		}
 		return c.NegativePrompt
-	case key == "steps":
+	case "steps":
 		if c.Steps == 0 {
 			return 28
 		}
 		return c.Steps
-	case key == "scale":
+	case "scale":
 		if c.Scale == 0 {
 			return 7
 		}
 		return c.Scale
-	case key == "width":
+	case "width":
 		if c.Width == 0 {
 			return 512
 		}
 		return c.Width
-	case key == "height":
+	case "height":
 		if c.Height == 0 {
 			return 512
 		}
 		return c.Height
-	case key == "res":
+	case "res":
 		return fmt.Sprintf("%dx%d", c.GetValueByKey("width"), c.GetValueByKey("height"))
-	case key == "number":
+	case "number":
 		if c.Number == 0 {
 			return 1
 		}
 		return c.Number
-	case key == "sampler":
+	case "sampler":
 		if c.Sampler == "" {
 			return "Euler a"
 		}
 		return c.Sampler
-	case key == "hr":
+	case "hr":
 		if c.HiResEnabled == "" {
 			return "off"
 		}
 		return c.HiResEnabled
-	case key == "denoising_strength":
+	case "denoising_strength":
 		if c.DenoisingStrength == 0 {
 			return 0.6
 		}
 		return c.DenoisingStrength
-	case key == "hr_scale":
+	case "hr_scale":
 		if c.HiResScale == 0 {
 			return 2.0
 		}
 		return c.HiResScale
-	case key == "hr_upscaler":
+	case "hr_upscaler":
 		if c.HiResUpscaler == "" {
 			return "Latent"
 		}
 		return c.HiResUpscaler
-	case key == "hr_second_pass_steps":
+	case "hr_second_pass_steps":
 		if c.HiResSecondPassSteps == 0 {
 			return 20
 		}
@@ -113,18 +113,18 @@ func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
 
 // SetValueByKey set config value by key.
 func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
-	switch {
-	case key == "server":
+	switch key {
+	case "server":
 		if value == "*" {
 			c.Server = ""
 		} else {
 			c.Server = strings.TrimSuffix(value, "/")
 		}
-	case key == "prompt":
+	case "prompt":
 		c.Prompt = value
-	case key == "negative_prompt":
+	case "negative_prompt":
 		c.NegativePrompt = value
-	case key == "steps":
+	case "steps":
 		steps, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: steps must be a integer", ErrConfigIsInvalid)
@@ -133,7 +133,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Steps < 1 || c.Steps > 50 {
 			return fmt.Errorf("%w: steps too small or too large", ErrConfigIsInvalid)
 		}
-	case key == "scale":
+	case "scale":
 		scale, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: scale must be a integer", ErrConfigIsInvalid)
@@ -142,7 +142,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Scale < 1 || c.Scale > 20 {
 			return fmt.Errorf("%w: scale too small or too large", ErrConfigIsInvalid)
 		}
-	case key == "width":
+	case "width":
 		width, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: width must be a integer", ErrConfigIsInvalid)
@@ -151,7 +151,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Width < 1 || c.Width > 1024 {
 			return fmt.Errorf("%w: width too small or too large", ErrConfigIsInvalid)
 		}
-	case key == "height":
+	case "height":
 		height, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: height must be a integer", ErrConfigIsInvalid)
@@ -160,7 +160,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Height < 1 || c.Height > 1024 {
 			return fmt.Errorf("%w: height too small or too large", ErrConfigIsInvalid)
 		}
-	case key == "res":
+	case "res":
 		res := strings.Split(value, "x")
 		if len(res) != 2 {
 			return fmt.Errorf("%w: invalid resolution", ErrConfigIsInvalid)
@@ -171,7 +171,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if err := c.SetValueByKey("height", res[1]); err != nil {
 			return err
 		}
-	case key == "number":
+	case "number":
 		number, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: number must be a integer", ErrConfigIsInvalid)
@@ -180,18 +180,18 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.Number < 1 || c.Number > 4 {
 			return fmt.Errorf("%w: number too small or too large", ErrConfigIsInvalid)
 		}
-	case key == "sampler":
+	case "sampler":
 		if value == "*" {
 			value = "Euler a"
 		}
 		c.Sampler = value
-	case key == "hr":
+	case "hr":
 		if value == "on" {
 			c.HiResEnabled = "on"
 		} else {
 			c.HiResEnabled = "off"
 		}
-	case key == "denoising_strength":
+	case "denoising_strength":
 		denoisingStrength, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return fmt.Errorf("%w: denoising_strength must be a float", ErrConfigIsInvalid)
@@ -200,7 +200,7 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.DenoisingStrength < 0 || c.DenoisingStrength > 1 {
 			return fmt.Errorf("%w: denoising_strength must be between 0 and 1", ErrConfigIsInvalid)
 		}
-	case key == "hr_scale":
+	case "hr_scale":
 		hrScale, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return fmt.Errorf("%w: hr_scale must be a float", ErrConfigIsInvalid)
@@ -209,12 +209,12 @@ func (c *StableDiffusionConfig) SetValueByKey(key string, value string) error {
 		if c.HiResScale < 1 || c.HiResScale > 4 {
 			return fmt.Errorf("%w: hr_scale must be between 1 and 4", ErrConfigIsInvalid)
 		}
-	case key == "hr_upscaler":
+	case "hr_upscaler":
 		if value == "*" {
 			value = "Latent"
 		}
 		c.HiResUpscaler = value
-	case key == "hr_second_pass_steps":
+	case "hr_second_pass_steps":
 		hrSecondPassSteps, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%w: hr_second_pass_steps must be a integer", ErrConfigIsInvalid)
