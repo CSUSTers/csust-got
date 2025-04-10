@@ -251,7 +251,7 @@ func Reburn(ctx tb.Context) error {
 
 		var userString string
 		if m.User.Username != "" {
-			userString = html.EscapeString(fmt.Sprintf("@%s", m.User.Username))
+			userString = html.EscapeString("@" + m.User.Username)
 		} else {
 			userString = fmt.Sprintf(`<a href="tg://user?id=%d">%s %s</a>`, m.User.ID,
 				html.EscapeString(m.User.FirstName),

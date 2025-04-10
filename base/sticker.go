@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -398,13 +399,14 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	case "mp4", "png", "apng", "webp":
 		ff := ffconv.FFConv{LogCmd: true}
 		outputArgs := []ffmpeg_go.KwArgs{}
-		if f == "png" || f == "apng" {
+		switch f {
+		case "png", "apng":
 			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
 				"plays": "0",
 				"f":     "apng",
 				"c:v":   "apng",
 			})
-		} else if f == "webp" {
+		case "webp":
 			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
 				"plays": "0",
 				"f":     "webp",
@@ -660,7 +662,7 @@ loop:
 				default:
 					replyMsgLock.Lock()
 					if replyMsg == "" {
-						replyMsg = fmt.Sprintf("unknown target image format: %s", f)
+						replyMsg = "unknown target image format: " + f
 					}
 					replyMsgLock.Unlock()
 
@@ -797,7 +799,7 @@ func getFileCacheKeys(set *tb.StickerSet, opt *stickerOpts) ([]string, error) {
 		log.Error("failed to write to hasher", zap.Error(err))
 		return nil, err
 	}
-	keys = append(keys, fmt.Sprintf("%x", hash.Sum64()))
+	keys = append(keys, strconv.FormatUint(hash.Sum64(), 16))
 	return keys, nil
 }
 

@@ -45,7 +45,7 @@ func SliceIsMaxheap[T util.Ordered](xs []T) bool {
 		return true
 	}
 
-	for i := 0; i < len(xs)/2; i++ {
+	for i := range len(xs) / 2 {
 		left, right := 2*i+1, 2*i+2
 		if left >= len(xs) {
 			break

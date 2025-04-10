@@ -83,7 +83,7 @@ func (c *biliProcessor) clearBiliUrlQuery(u *urlx.ExtraUrl) error {
 }
 
 func (c *biliProcessor) writeUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error {
-	ctx, cancel := context.WithTimeout(context.Background(), c.processConfig.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
 	defer cancel()
 
 	if strings.ToLower(u.Domain) == b23URL {

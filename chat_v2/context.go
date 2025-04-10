@@ -236,7 +236,7 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 	return buf.String()
 }
 
-// FormatSingleTgMessage format tb msg to xml with custom tag
+// FormatSingleTbMessage format tb msg to xml with custom tag
 func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 	if msg == nil {
 		return ""
@@ -244,29 +244,30 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 
 	buf := strings.Builder{}
 
-	buf.WriteString(fmt.Sprintf(`<%s id="%d" username="%s" showname="%s">`, tag, msg.ID,
+	buf.WriteString(fmt.Sprintf(`<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
 		html.EscapeString(msg.Sender.Username),
 		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
 
 	text := msg.Text
 	if text == "" {
-		if msg.Photo != nil {
-			buf.WriteString("<image_placeholder />")
+		switch {
+		case msg.Photo != nil:
+			buf.WriteString("<image_placeholder />\n")
 			text = msg.Photo.Caption
-		} else if msg.Document != nil {
+		case msg.Document != nil:
 			buf.WriteString("<file_placeholder filename=\"")
 			buf.WriteString(html.EscapeString(msg.Document.FileName))
-			buf.WriteString("\" />")
+			buf.WriteString("\" />\n")
 			text = msg.Document.Caption
-		} else if msg.Sticker != nil {
+		case msg.Sticker != nil:
 			buf.WriteString("<sticker emoji=\"")
 			buf.WriteString(msg.Sticker.Emoji)
-			buf.WriteString("\" />")
+			buf.WriteString("\" />\n")
 		}
 	}
-	buf.WriteString(html.EscapeString(msg.Text))
+	buf.WriteString(html.EscapeString(text))
 
-	buf.WriteString("</")
+	buf.WriteString("\n</")
 	buf.WriteString(tag)
 	buf.WriteByte('>')
 

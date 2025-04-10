@@ -162,8 +162,8 @@ func generateRequest(ctx Context, info *ChatInfo) (*openai.ChatCompletionRequest
 		Temperature: chatCfg.Temperature,
 	}
 
-	if info.Setting.Temperature > 0 {
-		req.Temperature = info.Setting.Temperature
+	if info.Temperature > 0 {
+		req.Temperature = info.Temperature
 	}
 
 	if info.Model != "" {
@@ -259,7 +259,7 @@ func chatWithStream(ctx *chatContext) {
 	var err error
 
 	// 重试5次，每次间隔1s
-	for i := 0; i < retryNums; i++ {
+	for i := range retryNums {
 		log.Debug("[ChatGPT] retry", zap.Int("retry", i), zap.String("content", ctx.req.Messages[len(ctx.req.Messages)-1].Content))
 		stream, err = client.CreateChatCompletionStream(context.Background(), *ctx.req)
 		if err == nil {
@@ -362,7 +362,7 @@ func chatWithoutStream(ctx *chatContext) {
 	var resp openai.ChatCompletionResponse
 	var err error
 
-	for i := 0; i < retryNums; i++ {
+	for range retryNums {
 		resp, err = client.CreateChatCompletion(context.Background(), *ctx.req)
 		if err == nil {
 			break // 如果成功创建stream，跳出循环
