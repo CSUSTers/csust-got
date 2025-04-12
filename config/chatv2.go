@@ -23,12 +23,14 @@ type Model struct {
 // ModelFeatures is the model features switch
 type ModelFeatures struct {
 	Image bool `mapstructure:"image"`
+	Mcp   bool `mapstructure:"mcp"`
 }
 
 // ChatTrigger is the configuration for chat
 type ChatTrigger struct {
 	Command string `mapstructure:"command"`
 	Regex   string `mapstructure:"regex"`
+	Reply   bool   `mapstructure:"reply"`
 }
 
 // ChatConfigV2 is the configuration for chat
@@ -50,6 +52,16 @@ type ChatConfigSingle struct {
 	Features FeatureSetting `mapstructure:"features"`
 }
 
+// TriggerOnReply checks if the chat will trigger on reply
+func (ccs *ChatConfigSingle) TriggerOnReply() (*ChatTrigger, bool) {
+	for _, t := range ccs.Trigger {
+		if t.Reply {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
 // FeatureSetting is the ~~Nintendo~~ switch and setting for model features
 type FeatureSetting struct {
 	Image              bool `mapstructure:"image"`
@@ -58,6 +70,25 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
+}
+
+// McpServers is the configuration for mcp servers
+type McpServers []McpServerConfig
+
+// McpServerConfig is the configuration for a single mcp server
+type McpServerConfig struct {
+	Name    string   `mapstructure:"name"`
+	Command string   `mapstructure:"command"`
+	Args    []string `mapstructure:"args"`
+	Env     []string `mapstructure:"env"`
+}
+
+func (m *McpServers) readConfig() {
+	v := viper.GetViper()
+	err := v.UnmarshalKey("mcp_servers", m)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // ImageResize return the resized width and height for image

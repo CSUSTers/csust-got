@@ -54,6 +54,7 @@ func NewBotConfig() *Config {
 		ContentFilterConfig: new(contentFilterConfig),
 		DebugOptConfig:      new(debugOptConfig),
 		ChatConfigV2:        new(ChatConfigV2),
+		McpServers:          new(McpServers),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -84,6 +85,7 @@ type Config struct {
 	GenShinConfig       *genShinConfig
 	ChatConfig          *chatConfig
 	ChatConfigV2        *ChatConfigV2
+	McpServers          *McpServers
 	MeiliConfig         *meiliConfig
 	McConfig            *mcConfig
 	GithubConfig        *githubConfig
@@ -151,6 +153,7 @@ func readConfig() {
 	BotConfig.GithubConfig.readConfig()
 	BotConfig.ContentFilterConfig.readConfig()
 	BotConfig.ChatConfigV2.readConfig()
+	BotConfig.McpServers.readConfig()
 
 	// genshin voice
 	BotConfig.GenShinConfig.readConfig()

@@ -39,6 +39,7 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat_v2.InitMcpClients()
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
@@ -177,9 +178,6 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
 	bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
 
-	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
-	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
 
@@ -230,6 +228,18 @@ func customHandler(ctx Context) error {
 	for _, v := range regexHandlers {
 		if v.Regex.MatchString(text) {
 			return v.Func(ctx)
+		}
+	}
+
+	// reply to bot
+	if text != "" && ctx.Message().ReplyTo != nil {
+		reply := ctx.Message().ReplyTo
+		if reply.Sender.Username == ctx.Bot().Me.Username {
+			for _, v2 := range *config.BotConfig.ChatConfigV2 {
+				if trigger, ok := v2.TriggerOnReply(); ok {
+					return chat_v2.Chat(ctx, v2, trigger)
+				}
+			}
 		}
 	}
 
