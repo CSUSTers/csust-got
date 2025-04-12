@@ -60,6 +60,23 @@ type FeatureSetting struct {
 	} `mapstructure:"image_resize"`
 }
 
+type McpServers []McpServerConfig
+
+type McpServerConfig struct {
+	Name    string   `mapstructure:"name"`
+	Command string   `mapstructure:"command"`
+	Args    []string `mapstructure:"args"`
+	Env     []string `mapstructure:"env"`
+}
+
+func (m *McpServers) readConfig() {
+	v := viper.GetViper()
+	err := v.UnmarshalKey("mcp_servers", m)
+	if err != nil {
+		panic(err)
+	}
+}
+
 // ImageResize return the resized width and height for image
 func (f *FeatureSetting) ImageResize(w, h int) (int, int) {
 	mw, mh := f.ImageResizeSetting.MaxWidth, f.ImageResizeSetting.MaxHeight

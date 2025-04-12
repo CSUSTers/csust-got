@@ -39,6 +39,7 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat_v2.InitMcpClients()
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
