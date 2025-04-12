@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"csust-got/config"
-	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
@@ -86,38 +85,6 @@ func InitChat() {
 		client = openai.NewClientWithConfig(clientConfig)
 		go chatService()
 	}
-}
-
-// GPTChat is handler for chat with GPT
-func GPTChat(ctx Context) error {
-	return chatHandler(ctx, false)
-}
-
-// GPTChatWithStream is handler for chat with GPT, and use stream api
-func GPTChatWithStream(ctx Context) error {
-	return chatHandler(ctx, true)
-}
-
-func chatHandler(ctx Context, stream bool) error {
-	_, text, err := entities.CommandTakeArgs(ctx.Message(), 0)
-	if err != nil {
-		log.Error("[ChatGPT] Can't take args", zap.Error(err))
-		return ctx.Reply("嗦啥呢？")
-	}
-
-	if len(text) == 0 {
-		return ctx.Reply("您好，有什么问题可以为您解答吗？")
-	}
-	if len(text) > config.BotConfig.ChatConfig.PromptLimit {
-		return ctx.Reply("TLDR")
-	}
-	return ChatWith(ctx, &ChatInfo{
-		Text: text,
-		Setting: Setting{
-			Stream: stream,
-			Reply:  true,
-		},
-	})
 }
 
 // ChatWith chat with GPT

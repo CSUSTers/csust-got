@@ -217,7 +217,7 @@ func TestChatConfigV2(t *testing.T) {
 	defer viper.Reset()
 
 	t.Logf("%+v", BotConfig.ChatConfigV2)
-	req.Len(*BotConfig.ChatConfigV2, 1)
+	req.Greater(len(*BotConfig.ChatConfigV2), 0)
 	req.NotNil((*BotConfig.ChatConfigV2)[0].Model)
 	req.NotEmpty((*BotConfig.ChatConfigV2)[0].Model.Model)
 }

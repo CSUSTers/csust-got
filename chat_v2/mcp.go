@@ -17,6 +17,7 @@ var mcpClients map[string]*client.StdioMCPClient
 var toolsClientMap map[string]string
 var allTools []openai.Tool
 
+// InitMcpClients initializes the MCP clients and tools
 func InitMcpClients() {
 	mcpClients = make(map[string]*client.StdioMCPClient)
 	toolsClientMap = make(map[string]string)

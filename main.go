@@ -178,9 +178,6 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
 	bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
 
-	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
-	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
-
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
 

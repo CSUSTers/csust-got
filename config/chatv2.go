@@ -23,6 +23,7 @@ type Model struct {
 // ModelFeatures is the model features switch
 type ModelFeatures struct {
 	Image bool `mapstructure:"image"`
+	Mcp   bool `mapstructure:"mcp"`
 }
 
 // ChatTrigger is the configuration for chat
@@ -60,8 +61,10 @@ type FeatureSetting struct {
 	} `mapstructure:"image_resize"`
 }
 
+// McpServers is the configuration for mcp servers
 type McpServers []McpServerConfig
 
+// McpServerConfig is the configuration for a single mcp server
 type McpServerConfig struct {
 	Name    string   `mapstructure:"name"`
 	Command string   `mapstructure:"command"`
