@@ -144,6 +144,7 @@ chats:
     message_context: 6
     trigger:
       - command: "chat"
+      - reply: true
     temperature: 0.7
     place_holder: "⏳"
     error_message: "😔很抱歉，我无法处理您的请求"

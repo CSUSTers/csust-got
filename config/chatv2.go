@@ -30,6 +30,7 @@ type ModelFeatures struct {
 type ChatTrigger struct {
 	Command string `mapstructure:"command"`
 	Regex   string `mapstructure:"regex"`
+	Reply   bool   `mapstructure:"reply"`
 }
 
 // ChatConfigV2 is the configuration for chat
@@ -49,6 +50,16 @@ type ChatConfigSingle struct {
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
 
 	Features FeatureSetting `mapstructure:"features"`
+}
+
+// TriggerOnReply checks if the chat will trigger on reply
+func (ccs *ChatConfigSingle) TriggerOnReply() (*ChatTrigger, bool) {
+	for _, t := range ccs.Trigger {
+		if t.Reply {
+			return t, true
+		}
+	}
+	return nil, false
 }
 
 // FeatureSetting is the ~~Nintendo~~ switch and setting for model features
