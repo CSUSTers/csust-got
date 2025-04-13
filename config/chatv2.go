@@ -22,8 +22,9 @@ type Model struct {
 
 // ModelFeatures is the model features switch
 type ModelFeatures struct {
-	Image bool `mapstructure:"image"`
-	Mcp   bool `mapstructure:"mcp"`
+	Image     bool `mapstructure:"image"`
+	Mcp       bool `mapstructure:"mcp"`
+	WhiteList bool `mapstructure:"white_list"`
 }
 
 // ChatTrigger is the configuration for chat

@@ -77,6 +77,8 @@ llm_models:
     model: "gpt-xxx"
     features:
       image: true
+      mcp: false
+      white_list: true
 
   qwen-xxx: &qwen
     <<: *default
