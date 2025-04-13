@@ -272,6 +272,9 @@ final:
 		}
 	}
 
+	chatCtx, cancel := context.WithTimeout(context.Background(), v2.GetTimeout())
+	defer cancel()
+
 	request := openai.ChatCompletionRequest{
 		Model:       v2.Model.Model,
 		Messages:    messages,
@@ -280,7 +283,7 @@ final:
 	if v2.Model.Features.Mcp {
 		request.Tools = allTools
 	}
-	resp, err := client.CreateChatCompletion(context.Background(), request)
+	resp, err := client.CreateChatCompletion(chatCtx, request)
 	if err != nil {
 		log.Error("Failed to send chat completion message", zap.Error(err))
 	}
@@ -328,7 +331,7 @@ final:
 				}
 				toolReq.Params.Arguments = args
 			}
-			result, err := c.CallTool(context.Background(), toolReq)
+			result, err := c.CallTool(chatCtx, toolReq)
 			if err != nil {
 				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
 				continue
@@ -354,7 +357,7 @@ final:
 		}
 
 		request.Messages = messages
-		resp, err = client.CreateChatCompletion(context.Background(), request)
+		resp, err = client.CreateChatCompletion(chatCtx, request)
 		if err != nil {
 			log.Error("Failed to send chat completion message", zap.Error(err))
 		}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"math"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -49,6 +50,7 @@ type ChatConfigSingle struct {
 	SystemPrompt   string         `mapstructure:"system_prompt"`
 	PromptTemplate string         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
+	Timeout        int            `mapstructure:"timeout"` // seconds
 
 	Features FeatureSetting `mapstructure:"features"`
 }
@@ -61,6 +63,14 @@ func (ccs *ChatConfigSingle) TriggerOnReply() (*ChatTrigger, bool) {
 		}
 	}
 	return nil, false
+}
+
+// GetTimeout returns the timeout for the chat model
+func (ccs *ChatConfigSingle) GetTimeout() time.Duration {
+	if ccs.Timeout > 0 {
+		return time.Duration(ccs.Timeout) * time.Second
+	}
+	return 30 * time.Second
 }
 
 // FeatureSetting is the ~~Nintendo~~ switch and setting for model features
