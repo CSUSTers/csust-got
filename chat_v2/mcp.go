@@ -21,7 +21,7 @@ var allTools []openai.Tool
 func InitMcpClients() {
 	mcpClients = make(map[string]*client.StdioMCPClient)
 	toolsClientMap = make(map[string]string)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, srv := range *config.BotConfig.McpServers {
 		c, err := client.NewStdioMCPClient(srv.Command, srv.Env, srv.Args...)
