@@ -30,7 +30,7 @@ var (
 // InitConfig - init bot config.
 func InitConfig(configFile, envPrefix string) {
 	BotConfig = NewBotConfig()
-	initViper(configFile, envPrefix)
+	InitViper(configFile, envPrefix)
 	readConfig()
 	checkConfig()
 }
@@ -46,7 +46,7 @@ func NewBotConfig() *Config {
 		WhiteListConfig:     new(specialListConfig),
 		BlockListConfig:     new(specialListConfig),
 		PromConfig:          new(promConfig),
-		GenShinConfig:       new(genShinConfig),
+		GetVoiceConfig:      new(GetVoiceConfig),
 		ChatConfig:          new(chatConfig),
 		MeiliConfig:         new(meiliConfig),
 		McConfig:            new(mcConfig),
@@ -75,14 +75,14 @@ type Config struct {
 	SkipDuration int64
 	LogFileDir   string
 
-	RedisConfig         *redisConfig
-	RestrictConfig      *restrictConfig
-	RateLimitConfig     *rateLimitConfig
-	MessageConfig       *messageConfig
-	BlockListConfig     *specialListConfig
-	WhiteListConfig     *specialListConfig
-	PromConfig          *promConfig
-	GenShinConfig       *genShinConfig
+	RedisConfig     *redisConfig
+	RestrictConfig  *restrictConfig
+	RateLimitConfig *rateLimitConfig
+	MessageConfig   *messageConfig
+	BlockListConfig *specialListConfig
+	WhiteListConfig *specialListConfig
+	PromConfig      *promConfig
+	*GetVoiceConfig
 	ChatConfig          *chatConfig
 	ChatConfigV2        *ChatConfigV2
 	McpServers          *McpServers
@@ -99,7 +99,8 @@ func GetBot() *Bot {
 	return BotConfig.Bot
 }
 
-func initViper(configFile, envPrefix string) {
+// InitViper init viper
+func InitViper(configFile, envPrefix string) {
 	if configFile != "" {
 		viper.SetConfigFile(configFile)
 		if err := viper.ReadInConfig(); err != nil {
@@ -156,10 +157,17 @@ func readConfig() {
 	BotConfig.McpServers.readConfig()
 
 	// genshin voice
-	BotConfig.GenShinConfig.readConfig()
+	BotConfig.readConfig()
 
 	// debug opt
 	BotConfig.DebugOptConfig.readConfig()
+}
+
+// ReadConfig read config.
+func ReadConfig(configs ...interface{ readConfig() }) {
+	for _, config := range configs {
+		config.readConfig()
+	}
 }
 
 // check some config value is reasonable, otherwise set to default value.
@@ -183,7 +191,7 @@ func checkConfig() {
 	BotConfig.BlockListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
 	BotConfig.PromConfig.checkConfig()
-	BotConfig.GenShinConfig.checkConfig()
+	BotConfig.checkConfig()
 	BotConfig.ChatConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
