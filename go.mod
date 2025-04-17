@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
-	github.com/mark3labs/mcp-go v0.20.1
+	github.com/mark3labs/mcp-go v0.21.1
 	github.com/meilisearch/meilisearch-go v0.31.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/common v0.63.0
