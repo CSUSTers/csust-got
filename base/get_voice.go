@@ -121,73 +121,80 @@ func (p *VoiceDb) RandomVoiceByCh(ch string) *VoiceChip {
 func InitGetVoice() error {
 	c := config.BotConfig.GetVoiceConfig
 
-	if c.Enable {
-		getVoiceAlias = make(map[string]*VoiceConfigNDb)
+	if !c.Enable {
+		return nil
+	}
 
-		for _, index := range c.Indexes {
-			n := &VoiceConfigNDb{
-				IndexConfig: &index,
+	getVoiceAlias = make(map[string]*VoiceConfigNDb)
+
+	for _, index := range c.Indexes {
+		n := &VoiceConfigNDb{
+			IndexConfig: &index,
+		}
+
+		if index.Database != nil {
+			t, file := index.Type, index.File
+
+			fd, err := os.Open(file)
+			if err != nil {
+				log.Error("cannot open file", zap.String("file", file), zap.Error(err))
+				return err
 			}
+			defer func() {
+				if err := fd.Close(); err != nil {
+					log.Error("failed to close file", zap.String("file", file), zap.Error(err))
+				}
+			}()
 
-			if index.Database != nil {
-				t, file := index.Type, index.File
-
-				fd, err := os.Open(file)
+			var it iter.Seq[*VoiceChip]
+			switch t {
+			case "json":
+				datas := []*VoiceChip{}
+				de := json.NewDecoder(fd)
+				err = de.Decode(&datas)
 				if err != nil {
-					log.Error("cannot open file", zap.String("file", file), zap.Error(err))
+					log.Error("fail to decode json file", zap.String("file", file), zap.Error(err))
 					return err
 				}
-				defer fd.Close()
+				it = slices.Values(datas)
+			case "jsonl", "ndjson":
+				r := bufio.NewScanner(fd)
+				it = func(yield func(*VoiceChip) bool) {
+					for r.Scan() {
+						if r.Err() != nil {
+							log.Error("fail to read file", zap.String("file", file), zap.Error(r.Err()))
+							return
+						}
 
-				var it iter.Seq[*VoiceChip]
-				switch t {
-				case "json":
-					datas := []*VoiceChip{}
-					de := json.NewDecoder(fd)
-					err = de.Decode(&datas)
-					if err != nil {
-						log.Error("fail to decode json file", zap.String("file", file), zap.Error(err))
-						return err
-					}
-					it = slices.Values(datas)
-				case "jsonl", "ndjson":
-					r := bufio.NewScanner(fd)
-					it = func(yield func(*VoiceChip) bool) {
-						for r.Scan() {
-							if r.Err() != nil {
-								log.Error("fail to read file", zap.String("file", file), zap.Error(r.Err()))
+						s := r.Text()
+						s = strings.TrimSpace(s)
+						if s != "" {
+							v := &VoiceChip{}
+							err = json.Unmarshal([]byte(s), v)
+							if err != nil {
+								log.Error("fail to decode json line", zap.String("s", s), zap.Error(err))
 								return
 							}
-
-							s := r.Text()
-							s = strings.TrimSpace(s)
-							if s != "" {
-								v := &VoiceChip{}
-								err = json.Unmarshal([]byte(s), v)
-								if err != nil {
-									log.Error("fail to decode json line", zap.String("s", s), zap.Error(err))
-									return
-								}
-								if !yield(v) {
-									return
-								}
+							if !yield(v) {
+								return
 							}
 						}
 					}
-
-				default:
-					// nolint: err113
-					return fmt.Errorf("not support type: %s", t)
 				}
-				n.VoiceDb = NewVoiceDb(it)
-			}
 
-			for _, alias := range index.Alias {
-				getVoiceAlias[alias] = n
+			default:
+				// nolint: err113
+				return fmt.Errorf("not support type: %s", t)
 			}
+			n.VoiceDb = NewVoiceDb(it)
 		}
-		getVoiceClient = getMeilisearchClient(c)
+
+		for _, alias := range index.Alias {
+			getVoiceAlias[alias] = n
+		}
 	}
+	getVoiceClient = getMeilisearchClient(c)
+
 	return nil
 }
 
@@ -392,14 +399,18 @@ func getVoice(ctx tb.Context, index string, text string) error {
 
 		errAudio := config.BotConfig.ErrAudioUrl
 		if errAudio != "" {
-			ctx.Reply(&tb.Voice{
+			if err := ctx.Reply(&tb.Voice{
 				File: tb.File{
 					FileURL: errAudio,
 				},
 				Caption: "异常",
-			})
+			}); err != nil {
+				log.Error("failed to send error audio", zap.Error(err))
+			}
 		} else {
-			ctx.Reply("异常")
+			if err := ctx.Reply("异常"); err != nil {
+				log.Error("failed to send error message", zap.Error(err))
+			}
 		}
 		return err
 	}
