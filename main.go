@@ -43,6 +43,11 @@ func main() {
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
+	err := base.InitGetVoice()
+	if err != nil {
+		log.Panic(err.Error())
+	}
+
 	// go iwatch.WatchService()
 
 	bot, err := initBot()
@@ -59,7 +64,7 @@ func main() {
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
 	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
-	bot.Handle("/sd", sd.Handler)
+	bot.Handle("/sd", sd.Handler, whiteMiddleware)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
@@ -173,10 +178,12 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/run_after", base.RunTask)
 
-	bot.Handle("/getvoice_old", base.GetVoice)
-	bot.Handle("/getvoice", base.GetVoiceV2)
-	bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
-	bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
+	// bot.Handle("/getvoice_old", base.GetVoice)
+	// bot.Handle("/getvoice", base.GetVoiceV2)
+	// bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
+	// bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
+
+	bot.Handle("/getvoice", base.GetVoice)
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)

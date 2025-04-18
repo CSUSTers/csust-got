@@ -26,7 +26,7 @@ func TestReadConfigFile(t *testing.T) {
 
 	// init config
 	BotConfig = NewBotConfig()
-	initViper(testConfigFile, "")
+	InitViper(testConfigFile, "")
 	readConfig()
 	viper.Reset()
 
@@ -35,10 +35,10 @@ func TestReadConfigFile(t *testing.T) {
 	req.Empty(BotConfig.Token)
 	req.Equal("redis:6379", BotConfig.RedisConfig.RedisAddr)
 	req.Equal("csust-bot-redis-password", BotConfig.RedisConfig.RedisPass)
-	req.Equal("https://api.csu.st", BotConfig.GenShinConfig.ApiServer)
-	req.Equal("https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg", BotConfig.GenShinConfig.ErrAudioAddr)
+	// req.Equal("https://api.csu.st", BotConfig.GenShinConfig.ApiServer)
+	// req.Equal("https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg", BotConfig.GenShinConfig.ErrAudioAddr)
 
-	initViper("not_exist", "")
+	InitViper("not_exist", "")
 	readConfig()
 	defer viper.Reset()
 
@@ -61,7 +61,7 @@ func TestReadEnv(t *testing.T) {
 
 	// init config
 	BotConfig = NewBotConfig()
-	initViper("", testEnvPrefix)
+	InitViper("", testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -83,7 +83,7 @@ func TestEnvOverrideFile(t *testing.T) {
 
 	// init config
 	BotConfig = NewBotConfig()
-	initViper(testConfigFile, testEnvPrefix)
+	InitViper(testConfigFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -105,7 +105,7 @@ func TestMustConfig(t *testing.T) {
 
 	// all set should not panic
 	BotConfig = NewBotConfig()
-	initViper("", testEnvPrefix)
+	InitViper("", testEnvPrefix)
 	readConfig()
 	require.NotPanics(t, func() { checkConfig() })
 	defer viper.Reset()
@@ -125,7 +125,7 @@ func TestRateLimitConfig(t *testing.T) {
 
 	// init config
 	BotConfig = NewBotConfig()
-	initViper(testConfigFile, testEnvPrefix)
+	InitViper(testConfigFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -171,7 +171,7 @@ func TestMessageConfig(t *testing.T) {
 	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 	// init config
 	BotConfig = NewBotConfig()
-	initViper(testConfigFile, testEnvPrefix)
+	InitViper(testConfigFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -196,7 +196,7 @@ func TestSpecialListConfig(t *testing.T) {
 	// init config
 	BotConfig = NewBotConfig()
 
-	initViper(testConfigFile, testEnvPrefix)
+	InitViper(testConfigFile, testEnvPrefix)
 	readConfig()
 
 	defer viper.Reset()
@@ -211,7 +211,7 @@ func TestChatConfigV2(t *testing.T) {
 	// init config
 	BotConfig = NewBotConfig()
 
-	initViper(testConfigFile, testEnvPrefix)
+	InitViper(testConfigFile, testEnvPrefix)
 	readConfig()
 
 	defer viper.Reset()
@@ -240,7 +240,7 @@ func TestCustomConfig(t *testing.T) {
 
 	// 初始化配置
 	BotConfig = NewBotConfig()
-	initViper(baseConfigPath, "")
+	InitViper(baseConfigPath, "")
 	readConfig()
 
 	// 检查custom.yaml是否覆盖了config.yaml中的配置
