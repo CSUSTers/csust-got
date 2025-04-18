@@ -250,6 +250,9 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 
 	text := msg.Text
 	if text == "" {
+		text = msg.Caption
+	}
+	if text == "" {
 		switch {
 		case msg.Photo != nil:
 			buf.WriteString("<image_placeholder />\n")

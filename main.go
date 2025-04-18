@@ -178,11 +178,6 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/run_after", base.RunTask)
 
-	// bot.Handle("/getvoice_old", base.GetVoice)
-	// bot.Handle("/getvoice", base.GetVoiceV2)
-	// bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
-	// bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
-
 	bot.Handle("/getvoice", base.GetVoice)
 
 	// meilisearch handler

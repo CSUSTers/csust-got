@@ -13,13 +13,13 @@ import (
 	"go.uber.org/zap"
 )
 
-var mcpClients map[string]*client.StdioMCPClient
+var mcpClients map[string]*client.Client
 var toolsClientMap map[string]string
 var allTools []openai.Tool
 
 // InitMcpClients initializes the MCP clients and tools
 func InitMcpClients() {
-	mcpClients = make(map[string]*client.StdioMCPClient)
+	mcpClients = make(map[string]*client.Client)
 	toolsClientMap = make(map[string]string)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -46,6 +46,7 @@ func InitMcpClients() {
 			zap.L().Error("Failed to list tools", zap.String("mcp-server", srv.Name), zap.Error(err))
 			continue
 		}
+		// nolint:gocritic
 		for _, tool := range ts.Tools {
 			schema, err := json.Marshal(tool.InputSchema)
 			if err != nil {

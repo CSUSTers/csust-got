@@ -245,6 +245,7 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 		ShowRankingScoreDetails: true,
 	}
 
+	// nolint:nestif
 	if random {
 		if index.VoiceDb != nil {
 			if query.Character != "" {

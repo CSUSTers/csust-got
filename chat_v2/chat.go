@@ -311,7 +311,7 @@ final:
 	}
 
 	// 处理大模型返回工具调用的情况
-	if resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
+	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
 		messages = append(messages, resp.Choices[0].Message)
 		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
 			c, ok := mcpClients[toolsClientMap[toolCall.Function.Name]]
