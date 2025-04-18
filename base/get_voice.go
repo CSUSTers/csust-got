@@ -140,53 +140,61 @@ func InitGetVoice() error {
 				log.Error("cannot open file", zap.String("file", file), zap.Error(err))
 				return err
 			}
-			defer func() {
-				if err := fd.Close(); err != nil {
-					log.Error("failed to close file", zap.String("file", file), zap.Error(err))
-				}
-			}()
 
-			var it iter.Seq[*VoiceChip]
-			switch t {
-			case "json":
-				datas := []*VoiceChip{}
-				de := json.NewDecoder(fd)
-				err = de.Decode(&datas)
-				if err != nil {
-					log.Error("fail to decode json file", zap.String("file", file), zap.Error(err))
-					return err
-				}
-				it = slices.Values(datas)
-			case "jsonl", "ndjson":
-				r := bufio.NewScanner(fd)
-				it = func(yield func(*VoiceChip) bool) {
-					for r.Scan() {
-						if r.Err() != nil {
-							log.Error("fail to read file", zap.String("file", file), zap.Error(r.Err()))
-							return
-						}
+			// 使用立即执行的匿名函数来处理文件，确保文件在处理完后关闭
+			err = func() error {
+				defer func() {
+					if err := fd.Close(); err != nil {
+						log.Error("failed to close file", zap.String("file", file), zap.Error(err))
+					}
+				}()
 
-						s := r.Text()
-						s = strings.TrimSpace(s)
-						if s != "" {
-							v := &VoiceChip{}
-							err = json.Unmarshal([]byte(s), v)
-							if err != nil {
-								log.Error("fail to decode json line", zap.String("s", s), zap.Error(err))
+				var it iter.Seq[*VoiceChip]
+				switch t {
+				case "json":
+					datas := []*VoiceChip{}
+					de := json.NewDecoder(fd)
+					err := de.Decode(&datas)
+					if err != nil {
+						log.Error("fail to decode json file", zap.String("file", file), zap.Error(err))
+						return err
+					}
+					it = slices.Values(datas)
+				case "jsonl", "ndjson":
+					r := bufio.NewScanner(fd)
+					it = func(yield func(*VoiceChip) bool) {
+						for r.Scan() {
+							if r.Err() != nil {
+								log.Error("fail to read file", zap.String("file", file), zap.Error(r.Err()))
 								return
 							}
-							if !yield(v) {
-								return
+
+							s := r.Text()
+							s = strings.TrimSpace(s)
+							if s != "" {
+								v := &VoiceChip{}
+								err := json.Unmarshal([]byte(s), v)
+								if err != nil {
+									log.Error("fail to decode json line", zap.String("s", s), zap.Error(err))
+									return
+								}
+								if !yield(v) {
+									return
+								}
 							}
 						}
 					}
+				default:
+					// nolint: err113
+					return fmt.Errorf("not support type: %s", t)
 				}
+				n.VoiceDb = NewVoiceDb(it)
+				return nil
+			}()
 
-			default:
-				// nolint: err113
-				return fmt.Errorf("not support type: %s", t)
+			if err != nil {
+				return err
 			}
-			n.VoiceDb = NewVoiceDb(it)
 		}
 
 		for _, alias := range index.Alias {
