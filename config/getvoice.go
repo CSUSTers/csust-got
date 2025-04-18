@@ -22,7 +22,7 @@ type MeiliSearch struct {
 // Database is config for database
 type Database struct {
 	Type string `mapstructure:"type"`
-	File string `mapsturcture:"file"`
+	File string `mapstructure:"file"`
 }
 
 // IndexConfig is config for index
