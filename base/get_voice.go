@@ -238,76 +238,74 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 	}
 
 	if random {
-		if index.VoiceDb == nil {
-
-			ret = &GetVoiceResult{}
-
-			filterTempl := "id STARTS WITH '%s'"
-			if searchOpt.Filter != "" {
-				filterTempl = fmt.Sprintf("(%s) AND (%s)", searchOpt.Filter, filterTempl)
-			}
-
-			var resp *meilisearch.SearchResponse
-			for range 64 {
-				// NEEDS TO ENABLE `containsFilter` EXPIRIMENTAL FEATURE
-				// AND ADD `id` FIELD TO FILTER
-				prefix := lo.RandomString(2, idChars)
-
-				searchOpt.Filter = fmt.Sprintf(filterTempl, prefix)
-
-				// TODO check meilisearch query
-				searchOpt.Limit = 2000
-				searchOpt.HitsPerPage = 1
-
-				resp, err = idx.Search(query.Text, searchOpt)
-				if err != nil {
-					return nil, err
-				}
-
-				log.Debug("random get voice: checking",
-					zap.Any("resp", resp))
-
-				if resp.TotalHits > 0 {
-					break
-				}
-			}
-
-			if resp.TotalHits == 0 {
-				searchOpt.Filter = filter
-				resp, err = idx.Search(query.Text, searchOpt)
-				if err != nil {
-					return nil, err
-				}
-				if resp.TotalHits == 0 {
-					return nil, ErrNoAudioFound
-				}
-			}
-
-			searchOpt.HitsPerPage = 1
-			searchOpt.Page = rand.N(resp.TotalHits)
-			resp, err = idx.Search(query.Text, searchOpt)
-			if err != nil {
-				return nil, err
-			}
-			if len(resp.Hits) == 0 {
-				return nil, ErrNoAudioFound
-			}
-			log.Debug("random get voice",
-				zap.Any("resp", resp))
-
-			v := &GetVoiceResult{}
-			err = mapstructure.Decode(resp.Hits[0], v)
-			if err != nil {
-				return nil, err
-			}
-			ret = v
-		} else {
+		if index.VoiceDb != nil {
 			if query.Character != "" {
 				return &GetVoiceResult{VoiceChip: *index.RandomVoiceByCh(query.Character)}, nil
 			}
 			return &GetVoiceResult{VoiceChip: *index.RandomVoice()}, nil
-
 		}
+
+		ret = &GetVoiceResult{}
+
+		filterTempl := "id STARTS WITH '%s'"
+		if searchOpt.Filter != "" {
+			filterTempl = fmt.Sprintf("(%s) AND (%s)", searchOpt.Filter, filterTempl)
+		}
+
+		var resp *meilisearch.SearchResponse
+		for range 64 {
+			// NEEDS TO ENABLE `containsFilter` EXPIRIMENTAL FEATURE
+			// AND ADD `id` FIELD TO FILTER
+			prefix := lo.RandomString(2, idChars)
+
+			searchOpt.Filter = fmt.Sprintf(filterTempl, prefix)
+
+			// TODO check meilisearch query
+			searchOpt.Limit = 2000
+			searchOpt.HitsPerPage = 1
+
+			resp, err = idx.Search(query.Text, searchOpt)
+			if err != nil {
+				return nil, err
+			}
+
+			log.Debug("random get voice: checking",
+				zap.Any("resp", resp))
+
+			if resp.TotalHits > 0 {
+				break
+			}
+		}
+
+		if resp.TotalHits == 0 {
+			searchOpt.Filter = filter
+			resp, err = idx.Search(query.Text, searchOpt)
+			if err != nil {
+				return nil, err
+			}
+			if resp.TotalHits == 0 {
+				return nil, ErrNoAudioFound
+			}
+		}
+
+		searchOpt.HitsPerPage = 1
+		searchOpt.Page = rand.N(resp.TotalHits)
+		resp, err = idx.Search(query.Text, searchOpt)
+		if err != nil {
+			return nil, err
+		}
+		if len(resp.Hits) == 0 {
+			return nil, ErrNoAudioFound
+		}
+		log.Debug("random get voice",
+			zap.Any("resp", resp))
+
+		v := &GetVoiceResult{}
+		err = mapstructure.Decode(resp.Hits[0], v)
+		if err != nil {
+			return nil, err
+		}
+		ret = v
 	} else {
 		searchOpt.Limit = 2000
 		searchOpt.HitsPerPage = 2000

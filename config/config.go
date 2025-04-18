@@ -14,11 +14,10 @@ import (
 var BotConfig *Config
 
 var (
-	noTokenMsg      = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
-	noRedisMsg      = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
-	noGenShinApiMsg = "genShinApi address is not set! Please set config file config.yaml!"
-	noMeiliMsg      = "meili configuration is not set! Please set config file config.yaml!"
-	noGithubMsg     = "github configuration is not set! Please set config file config.yaml!"
+	noTokenMsg  = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
+	noRedisMsg  = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+	noMeiliMsg  = "meili configuration is not set! Please set config file config.yaml!"
+	noGithubMsg = "github configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config

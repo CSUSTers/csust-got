@@ -23,18 +23,21 @@ func TestGetVoiceMeta(t *testing.T) {
 	index := "genshin"
 
 	t.Run("index not found", func(t *testing.T) {
+		t.Parallel()
 		meta, err := getVoiceMeta("123", &GetVoiceQuery{})
 		assert.Nil(t, meta, "meta should be nil")
 		assert.ErrorIs(t, err, ErrIndexNotFound)
 	})
 
 	t.Run("character not exist", func(t *testing.T) {
+		t.Parallel()
 		meta, err := getVoiceMeta(index, &GetVoiceQuery{Character: "123"})
 		assert.ErrorIs(t, err, ErrNoAudioFound)
 		assert.Nil(t, meta, "meta should be nil")
 	})
 
 	t.Run("random audio", func(t *testing.T) {
+		t.Parallel()
 		meta, err := getVoiceMeta(index, &GetVoiceQuery{})
 		assert.NoError(t, err)
 		assert.NotNil(t, meta, "meta should not be nil")
@@ -42,6 +45,7 @@ func TestGetVoiceMeta(t *testing.T) {
 	})
 
 	t.Run("random audio of character", func(t *testing.T) {
+		t.Parallel()
 		ch := "派蒙"
 		meta, err := getVoiceMeta(index, &GetVoiceQuery{Character: ch})
 		assert.NoError(t, err)
@@ -51,6 +55,7 @@ func TestGetVoiceMeta(t *testing.T) {
 	})
 
 	t.Run("search audio", func(t *testing.T) {
+		t.Parallel()
 		meta, err := getVoiceMeta(index, &GetVoiceQuery{Text: "修都修了"})
 		assert.NoError(t, err)
 		assert.NotNil(t, meta, "meta should not be nil")
