@@ -270,6 +270,11 @@ final:
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
 			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
 		}
+	} else {
+		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
+		if err != nil {
+			log.Error("Failed to send typing notification", zap.Error(err))
+		}
 	}
 
 	chatCtx, cancel := context.WithTimeout(context.Background(), v2.GetTimeout())
