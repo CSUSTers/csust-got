@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
 
-	// nolint:revive // import for registering webp decoder to image package
 	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
 )

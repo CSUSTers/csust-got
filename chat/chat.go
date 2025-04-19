@@ -34,7 +34,6 @@ type chatContext struct {
 }
 
 // ChatInfo is input of ChatWith
-// nolint: revive
 type ChatInfo struct {
 	Setting
 
@@ -88,7 +87,6 @@ func InitChat() {
 }
 
 // ChatWith chat with GPT
-// nolint: revive
 func ChatWith(ctx Context, info *ChatInfo) error {
 	if client == nil {
 		return nil

@@ -121,18 +121,12 @@ var TLDs = append(slices.Clone(TLDsAscii), unicodeTLDs...)
 var TLDsPunycode = append(slices.Clone(TLDsAscii), punycodeTLDs...)
 
 // TLDRegex is regex pattern to match [`TLDs`]
-//
-//nolint:revive // it's long
 var TLDRegex = `%s`
 
 // TLDAsciiRegex is regex pattern to match [`TLDsAscii`]
-//
-//nolint:revive // it's long
 var TLDAsciiRegex = `%s`
 
 // TLDsPunycodeRegex is regex pattern to match [`TLDsPunycode`]
-//
-//nolint:revive // it's long
 var TLDsPunycodeRegex = `%s`
 """
 

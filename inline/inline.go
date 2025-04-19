@@ -13,7 +13,6 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-//nolint:revive // It's too long.
 var biliUrlRegex = `(?i)((?P<schema>https?://)?(?P<host>(?P<sub_domain>[\w\d\-]+\.)?(?P<main_domain>b23\.tv|bilibili\.com))(?P<path>(?:/[^\s\?#]*)*)?(?P<query>\?[^\s#]*)?(?P<hash>#[\S]*)?)`
 var biliPatt = regexp.MustCompile(biliUrlRegex)
 

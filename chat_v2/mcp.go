@@ -46,7 +46,7 @@ func InitMcpClients() {
 			zap.L().Error("Failed to list tools", zap.String("mcp-server", srv.Name), zap.Error(err))
 			continue
 		}
-		// nolint:gocritic
+
 		for _, tool := range ts.Tools {
 			schema, err := json.Marshal(tool.InputSchema)
 			if err != nil {
