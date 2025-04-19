@@ -1,4 +1,3 @@
-// nolint: revive
 package util
 
 import "sync"
@@ -9,12 +8,15 @@ type Mutexed[T any] struct {
 	v T
 }
 
+// LockSet locks, sets the value, and then unlocks.
 func (m *Mutexed[T]) LockSet(value T) {
 	m.Lock()
 	m.v = value
 	m.Unlock()
 }
 
+// LockGet locks, gets the value, and then unlocks.
+// It returns the value stored.
 func (m *Mutexed[T]) LockGet() (ret T) {
 	m.Lock()
 	defer m.Unlock()
@@ -22,10 +24,14 @@ func (m *Mutexed[T]) LockGet() (ret T) {
 	return
 }
 
+// Set sets the value without locking.
+// This is not thread-safe unless the caller handles locking.
 func (m *Mutexed[T]) Set(value T) {
 	m.v = value
 }
 
+// Get gets the value without locking.
+// This is not thread-safe unless the caller handles locking.
 func (m *Mutexed[T]) Get() (ret T) {
 	return m.v
 }
@@ -36,12 +42,15 @@ type RWMutexed[T any] struct {
 	v T
 }
 
+// LockSet locks for writing, sets the value, and then unlocks.
 func (m *RWMutexed[T]) LockSet(value T) {
 	m.Lock()
 	m.v = value
 	m.Unlock()
 }
 
+// LockGet locks for reading, gets the value, and then unlocks.
+// It returns the value stored.
 func (m *RWMutexed[T]) LockGet() (ret T) {
 	m.RLock()
 	defer m.RUnlock()
@@ -49,10 +58,14 @@ func (m *RWMutexed[T]) LockGet() (ret T) {
 	return
 }
 
+// Set sets the value without locking.
+// This is not thread-safe unless the caller handles locking.
 func (m *RWMutexed[T]) Set(value T) {
 	m.v = value
 }
 
+// Get gets the value without locking.
+// This is not thread-safe unless the caller handles locking.
 func (m *RWMutexed[T]) Get() (ret T) {
 	return m.v
 }

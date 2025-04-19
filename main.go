@@ -120,7 +120,7 @@ func initBot() (*Bot, error) {
 	}
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
-		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
+		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
 		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
@@ -152,9 +152,7 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
 	bot.Handle("/cid", base.GetChatID)
 	bot.Handle("/info", base.Info)
-	// bot.Handle("/links", base.Links)
 
-	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", util.GroupCommand(base.Forward))
 	bot.Handle("/mc", util.GroupCommandCtx(base.MC))
 	bot.Handle("/reburn", util.GroupCommandCtx(base.Reburn))
@@ -431,21 +429,6 @@ func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("message deleted by no sticker", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
-		}
-		return next(ctx)
-	}
-}
-
-func promMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		if ctx.Message() == nil {
-			return next(ctx)
-		}
-		prom.DialContext(ctx)
-		command := entities.FromMessage(ctx.Message())
-		if command != nil {
-			log.Debug("bot receive command", zap.String("chat", ctx.Chat().Title),
-				zap.String("user", ctx.Sender().Username), zap.String("command", ctx.Message().Text))
 		}
 		return next(ctx)
 	}

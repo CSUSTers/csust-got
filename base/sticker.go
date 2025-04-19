@@ -28,7 +28,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 
-	// nolint: revive
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
@@ -141,7 +140,7 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 	return o
 }
 
-// nolint: gocritic
+// VideoFormat will return video format
 func (o stickerOpts) VideoFormat() string {
 	if o.Vf != "" {
 		return o.Vf
@@ -149,7 +148,7 @@ func (o stickerOpts) VideoFormat() string {
 	return o.Format
 }
 
-// nolint: gocritic
+// StickerFormat will return sticker format
 func (o stickerOpts) StickerFormat() string {
 	if o.Sf != "" {
 		return o.Sf
@@ -157,7 +156,7 @@ func (o stickerOpts) StickerFormat() string {
 	return o.Format
 }
 
-// nolint: gocritic
+// FileExt will return file extension
 func (o stickerOpts) FileExt(video bool) string {
 	if video {
 		f := o.VideoFormat()
@@ -176,7 +175,7 @@ func (o stickerOpts) FileExt(video bool) string {
 	return "." + f
 }
 
-// nolint: gocritic
+// NotConvert will return true if the sticker is not convert
 func (o stickerOpts) NotConvert(s *tb.Sticker) bool {
 	if s.Video {
 		switch o.VideoFormat() {

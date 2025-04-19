@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
 
-	// nolint:revive // import for registering webp decoder to image package
 	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
 )
@@ -269,6 +268,11 @@ final:
 		if placeHolderErr != nil {
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
 			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
+		}
+	} else {
+		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
+		if err != nil {
+			log.Error("Failed to send typing notification", zap.Error(err))
 		}
 	}
 

@@ -1,4 +1,3 @@
-// nolint: revive
 package util
 
 import (
@@ -112,6 +111,7 @@ func (r Result[T]) ThenOr(fn func(T) T, o T) Result[T] {
 	return NewResult(fn(r.v))
 }
 
+// ThenElse returns result of applying function to error if Result is in error state, otherwise returns self.
 func (r Result[T]) ThenElse(fn func(error) Result[T]) Result[T] {
 	if r.IsError() {
 		return fn(r.e)
@@ -119,6 +119,7 @@ func (r Result[T]) ThenElse(fn func(error) Result[T]) Result[T] {
 	return r
 }
 
+// Map applies function to the value if Result is ok, otherwise returns the original value.
 func (r Result[T]) Map(fn func(T) T) T {
 	if r.IsError() {
 		return r.v
@@ -126,6 +127,7 @@ func (r Result[T]) Map(fn func(T) T) T {
 	return fn(r.v)
 }
 
+// MapOr applies function to the value if Result is ok, otherwise returns the provided default value.
 func (r Result[T]) MapOr(fn func(T) T, d T) T {
 	if r.IsError() {
 		return d
@@ -133,6 +135,7 @@ func (r Result[T]) MapOr(fn func(T) T, d T) T {
 	return fn(r.v)
 }
 
+// MapOrElse applies fnOk to the value if Result is ok, otherwise applies fnFail to the error.
 func (r Result[T]) MapOrElse(fnOk func(T) T, fnFail func(error) T) T {
 	if r.IsError() {
 		return fnFail(r.e)
@@ -140,6 +143,7 @@ func (r Result[T]) MapOrElse(fnOk func(T) T, fnFail func(error) T) T {
 	return fnOk(r.v)
 }
 
+// Do applies function to the value if Result is ok and returns self.
 func (r Result[T]) Do(fn func(T)) Result[T] {
 	if !r.IsError() {
 		fn(r.v)
@@ -147,6 +151,7 @@ func (r Result[T]) Do(fn func(T)) Result[T] {
 	return r
 }
 
+// DoError applies function to the error if Result is in error state and returns self.
 func (r Result[T]) DoError(fn func(error)) Result[T] {
 	if r.IsError() {
 		fn(r.e)

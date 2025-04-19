@@ -2,7 +2,6 @@ package log
 
 import (
 	"csust-got/config"
-	"csust-got/prom"
 	"os"
 
 	"github.com/samber/lo"
@@ -37,7 +36,6 @@ func NewLogger() *zap.Logger {
 		return tmpLogger
 	}
 	zap.L().Error("NewLogger failed, using default logger", zap.Error(err))
-	prom.Log(zap.ErrorLevel.String())
 	return zap.L()
 }
 
@@ -102,37 +100,31 @@ func prodConfig() zap.Config {
 // Debug print log at debug level.
 func Debug(msg string, fields ...zap.Field) {
 	logger.Debug(msg, fields...)
-	prom.Log(zap.DebugLevel.String())
 }
 
 // Info print log at info level.
 func Info(msg string, fields ...zap.Field) {
 	logger.Info(msg, fields...)
-	prom.Log(zap.InfoLevel.String())
 }
 
 // Warn print log at warning level.
 func Warn(msg string, fields ...zap.Field) {
 	logger.Warn(msg, fields...)
-	prom.Log(zap.WarnLevel.String())
 }
 
 // Error print log at error level.
 func Error(msg string, fields ...zap.Field) {
 	logger.Error(msg, fields...)
-	prom.Log(zap.ErrorLevel.String())
 }
 
 // Fatal print log at fatal level, then calls os.Exit(1).
 func Fatal(msg string, fields ...zap.Field) {
-	prom.Log(zap.FatalLevel.String())
 	logger.Fatal(msg, fields...)
 }
 
 // Panic print log at panic level, then panic.
 func Panic(msg string, fields ...zap.Field) {
 	logger.Panic(msg, fields...)
-	prom.Log(zap.PanicLevel.String())
 }
 
 // Sync sync logger.

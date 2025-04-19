@@ -10,7 +10,6 @@ import (
 var missMsg = "[this message has eat by bot]"
 
 type messageConfig struct {
-	Links            string
 	RestrictBot      string
 	FakeBanInCD      string
 	HitokotoNotFound string
@@ -20,7 +19,6 @@ type messageConfig struct {
 }
 
 func (c *messageConfig) readConfig() {
-	c.Links = viper.GetString("message.links")
 	c.RestrictBot = viper.GetString("message.restrict_bot")
 	c.FakeBanInCD = viper.GetString("message.fake_ban_in_cd")
 	c.HitokotoNotFound = viper.GetString("message.hitokoto_not_found")

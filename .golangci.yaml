@@ -37,12 +37,10 @@ linters:
     - tparallel
     - unconvert
     - usetesting
-    
     - iface
     - intrange
     - perfsprint
     - recvcheck
-    # - zerologlint
   settings:
     copyloopvar:
       check-alias: false
@@ -84,6 +82,9 @@ linters:
         - nestingReduce
         - ruleguard
         - truncateCmp
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
       enabled-tags:
         - performance
       disabled-tags:
@@ -160,7 +161,6 @@ linters:
       severity: warning
       rules:
         - name: atomic
-        - name: blank-imports
         - name: bool-literal-in-expr
         - name: constant-logical-expr
         - name: context-as-argument
@@ -171,18 +171,16 @@ linters:
         - name: error-return
         - name: error-strings
         - name: exported
+          arguments:
+            - disableStutteringCheck
         - name: get-return
         - name: identical-branches
         - name: if-return
         - name: indent-error-flow
         - name: import-shadowing
-        - name: line-length-limit
-          arguments:
-            - 150
         - name: range
         - name: range-val-in-closure
         - name: receiver-naming
-        - name: redefines-builtin-id
         - name: string-format
         - name: struct-tag
         - name: superfluous-else
@@ -190,8 +188,6 @@ linters:
         - name: unreachable-code
         - name: useless-break
         - name: waitgroup-by-value
-        - name: redefines-builtin-id
-          disabled: true
     rowserrcheck:
       packages:
         - github.com/jmoiron/sqlx
