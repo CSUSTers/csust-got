@@ -46,10 +46,6 @@ prometheus:
   message_query: 'topk(5, sum(rate(bot_message_count{chat_id="##"}[24h])*(24*3600-5)) by (username))'
   sticker_query: 'topk(5, sum(rate(bot_message_count{chat_id="##", is_sticker="true"}[24h])*(24*3600-5)) by (username))'
 
-# 原神语音api
-genshin_voice:
-  api_server: "https://api.csu.st"
-  err_audio_addr: "https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg"
 
 chatgpt:
   base_url: ""
@@ -205,6 +201,28 @@ meili:
   address: "http://127.0.0.1:7070"
   api_key: ""
   index_prefix: "csust-got-"
+
+# 游戏语音api
+get_voice:
+  enable: true
+  meilisearch:
+    host: "http://10.4.4.13:7700"
+    api_key: ""
+  err_audio_url: "https://api.csu.st/file/VO_inGame/VO_NPC/NPC_DQ/vo_npc_dq_f_katheryne_01.ogg"
+  indexes:
+    - name: genshin
+      alias: [genshin, 原神, 原]
+      index_uid: genshin
+      voice_base_url: "https://api.csu.st/file/gameAudio/Genshin"
+    - name: zzz
+      alias: [zzz, 绝, 绝区零]
+      index_uid: zzz
+      voice_base_url: "https://api.csu.st/file/gameAudio/ZZZ"
+    - name: hsr
+      alias: [hsr, 铁道, 崩坏星穹铁道, 星铁, 铁]
+      index_uid: hsr
+      voice_base_url: "https://api.csu.st/file/gameAudio/HSR"
+
 
 mc:
   max_count: 10

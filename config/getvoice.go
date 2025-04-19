@@ -4,13 +4,9 @@ import "github.com/spf13/viper"
 
 // GetVoiceConfig is config
 type GetVoiceConfig struct {
-	Enable bool `mapstructure:"enable"`
-
-	MeiliSearch `mapstructure:"meilisearch"`
-
-	ErrAudioUrl string `mapstructure:"err_audio_url"`
-
-	Indexes []IndexConfig `mapstructure:"indexes"`
+	Enable      bool          `mapstructure:"enable"`
+	ErrAudioUrl string        `mapstructure:"err_audio_url"`
+	Indexes     []IndexConfig `mapstructure:"indexes"`
 }
 
 // MeiliSearch is config for meilisearch
@@ -44,7 +40,8 @@ func (c *GetVoiceConfig) readConfig() {
 }
 
 func (c *GetVoiceConfig) checkConfig() {
-	if c.Enable && c.Host == "" {
+	// 修正字段名为 HostAddr
+	if c.Enable && (BotConfig.MeiliConfig == nil || BotConfig.MeiliConfig.HostAddr == "") {
 		panic("MeiliSearch URL is required when GetVoice is enabled")
 	}
 }

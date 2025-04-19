@@ -201,17 +201,18 @@ func InitGetVoice() error {
 			getVoiceAlias[alias] = n
 		}
 	}
-	getVoiceClient = getMeilisearchClient(c)
+	getVoiceClient = getMeilisearchClient(nil)
 
 	return nil
 }
 
-func getMeilisearchClient(c *config.GetVoiceConfig) meilisearch.ServiceManager {
+func getMeilisearchClient(_ *config.GetVoiceConfig) meilisearch.ServiceManager {
+	c := config.BotConfig.MeiliConfig
 	opts := []meilisearch.Option{}
 	if c.ApiKey != "" {
 		opts = append(opts, meilisearch.WithAPIKey(c.ApiKey))
 	}
-	client := meilisearch.New(c.Host, opts...)
+	client := meilisearch.New(c.HostAddr, opts...)
 	return client
 }
 
@@ -422,11 +423,26 @@ func getVoice(ctx tb.Context, index string, text string) error {
 		return err
 	}
 
+	indexConfig, ok := getVoiceAlias[index]
+	gameName := index // 使用索引名作为游戏名
+	if ok && indexConfig.Name != "" {
+		gameName = indexConfig.Name
+	}
+
+	gameTag := "#" + strings.ReplaceAll(gameName, " ", "_")
+	characterTag := "#" + strings.ReplaceAll(meta.Ch, " ", "_")
+
+	spoilerText := fmt.Sprintf("<blockquote expandable>%s</blockquote>", meta.Text)
+
+	caption := fmt.Sprintf("%s %s\n%s: %s", gameTag, characterTag, meta.Ch, spoilerText)
+
 	return ctx.Reply(&tb.Voice{
 		File: tb.File{
 			FileURL: meta.Url,
 		},
-		Caption: meta.Ch + ":\n" + meta.Text,
+		Caption: caption,
+	}, &tb.SendOptions{
+		ParseMode: tb.ModeHTML, // 启用 HTML 解析以支持 blockquote	 标签
 	})
 }
 

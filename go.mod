@@ -3,6 +3,7 @@ module csust-got
 go 1.24
 
 require (
+	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/mark3labs/mcp-go v0.21.1
 	github.com/meilisearch/meilisearch-go v0.31.0
@@ -27,7 +28,6 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 )
 
