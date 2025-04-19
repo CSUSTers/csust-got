@@ -54,20 +54,6 @@ func GetChatID(ctx Context) error {
 	return ctx.Reply(msg)
 }
 
-// GetGroupMember get how many members in group
-// func GetGroupMember() {
-// 	chat := update.Message.Chat
-// 	if chat.IsPrivate() {
-// 		return
-// 	}
-// 	num, err := bot.GetChatMembersCount(chat.ChatConfig())
-// 	if err != nil {
-// 		log.Error("GetChatMembersCount failed", zap.Int64("chatID", chat.ID), zap.Error(err))
-// 		return
-// 	}
-// 	prom.GetMember(chat.Title, num)
-// }
-
 // DoNothing is a handler do nothing
 // It just a placeholder for some handle endpoint, let the bot know
 // it should process this update, then the update can be processed in middleware.

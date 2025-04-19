@@ -34,11 +34,6 @@ func HelloToAll(ctx Context) error {
 	return ctx.Send(text + util.RandomChoice(helloText))
 }
 
-// Links is handle for command `links`.
-func Links(ctx Context) error {
-	return ctx.Send(config.BotConfig.MessageConfig.Links, ModeMarkdownV2, NoPreview)
-}
-
 // Shutdown is handler for command `shutdown`.
 func Shutdown(m *Message) {
 	if orm.IsShutdown(m.Chat.ID) {
