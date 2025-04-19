@@ -201,6 +201,7 @@ linters:
         - '-ST1020'
         - '-ST1021'
         - '-ST1022'
+        - '-QF1008'
       initialisms:
         - ACL
         - API
