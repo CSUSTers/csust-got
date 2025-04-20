@@ -364,6 +364,7 @@ final:
 		resp, err = client.CreateChatCompletion(chatCtx, request)
 		if err != nil {
 			log.Error("Failed to send chat completion message", zap.Error(err))
+			return err
 		}
 		if len(resp.Choices) == 0 {
 			log.Error("No choices in chat completion response")
