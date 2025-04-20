@@ -387,30 +387,23 @@ func GetVoice(ctx tb.Context) error {
 	// 解析命令参数
 	message := ctx.Message()
 
-	// 检查是否为纯命令（没有任何参数）
-	cmd := entities.FromMessage(message)
-	if cmd != nil && cmd.Argc() == 0 {
-		// 纯命令，没有参数
-		return getRandomVoiceFromAllGames(ctx)
-	}
-
-	// 解析命令和参数
 	cmd, rest, err := entities.CommandTakeArgs(message, 1)
 	if err != nil {
 		return ctx.Send("参数错误")
 	}
+	if cmd.Argc() == 0 {
+		return getRandomVoiceFromAllGames(ctx)
+	}
 
-	// 提取第一个参数，检查是否是游戏别名
 	if _, ok := getVoiceAlias[cmd.Arg(0)]; ok {
 		return getVoice(ctx, cmd.Arg(0), rest)
 	}
 
-	// 第一个参数不是游戏别名，全部文本作为搜索内容
-	fullText := strings.TrimPrefix(message.Text, "/getvoice")
-	// 移除可能的@username部分
-	re := regexp.MustCompile(`^(@\w+)\s+`)
-	fullText = re.ReplaceAllString(fullText, "")
-	return searchVoiceFromAllGames(ctx, strings.TrimSpace(fullText))
+	_, rest, err = entities.CommandTakeArgs(message, 0)
+	if err != nil {
+		return ctx.Send("参数错误")
+	}
+	return searchVoiceFromAllGames(ctx, rest)
 }
 
 // searchVoiceFromAllGames 从所有游戏中搜索语音
@@ -449,8 +442,7 @@ func searchVoiceFromAllGames(ctx tb.Context, query string) error {
 		return sendVoiceMessage(ctx, bestMatch.Url, caption)
 	}
 
-	// 没有找到匹配项
-	return ctx.Send("未找到匹配的语音")
+	return handleVoiceError(ctx, ErrNoAudioFound, "")
 }
 
 // formatVoiceCaption 格式化语音消息的 caption
@@ -540,14 +532,8 @@ func getRandomVoiceFromAllGames(ctx tb.Context) error {
 		return ctx.Send("未配置任何语音库")
 	}
 
-	// 随机选择一个游戏
-	gameAliases := make([]string, 0, len(getVoiceAlias))
-	for alias := range getVoiceAlias {
-		gameAliases = append(gameAliases, alias)
-	}
-
 	// 随机选择一个游戏别名
-	randomGameAlias := gameAliases[rand.IntN(len(gameAliases))]
+	randomGameAlias := lo.Keys(getVoiceAlias)[rand.IntN(len(getVoiceAlias))]
 
 	// 从选中的游戏中获取随机语音
 	return getVoice(ctx, randomGameAlias, "")
@@ -560,7 +546,7 @@ func parseQueryText(text string) *GetVoiceQuery {
 	}
 
 	// 解析参数（如 ch=xx）
-	patt := regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\\'*\\')))\s*`)
+	patt := regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\'*\'))\s*)`)
 	cur := 0
 	args := make([]string, 0)
 	for {
