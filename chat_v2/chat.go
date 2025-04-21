@@ -20,7 +20,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
@@ -30,7 +30,7 @@ import (
 )
 
 var clients map[string]*openai.Client
-var templates *xsync.MapOf[string, chatTemplate]
+var templates *xsync.Map[string, chatTemplate]
 
 type chatTemplate struct {
 	PromptTemplate       *template.Template
@@ -69,7 +69,7 @@ func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
 func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	// templates = make(map[string]*template.Template)
-	templates = xsync.NewMapOf[string, chatTemplate](xsync.WithPresize(len(configs)))
+	templates = xsync.NewMap[string, chatTemplate](xsync.WithPresize(len(configs)))
 
 	for _, c := range configs {
 		// 初始化模板
