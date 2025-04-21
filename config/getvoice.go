@@ -5,6 +5,7 @@ import "github.com/spf13/viper"
 // GetVoiceConfig is config
 type GetVoiceConfig struct {
 	Enable      bool          `mapstructure:"enable"`
+	Meili       *MeiliSearch  `mapstructure:"meili"`
 	ErrAudioUrl string        `mapstructure:"err_audio_url"`
 	Indexes     []IndexConfig `mapstructure:"indexes"`
 }

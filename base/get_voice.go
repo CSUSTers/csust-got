@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"iter"
 	"math"
 	"math/rand/v2"
@@ -27,6 +28,7 @@ import (
 
 // GetVoiceQuery is query of get voice
 type GetVoiceQuery struct {
+	Index     string
 	Character string
 
 	Text string
@@ -201,18 +203,23 @@ func InitGetVoice() error {
 			getVoiceAlias[alias] = n
 		}
 	}
-	getVoiceClient = getMeilisearchClient(nil)
+	getVoiceClient = getMeilisearchClient(c.Meili)
 
 	return nil
 }
 
-func getMeilisearchClient(_ *config.GetVoiceConfig) meilisearch.ServiceManager {
-	c := config.BotConfig.MeiliConfig
+func getMeilisearchClient(c *config.MeiliSearch) meilisearch.ServiceManager {
+	if c == nil {
+		c = &config.MeiliSearch{
+			Host:   config.BotConfig.MeiliConfig.HostAddr,
+			ApiKey: config.BotConfig.MeiliConfig.ApiKey,
+		}
+	}
 	opts := []meilisearch.Option{}
 	if c.ApiKey != "" {
 		opts = append(opts, meilisearch.WithAPIKey(c.ApiKey))
 	}
-	client := meilisearch.New(c.HostAddr, opts...)
+	client := meilisearch.New(c.Host, opts...)
 	return client
 }
 
@@ -227,6 +234,9 @@ var (
 var idChars = append(lo.NumbersCharset, []rune("abcde")...)
 
 func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, err error) {
+	if indexName == "" && query.Index != "" {
+		indexName = query.Index
+	}
 	index, ok := getVoiceAlias[indexName]
 	if !ok {
 		return nil, ErrIndexNotFound
@@ -361,19 +371,80 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 	return ret, err
 }
 
-func getVoice(ctx tb.Context, index string, text string) error {
-	// 解析请求
-	q := parseQueryText(text)
+func getVoiceMetaFromIndexes(indexes []*VoiceConfigNDb, q *GetVoiceQuery, random bool) (*GetVoiceResult, *VoiceConfigNDb, error) {
+	if !random {
+		var bestMatch *GetVoiceResult
+		var bestMatchIndex *VoiceConfigNDb
+		var bestScore float64
 
-	meta, err := getVoiceMeta(index, q)
-	if err != nil {
-		return handleVoiceError(ctx, err, index)
+		for _, indexConfig := range indexes {
+			if indexConfig.IndexUid == "" {
+				continue
+			}
+
+			result, err := getVoiceMeta(indexConfig.Alias[0], q)
+			if err == nil && result != nil && result.RankingScore > bestScore {
+				bestMatch = result
+				bestMatchIndex = indexConfig
+				bestScore = result.RankingScore
+			}
+		}
+
+		if bestMatch == nil {
+			return nil, nil, ErrNoAudioFound
+		}
+		return bestMatch, bestMatchIndex, nil
 	}
 
-	// 获取游戏名称
-	gameName := getGameNameFromIndex(index)
+	type R struct {
+		ret *GetVoiceResult
+		idx *VoiceConfigNDb
+	}
 
-	// 格式化并发送消息
+	results := make([]R, 0, len(indexes))
+	for _, indexConfig := range indexes {
+		if indexConfig.IndexUid == "" || len(indexConfig.Alias) == 0 {
+			continue
+		}
+
+		result, err := getVoiceMeta(indexConfig.Alias[0], q)
+		if err != nil {
+			log.Error("get voice meta error", zap.String("index", indexConfig.Name), zap.Error(err))
+			continue
+		}
+		results = append(results, R{ret: result, idx: indexConfig})
+	}
+
+	if len(results) == 0 {
+		return nil, nil, ErrNoAudioFound
+	}
+	i := rand.IntN(len(results))
+	return results[i].ret, results[i].idx, nil
+}
+
+func getVoice(ctx tb.Context, index string, text string) error {
+	q := parseQueryText(text)
+
+	if index == "" && q.Index != "" {
+		index = q.Index
+	}
+
+	if index != "" {
+		meta, err := getVoiceMeta(index, q)
+		if err != nil {
+			return handleVoiceError(ctx, err, index)
+		}
+
+		gameName := getGameNameFromIndex(index)
+		caption := formatVoiceCaption(gameName, meta.Ch, meta.Text)
+		return sendVoiceMessage(ctx, meta.Url, caption)
+	}
+
+	meta, idx, err := getVoiceMetaFromIndexes(lo.UniqBy(lo.Values(getVoiceAlias), func(v *VoiceConfigNDb) string { return v.Name }), q, q.Text == "" && q.Character == "")
+	if err != nil {
+		return handleVoiceError(ctx, ErrNoAudioFound, "")
+	}
+	gameName := idx.Name
 	caption := formatVoiceCaption(gameName, meta.Ch, meta.Text)
 	return sendVoiceMessage(ctx, meta.Url, caption)
 }
@@ -381,18 +452,17 @@ func getVoice(ctx tb.Context, index string, text string) error {
 // GetVoice for get voice handle
 func GetVoice(ctx tb.Context) error {
 	if !config.BotConfig.GetVoiceConfig.Enable {
-		return ctx.Send("功能未启用")
+		return ctx.Reply("功能未启用")
 	}
 
-	// 解析命令参数
 	message := ctx.Message()
 
 	cmd, rest, err := entities.CommandTakeArgs(message, 1)
 	if err != nil {
-		return ctx.Send("参数错误")
+		return ctx.Reply("参数错误")
 	}
 	if cmd.Argc() == 0 {
-		return getRandomVoiceFromAllGames(ctx)
+		return getVoice(ctx, "", rest)
 	}
 
 	if _, ok := getVoiceAlias[cmd.Arg(0)]; ok {
@@ -401,79 +471,34 @@ func GetVoice(ctx tb.Context) error {
 
 	_, rest, err = entities.CommandTakeArgs(message, 0)
 	if err != nil {
-		return ctx.Send("参数错误")
+		return ctx.Reply("参数错误")
 	}
-	return searchVoiceFromAllGames(ctx, rest)
+	return getVoice(ctx, "", rest)
 }
 
-// searchVoiceFromAllGames 从所有游戏中搜索语音
-func searchVoiceFromAllGames(ctx tb.Context, query string) error {
-	if len(getVoiceAlias) == 0 {
-		return ctx.Send("未配置任何语音库")
-	}
-
-	// 解析查询
-	q := parseQueryText(query)
-
-	// 从每个游戏中查询，找出最佳匹配
-	var bestMatch *GetVoiceResult
-	var bestMatchIndex string
-	var bestScore float64
-
-	for alias, indexConfig := range getVoiceAlias {
-		// 跳过没有indexUid的配置
-		if indexConfig.IndexUid == "" {
-			continue
-		}
-
-		// 查询当前游戏
-		result, err := getVoiceMeta(alias, q)
-		if err == nil && result != nil && result.RankingScore > bestScore {
-			bestMatch = result
-			bestMatchIndex = alias
-			bestScore = result.RankingScore
-		}
-	}
-
-	// 处理查询结果
-	if bestMatch != nil {
-		gameName := getGameNameFromIndex(bestMatchIndex)
-		caption := formatVoiceCaption(gameName, bestMatch.Ch, bestMatch.Text)
-		return sendVoiceMessage(ctx, bestMatch.Url, caption)
-	}
-
-	return handleVoiceError(ctx, ErrNoAudioFound, "")
-}
-
-// formatVoiceCaption 格式化语音消息的 caption
 func formatVoiceCaption(gameName, characterName, text string) string {
-	// 格式化标签
 	var gameTag string
 	if gameName != "" {
 		gameTag = "#" + strings.ReplaceAll(gameName, " ", "_")
 	}
 	characterTag := "#" + strings.ReplaceAll(characterName, " ", "_")
 
-	// 封装文本
-	blockquoteText := fmt.Sprintf("<blockquote expandable>%s</blockquote>", text)
+	blockquoteText := fmt.Sprintf("<blockquote expandable>%s</blockquote>", html.EscapeString(text))
 
-	// 游戏名标签可能为空时的处理
 	if gameTag != "" {
 		return fmt.Sprintf("%s %s\n%s", gameTag, characterTag, blockquoteText)
 	}
 	return fmt.Sprintf("%s\n%s", characterTag, blockquoteText)
 }
 
-// getGameNameFromIndex 从索引配置中获取游戏名称
 func getGameNameFromIndex(indexName string) string {
 	indexConfig, ok := getVoiceAlias[indexName]
 	if !ok || indexConfig.Name == "" {
-		return "" // 当找不到索引或没有名称时返回空字符串
+		return ""
 	}
 	return indexConfig.Name
 }
 
-// sendVoiceMessage 发送语音消息
 func sendVoiceMessage(ctx tb.Context, fileURL, caption string) error {
 	return ctx.Send(&tb.Voice{
 		File: tb.File{
@@ -485,14 +510,11 @@ func sendVoiceMessage(ctx tb.Context, fileURL, caption string) error {
 	})
 }
 
-// handleVoiceError 处理错误响应
 func handleVoiceError(ctx tb.Context, err error, indexName string) error {
 	log.Error("fail to get voice meta", zap.String("index", indexName), zap.Error(err))
 
-	// 获取游戏名称
 	gameName := getGameNameFromIndex(indexName)
 
-	// 根据错误类型构建错误信息
 	var errorMsg string
 	switch {
 	case errors.Is(err, ErrIndexNotFound):
@@ -503,7 +525,6 @@ func handleVoiceError(ctx tb.Context, err error, indexName string) error {
 		errorMsg = "连接语音API服务器失败"
 	}
 
-	// 构建错误标签和caption
 	var gameTag string
 	if gameName != "" {
 		gameTag = "#" + strings.ReplaceAll(gameName, " ", "_") + " "
@@ -511,7 +532,6 @@ func handleVoiceError(ctx tb.Context, err error, indexName string) error {
 	errorCaption := fmt.Sprintf("%s%s\n<blockquote expandable>…异常…</blockquote>\n%s",
 		gameTag, "#异常", errorMsg)
 
-	// 发送错误响应
 	errAudio := config.BotConfig.ErrAudioUrl
 	if errAudio != "" {
 		if sendErr := sendVoiceMessage(ctx, errAudio, errorCaption); sendErr != nil {
@@ -525,28 +545,13 @@ func handleVoiceError(ctx tb.Context, err error, indexName string) error {
 	return err
 }
 
-// getRandomVoiceFromAllGames 从所有游戏中随机获取一条语音
-func getRandomVoiceFromAllGames(ctx tb.Context) error {
-	// 随机选择一个游戏别名
-	if len(getVoiceAlias) == 0 {
-		return ctx.Send("未配置任何语音库")
-	}
-
-	// 随机选择一个游戏别名
-	randomGameAlias := lo.Keys(getVoiceAlias)[rand.IntN(len(getVoiceAlias))]
-
-	// 从选中的游戏中获取随机语音
-	return getVoice(ctx, randomGameAlias, "")
-}
-
-// parseQueryText 解析查询文本，提取角色和查询文本
 func parseQueryText(text string) *GetVoiceQuery {
 	q := &GetVoiceQuery{
 		Text: text,
 	}
 
-	// 解析参数（如 ch=xx）
-	patt := regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\'*\'))\s*)`)
+	// extract args like `key=value` in front of all text
+	patt := regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\'.*\'))\s*)`)
 	cur := 0
 	args := make([]string, 0)
 	for {
@@ -558,10 +563,8 @@ func parseQueryText(text string) *GetVoiceQuery {
 		cur += len(groups[0])
 	}
 
-	// 剩下的内容作为文本
 	q.Text = text[cur:]
 
-	// 处理参数
 	for _, arg := range args {
 		ss := strings.SplitN(arg, "=", 2)
 		if len(ss) == 0 {
@@ -575,6 +578,8 @@ func parseQueryText(text string) *GetVoiceQuery {
 		}
 
 		switch key {
+		case "i", "index", "p", "索引", "游戏":
+			q.Index = value
 		case "ch", "角色":
 			q.Character = value
 		}
