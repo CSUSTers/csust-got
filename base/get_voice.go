@@ -246,8 +246,23 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 	random := query.Text == ""
 
 	var filter = ""
-	if query.Character != "" {
-		filter = "ch = '" + query.Character + "'"
+	if ch := query.Character; ch != "" {
+		// NEEDS TO ENABLE `containsFilter` EXPIRIMENTAL FEATURE
+		// AND ADD `id` FIELD TO FILTER
+		switch {
+		case strings.HasSuffix(ch, "*") || strings.HasSuffix(ch, "%"):
+			s := ch[:len(ch)-1]
+			if s != "" {
+				filter = "ch STARTS WITH '" + s + "'"
+			}
+		case strings.HasPrefix(ch, "*") || strings.HasPrefix(ch, "%"):
+			s := ch[1:]
+			if s != "" {
+				filter = "ch CONTAINS '" + s + "'"
+			}
+		default:
+			filter = "ch = '" + query.Character + "'"
+		}
 	}
 	searchOpt := &meilisearch.SearchRequest{
 		Filter:                  filter,
@@ -440,7 +455,7 @@ func getVoice(ctx tb.Context, index string, text string) error {
 		return sendVoiceMessage(ctx, meta.Url, caption)
 	}
 
-	meta, idx, err := getVoiceMetaFromIndexes(lo.UniqBy(lo.Values(getVoiceAlias), func(v *VoiceConfigNDb) string { return v.Name }), q, q.Text == "" && q.Character == "")
+	meta, idx, err := getVoiceMetaFromIndexes(lo.UniqBy(lo.Values(getVoiceAlias), func(v *VoiceConfigNDb) string { return v.Name }), q, q.Text == "")
 	if err != nil {
 		return handleVoiceError(ctx, ErrNoAudioFound, "")
 	}
