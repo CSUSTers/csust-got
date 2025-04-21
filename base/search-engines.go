@@ -53,25 +53,25 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 
 func google(cmd string) string {
 	query := url.QueryEscape(cmd)
-	website := fmt.Sprintf("https://google.com/search?q=%s", query)
+	website := "https://google.com/search?q=" + query
 	return fmt.Sprintf("谷歌的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func bing(cmd string) string {
 	query := url.QueryEscape(cmd)
-	website := fmt.Sprintf("https://bing.com/search?q=%s", query)
+	website := "https://bing.com/search?q=" + query
 	return fmt.Sprintf("必应的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func bilibili(cmd string) string {
 	query := url.QueryEscape(cmd)
-	website := fmt.Sprintf("https://search.bilibili.com/all?keyword=%s", query)
+	website := "https://search.bilibili.com/all?keyword=" + query
 	return fmt.Sprintf("哔哩哔哩🍻~: <a href=\"%s\">%s</a>", website, cmd)
 }
 
 func github(cmd string) string {
 	query := url.QueryEscape(cmd)
-	website := fmt.Sprintf("https://github.com/search?q=%s", query)
+	website := "https://github.com/search?q=" + query
 	return fmt.Sprintf("🐙🐱 Github: <a href=\"%s\">%s</a>", website, cmd)
 }
 

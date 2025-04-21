@@ -9,6 +9,7 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"encoding/base64"
+	"encoding/json"
 	"image"
 	"image/jpeg"
 	"net/http"
@@ -17,17 +18,19 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	"golang.org/x/image/draw"
-	// nolint:revive // import for registering webp decoder to image package
+
 	_ "golang.org/x/image/webp"
 	tb "gopkg.in/telebot.v3"
 )
 
 var clients map[string]*openai.Client
-var templates *xsync.MapOf[string, chatTemplate]
+var templates *xsync.Map[string, chatTemplate]
 
 type chatTemplate struct {
 	PromptTemplate       *template.Template
@@ -66,7 +69,7 @@ func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
 func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	// templates = make(map[string]*template.Template)
-	templates = xsync.NewMapOf[string, chatTemplate](xsync.WithPresize(len(configs)))
+	templates = xsync.NewMap[string, chatTemplate](xsync.WithPresize(len(configs)))
 
 	for _, c := range configs {
 		// 初始化模板
@@ -113,11 +116,20 @@ type promptData struct {
 	ContextMessages []*ContextMessage
 	ContextText     string
 	ContextXml      string
+	ReplyToXml      string
 	BotUsername     string // 添加 Bot 用户名字段
 }
 
 // Chat 处理聊天请求
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
+
+	// 检查白名单
+	if v2.Model.Features.WhiteList {
+		if !config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) &&
+			!config.BotConfig.WhiteListConfig.Check(ctx.Sender().ID) {
+			return nil
+		}
+	}
 
 	input := ctx.Message().Text
 	if input == "" {
@@ -142,6 +154,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextMessages: contextMsgs,
 		ContextText:     FormatContextMessages(contextMsgs),
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
+		ReplyToXml:      FormatSingleTbMessage(ctx.Message().ReplyTo, "REPLY_TO"),
 		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
 	}
 
@@ -256,14 +269,25 @@ final:
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
 			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
 		}
+	} else {
+		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
+		if err != nil {
+			log.Error("Failed to send typing notification", zap.Error(err))
+		}
 	}
 
-	resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+	chatCtx, cancel := context.WithTimeout(context.Background(), v2.GetTimeout())
+	defer cancel()
+
+	request := openai.ChatCompletionRequest{
 		Model:       v2.Model.Model,
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
-	})
-
+	}
+	if v2.Model.Features.Mcp {
+		request.Tools = allTools
+	}
+	resp, err := client.CreateChatCompletion(chatCtx, request)
 	if err != nil {
 		log.Error("Failed to send chat completion message", zap.Error(err))
 	}
@@ -279,43 +303,106 @@ final:
 		return err
 	}
 
-	// 获取AI响应并发送回复
-	if len(resp.Choices) > 0 {
-		response := resp.Choices[0].Message.Content
-		// 移除可能的空行
-		response = strings.TrimSpace(response)
-		response = util.EscapeTelegramReservedChars(response)
-		log.Debug("Chat response", zap.String("response", response))
-
-		// 根据是否有placeholder选择更新或发送新消息
-		var replyMsg *tb.Message
-		var err error
-
+	if len(resp.Choices) == 0 {
+		log.Error("No choices in chat completion response")
 		if placeholderMsg != nil {
-			// 如果使用了placeholder，更新消息
-			if response == "" {
-				response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
+			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
+			if editErr != nil {
+				log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
 			}
-			replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
-			if err != nil {
-				log.Error("Failed to edit placeholder message", zap.Error(err))
-				return err
-			}
-		} else {
-			// 如果没有使用placeholder，直接发送响应
-			replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
-			if err != nil {
-				log.Error("Failed to send reply", zap.Error(err))
-				return err
-			}
-		}
-
-		err = orm.PushMessageToStream(replyMsg)
-		if err != nil {
-			log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
 		}
 		return nil
 	}
 
+	// 处理大模型返回工具调用的情况
+	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
+		messages = append(messages, resp.Choices[0].Message)
+		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
+			c, ok := mcpClients[toolsClientMap[toolCall.Function.Name]]
+			if !ok {
+				log.Error("MCP client not found", zap.String("toolName", toolCall.Function.Name))
+				continue
+			}
+			// 调用工具 {"timezone": "Asia/Shanghai"}
+			toolReq := mcp.CallToolRequest{}
+			toolReq.Params.Name = toolCall.Function.Name
+			if toolCall.Function.Arguments != "" {
+				args := make(map[string]any)
+				err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
+				if err != nil {
+					log.Error("Failed to unmarshal tool arguments", zap.String("arguments", toolCall.Function.Arguments), zap.Error(err))
+					continue
+				}
+				toolReq.Params.Arguments = args
+			}
+			result, err := c.CallTool(chatCtx, toolReq)
+			if err != nil {
+				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
+				continue
+			}
+			// 处理工具调用结果
+			if result.IsError {
+				log.Error("Tool call error", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result.Result))
+				continue
+			}
+			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result))
+			content, err := json.Marshal(result.Content)
+			if err != nil {
+				log.Error("Failed to marshal tool call result", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
+				continue
+			}
+			toolMsg := openai.ChatCompletionMessage{
+				Role:       openai.ChatMessageRoleTool,
+				ToolCallID: toolCall.ID,
+				Name:       toolCall.Function.Name,
+				Content:    string(content),
+			}
+			messages = append(messages, toolMsg)
+		}
+
+		request.Messages = messages
+		resp, err = client.CreateChatCompletion(chatCtx, request)
+		if err != nil {
+			log.Error("Failed to send chat completion message", zap.Error(err))
+			return err
+		}
+		if len(resp.Choices) == 0 {
+			log.Error("No choices in chat completion response")
+			return nil
+		}
+	}
+
+	response := resp.Choices[0].Message.Content
+	// 移除可能的空行
+	response = strings.TrimSpace(response)
+	response = util.EscapeTelegramReservedChars(response)
+	log.Debug("Chat response", zap.String("response", response))
+
+	// 根据是否有placeholder选择更新或发送新消息
+	var replyMsg *tb.Message
+	if placeholderMsg != nil {
+		// 如果使用了placeholder，更新消息
+		if response == "" {
+			response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
+		}
+		replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
+		if err != nil {
+			log.Error("Failed to edit placeholder message", zap.Error(err))
+			return err
+		}
+	} else {
+		// 如果没有使用placeholder，直接发送响应
+		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
+		if err != nil {
+			log.Error("Failed to send reply", zap.Error(err))
+			return err
+		}
+	}
+
+	err = orm.PushMessageToStream(replyMsg)
+	if err != nil {
+		log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
+	}
 	return nil
+
 }

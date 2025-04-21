@@ -112,7 +112,7 @@ func (h *Heap[T]) IsHeap() bool {
 		return true
 	}
 
-	for i := 0; i < h.Len()/2; i++ {
+	for i := range h.Len() / 2 {
 		left, right := 2*i+1, 2*i+2
 		if left >= h.Len() {
 			break

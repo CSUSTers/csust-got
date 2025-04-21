@@ -2,7 +2,6 @@ package base
 
 import (
 	"csust-got/config"
-	"csust-got/prom"
 	"csust-got/util"
 
 	. "gopkg.in/telebot.v3"
@@ -15,7 +14,6 @@ func WelcomeNewMember(ctx Context) error {
 	for idx := range usersJoined {
 		member := &usersJoined[idx]
 		text := config.BotConfig.MessageConfig.WelcomeMessage + util.GetName(member)
-		prom.NewMember(ctx.Chat().Title)
 		if err := ctx.Send(text); err != nil {
 			return err
 		}
@@ -28,5 +26,4 @@ func LeftMember(m *Message) {
 	if m.UserLeft == nil {
 		return
 	}
-	prom.MemberLeft(m.Chat.Title)
 }

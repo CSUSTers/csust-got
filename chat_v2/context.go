@@ -235,3 +235,44 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 
 	return buf.String()
 }
+
+// FormatSingleTbMessage format tb msg to xml with custom tag
+func FormatSingleTbMessage(msg *tb.Message, tag string) string {
+	if msg == nil {
+		return ""
+	}
+
+	buf := strings.Builder{}
+
+	buf.WriteString(fmt.Sprintf(`<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
+		html.EscapeString(msg.Sender.Username),
+		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
+
+	text := msg.Text
+	if text == "" {
+		text = msg.Caption
+	}
+	if text == "" {
+		switch {
+		case msg.Photo != nil:
+			buf.WriteString("<image_placeholder />\n")
+			text = msg.Photo.Caption
+		case msg.Document != nil:
+			buf.WriteString("<file_placeholder filename=\"")
+			buf.WriteString(html.EscapeString(msg.Document.FileName))
+			buf.WriteString("\" />\n")
+			text = msg.Document.Caption
+		case msg.Sticker != nil:
+			buf.WriteString("<sticker emoji=\"")
+			buf.WriteString(msg.Sticker.Emoji)
+			buf.WriteString("\" />\n")
+		}
+	}
+	buf.WriteString(html.EscapeString(text))
+
+	buf.WriteString("\n</")
+	buf.WriteString(tag)
+	buf.WriteByte('>')
+
+	return buf.String()
+}

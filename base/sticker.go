@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +28,6 @@ import (
 	"github.com/cespare/xxhash/v2"
 	ffmpeg_go "github.com/u2takey/ffmpeg-go"
 
-	// nolint: revive
 	_ "golang.org/x/image/webp"
 
 	"go.uber.org/zap"
@@ -140,7 +140,7 @@ func (o stickerOpts) merge(m map[string]string, final bool) stickerOpts {
 	return o
 }
 
-// nolint: gocritic
+// VideoFormat will return video format
 func (o stickerOpts) VideoFormat() string {
 	if o.Vf != "" {
 		return o.Vf
@@ -148,7 +148,7 @@ func (o stickerOpts) VideoFormat() string {
 	return o.Format
 }
 
-// nolint: gocritic
+// StickerFormat will return sticker format
 func (o stickerOpts) StickerFormat() string {
 	if o.Sf != "" {
 		return o.Sf
@@ -156,7 +156,7 @@ func (o stickerOpts) StickerFormat() string {
 	return o.Format
 }
 
-// nolint: gocritic
+// FileExt will return file extension
 func (o stickerOpts) FileExt(video bool) string {
 	if video {
 		f := o.VideoFormat()
@@ -175,7 +175,7 @@ func (o stickerOpts) FileExt(video bool) string {
 	return "." + f
 }
 
-// nolint: gocritic
+// NotConvert will return true if the sticker is not convert
 func (o stickerOpts) NotConvert(s *tb.Sticker) bool {
 	if s.Video {
 		switch o.VideoFormat() {
@@ -398,13 +398,14 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 	case "mp4", "png", "apng", "webp":
 		ff := ffconv.FFConv{LogCmd: true}
 		outputArgs := []ffmpeg_go.KwArgs{}
-		if f == "png" || f == "apng" {
+		switch f {
+		case "png", "apng":
 			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
 				"plays": "0",
 				"f":     "apng",
 				"c:v":   "apng",
 			})
-		} else if f == "webp" {
+		case "webp":
 			outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
 				"plays": "0",
 				"f":     "webp",
@@ -660,7 +661,7 @@ loop:
 				default:
 					replyMsgLock.Lock()
 					if replyMsg == "" {
-						replyMsg = fmt.Sprintf("unknown target image format: %s", f)
+						replyMsg = "unknown target image format: " + f
 					}
 					replyMsgLock.Unlock()
 
@@ -797,7 +798,7 @@ func getFileCacheKeys(set *tb.StickerSet, opt *stickerOpts) ([]string, error) {
 		log.Error("failed to write to hasher", zap.Error(err))
 		return nil, err
 	}
-	keys = append(keys, fmt.Sprintf("%x", hash.Sum64()))
+	keys = append(keys, strconv.FormatUint(hash.Sum64(), 16))
 	return keys, nil
 }
 

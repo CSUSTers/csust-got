@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"csust-got/config"
-	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
@@ -35,7 +34,6 @@ type chatContext struct {
 }
 
 // ChatInfo is input of ChatWith
-// nolint: revive
 type ChatInfo struct {
 	Setting
 
@@ -88,40 +86,7 @@ func InitChat() {
 	}
 }
 
-// GPTChat is handler for chat with GPT
-func GPTChat(ctx Context) error {
-	return chatHandler(ctx, false)
-}
-
-// GPTChatWithStream is handler for chat with GPT, and use stream api
-func GPTChatWithStream(ctx Context) error {
-	return chatHandler(ctx, true)
-}
-
-func chatHandler(ctx Context, stream bool) error {
-	_, text, err := entities.CommandTakeArgs(ctx.Message(), 0)
-	if err != nil {
-		log.Error("[ChatGPT] Can't take args", zap.Error(err))
-		return ctx.Reply("嗦啥呢？")
-	}
-
-	if len(text) == 0 {
-		return ctx.Reply("您好，有什么问题可以为您解答吗？")
-	}
-	if len(text) > config.BotConfig.ChatConfig.PromptLimit {
-		return ctx.Reply("TLDR")
-	}
-	return ChatWith(ctx, &ChatInfo{
-		Text: text,
-		Setting: Setting{
-			Stream: stream,
-			Reply:  true,
-		},
-	})
-}
-
 // ChatWith chat with GPT
-// nolint: revive
 func ChatWith(ctx Context, info *ChatInfo) error {
 	if client == nil {
 		return nil
@@ -162,8 +127,8 @@ func generateRequest(ctx Context, info *ChatInfo) (*openai.ChatCompletionRequest
 		Temperature: chatCfg.Temperature,
 	}
 
-	if info.Setting.Temperature > 0 {
-		req.Temperature = info.Setting.Temperature
+	if info.Temperature > 0 {
+		req.Temperature = info.Temperature
 	}
 
 	if info.Model != "" {
@@ -259,7 +224,7 @@ func chatWithStream(ctx *chatContext) {
 	var err error
 
 	// 重试5次，每次间隔1s
-	for i := 0; i < retryNums; i++ {
+	for i := range retryNums {
 		log.Debug("[ChatGPT] retry", zap.Int("retry", i), zap.String("content", ctx.req.Messages[len(ctx.req.Messages)-1].Content))
 		stream, err = client.CreateChatCompletionStream(context.Background(), *ctx.req)
 		if err == nil {
@@ -362,7 +327,7 @@ func chatWithoutStream(ctx *chatContext) {
 	var resp openai.ChatCompletionResponse
 	var err error
 
-	for i := 0; i < retryNums; i++ {
+	for range retryNums {
 		resp, err = client.CreateChatCompletion(context.Background(), *ctx.req)
 		if err == nil {
 			break // 如果成功创建stream，跳出循环

@@ -39,8 +39,14 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat_v2.InitMcpClients()
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
+
+	err := base.InitGetVoice()
+	if err != nil {
+		log.Panic(err.Error())
+	}
 
 	// go iwatch.WatchService()
 
@@ -58,7 +64,7 @@ func main() {
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
 	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
-	bot.Handle("/sd", sd.Handler)
+	bot.Handle("/sd", sd.Handler, whiteMiddleware)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)
 
@@ -114,7 +120,7 @@ func initBot() (*Bot, error) {
 	}
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
-		rateMiddleware, noStickerMiddleware, promMiddleware, shutdownMiddleware,
+		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
 		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
@@ -146,9 +152,7 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/id", util.PrivateCommand(base.GetUserID))
 	bot.Handle("/cid", base.GetChatID)
 	bot.Handle("/info", base.Info)
-	// bot.Handle("/links", base.Links)
 
-	// bot.Handle("/history", base.History)
 	bot.Handle("/forward", util.GroupCommand(base.Forward))
 	bot.Handle("/mc", util.GroupCommandCtx(base.MC))
 	bot.Handle("/reburn", util.GroupCommandCtx(base.Reburn))
@@ -172,13 +176,7 @@ func registerBaseHandler(bot *Bot) {
 
 	bot.Handle("/run_after", base.RunTask)
 
-	bot.Handle("/getvoice_old", base.GetVoice)
-	bot.Handle("/getvoice", base.GetVoiceV2)
-	bot.Handle("/genvoice", base.GetVoiceV3, whiteMiddleware)
-	bot.Handle("/provoice", base.GetVoiceV3Pro, whiteMiddleware)
-
-	bot.Handle("/chat", chat.GPTChat, whiteMiddleware)
-	bot.Handle("/chats", chat.GPTChatWithStream, whiteMiddleware)
+	bot.Handle("/getvoice", base.GetVoice)
 
 	// meilisearch handler
 	bot.Handle("/search", meili.SearchHandle)
@@ -230,6 +228,18 @@ func customHandler(ctx Context) error {
 	for _, v := range regexHandlers {
 		if v.Regex.MatchString(text) {
 			return v.Func(ctx)
+		}
+	}
+
+	// reply to bot
+	if text != "" && ctx.Message().ReplyTo != nil {
+		reply := ctx.Message().ReplyTo
+		if reply.Sender.Username == ctx.Bot().Me.Username {
+			for _, v2 := range *config.BotConfig.ChatConfigV2 {
+				if trigger, ok := v2.TriggerOnReply(); ok {
+					return chat_v2.Chat(ctx, v2, trigger)
+				}
+			}
 		}
 	}
 
@@ -419,21 +429,6 @@ func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("message deleted by no sticker", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
-		}
-		return next(ctx)
-	}
-}
-
-func promMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		if ctx.Message() == nil {
-			return next(ctx)
-		}
-		prom.DialContext(ctx)
-		command := entities.FromMessage(ctx.Message())
-		if command != nil {
-			log.Debug("bot receive command", zap.String("chat", ctx.Chat().Title),
-				zap.String("user", ctx.Sender().Username), zap.String("command", ctx.Message().Text))
 		}
 		return next(ctx)
 	}

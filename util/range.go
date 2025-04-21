@@ -44,7 +44,7 @@ func (r Range[T]) Cover(x T) bool {
 
 // IsEmpty tells if the range is available.
 func (r Range[T]) IsEmpty() bool {
-	return !(r.max > r.min || (r.t == ClosedInterval && r.max == r.min))
+	return r.max <= r.min && (r.t != ClosedInterval || r.max != r.min)
 }
 
 type emptyRange[T Ordered] struct{}
