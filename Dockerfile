@@ -24,8 +24,11 @@ FROM --platform=$BUILDPLATFORM alpine
 
 RUN apk add --no-cache tzdata
 COPY --from=ghcr.io/hugefiver/static-ffmpeg:latest /ffmpeg /usr/local/bin/ffmpeg
+
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-# COPY --from=hugefiver/ffmpeg:7.0.1 /ffprobe /usr/local/bin/ffprobe
+# preinstall mcp tools
+RUN for package in mcp-server-time mcp-searxng mcp-server-fetch; do \
+    uv tool install --no-cache "$package"; done
 
 WORKDIR /app
 COPY --from=buildenv /go/src/app/got .
