@@ -31,9 +31,10 @@ func InitMcpClients() {
 		Version: "1.0.0",
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// nolint:gocritic
 	for _, srv := range *config.BotConfig.McpServers {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 
 		c, err := client.NewStdioMCPClient(srv.Command, srv.Env, srv.Args...)
 		if err != nil {
