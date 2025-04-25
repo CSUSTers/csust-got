@@ -52,6 +52,9 @@ type ChatConfigSingle struct {
 	Trigger        []*ChatTrigger `mapstructure:"trigger"`
 	Timeout        int            `mapstructure:"timeout"` // seconds
 
+	// disable preload system prompt
+	NoPreloadSystemPrompt bool `mapstructure:"no_preload_system_prompt"`
+
 	Features FeatureSetting `mapstructure:"features"`
 }
 
@@ -81,6 +84,8 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
+
+	Mcp *bool `mapstructure:"mcp"`
 }
 
 // McpServers is the configuration for mcp servers
