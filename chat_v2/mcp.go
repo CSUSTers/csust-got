@@ -6,8 +6,6 @@ import (
 	"csust-got/log"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/client"
@@ -20,7 +18,6 @@ import (
 var mcpClients map[string]*client.Client
 var toolsClientMap map[string]string
 var allTools []openai.Tool
-var mcpToolsDesc string
 
 // InitMcpClients initializes the MCP clients and tools
 func InitMcpClients() {
@@ -90,31 +87,4 @@ func InitMcpClients() {
 		log.Info("MCP Server initialized", zap.String("name", initResult.ServerInfo.Name), zap.String("version", initResult.ServerInfo.Version))
 	}
 
-	mcpToolsDesc = getMcpToolsDesc(allTools)
-}
-
-func getMcpToolsDesc(tools []openai.Tool) string {
-	if len(tools) == 0 {
-		return ""
-	}
-
-	buf := strings.Builder{}
-	buf.WriteString("<tools>\n")
-	for _, tool := range tools {
-		parameters, err := json.Marshal(tool.Function.Parameters)
-		if err != nil {
-			log.Error("failed to build tool-use system prompt, cause of cannot get tool parameters schema",
-				zap.String("tool_name", tool.Function.Name), zap.Error(err))
-			continue
-		}
-		buf.WriteString("<tool>\n\n")
-		buf.WriteString(fmt.Sprintf(`
-  <name>%s</name>
-  <description>%s</description>
-  <arguments>`, tool.Function.Name, tool.Function.Description))
-		buf.Write(parameters)
-		buf.WriteString("</arguments>\n</tool>\n\n")
-	}
-	buf.WriteString("</tools>\n")
-	return buf.String()
 }
