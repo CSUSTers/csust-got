@@ -10,6 +10,7 @@ import (
 	"csust-got/util"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"image"
 	"image/jpeg"
 	"net/http"
@@ -272,6 +273,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	if useMcp && v2.Features.Mcp != nil {
 		useMcp = *v2.Features.Mcp
 	}
+	usePromptTool := v2.Features.UsePromptTool
 
 	input := ctx.Message().Text
 	if input == "" {
@@ -317,7 +319,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		promptBuf.Reset()
 	}
 
-	if useMcp && !v2.NoPreloadSystemPrompt {
+	if usePromptTool {
 		systemPrompt = getToolUseSystemPrompt(systemPrompt)
 		log.Debug("mcp systen promplt", zap.String("system prompt", systemPrompt))
 	}
@@ -461,63 +463,153 @@ final:
 		return nil
 	}
 
-	// 处理大模型返回工具调用的情况
-	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
-		messages = append(messages, resp.Choices[0].Message)
-		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
-			c, ok := mcpClients[toolsClientMap[toolCall.Function.Name]]
-			if !ok {
-				log.Error("MCP client not found", zap.String("toolName", toolCall.Function.Name))
-				continue
+	// nolint:nestif
+	if usePromptTool {
+		type ToolCall struct {
+			Name      string `xml:"name"`
+			Arguments string `xml:"arguments"`
+		}
+		for {
+			ch := resp.Choices[0]
+			switch ch.FinishReason {
+			case openai.FinishReasonLength, openai.FinishReasonNull, openai.FinishReasonStop:
+				log.Info("use tool prompt break", zap.String("reason", string(ch.FinishReason)))
+				goto chat_finish
+			default:
 			}
-			// 调用工具 {"timezone": "Asia/Shanghai"}
+			log.Debug("prompt tool resp", zap.Any("msg", &ch.Message))
+			msgContent := ch.Message.Content
+			toolCall := ToolCall{}
+			err := xml.Unmarshal([]byte(msgContent), &toolCall)
+			if err != nil || toolCall.Name == "" {
+				log.Info("cannot parse tool call request, maybe normal msg",
+					zap.String("content", msgContent), zap.Error(err))
+				goto chat_finish
+			}
+
+			clientName, ok := toolsClientMap[toolCall.Name]
+			c, ok2 := mcpClients[clientName]
+			if !ok || !ok2 {
+				log.Error("cannot find tool client request by llm", zap.String("tool", toolCall.Name))
+				goto chat_finish
+			}
+
 			toolReq := mcp.CallToolRequest{}
-			toolReq.Params.Name = toolCall.Function.Name
-			if toolCall.Function.Arguments != "" {
+			toolReq.Params.Name = toolCall.Name
+			var callResult *mcp.CallToolResult
+			var callResultResp string
+			if toolCall.Arguments != "" {
 				args := make(map[string]any)
-				err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
+				err := json.Unmarshal([]byte(toolCall.Arguments), &args)
 				if err != nil {
-					log.Error("Failed to unmarshal tool arguments", zap.String("arguments", toolCall.Function.Arguments), zap.Error(err))
-					continue
+					log.Error("Failed to unmarshal tool arguments", zap.String("arguments", toolCall.Arguments), zap.Error(err))
+					goto tool_call_end
 				}
 				toolReq.Params.Arguments = args
 			}
-			result, err := c.CallTool(chatCtx, toolReq)
+			callResult, err = c.CallTool(chatCtx, toolReq)
 			if err != nil {
-				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
+				log.Error("Failed to call tool", zap.String("toolName", toolCall.Name), zap.Error(err))
 				continue
 			}
 			// 处理工具调用结果
-			if result.IsError {
-				log.Error("Tool call error", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result.Result))
-				continue
+			if callResult.IsError {
+				log.Error("Tool call error", zap.String("toolName", toolCall.Name), zap.Any("result", callResult.Result))
+				goto tool_call_end
 			}
-			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result))
-			content, err := json.Marshal(result.Content)
-			if err != nil {
-				log.Error("Failed to marshal tool call result", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				continue
+			log.Debug("Tool call result", zap.String("toolName", toolCall.Name), zap.Any("result", callResult))
+			{
+				content, err := json.Marshal(callResult.Content)
+				if err != nil {
+					log.Error("Failed to marshal tool call result", zap.String("toolName", toolCall.Name), zap.Error(err))
+					goto tool_call_end
+				}
+				callResultResp = ("<tool_use_result>\n" +
+					"  <name>" + toolCall.Name + "</name>\n" +
+					"  <result>" + string(content) + "</result>\n" +
+					"</tool_use_result>")
 			}
-			toolMsg := openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				ToolCallID: toolCall.ID,
-				Name:       toolCall.Function.Name,
-				Content:    string(content),
-			}
-			messages = append(messages, toolMsg)
-		}
 
-		request.Messages = messages
-		resp, err = client.CreateChatCompletion(chatCtx, request)
-		if err != nil {
-			log.Error("Failed to send chat completion message", zap.Error(err))
-			return err
+		tool_call_end:
+			if callResultResp == "" {
+				log.Error("failed to call mcp tool")
+				goto chat_finish
+			}
+			request.Messages = append(request.Messages, openai.ChatCompletionMessage{
+				Role:    openai.ChatMessageRoleUser,
+				Content: callResultResp,
+			})
+			resp, err = client.CreateChatCompletion(chatCtx, request)
+			if err != nil {
+				log.Error("Failed to send chat completion message", zap.Error(err))
+				return err
+			}
+			if len(resp.Choices) == 0 {
+				log.Error("No choices in chat completion response")
+				return nil
+			}
 		}
-		if len(resp.Choices) == 0 {
-			log.Error("No choices in chat completion response")
-			return nil
+	} else if useMcp {
+		// 处理大模型返回工具调用的情况
+		for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
+			messages = append(messages, resp.Choices[0].Message)
+			for _, toolCall := range resp.Choices[0].Message.ToolCalls {
+				c, ok := mcpClients[toolsClientMap[toolCall.Function.Name]]
+				if !ok {
+					log.Error("MCP client not found", zap.String("toolName", toolCall.Function.Name))
+					continue
+				}
+				// 调用工具 {"timezone": "Asia/Shanghai"}
+				toolReq := mcp.CallToolRequest{}
+				toolReq.Params.Name = toolCall.Function.Name
+				if toolCall.Function.Arguments != "" {
+					args := make(map[string]any)
+					err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
+					if err != nil {
+						log.Error("Failed to unmarshal tool arguments", zap.String("arguments", toolCall.Function.Arguments), zap.Error(err))
+						continue
+					}
+					toolReq.Params.Arguments = args
+				}
+				result, err := c.CallTool(chatCtx, toolReq)
+				if err != nil {
+					log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
+					continue
+				}
+				// 处理工具调用结果
+				if result.IsError {
+					log.Error("Tool call error", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result.Result))
+					continue
+				}
+				log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result))
+				content, err := json.Marshal(result.Content)
+				if err != nil {
+					log.Error("Failed to marshal tool call result", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
+					continue
+				}
+				toolMsg := openai.ChatCompletionMessage{
+					Role:       openai.ChatMessageRoleTool,
+					ToolCallID: toolCall.ID,
+					Name:       toolCall.Function.Name,
+					Content:    string(content),
+				}
+				messages = append(messages, toolMsg)
+			}
+
+			request.Messages = messages
+			resp, err = client.CreateChatCompletion(chatCtx, request)
+			if err != nil {
+				log.Error("Failed to send chat completion message", zap.Error(err))
+				return err
+			}
+			if len(resp.Choices) == 0 {
+				log.Error("No choices in chat completion response")
+				return nil
+			}
 		}
 	}
+
+chat_finish:
 
 	response := resp.Choices[0].Message.Content
 	// 移除可能的空行
