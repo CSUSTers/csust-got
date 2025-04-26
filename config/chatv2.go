@@ -81,9 +81,6 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
-
-	Mcp           *bool `mapstructure:"mcp"`
-	UsePromptTool bool  `mapmapstructure:"prompt_tool"`
 }
 
 // McpServers is the configuration for mcp servers
