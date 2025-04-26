@@ -155,9 +155,6 @@ Here are the rules you should always follow to solve your task:
 4. Never re-do a tool call that you previously did with the exact same parameters.
 5. For tool use, MARK SURE use XML tag format as shown in the examples above. Do not use any other format.
 
-# User Instructions
-{{USER_SYSTEM_PROMPT}}
-
 Now Begin! If you solve the task correctly, you will receive a reward of $1,000,000.`
 )
 
@@ -319,12 +316,16 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		promptBuf.Reset()
 	}
 
+	messages := make([]openai.ChatCompletionMessage, 0)
 	if usePromptTool {
-		systemPrompt = getToolUseSystemPrompt(systemPrompt)
+		toolPrompt := getToolUseSystemPrompt(systemPrompt)
 		log.Debug("mcp systen promplt", zap.String("system prompt", systemPrompt))
+		messages = append(messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: toolPrompt,
+		})
 	}
 
-	messages := make([]openai.ChatCompletionMessage, 0)
 	if systemPrompt != "" {
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleSystem,
