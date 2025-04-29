@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
-	github.com/mark3labs/mcp-go v0.23.1
+	github.com/mark3labs/mcp-go v0.24.1
 	github.com/meilisearch/meilisearch-go v0.31.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/puzpuzpuz/xsync/v4 v4.0.0
