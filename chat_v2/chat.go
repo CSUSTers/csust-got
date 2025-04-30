@@ -317,17 +317,22 @@ final:
 	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls && useMcp {
 		messages = append(messages, resp.Choices[0].Message)
 		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
+			var result string
+			var err error
 			tool, ok := mcpo.GetTool(toolCall.Function.Name)
 			if !ok {
 				log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
-				continue
+				result = "MCP tool not found"
+				goto finish_each_toolcall
 			}
-			result, err := tool.Call(chatCtx, toolCall.Function.Arguments)
+			result, err = tool.Call(chatCtx, toolCall.Function.Arguments)
 			if err != nil {
 				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				continue
+				result = "Failed to call function tool"
 			}
 			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
+
+		finish_each_toolcall:
 			toolMsg := openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				ToolCallID: toolCall.ID,
