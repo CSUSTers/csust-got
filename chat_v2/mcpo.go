@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/sashabaranov/go-openai"
@@ -46,7 +47,9 @@ func NewMcpoClient(baseUrl string, tools []string) *McpoClient {
 func InitMcpoClient() {
 	cnf := config.BotConfig.McpoServer
 	if cnf.Enable {
-		mcpo = NewMcpoClient(cnf.Url, cnf.Tools)
+		mcpo = NewMcpoClient(cnf.Url, cnf.Tools).WithHttpClient(&http.Client{
+			Timeout: time.Second * 120,
+		})
 		err := mcpo.Init()
 		if err != nil {
 			log.Fatal("failed to init mcpo client", zap.Error(err))
