@@ -69,7 +69,6 @@ llm_models:
     model: "gpt-xxx"
     features:
       image: true
-      mcp: false
       white_list: true
 
   qwen: &qwen
@@ -77,22 +76,13 @@ llm_models:
     name: "qwen"
     model: "qwen-xxx"
 
-mcp_servers:
-  - name: time
-    command: uvx
-    args:
-      - "mcp-server-time"
-      - "--local-timezone=Asia/Shanghai"
-  - name: searxng
-    command: uvx
-    args:
-      - "mcp-searxng"
-    env:
-      - "SEARXNG_URL="
-  - name: fetch
-    command: uvx
-    args:
-      - "mcp-server-fetch"
+mcpo_server:
+  enable: true
+  url: http://mcpo_host:8080
+  tools:
+    - time
+    - searxng
+    - fetch
 
 chats:
   - name: 什么是bot
@@ -168,6 +158,7 @@ chats:
     place_holder: "👀"
     error_message: "😔很抱歉，我无法处理您的请求"
     stream: false
+    use_mcpo: true
     features:
       image: true
       image_resize:
