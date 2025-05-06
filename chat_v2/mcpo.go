@@ -20,6 +20,7 @@ import (
 
 var mcpo *McpoClient
 
+// McpoClient for mcpo call
 type McpoClient struct {
 	c       *http.Client
 	baseUrl string
@@ -29,6 +30,7 @@ type McpoClient struct {
 	toolSets map[string][]string
 }
 
+// McpoTool is config of mcpo tool
 type McpoTool struct {
 	Url  string
 	Name string
@@ -36,6 +38,7 @@ type McpoTool struct {
 	openai.Tool
 }
 
+// NewMcpoClient create a new [McpoClient]
 func NewMcpoClient(baseUrl string, tools []string) *McpoClient {
 	return &McpoClient{
 		c:       http.DefaultClient,
@@ -44,6 +47,7 @@ func NewMcpoClient(baseUrl string, tools []string) *McpoClient {
 	}
 }
 
+// InitMcpoClient init global mcpo client
 func InitMcpoClient() {
 	cnf := config.BotConfig.McpoServer
 	if cnf.Enable {
@@ -57,6 +61,7 @@ func InitMcpoClient() {
 	}
 }
 
+// Init init mcpo client
 func (c *McpoClient) Init() error {
 	allTools := []string{}
 	for _, tool := range c.tools {
@@ -79,10 +84,13 @@ func (c *McpoClient) Init() error {
 	return nil
 }
 
+// WithHttpClient set http client
 func (c *McpoClient) WithHttpClient(client *http.Client) *McpoClient {
 	c.c = client
 	return c
 }
+
+// GetToolSetToolNames get tool names with set name
 func (c *McpoClient) GetToolSetToolNames(set string) []string {
 	if set == "" {
 		set = "_default"
@@ -93,6 +101,7 @@ func (c *McpoClient) GetToolSetToolNames(set string) []string {
 	return nil
 }
 
+// GetToolSet get tool set with set name
 func (c *McpoClient) GetToolSet(set string) []openai.Tool {
 	toolNames := c.GetToolSetToolNames(set)
 	ret := make([]openai.Tool, 0, len(toolNames))
@@ -103,6 +112,7 @@ func (c *McpoClient) GetToolSet(set string) []openai.Tool {
 	return ret
 }
 
+// GetTool get tool
 func (c *McpoClient) GetTool(name string) (*McpoTool, bool) {
 	ret, ok := c.mcpTools[name]
 	return ret, ok
@@ -139,25 +149,31 @@ func (c *McpoClient) getToolDefined(tool string) ([]*McpoTool, error) {
 	return ret, nil
 }
 
+// ErrInvaliableParameter error
+var ErrInvaliableParameter = errors.New("invaliable parameter")
+
+// Call call mcpo tool
 func (t *McpoTool) Call(ctx context.Context, param string) (result string, err error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", t.Url, strings.NewReader(param))
 	if err != nil {
 		return result, err
 	}
-	if param == "" {
+	switch {
+	case param == "":
 		// do nothing
-	} else if json.Valid([]byte(param)) {
+	case json.Valid([]byte(param)):
 		req.Header.Add("Content-Type", "application/json")
-	} else {
-		return result, errors.New("Invaliable parameter")
+	default:
+		return result, ErrInvaliableParameter
 	}
 	resp, err := mcpo.c.Do(req)
 	if err != nil {
 		return result, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
+		// nolint: err113
 		return result, fmt.Errorf("HTTP status code not ok: %d", resp.StatusCode)
 	}
 
@@ -170,7 +186,7 @@ func (t *McpoTool) Call(ctx context.Context, param string) (result string, err e
 }
 
 func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
-	var functions []*McpoTool
+	var functions = []*McpoTool{}
 
 	paths := spec.Paths.MapOfPathItemValues
 	for path, pathItem := range paths {
@@ -198,7 +214,7 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 				for _, p := range params {
 					param := p.Parameter
 					prop := param.Schema
-					if lo.FromPtr(param.Required) == true {
+					if lo.FromPtr(param.Required) {
 						required = append(required, param.Name)
 					}
 					props[param.Name] = prop

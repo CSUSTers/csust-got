@@ -86,6 +86,7 @@ type FeatureSetting struct {
 	} `mapstructure:"image_resize"`
 }
 
+// McpoConfig is the configuration for mcpo server
 type McpoConfig struct {
 	Enable bool     `mapstructure:"enable"`
 	Url    string   `mapstructure:"url"`
