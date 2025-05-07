@@ -9,7 +9,6 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"encoding/base64"
-	"encoding/json"
 	"image"
 	"image/jpeg"
 	"net/http"
@@ -17,8 +16,6 @@ import (
 	"strings"
 	"text/template"
 	"time"
-
-	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/sashabaranov/go-openai"
@@ -279,13 +276,15 @@ final:
 	chatCtx, cancel := context.WithTimeout(context.Background(), v2.GetTimeout())
 	defer cancel()
 
+	useMcp := v2.UseMcpo && config.BotConfig.McpoServer.Enable
+
 	request := openai.ChatCompletionRequest{
 		Model:       v2.Model.Model,
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
 	}
-	if v2.Model.Features.Mcp {
-		request.Tools = allTools
+	if useMcp {
+		request.Tools = mcpo.GetToolSet("")
 	}
 	resp, err := client.CreateChatCompletion(chatCtx, request)
 	if err != nil {
@@ -315,47 +314,30 @@ final:
 	}
 
 	// 处理大模型返回工具调用的情况
-	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls {
+	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls && useMcp {
 		messages = append(messages, resp.Choices[0].Message)
 		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
-			c, ok := mcpClients[toolsClientMap[toolCall.Function.Name]]
+			var result string
+			var err error
+			tool, ok := mcpo.GetTool(toolCall.Function.Name)
 			if !ok {
-				log.Error("MCP client not found", zap.String("toolName", toolCall.Function.Name))
-				continue
+				log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
+				result = "MCP tool not found"
+				goto finish_each_toolcall
 			}
-			// 调用工具 {"timezone": "Asia/Shanghai"}
-			toolReq := mcp.CallToolRequest{}
-			toolReq.Params.Name = toolCall.Function.Name
-			if toolCall.Function.Arguments != "" {
-				args := make(map[string]any)
-				err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args)
-				if err != nil {
-					log.Error("Failed to unmarshal tool arguments", zap.String("arguments", toolCall.Function.Arguments), zap.Error(err))
-					continue
-				}
-				toolReq.Params.Arguments = args
-			}
-			result, err := c.CallTool(chatCtx, toolReq)
+			result, err = tool.Call(chatCtx, toolCall.Function.Arguments)
 			if err != nil {
 				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				continue
+				result = "Failed to call function tool"
 			}
-			// 处理工具调用结果
-			if result.IsError {
-				log.Error("Tool call error", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result.Result))
-				continue
-			}
-			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.Any("result", result))
-			content, err := json.Marshal(result.Content)
-			if err != nil {
-				log.Error("Failed to marshal tool call result", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				continue
-			}
+			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
+
+		finish_each_toolcall:
 			toolMsg := openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				ToolCallID: toolCall.ID,
 				Name:       toolCall.Function.Name,
-				Content:    string(content),
+				Content:    result,
 			}
 			messages = append(messages, toolMsg)
 		}
