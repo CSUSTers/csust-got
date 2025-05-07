@@ -44,6 +44,9 @@ func NewMcpoClient(baseUrl string, tools []string) *McpoClient {
 		c:       http.DefaultClient,
 		baseUrl: baseUrl,
 		tools:   tools,
+
+		mcpTools: map[string]*McpoTool{},
+		toolSets: map[string][]string{},
 	}
 }
 
