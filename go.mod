@@ -7,7 +7,7 @@ require (
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/meilisearch/meilisearch-go v0.32.0
 	github.com/prometheus/client_golang v1.22.0
-	github.com/puzpuzpuz/xsync/v4 v4.0.0
+	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quic-go/quic-go v0.51.0
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/sashabaranov/go-openai v1.39.1
