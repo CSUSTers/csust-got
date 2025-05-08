@@ -400,7 +400,7 @@ func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
 
 	var reason, output string
 	if len(matches) != 0 {
-		output = text[matches[2]:]
+		output = text[matches[1]:]
 		rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
 		reason = text[rIdx1:rIdx2]
 	} else {
