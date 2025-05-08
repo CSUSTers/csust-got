@@ -392,7 +392,7 @@ final:
 
 }
 
-var extractReasonPatt = regexp.MustCompile(`(?mi)^\s*<think>\s*(?P<reason>.*)\s*</think>\s*`)
+var extractReasonPatt = regexp.MustCompile(`(?smi)^\s*<think>\s*(?P<reason>.*?)\s*</think>\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 
 func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
@@ -447,6 +447,9 @@ const (
 )
 
 func formatText(buf *strings.Builder, text string, format string, t wholeTextType) {
+	if len(text) == 0 {
+		return
+	}
 	switch format {
 	case "markdown":
 		switch t {
@@ -460,6 +463,12 @@ func formatText(buf *strings.Builder, text string, format string, t wholeTextTyp
 			for line := range lines {
 				buf.WriteString(">")
 				buf.WriteString(util.EscapeTgMDv2ReservedChars(line))
+			}
+			if t == wholeTextTypeCollapse {
+				if text[len(text)-1] == '\n' {
+					buf.WriteString(">")
+				}
+				buf.WriteString("||")
 			}
 			buf.WriteString("\n")
 		case wholeTextTypeBlock:
