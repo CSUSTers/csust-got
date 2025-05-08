@@ -13,7 +13,7 @@ require (
 	github.com/sashabaranov/go-openai v1.39.1
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
-	github.com/swaggest/openapi-go v0.2.57
+	github.com/swaggest/openapi-go v0.2.58
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/image v0.27.0
@@ -27,7 +27,7 @@ require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/prometheus/common v0.63.0 // indirect
-	github.com/swaggest/jsonschema-go v0.3.73 // indirect
+	github.com/swaggest/jsonschema-go v0.3.74 // indirect
 	github.com/swaggest/refl v1.3.1 // indirect
 	golang.org/x/net v0.39.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
