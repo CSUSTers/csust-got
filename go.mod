@@ -5,20 +5,20 @@ go 1.24
 require (
 	github.com/go-viper/mapstructure/v2 v2.2.1
 	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
-	github.com/mark3labs/mcp-go v0.21.1
-	github.com/meilisearch/meilisearch-go v0.31.0
+	github.com/meilisearch/meilisearch-go v0.32.0
 	github.com/prometheus/client_golang v1.22.0
-	github.com/puzpuzpuz/xsync/v4 v4.0.0
-	github.com/quic-go/quic-go v0.50.1
-	github.com/redis/go-redis/v9 v9.7.3
-	github.com/sashabaranov/go-openai v1.38.2
+	github.com/puzpuzpuz/xsync/v4 v4.1.0
+	github.com/quic-go/quic-go v0.51.0
+	github.com/redis/go-redis/v9 v9.8.0
+	github.com/sashabaranov/go-openai v1.39.1
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.10.0
+	github.com/swaggest/openapi-go v0.2.57
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.26.0
-	golang.org/x/sync v0.13.0
-	golang.org/x/text v0.24.0
+	golang.org/x/image v0.27.0
+	golang.org/x/sync v0.14.0
+	golang.org/x/text v0.25.0
 	golang.org/x/time v0.11.0
 	gopkg.in/telebot.v3 v3.3.8
 )
@@ -27,8 +27,10 @@ require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/prometheus/common v0.63.0 // indirect
-	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	github.com/swaggest/jsonschema-go v0.3.73 // indirect
+	github.com/swaggest/refl v1.3.1 // indirect
 	golang.org/x/net v0.39.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (
@@ -52,7 +54,7 @@ require (
 	github.com/prometheus/procfs v0.16.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/sagikazarmark/locafero v0.9.0 // indirect
-	github.com/samber/lo v1.49.1
+	github.com/samber/lo v1.50.0
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.14.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
@@ -62,7 +64,6 @@ require (
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
 	golang.org/x/mod v0.24.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/tools v0.31.0 // indirect

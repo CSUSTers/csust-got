@@ -1,10 +1,12 @@
 package config
 
 import (
+	"log"
 	"math"
 	"time"
 
 	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 // Model is the model configuration for chat
@@ -53,6 +55,7 @@ type ChatConfigSingle struct {
 	Timeout        int            `mapstructure:"timeout"` // seconds
 
 	Features FeatureSetting `mapstructure:"features"`
+	UseMcpo  bool           `mapstructure:"use_mcpo"`
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -83,22 +86,17 @@ type FeatureSetting struct {
 	} `mapstructure:"image_resize"`
 }
 
-// McpServers is the configuration for mcp servers
-type McpServers []McpServerConfig
-
-// McpServerConfig is the configuration for a single mcp server
-type McpServerConfig struct {
-	Name    string   `mapstructure:"name"`
-	Command string   `mapstructure:"command"`
-	Args    []string `mapstructure:"args"`
-	Env     []string `mapstructure:"env"`
+// McpoConfig is the configuration for mcpo server
+type McpoConfig struct {
+	Enable bool     `mapstructure:"enable"`
+	Url    string   `mapstructure:"url"`
+	Tools  []string `mapstructure:"tools"`
 }
 
-func (m *McpServers) readConfig() {
-	v := viper.GetViper()
-	err := v.UnmarshalKey("mcp_servers", m)
+func (c *McpoConfig) readConfig() {
+	err := viper.UnmarshalKey("mcpo_server", c)
 	if err != nil {
-		panic(err)
+		log.Fatal("cannot parse mcpo config", zap.Error(err))
 	}
 }
 
