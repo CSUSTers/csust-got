@@ -137,7 +137,7 @@ func executeSearch(ctx Context) string {
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
 		rplMsg += "内容: “ `" +
-			util.EscapeTelegramReservedChars(respMap[item]["text"]) +
+			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]) +
 			"` ” message id: [" + respMap[item]["id"] +
 			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}
