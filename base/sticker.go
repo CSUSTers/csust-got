@@ -918,7 +918,7 @@ func SetStickerConfig(ctx tb.Context) error {
 			}
 			return ctx.Reply(
 				fmt.Sprintf("iwant config: ```\n%s```",
-					util.EscapeTelegramReservedChars(string(cs))),
+					util.EscapeTgMDv2ReservedChars(string(cs))),
 				&tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
 		}
 

@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -37,22 +38,57 @@ type ChatTrigger struct {
 	Reply   bool   `mapstructure:"reply"`
 }
 
+// ChatOutputFormatConfig is the configuration for tg message format
+type ChatOutputFormatConfig struct {
+	// format: markdown(default), html
+	Format string `mapstructure:"format"`
+	// how to show the reason output: none(default), quote, collapse
+	Reason string `mapstructure:"reason"`
+}
+
+// GetFormat get message format
+func (c *ChatOutputFormatConfig) GetFormat() string {
+	switch strings.ToLower(c.Format) {
+	case "", "md", "mdv2", "markdown", "markdownv2":
+		return "markdown"
+	case "html":
+		return "html"
+	default:
+		return ""
+	}
+}
+
+// GetReasonFormat get reason output format
+func (c *ChatOutputFormatConfig) GetReasonFormat() string {
+	switch strings.ToLower(c.Reason) {
+	case "", "none", "false":
+		return "none"
+	case "quote", "q":
+		return "quote"
+	case "collapse", "c":
+		return "collapse"
+	default:
+		return ""
+	}
+}
+
 // ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
 // ChatConfigSingle is the configuration for a single chat
 type ChatConfigSingle struct {
-	Name           string         `mapstructure:"name"`
-	Model          *Model         `mapstructure:"model"`
-	MessageContext int            `mapstructure:"message_context"`
-	Temperature    *float32       `mapstructure:"temperature"`
-	PlaceHolder    string         `mapstructure:"place_holder"`
-	ErrorMessage   string         `mapstructure:"error_message"` // 添加错误提示消息配置
-	Steam          bool           `mapstructure:"stream"`
-	SystemPrompt   string         `mapstructure:"system_prompt"`
-	PromptTemplate string         `mapstructure:"prompt_template"`
-	Trigger        []*ChatTrigger `mapstructure:"trigger"`
-	Timeout        int            `mapstructure:"timeout"` // seconds
+	Name           string                 `mapstructure:"name"`
+	Model          *Model                 `mapstructure:"model"`
+	MessageContext int                    `mapstructure:"message_context"`
+	Temperature    *float32               `mapstructure:"temperature"`
+	PlaceHolder    string                 `mapstructure:"place_holder"`
+	ErrorMessage   string                 `mapstructure:"error_message"` // 添加错误提示消息配置
+	Steam          bool                   `mapstructure:"stream"`
+	SystemPrompt   string                 `mapstructure:"system_prompt"`
+	PromptTemplate string                 `mapstructure:"prompt_template"`
+	Trigger        []*ChatTrigger         `mapstructure:"trigger"`
+	Timeout        int                    `mapstructure:"timeout"` // seconds
+	Format         ChatOutputFormatConfig `mapstructure:"format"`
 
 	Features FeatureSetting `mapstructure:"features"`
 	UseMcpo  bool           `mapstructure:"use_mcpo"`

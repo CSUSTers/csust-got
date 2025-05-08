@@ -52,7 +52,7 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		}
 
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
-		reTextEscaped := util.EscapeTelegramReservedChars(reText)
+		reTextEscaped := util.EscapeTgMDv2ReservedChars(reText)
 		err = ctx.Answer(&tb.QueryResponse{
 			Results: tb.Results{
 				&tb.ArticleResult{

@@ -13,6 +13,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -59,8 +60,6 @@ func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
 	}
 	return ret, nil
 }
-
-// var templates map[string]*template.Template
 
 // InitAiClients 初始化AI客户端
 func InitAiClients(configs []*config.ChatConfigSingle) {
@@ -357,7 +356,11 @@ final:
 	response := resp.Choices[0].Message.Content
 	// 移除可能的空行
 	response = strings.TrimSpace(response)
-	response = util.EscapeTelegramReservedChars(response)
+	response = formatOutput(response, &v2.Format)
+	formatOpt := tb.ModeMarkdownV2
+	if v2.Format.Format == "html" {
+		formatOpt = tb.ModeHTML
+	}
 	log.Debug("Chat response", zap.String("response", response))
 
 	// 根据是否有placeholder选择更新或发送新消息
@@ -367,14 +370,14 @@ final:
 		if response == "" {
 			response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
 		}
-		replyMsg, err = util.EditMessageWithError(placeholderMsg, response, tb.ModeMarkdownV2)
+		replyMsg, err = util.EditMessageWithError(placeholderMsg, response, formatOpt)
 		if err != nil {
 			log.Error("Failed to edit placeholder message", zap.Error(err))
 			return err
 		}
 	} else {
 		// 如果没有使用placeholder，直接发送响应
-		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, tb.ModeMarkdownV2)
+		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, formatOpt)
 		if err != nil {
 			log.Error("Failed to send reply", zap.Error(err))
 			return err
@@ -387,4 +390,101 @@ final:
 	}
 	return nil
 
+}
+
+var extractReasonPatt = regexp.MustCompile(`(?mi)^\s*<think>\s*(?P<reason>.*)\s*</think>\s*`)
+var reasonGroup = extractReasonPatt.SubexpIndex("reason")
+
+func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
+	matches := extractReasonPatt.FindStringSubmatchIndex(text)
+
+	var reason, output string
+	if len(matches) != 0 {
+		output = text[matches[2]:]
+		rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
+		reason = text[rIdx1:rIdx2]
+	} else {
+		output = text
+	}
+
+	buf := strings.Builder{}
+
+	outputFormat := format.GetFormat()
+	if outputFormat == "" {
+		log.Warn("chat text output format must in [markdown, html], will set to markdown")
+		outputFormat = "markdown"
+	}
+
+	if reason != "" {
+		reasonFormat := format.GetReasonFormat()
+		if reasonFormat == "" {
+			log.Warn("chat reason output format must in [none, quote, collapse], will set to none")
+			reasonFormat = "none"
+		}
+		switch reasonFormat {
+		case "quote":
+			formatText(&buf, reason, outputFormat, wholeTextTypeQuote)
+		case "collapse":
+			formatText(&buf, reason, outputFormat, wholeTextTypeCollapse)
+		default:
+		}
+		if buf.Len() > 0 {
+			buf.WriteString("\n")
+		}
+	}
+
+	formatText(&buf, output, outputFormat, wholeTextTypePlain)
+	return buf.String()
+}
+
+type wholeTextType string
+
+const (
+	wholeTextTypePlain    wholeTextType = "plain"
+	wholeTextTypeQuote    wholeTextType = "quote"
+	wholeTextTypeCollapse wholeTextType = "collapse"
+	wholeTextTypeBlock    wholeTextType = "block"
+)
+
+func formatText(buf *strings.Builder, text string, format string, t wholeTextType) {
+	switch format {
+	case "markdown":
+		switch t {
+		case wholeTextTypePlain:
+			buf.WriteString(util.EscapeTgMDv2ReservedChars(text))
+		case wholeTextTypeCollapse:
+			buf.WriteString("**")
+			fallthrough
+		case wholeTextTypeQuote:
+			lines := strings.Lines(text)
+			for line := range lines {
+				buf.WriteString(">")
+				buf.WriteString(util.EscapeTgMDv2ReservedChars(line))
+			}
+			buf.WriteString("\n")
+		case wholeTextTypeBlock:
+			buf.WriteString("```\n")
+			buf.WriteString(util.EscapeTgMDv2ReservedChars(text))
+			buf.WriteString("\n```\n")
+		}
+	case "html":
+		switch t {
+		case wholeTextTypePlain:
+			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
+		case wholeTextTypeCollapse:
+			buf.WriteString("<blockquote expandable>")
+			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
+			buf.WriteString("</blockquote>")
+		case wholeTextTypeQuote:
+			buf.WriteString("<blockquote>")
+			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
+			buf.WriteString("</blockquote>")
+		case wholeTextTypeBlock:
+			buf.WriteString("<pre>")
+			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
+			buf.WriteString("</pre>")
+		}
+	default:
+		buf.WriteString(text)
+	}
 }

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"html"
 	"io"
 	"math/rand"
 	"net/http"
@@ -253,9 +254,19 @@ var reservedChars = []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", 
 var reservedCharsPairs = lo.FlatMap(reservedChars, func(char string, _ int) []string { return []string{char, "\\" + char} })
 var escapeReplacer = strings.NewReplacer(reservedCharsPairs...)
 
-// EscapeTelegramReservedChars escape telegram reserved chars
-func EscapeTelegramReservedChars(s string) string {
+// EscapeTgMDv2ReservedChars escape telegram reserved chars
+func EscapeTgMDv2ReservedChars(s string) string {
 	s = escapeReplacer.Replace(s)
+	return s
+}
+
+var htmlReservedChars = []string{"<", ">", "&"}
+var htmlReservedCharsPairs = lo.FlatMap(htmlReservedChars, func(char string, _ int) []string { return []string{char, html.EscapeString(char)} })
+var htmlEscapeReplacer = strings.NewReplacer(htmlReservedCharsPairs...)
+
+// EscapeTgHTMLReservedChars escape telegram reserved chars
+func EscapeTgHTMLReservedChars(s string) string {
+	s = htmlEscapeReplacer.Replace(s)
 	return s
 }
 
