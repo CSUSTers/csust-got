@@ -447,6 +447,8 @@ func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
 		payloadType = wholeTextTypeCollapse
 	case "block":
 		payloadType = wholeTextTypeBlock
+	case "markdown-block":
+		payloadType = wholeTextTypeMdBlock
 	}
 
 	formatText(&buf, payload, outputFormat, payloadType)
@@ -460,6 +462,7 @@ const (
 	wholeTextTypeQuote    wholeTextType = "quote"
 	wholeTextTypeCollapse wholeTextType = "collapse"
 	wholeTextTypeBlock    wholeTextType = "block"
+	wholeTextTypeMdBlock  wholeTextType = "markdown-block"
 )
 
 func formatText(buf *strings.Builder, text string, format string, t wholeTextType) {
@@ -487,8 +490,12 @@ func formatText(buf *strings.Builder, text string, format string, t wholeTextTyp
 				buf.WriteString("||")
 			}
 			buf.WriteString("\n")
-		case wholeTextTypeBlock:
-			buf.WriteString("```\n")
+		case wholeTextTypeBlock, wholeTextTypeMdBlock:
+			buf.WriteString("```")
+			if t == wholeTextTypeMdBlock {
+				buf.WriteString("markdown")
+			}
+			buf.WriteString("\n")
 			buf.WriteString(util.EscapeTgMDv2ReservedChars(text))
 			buf.WriteString("\n```\n")
 		}
@@ -504,9 +511,15 @@ func formatText(buf *strings.Builder, text string, format string, t wholeTextTyp
 			buf.WriteString("<blockquote>")
 			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
 			buf.WriteString("</blockquote>")
-		case wholeTextTypeBlock:
+		case wholeTextTypeBlock, wholeTextTypeMdBlock:
 			buf.WriteString("<pre>")
+			if t == wholeTextTypeMdBlock {
+				buf.WriteString(`<code class="language-markdown">`)
+			}
 			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
+			if t == wholeTextTypeMdBlock {
+				buf.WriteString(`</code class="language-markdown">`)
+			}
 			buf.WriteString("</pre>")
 		}
 	default:

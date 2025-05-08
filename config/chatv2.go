@@ -91,6 +91,8 @@ func (c *ChatOutputFormatConfig) GetPayloadFormat() string {
 		return "collapse"
 	case "block", "b":
 		return "block"
+	case "md", "md-block", "markdown", "markdown-block":
+		return "markdown-block"
 	default:
 		return ""
 	}
