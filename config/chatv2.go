@@ -44,9 +44,13 @@ type ChatOutputFormatConfig struct {
 	Format string `mapstructure:"format"`
 	// how to show the reason output: none(default), quote, collapse
 	Reason string `mapstructure:"reason"`
+	// how to show the payload output: plain(default), quote, collapse, block
+	Payload string `mapstructure:"payload"`
 }
 
 // GetFormat get message format
+//
+// nolint: goconst
 func (c *ChatOutputFormatConfig) GetFormat() string {
 	switch strings.ToLower(c.Format) {
 	case "", "md", "mdv2", "markdown", "markdownv2":
@@ -59,6 +63,8 @@ func (c *ChatOutputFormatConfig) GetFormat() string {
 }
 
 // GetReasonFormat get reason output format
+//
+// nolint: goconst
 func (c *ChatOutputFormatConfig) GetReasonFormat() string {
 	switch strings.ToLower(c.Reason) {
 	case "", "none", "false":
@@ -67,6 +73,24 @@ func (c *ChatOutputFormatConfig) GetReasonFormat() string {
 		return "quote"
 	case "collapse", "c":
 		return "collapse"
+	default:
+		return ""
+	}
+}
+
+// GetPayloadFormat get payload output format
+//
+// nolint: goconst
+func (c *ChatOutputFormatConfig) GetPayloadFormat() string {
+	switch strings.ToLower(c.Payload) {
+	case "", "plain", "p":
+		return "plain"
+	case "quote", "q":
+		return "quote"
+	case "collapse", "c":
+		return "collapse"
+	case "block", "b":
+		return "block"
 	default:
 		return ""
 	}

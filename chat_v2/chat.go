@@ -398,13 +398,13 @@ var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
 	matches := extractReasonPatt.FindStringSubmatchIndex(text)
 
-	var reason, output string
+	var reason, payload string
 	if len(matches) != 0 {
-		output = text[matches[1]:]
+		payload = text[matches[1]:]
 		rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
 		reason = text[rIdx1:rIdx2]
 	} else {
-		output = text
+		payload = text
 	}
 
 	buf := strings.Builder{}
@@ -433,7 +433,23 @@ func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
 		}
 	}
 
-	formatText(&buf, output, outputFormat, wholeTextTypePlain)
+	payloadFormat := format.GetPayloadFormat()
+	if payloadFormat == "" {
+		log.Warn("chat payload output format must in [plain, quote, collapse, block], will set to plain")
+		payloadFormat = "plain"
+	}
+
+	payloadType := wholeTextTypePlain
+	switch payloadFormat {
+	case "quote":
+		payloadType = wholeTextTypeQuote
+	case "collapse":
+		payloadType = wholeTextTypeCollapse
+	case "block":
+		payloadType = wholeTextTypeBlock
+	}
+
+	formatText(&buf, payload, outputFormat, payloadType)
 	return buf.String()
 }
 
