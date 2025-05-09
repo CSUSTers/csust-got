@@ -61,6 +61,13 @@ func InitMcpoClient() {
 		if err != nil {
 			log.Fatal("failed to init mcpo client", zap.Error(err))
 		}
+		if config.BotConfig.DebugMode {
+			for _, tool := range mcpo.mcpTools {
+				log.Debug("enable mcp tool", zap.String("name", tool.Name),
+					zap.String("desc", tool.Function.Description),
+					zap.Any("params", tool.Function.Parameters))
+			}
+		}
 	}
 }
 
