@@ -206,46 +206,52 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 			continue
 		}
 
-		var schema any
-		if requestBody := op.RequestBody; requestBody != nil {
-			content := requestBody.RequestBody.Content
-			if jsonContent, ok := content["application/json"]; ok {
-				schema = jsonContent.Schema
-			}
-		}
+		// var schema any
+		// if requestBody := op.RequestBody; requestBody != nil {
+		// 	content := requestBody.RequestBody.Content
+		// 	if jsonContent, ok := content["application/json"]; ok {
+		// 		schema = jsonContent.Schema
+		// 	}
+		// }
 
-		if schema == nil {
-			paramsSchema := map[string]any{
-				"type": "object",
-			}
-			if params := op.Parameters; len(params) > 0 {
-				props := map[string]any{}
-				required := []string{}
-				for _, p := range params {
-					param := p.Parameter
-					prop := param.Schema
-					if lo.FromPtr(param.Required) {
-						required = append(required, param.Name)
-					}
-					props[param.Name] = prop
+		// if schema == nil {
+		paramsSchema := map[string]any{
+			"type": "object",
+		}
+		if params := op.Parameters; len(params) > 0 {
+			props := map[string]any{}
+			required := []string{}
+			for _, p := range params {
+				param := p.Parameter
+				prop := param.Schema
+				if lo.FromPtr(param.Required) {
+					required = append(required, param.Name)
 				}
-				paramsSchema["properties"] = props
-				paramsSchema["required"] = required
+				props[param.Name] = prop
 			}
-			schema = paramsSchema
+			paramsSchema["properties"] = props
+			paramsSchema["required"] = required
+		}
+		schema := paramsSchema
+		// }
+
+		name := strings.ReplaceAll(strings.Trim(path, "/"), "/", "_")
+		if op.ID != nil {
+			name += "_" + *op.ID
 		}
 
 		fn := &McpoTool{
 			Tool: openai.Tool{
 				Type: openai.ToolTypeFunction,
 				Function: &openai.FunctionDefinition{
-					Name:        lo.FromPtr(op.ID),
-					Description: lo.FromPtr(op.Description),
-					Parameters:  schema,
+					Name: name,
+					Description: lo.CoalesceOrEmpty(lo.FromPtr(op.Description),
+						lo.FromPtr(lo.FromPtr(op.ExternalDocs).Description)),
+					Parameters: schema,
 				},
 			},
 			Url:  base + path,
-			Name: lo.FromPtr(op.ID),
+			Name: name,
 		}
 		functions = append(functions, fn)
 
