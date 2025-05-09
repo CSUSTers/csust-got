@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -195,6 +196,32 @@ func (t *McpoTool) Call(ctx context.Context, param string) (result string, err e
 	return buf.String(), nil
 }
 
+const componentsSchemas = "#/components/schemas/"
+
+func derefJSONSchemaRef(spec *openapi31.Spec, ref map[string]any) (done map[string]any, derefed bool) {
+	done = maps.Clone(ref)
+
+	if spec == nil || spec.Components == nil || spec.Components.Schemas == nil {
+		return done, false
+	}
+
+	r, ok := ref["$ref"]
+	s, ok2 := r.(string)
+	if !ok || !ok2 {
+		return done, false
+	}
+
+	rr := strings.TrimPrefix(s, componentsSchemas)
+	os, found := spec.Components.Schemas[rr]
+
+	if found {
+		delete(done, "$ref")
+		maps.Copy(done, os)
+	}
+
+	return done, found
+}
+
 func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 	var functions = []*McpoTool{}
 
@@ -206,34 +233,34 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 			continue
 		}
 
-		// var schema any
-		// if requestBody := op.RequestBody; requestBody != nil {
-		// 	content := requestBody.RequestBody.Content
-		// 	if jsonContent, ok := content["application/json"]; ok {
-		// 		schema = jsonContent.Schema
-		// 	}
-		// }
-
-		// if schema == nil {
-		paramsSchema := map[string]any{
-			"type": "object",
-		}
-		if params := op.Parameters; len(params) > 0 {
-			props := map[string]any{}
-			required := []string{}
-			for _, p := range params {
-				param := p.Parameter
-				prop := param.Schema
-				if lo.FromPtr(param.Required) {
-					required = append(required, param.Name)
-				}
-				props[param.Name] = prop
+		var schema any
+		if requestBody := op.RequestBody; requestBody != nil {
+			content := requestBody.RequestBody.Content
+			if jsonContent, ok := content["application/json"]; ok {
+				schema, _ = derefJSONSchemaRef(spec, jsonContent.Schema)
 			}
-			paramsSchema["properties"] = props
-			paramsSchema["required"] = required
 		}
-		schema := paramsSchema
-		// }
+
+		if schema == nil {
+			paramsSchema := map[string]any{
+				"type": "object",
+			}
+			if params := op.Parameters; len(params) > 0 {
+				props := map[string]any{}
+				required := []string{}
+				for _, p := range params {
+					param := p.Parameter
+					prop := param.Schema
+					if lo.FromPtr(param.Required) {
+						required = append(required, param.Name)
+					}
+					props[param.Name] = prop
+				}
+				paramsSchema["properties"] = props
+				paramsSchema["required"] = required
+			}
+			schema = paramsSchema
+		}
 
 		name := strings.ReplaceAll(strings.Trim(path, "/"), "/", "_")
 		if op.ID != nil {
