@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -60,6 +61,13 @@ func InitMcpoClient() {
 		err := mcpo.Init()
 		if err != nil {
 			log.Fatal("failed to init mcpo client", zap.Error(err))
+		}
+		if config.BotConfig.DebugMode {
+			for _, tool := range mcpo.mcpTools {
+				log.Debug("enable mcp tool", zap.String("name", tool.Name),
+					zap.String("desc", tool.Function.Description),
+					zap.Any("params", tool.Function.Parameters))
+			}
 		}
 	}
 }
@@ -188,6 +196,32 @@ func (t *McpoTool) Call(ctx context.Context, param string) (result string, err e
 	return buf.String(), nil
 }
 
+const componentsSchemas = "#/components/schemas/"
+
+func derefJSONSchemaRef(spec *openapi31.Spec, ref map[string]any) (done map[string]any, derefed bool) {
+	done = maps.Clone(ref)
+
+	if spec == nil || spec.Components == nil || spec.Components.Schemas == nil {
+		return done, false
+	}
+
+	r, ok := ref["$ref"]
+	s, ok2 := r.(string)
+	if !ok || !ok2 {
+		return done, false
+	}
+
+	rr := strings.TrimPrefix(s, componentsSchemas)
+	os, found := spec.Components.Schemas[rr]
+
+	if found {
+		delete(done, "$ref")
+		maps.Copy(done, os)
+	}
+
+	return done, found
+}
+
 func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 	var functions = []*McpoTool{}
 
@@ -203,7 +237,7 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 		if requestBody := op.RequestBody; requestBody != nil {
 			content := requestBody.RequestBody.Content
 			if jsonContent, ok := content["application/json"]; ok {
-				schema = jsonContent.Schema
+				schema, _ = derefJSONSchemaRef(spec, jsonContent.Schema)
 			}
 		}
 
@@ -228,17 +262,23 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 			schema = paramsSchema
 		}
 
+		name := strings.ReplaceAll(strings.Trim(path, "/"), "/", "_")
+		// if op.ID != nil {
+		// 	name += "_" + *op.ID
+		// }
+
 		fn := &McpoTool{
 			Tool: openai.Tool{
 				Type: openai.ToolTypeFunction,
 				Function: &openai.FunctionDefinition{
-					Name:        lo.FromPtr(op.ID),
-					Description: lo.FromPtr(op.Description),
-					Parameters:  schema,
+					Name: name,
+					Description: lo.CoalesceOrEmpty(lo.FromPtr(op.Description),
+						lo.FromPtr(lo.FromPtr(op.ExternalDocs).Description)),
+					Parameters: schema,
 				},
 			},
 			Url:  base + path,
-			Name: lo.FromPtr(op.ID),
+			Name: name,
 		}
 		functions = append(functions, fn)
 
