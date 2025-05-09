@@ -263,9 +263,9 @@ func specToTool(base string, spec *openapi31.Spec) []*McpoTool {
 		}
 
 		name := strings.ReplaceAll(strings.Trim(path, "/"), "/", "_")
-		if op.ID != nil {
-			name += "_" + *op.ID
-		}
+		// if op.ID != nil {
+		// 	name += "_" + *op.ID
+		// }
 
 		fn := &McpoTool{
 			Tool: openai.Tool{
