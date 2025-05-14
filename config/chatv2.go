@@ -110,8 +110,8 @@ type ChatConfigSingle struct {
 	PlaceHolder    string                 `mapstructure:"place_holder"`
 	ErrorMessage   string                 `mapstructure:"error_message"` // 添加错误提示消息配置
 	Steam          bool                   `mapstructure:"stream"`
-	SystemPrompt   string                 `mapstructure:"system_prompt"`
-	PromptTemplate string                 `mapstructure:"prompt_template"`
+	SystemPrompt   JoinableString         `mapstructure:"system_prompt"`
+	PromptTemplate JoinableString         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger         `mapstructure:"trigger"`
 	Timeout        int                    `mapstructure:"timeout"` // seconds
 	Format         ChatOutputFormatConfig `mapstructure:"format"`
@@ -215,7 +215,7 @@ func (ccs *ChatConfigSingle) GetErrorMessage() string {
 
 func (c *ChatConfigV2) readConfig() {
 	v := viper.GetViper()
-	err := v.UnmarshalKey("chats", c)
+	err := v.UnmarshalKey("chats", c, viper.DecodeHook(DispatchFor()))
 	if err != nil {
 		panic(err)
 	}

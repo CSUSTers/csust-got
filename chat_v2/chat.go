@@ -42,14 +42,14 @@ func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
 	}
 	var ret chatTemplate
 	if c.SystemPrompt != "" {
-		p, err := template.New("system-prompt").Parse(c.SystemPrompt)
+		p, err := template.New("system-prompt").Parse(c.SystemPrompt.String())
 		if err != nil {
 			return ret, err
 		}
 		ret.SystemPromptTemplate = p
 	}
 
-	p, err := template.New("prompt").Parse(c.PromptTemplate)
+	p, err := template.New("prompt").Parse(c.PromptTemplate.String())
 	if err != nil {
 		return ret, err
 	}
@@ -72,10 +72,10 @@ func InitAiClients(configs []*config.ChatConfigSingle) {
 		if _, ok := templates.Load(c.Name); !ok {
 			var sysPrompt *template.Template
 			if c.SystemPrompt != "" {
-				sysPrompt = template.Must(template.New("systemPrompt").Parse(c.SystemPrompt))
+				sysPrompt = template.Must(template.New("systemPrompt").Parse(c.SystemPrompt.String()))
 			}
 			templates.Store(c.Name, chatTemplate{
-				PromptTemplate:       template.Must(template.New("prompt").Parse(c.PromptTemplate)),
+				PromptTemplate:       template.Must(template.New("prompt").Parse(c.PromptTemplate.String())),
 				SystemPromptTemplate: sysPrompt,
 			})
 		}
@@ -161,7 +161,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	}
 
 	var promptBuf bytes.Buffer
-	systemPrompt := v2.SystemPrompt
+	systemPrompt := v2.SystemPrompt.String()
 
 	if templs.SystemPromptTemplate != nil {
 		if err := templs.SystemPromptTemplate.Execute(&promptBuf, data); err != nil {
