@@ -138,6 +138,9 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		}
 	}
 
+	// if gacha, reply and not send placeholder
+	isGacha := trigger.Gacha > 0
+
 	contextMsgs, err := GetMessageContext(ctx.Bot(), ctx.Message(), v2.MessageContext)
 	if err != nil {
 		zap.L().Warn("[Chat] Failed to get message context", zap.Error(err))
@@ -265,7 +268,7 @@ final:
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
 			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
 		}
-	} else {
+	} else if !isGacha {
 		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
 		if err != nil {
 			log.Error("Failed to send typing notification", zap.Error(err))

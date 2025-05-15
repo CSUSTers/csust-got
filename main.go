@@ -1,7 +1,6 @@
 package main
 
 import (
-	"csust-got/chat"
 	"csust-got/chat_v2"
 	"csust-got/inline"
 	"csust-got/meili"
@@ -43,6 +42,8 @@ func main() {
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
+	chat_v2.InitGachaConfigs()
+
 	err := base.InitGetVoice()
 	if err != nil {
 		log.Panic(err.Error())
@@ -75,8 +76,6 @@ func main() {
 	wordSeg.InitWordSeg()
 
 	go sd.Process()
-
-	go chat.InitChat()
 
 	base.Init()
 
@@ -495,7 +494,7 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		// DONE: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
 		// 2024-12-17 [dawu]: 已经重构
 		if m.Text != "" {
-			go chat.GachaReplyHandler(ctx)
+			go chat_v2.GachaReplyHandler(ctx)
 		}
 
 		return next(ctx)

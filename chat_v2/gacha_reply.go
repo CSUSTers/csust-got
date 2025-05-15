@@ -1,15 +1,31 @@
-package chat
+package chat_v2
 
 import (
+	"csust-got/config"
 	"csust-got/log"
 	"csust-got/util/gacha"
 	"errors"
-	"github.com/redis/go-redis/v9"
 	"strings"
+
+	"github.com/redis/go-redis/v9"
 
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v3"
 )
+
+var gachaConfigs map[int]*config.ChatConfigSingle
+
+// InitGachaConfigs init gachaConfigs
+func InitGachaConfigs() {
+	gachaConfigs = make(map[int]*config.ChatConfigSingle)
+
+	for _, ccs := range *config.BotConfig.ChatConfigV2 {
+		stars, _ := ccs.TriggerForGacha()
+		for _, star := range stars {
+			gachaConfigs[star] = ccs
+		}
+	}
+}
 
 // GachaReplyHandler reply a gpt msg determined by the gacha result
 func GachaReplyHandler(ctx telebot.Context) {
@@ -34,19 +50,9 @@ func GachaReplyHandler(ctx telebot.Context) {
 		}
 		return
 	}
+	star := int(result)
 
-	switch result {
-	case 3:
-		return
-	case 4:
-		// TODO: `ChatWith` a different prompt
-	case 5:
-		err = ChatWith(ctx, &ChatInfo{
-			Text:    text,
-			Setting: Setting{Stream: false, Reply: true},
-		})
-		if err != nil {
-			log.Error("[ChatGPT]: get a answer failed", zap.Error(err))
-		}
+	if ccs, ok := gachaConfigs[star]; ok {
+		_ = Chat(ctx, ccs, &config.ChatTrigger{Gacha: star})
 	}
 }
