@@ -1,58 +1,25 @@
 package ffconv
 
 import (
-	"csust-got/log"
-	"errors"
 	"io"
-	"os"
 
 	ff "github.com/u2takey/ffmpeg-go"
-	"go.uber.org/zap"
 )
 
 // Convert2GifFromReader read media file from reader `r` and convert it to gif
 // return the converted data reader and a channel of run error
 func (c *FFConv) Convert2GifFromReader(r io.Reader, inputFileType string) (io.Reader, <-chan error) {
-	input := GetPipeInputStream(inputFileType)
-	vf := GetGifPaletteVfStream(input)
+	in := NewPipeInputStream(inputFileType).Combine(GifPaletteVfStream)
 
-	outputArgs := ff.KwArgs{
+	outputArg := ff.KwArgs{
 		"c:v": "gif",
 		"f":   "gif",
 	}
-	pipeR, pipeW := io.Pipe()
-	bufOut := NewReadBuffer(pipeR, 1*1024*1024)
-	stderr := io.Discard
-	var stderrCloser io.Closer
-	if c.DebugFile != "" {
-		f, err := os.OpenFile(c.DebugFile, os.O_APPEND|os.O_CREATE, 0644)
-		if err == nil {
-			stderr = f
-			stderrCloser = f
-		}
-	}
-	runner := vf.Output("pipe:", outputArgs).Silent(true).WithInput(r).WithOutput(pipeW, stderr)
-	if c.LogCmd {
-		cmd := runner.Compile()
-		log.Info("ffmpeg command", zap.String("cmd", cmd.Path), zap.Strings("args", cmd.Args))
-	}
-	resultCh := make(chan error, 1)
-
-	go func() {
-		if stderrCloser != nil {
-			defer func() {
-				_ = stderrCloser.Close()
-			}()
-		}
-		err := runner.Run()
-		err1 := pipeW.Close()
-		resultCh <- errors.Join(err, err1)
-	}()
-	return bufOut, resultCh
+	return c.ConvertPipe2Pipe(r, in, outputArg)
 }
 
-// GetGifPaletteVfStream get gif palette vfilter stream
-func GetGifPaletteVfStream(input *ff.Stream) *ff.Stream {
+// GifPaletteVfStream get gif palette vfilter stream
+func GifPaletteVfStream(input *ff.Stream) *ff.Stream {
 	split := input.Split()
 	ori, s1 := split.Get("ori"), split.Get("s1")
 	p1 := s1.Filter("palettegen", ff.Args{}, ff.KwArgs{
