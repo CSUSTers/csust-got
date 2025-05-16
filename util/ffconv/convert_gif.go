@@ -25,9 +25,9 @@ func GifPaletteVfStream(input *ff.Stream) *ff.Stream {
 	p1 := s1.Filter("palettegen", ff.Args{}, ff.KwArgs{
 		"reserve_transparent": "on",
 		"transparency_color":  "ffffff",
-		"stats_mode":          "full",
+		"stats_mode":          "diff",
 	})
 
-	vf := ff.Filter([]*ff.Stream{ori, p1}, "paletteuse", ff.Args{}, ff.KwArgs{"dither": "sierra2_4a"})
+	vf := ff.Filter([]*ff.Stream{ori, p1}, "paletteuse", ff.Args{}, ff.KwArgs{"dither": "sierra3"})
 	return vf
 }
