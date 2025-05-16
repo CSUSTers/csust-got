@@ -260,9 +260,10 @@ final:
 
 	// 处理place_holder功能
 	var placeholderMsg *tb.Message
-	if isGacha {
+	switch {
+	case isGacha:
 		// 如果是gacha模式，不使用placeholder
-	} else if v2.PlaceHolder != "" {
+	case v2.PlaceHolder != "":
 		// 如果有place_holder，先发送placeholder消息
 		var placeHolderErr error
 		placeholderMsg, placeHolderErr = ctx.Bot().Reply(ctx.Message(), v2.PlaceHolder, tb.ModeMarkdownV2)
@@ -270,7 +271,7 @@ final:
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
 			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
 		}
-	} else {
+	default:
 		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
 		if err != nil {
 			log.Error("Failed to send typing notification", zap.Error(err))
