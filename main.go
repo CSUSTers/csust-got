@@ -7,7 +7,6 @@ import (
 	"csust-got/sd"
 	"csust-got/store"
 	"csust-got/util/gacha"
-	wordSeg "csust-got/word_seg"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -73,7 +72,6 @@ func main() {
 	inline.RegisterInlineHandler(bot, config.BotConfig)
 
 	meili.InitMeili()
-	wordSeg.InitWordSeg()
 
 	go sd.Process()
 
@@ -475,8 +473,6 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
-			// 分词并存入redis
-			go wordSeg.WordSegment(m.Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}
