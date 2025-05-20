@@ -33,7 +33,7 @@ type StableDiffusionConfig struct {
 }
 
 // GetValueByKey get value by key.
-func (c *StableDiffusionConfig) GetValueByKey(key string) interface{} {
+func (c *StableDiffusionConfig) GetValueByKey(key string) any {
 	switch key {
 	case "server":
 		return "🤫"

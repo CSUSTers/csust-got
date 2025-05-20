@@ -43,10 +43,7 @@ func (c *rateLimitConfig) readConfig() {
 	c.StickerCost = viper.GetInt("rate_limit.cost_sticker")
 	c.CommandCost = viper.GetInt("rate_limit.cost_command")
 
-	expire := viper.GetInt64("rate_limit.expire_time")
-	if expire <= 60*1000 {
-		expire = 60 * 1000
-	}
+	expire := max(viper.GetInt64("rate_limit.expire_time"), 60*1000)
 	c.ExpireTime = time.Duration(expire) * time.Millisecond
 }
 

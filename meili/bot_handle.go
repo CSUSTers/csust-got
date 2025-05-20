@@ -25,7 +25,7 @@ type resultMsg struct {
 }
 
 // ExtractFields extract fields from search result
-func ExtractFields(hits []interface{}) ([]map[string]string, error) {
+func ExtractFields(hits []any) ([]map[string]string, error) {
 	var resultMsgs = make([]resultMsg, 0, len(hits))
 	for _, hit := range hits {
 		var message resultMsg

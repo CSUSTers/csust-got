@@ -11,7 +11,7 @@ import (
 )
 
 type meiliData struct {
-	Data   map[string]interface{}
+	Data   map[string]any
 	ChatID int64
 }
 
@@ -22,7 +22,7 @@ type searchQuery struct {
 }
 
 type searchResult struct {
-	Result interface{}
+	Result any
 	Error  error
 }
 
@@ -113,12 +113,12 @@ func handleSearchQuery(query string, indexName string, searchRequest *meilisearc
 }
 
 // AddData2Meili adds data to meili search.
-func AddData2Meili(data map[string]interface{}, chatID int64) {
+func AddData2Meili(data map[string]any, chatID int64) {
 	dataChan <- meiliData{Data: data, ChatID: chatID}
 }
 
 // SearchMeili performs a search query and returns results or error.
-func SearchMeili(query *searchQuery) (interface{}, error) {
+func SearchMeili(query *searchQuery) (any, error) {
 	searchChan <- query
 	result := <-resultChan
 	return result.Result, result.Error

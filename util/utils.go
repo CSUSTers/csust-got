@@ -34,19 +34,19 @@ func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (numbe
 }
 
 // SendMessage will use the bot to send a message.
-func SendMessage(to tb.Recipient, what interface{}, ops ...interface{}) *tb.Message {
+func SendMessage(to tb.Recipient, what any, ops ...any) *tb.Message {
 	msg, _ := SendMessageWithError(to, what, ops...)
 	return msg
 }
 
 // SendReply will use the bot to reply a message.
-func SendReply(to tb.Recipient, what interface{}, replyMsg *tb.Message, ops ...interface{}) *tb.Message {
-	ops = append([]interface{}{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
+func SendReply(to tb.Recipient, what any, replyMsg *tb.Message, ops ...any) *tb.Message {
+	ops = append([]any{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessage(to, what, ops...)
 }
 
 // SendMessageWithError is same as SendMessage but return error.
-func SendMessageWithError(to tb.Recipient, what interface{}, ops ...interface{}) (*tb.Message, error) {
+func SendMessageWithError(to tb.Recipient, what any, ops ...any) (*tb.Message, error) {
 	msg, err := config.BotConfig.Bot.Send(to, what, ops...)
 	if err != nil {
 		log.Error("Can't send message", zap.Error(err))
@@ -55,13 +55,13 @@ func SendMessageWithError(to tb.Recipient, what interface{}, ops ...interface{})
 }
 
 // EditMessage edit bot's message.
-func EditMessage(m *tb.Message, what interface{}, ops ...interface{}) *tb.Message {
+func EditMessage(m *tb.Message, what any, ops ...any) *tb.Message {
 	msg, _ := EditMessageWithError(m, what, ops...)
 	return msg
 }
 
 // EditMessageWithError is same as EditMessage but return error.
-func EditMessageWithError(m *tb.Message, what interface{}, ops ...interface{}) (*tb.Message, error) {
+func EditMessageWithError(m *tb.Message, what any, ops ...any) (*tb.Message, error) {
 	msg, err := config.GetBot().Edit(m, what, ops...)
 	if err != nil {
 		log.Error("Can't edit message", zap.Error(err))
@@ -70,8 +70,8 @@ func EditMessageWithError(m *tb.Message, what interface{}, ops ...interface{}) (
 }
 
 // SendReplyWithError is same as SendReply but return error.
-func SendReplyWithError(to tb.Recipient, what interface{}, replyMsg *tb.Message, ops ...interface{}) (*tb.Message, error) {
-	ops = append([]interface{}{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
+func SendReplyWithError(to tb.Recipient, what any, replyMsg *tb.Message, ops ...any) (*tb.Message, error) {
+	ops = append([]any{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessageWithError(to, what, ops...)
 }
 

@@ -166,7 +166,7 @@ func Decode(ctx tb.Context) error {
 				bsLen--
 			}
 			s := make([]uint16, bsLen/2)
-			for i := 0; i < len(s); i++ {
+			for i := range s {
 				s[i] = uint16(bs[i*2]) | uint16(bs[i*2+1])<<8
 			}
 			result = string(utf16.Decode(s))
@@ -176,7 +176,7 @@ func Decode(ctx tb.Context) error {
 				bsLen--
 			}
 			s := make([]uint16, bsLen/2)
-			for i := 0; i < len(s); i++ {
+			for i := range s {
 				s[i] = uint16(bs[i*2+1]) | uint16(bs[i*2])<<8
 			}
 		}

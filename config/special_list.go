@@ -1,5 +1,7 @@
 package config
 
+import "slices"
+
 import "github.com/spf13/viper"
 
 type specialListConfig struct {
@@ -26,10 +28,5 @@ func (c *specialListConfig) SetName(name string) {
 }
 
 func (c *specialListConfig) Check(chatID int64) bool {
-	for _, v := range c.Chats {
-		if v == chatID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.Chats, chatID)
 }

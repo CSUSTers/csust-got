@@ -247,7 +247,7 @@ func WatchStore(userID int64, stores []string) bool {
 	}
 
 	// add store to user's watching list
-	userStore := make([]interface{}, len(stores))
+	userStore := make([]any, len(stores))
 	for i, v := range stores {
 		userStore[i] = v
 	}
@@ -272,7 +272,7 @@ func RemoveStore(userID int64, stores []string) bool {
 		return true
 	}
 	// remove store from user's watching list
-	userStore := make([]interface{}, len(stores))
+	userStore := make([]any, len(stores))
 	for i, v := range stores {
 		userStore[i] = v
 	}
@@ -296,7 +296,7 @@ func WatchProduct(userID int64, products []string) bool {
 	}
 
 	// add products to user's watching list
-	userProduct := make([]interface{}, len(products))
+	userProduct := make([]any, len(products))
 	for i, v := range products {
 		userProduct[i] = v
 	}
@@ -321,7 +321,7 @@ func RemoveProduct(userID int64, products []string) bool {
 		return true
 	}
 	// remove products from user's watching list
-	userProduct := make([]interface{}, len(products))
+	userProduct := make([]any, len(products))
 	for i, v := range products {
 		userProduct[i] = v
 	}
@@ -368,7 +368,7 @@ func AppleTargetRegister(products, stores []string) bool {
 		return true
 	}
 	// get all targets
-	targets := make([]interface{}, 0, len(products)*len(stores))
+	targets := make([]any, 0, len(products)*len(stores))
 	for _, store := range stores {
 		for _, product := range products {
 			targets = append(targets, product+":"+store)
@@ -390,7 +390,7 @@ func AppleTargetRemove(targets ...string) bool {
 	if len(targets) == 0 {
 		return true
 	}
-	tar := make([]interface{}, len(targets))
+	tar := make([]any, len(targets))
 	for i, v := range targets {
 		tar[i] = v
 	}

@@ -466,7 +466,7 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
 				return next(ctx)
 			}
-			var msgMap map[string]interface{}
+			var msgMap map[string]any
 			err = json.Unmarshal(msgJSON, &msgMap)
 			if err != nil {
 				log.Error("[MeiliSearch] json unmarshal message error", zap.Error(err))
