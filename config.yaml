@@ -43,18 +43,6 @@ prometheus:
   enabled: false
 
 
-chatgpt:
-  base_url: ""
-  key: ""
-  max_tokens: 8192
-  temperature: 0.8
-  prompt_limit: 1000
-  system_prompt: ""
-  keep_context: 3
-  model: ""
-  retry_nums: 5
-  retry_interval: 1  # 单位：秒
-
 llm_models:
   _default: &default
     base_url: "xxx"

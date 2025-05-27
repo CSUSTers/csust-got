@@ -1,14 +1,12 @@
 package main
 
 import (
-	"csust-got/chat"
 	"csust-got/chat_v2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/store"
 	"csust-got/util/gacha"
-	wordSeg "csust-got/word_seg"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -43,6 +41,8 @@ func main() {
 	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
+	chat_v2.InitGachaConfigs()
+
 	err := base.InitGetVoice()
 	if err != nil {
 		log.Panic(err.Error())
@@ -72,11 +72,8 @@ func main() {
 	inline.RegisterInlineHandler(bot, config.BotConfig)
 
 	meili.InitMeili()
-	wordSeg.InitWordSeg()
 
 	go sd.Process()
-
-	go chat.InitChat()
 
 	base.Init()
 
@@ -469,15 +466,13 @@ func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
 				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
 				return next(ctx)
 			}
-			var msgMap map[string]interface{}
+			var msgMap map[string]any
 			err = json.Unmarshal(msgJSON, &msgMap)
 			if err != nil {
 				log.Error("[MeiliSearch] json unmarshal message error", zap.Error(err))
 				return next(ctx)
 			}
 			meili.AddData2Meili(msgMap, ctx.Chat().ID)
-			// 分词并存入redis
-			go wordSeg.WordSegment(m.Text, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}
@@ -495,7 +490,7 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		// DONE: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
 		// 2024-12-17 [dawu]: 已经重构
 		if m.Text != "" {
-			go chat.GachaReplyHandler(ctx)
+			go chat_v2.GachaReplyHandler(ctx)
 		}
 
 		return next(ctx)

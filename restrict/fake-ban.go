@@ -71,10 +71,7 @@ func ExecFakeBan(m *Message, d time.Duration) {
 	}
 	// check if user 'banned' already banned
 	maxAdd := time.Duration(config.BotConfig.RestrictConfig.FakeBanMaxAddSeconds) * time.Second
-	ad := d
-	if ad > maxAdd {
-		ad = maxAdd
-	}
+	ad := min(d, maxAdd)
 	if orm.AddBanDuration(m.Chat.ID, m.Sender.ID, banned.ID, ad) {
 		text = fmt.Sprintf("好耶，成功为 %s 追加%v，希望 %s 过得开心", bannedName, ad, bannedName)
 		util.SendReply(m.Chat, text, m)

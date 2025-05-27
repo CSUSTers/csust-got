@@ -14,14 +14,9 @@ import (
 
 // ConvertPipe2File read media file from reader `r` and convert it to file with default/provided options
 // return the converted data readcloser and a channel of run error, and delete the temp work dir when readcloser closed
-func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, inputFileType string, input *ff.Stream,
+func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, intputStream StreamApply,
 	outputFilename string, outputArgs ...ff.KwArgs) (io.ReadCloser, <-chan error) {
-	if input == nil {
-		input = GetPipeInputStream(inputFileType)
-		if ctx != nil {
-			input.Context = ctx
-		}
-	}
+	input := intputStream(ff.Input("pipe:"))
 
 	stderr := io.Discard
 	var stderrCloser io.Closer
@@ -69,14 +64,4 @@ func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, inputFileTyp
 		TempWorkDir: workdir,
 		File:        outputFile,
 	}, resultCh
-}
-
-// GetPipeInputStream get pipe input stream
-func GetPipeInputStream(fileType string) *ff.Stream {
-	inputArgs := ff.KwArgs{}
-	if fileType != "" {
-		inputArgs["f"] = fileType
-	}
-	input := ff.Input("pipe:", inputArgs)
-	return input
 }

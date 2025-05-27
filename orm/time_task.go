@@ -159,7 +159,7 @@ func DeleteTasks(raws ...string) error {
 	if len(raws) == 0 {
 		return nil
 	}
-	is := make([]interface{}, 0, len(raws))
+	is := make([]any, 0, len(raws))
 	for _, r := range raws {
 		is = append(is, r)
 	}

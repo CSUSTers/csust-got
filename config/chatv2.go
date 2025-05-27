@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -36,6 +37,7 @@ type ChatTrigger struct {
 	Command string `mapstructure:"command"`
 	Regex   string `mapstructure:"regex"`
 	Reply   bool   `mapstructure:"reply"`
+	Gacha   int    `mapstructure:"gacha"`
 }
 
 // ChatOutputFormatConfig is the configuration for tg message format
@@ -128,6 +130,17 @@ func (ccs *ChatConfigSingle) TriggerOnReply() (*ChatTrigger, bool) {
 		}
 	}
 	return nil, false
+}
+
+// TriggerForGacha checks if the chat will trigger on gacha
+func (ccs *ChatConfigSingle) TriggerForGacha() ([]int, bool) {
+	stars := lo.FilterMap(ccs.Trigger, func(t *ChatTrigger, _ int) (int, bool) {
+		if t.Gacha > 0 {
+			return t.Gacha, true
+		}
+		return 0, false
+	})
+	return stars, len(stars) > 0
 }
 
 // GetTimeout returns the timeout for the chat model

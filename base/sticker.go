@@ -415,7 +415,7 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 
 		cc, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		r, errCh := ff.ConvertPipe2File(cc, reader, "webm", nil, filename+"."+f, outputArgs...)
+		r, errCh := ff.ConvertPipe2File(cc, reader, ffconv.NewPipeInputStream("webm"), filename+"."+f, outputArgs...)
 		defer func() {
 			_ = r.Close()
 		}()
@@ -572,13 +572,13 @@ loop:
 					return err
 				}
 
-				input := ffconv.GetPipeInputStream("webm")
+				input := ffconv.NewPipeInputStream("webm")
 				defer func() {
 					_ = fileR.Close()
 				}()
 				switch f {
 				case "gif":
-					input = ffconv.GetGifPaletteVfStream(input)
+					input = input.Combine(ffconv.GifPaletteVfStream)
 					outputArgs = append(outputArgs, ffmpeg_go.KwArgs{
 						"loop": "0",
 						"c:v":  "gif",
@@ -601,7 +601,7 @@ loop:
 				}
 				ccc, cancel := context.WithTimeout(cc, time.Second*120)
 				defer cancel()
-				_, errCh := ff.ConvertPipe2File(ccc, fileR, "", input, path.Join(tempDir, filename), outputArgs...)
+				_, errCh := ff.ConvertPipe2File(ccc, fileR, input, path.Join(tempDir, filename), outputArgs...)
 				select {
 				case err := <-errCh:
 					if err != nil {

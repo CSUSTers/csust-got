@@ -4,11 +4,10 @@ go 1.24
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.2.1
-	github.com/huichen/sego v0.0.0-20210824061530-c87651ea5c76
 	github.com/meilisearch/meilisearch-go v0.32.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
-	github.com/quic-go/quic-go v0.51.0
+	github.com/quic-go/quic-go v0.52.0
 	github.com/redis/go-redis/v9 v9.8.0
 	github.com/sashabaranov/go-openai v1.40.0
 	github.com/spf13/viper v1.20.1
@@ -34,7 +33,6 @@ require (
 )
 
 require (
-	github.com/adamzy/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
 	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0

@@ -9,7 +9,7 @@ import (
 )
 
 // PushQueue pushes sth to a queue
-func PushQueue(key string, value interface{}, score int64) error {
+func PushQueue(key string, value any, score int64) error {
 	member, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -21,7 +21,7 @@ func PushQueue(key string, value interface{}, score int64) error {
 }
 
 // RemoveFromQueue removes sth from a queue
-func RemoveFromQueue(key string, value interface{}) error {
+func RemoveFromQueue(key string, value any) error {
 	member, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -48,7 +48,7 @@ func PopQueue(key string, from, to int64) ([]string, error) {
 	if z == nil {
 		return nil, nil
 	}
-	zs, ok := z.([]interface{})
+	zs, ok := z.([]any)
 	if !ok {
 		return nil, fmt.Errorf("[PopQueue] %w, invalid result type: %T", ErrWrongType, z)
 	}
