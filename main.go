@@ -1,7 +1,7 @@
 package main
 
 import (
-	"csust-got/chat_v2"
+	"csust-got/chat"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
@@ -37,11 +37,11 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
-	chat_v2.InitMcpoClient()
-	chat_v2.InitAiClients(*config.BotConfig.ChatConfigV2)
+	chat.InitMcpoClient()
+	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
-	chat_v2.InitGachaConfigs()
+	chat.InitGachaConfigs()
 
 	err := base.InitGetVoice()
 	if err != nil {
@@ -234,7 +234,7 @@ func customHandler(ctx Context) error {
 		if reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, v2 := range *config.BotConfig.ChatConfigV2 {
 				if trigger, ok := v2.TriggerOnReply(); ok {
-					return chat_v2.Chat(ctx, v2, trigger)
+					return chat.Chat(ctx, v2, trigger)
 				}
 			}
 		}
@@ -280,7 +280,7 @@ func registerChatConfigHandler(bot *Bot) {
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
-					return chat_v2.Chat(ctx, vCopy, trCopy)
+					return chat.Chat(ctx, vCopy, trCopy)
 				})
 			}
 		}
@@ -302,7 +302,7 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
-					return chat_v2.Chat(context, vCopy, trCopy)
+					return chat.Chat(context, vCopy, trCopy)
 				}})
 			}
 		}
@@ -490,7 +490,7 @@ func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
 		// DONE: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
 		// 2024-12-17 [dawu]: 已经重构
 		if m.Text != "" {
-			go chat_v2.GachaReplyHandler(ctx)
+			go chat.GachaReplyHandler(ctx)
 		}
 
 		return next(ctx)
