@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/meilisearch/meilisearch-go"
 	"go.uber.org/zap"
@@ -22,6 +23,56 @@ type resultMsg struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
+}
+
+// truncateAndHighlight truncates long text and highlights search terms
+func truncateAndHighlight(text, searchQuery string, maxLength int) string {
+	if len(text) <= maxLength {
+		return text
+	}
+	
+	// Find the position of the search query in the text (case insensitive)
+	lowerText := strings.ToLower(text)
+	lowerQuery := strings.ToLower(searchQuery)
+	
+	pos := strings.Index(lowerText, lowerQuery)
+	if pos == -1 {
+		// If query not found, just truncate from the beginning
+		if len(text) > maxLength {
+			return text[:maxLength-3] + "..."
+		}
+		return text
+	}
+	
+	// Calculate how much context to show around the match
+	queryLen := len(searchQuery)
+	contextLength := (maxLength - queryLen - 6) / 2 // 6 for "..." on both sides
+	
+	start := pos - contextLength
+	end := pos + queryLen + contextLength
+	
+	if start < 0 {
+		start = 0
+		end = maxLength - 3
+	}
+	if end > len(text) {
+		end = len(text)
+		start = end - maxLength + 3
+		if start < 0 {
+			start = 0
+		}
+	}
+	
+	result := ""
+	if start > 0 {
+		result += "..."
+	}
+	result += text[start:end]
+	if end < len(text) {
+		result += "..."
+	}
+	
+	return result
 }
 
 // ExtractFields extract fields from search result
@@ -64,6 +115,7 @@ func SearchHandle(ctx Context) error {
 func executeSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
 	chatId := ctx.Chat().ID
+	page := int64(1) // default to page 1
 	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
 	// parse option
 	searchKeywordIdx := 0
@@ -76,6 +128,15 @@ func executeSearch(ctx Context) string {
 			if err != nil {
 				log.Error("[MeiliSearch]: Parse chat id failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
 				return "Invalid chat id"
+			}
+			searchKeywordIdx = 2
+		} else if option == "-p" {
+			// when search with page, index 0 arg is "-p", 1 arg is page, pass rest to query
+			var err error
+			page, err = strconv.ParseInt(command.Arg(1), 10, 64)
+			if err != nil || page < 1 {
+				log.Error("[MeiliSearch]: Parse page failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+				return "Invalid page number"
 			}
 			searchKeywordIdx = 2
 		}
@@ -99,7 +160,9 @@ func executeSearch(ctx Context) string {
 	query := &searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
-			Limit: 10,
+			HitsPerPage: 10,
+			Page:        page,
+			Filter:      "text NOT LIKE '/%'", // Filter out command messages
 		}
 		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
@@ -133,6 +196,14 @@ func executeSearch(ctx Context) string {
 		return "Extract fields failed"
 	}
 	var rplMsg string
+	searchQuery := command.ArgAllInOneFrom(searchKeywordIdx)
+	
+	// Add pagination info header
+	if resp.TotalPages > 1 {
+		rplMsg += fmt.Sprintf("🔍 Search results \\(Page %d of %d, %d total\\):\n\n", page, resp.TotalPages, resp.TotalHits)
+	} else {
+		rplMsg += fmt.Sprintf("🔍 Search results \\(%d found\\):\n\n", resp.TotalHits)
+	}
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
@@ -140,6 +211,17 @@ func executeSearch(ctx Context) string {
 			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]) +
 			"` ” message id: [" + respMap[item]["id"] +
 			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
+	}
+	
+	// Add pagination buttons if needed
+	if resp.TotalPages > 1 {
+		rplMsg += "\n"
+		if page > 1 {
+			rplMsg += "Use `/search -p " + strconv.FormatInt(page-1, 10) + " " + searchQuery + "` for previous page\n"
+		}
+		if page < resp.TotalPages {
+			rplMsg += "Use `/search -p " + strconv.FormatInt(page+1, 10) + " " + searchQuery + "` for next page\n"
+		}
 	}
 	// TODO: format rplMsg
 	return rplMsg
