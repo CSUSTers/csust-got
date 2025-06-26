@@ -172,7 +172,13 @@ func executeSearch(ctx Context) string {
 	}
 
 	if query.Query == "" {
-		return fmt.Sprintf("search keyword is empty, use `%s <keyword>` to search", ctx.Message().Text)
+		helpMsg := fmt.Sprintf("search keyword is empty, use `%s <keyword>` to search\n\n", ctx.Message().Text)
+		helpMsg += "Usage:\n"
+		helpMsg += "• `/search <keyword>` - Search in current chat\n"
+		helpMsg += "• `/search -id <chat_id> <keyword>` - Search in specific chat\n"
+		helpMsg += "• `/search -p <page> <keyword>` - Search specific page\n"
+		helpMsg += "• `/search -id <chat_id> -p <page> <keyword>` - Combined options\n"
+		return helpMsg
 	}
 
 	result, err := SearchMeili(query)
@@ -207,9 +213,11 @@ func executeSearch(ctx Context) string {
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
-		rplMsg += "内容: “ `" +
-			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]) +
-			"` ” message id: [" + respMap[item]["id"] +
+		// Truncate long text and highlight search terms
+		truncatedText := truncateAndHighlight(respMap[item]["text"], searchQuery, 200)
+		rplMsg += "内容: " + "`" +
+			util.EscapeTgMDv2ReservedChars(truncatedText) +
+			"` " + "message id: [" + respMap[item]["id"] +
 			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}
 	
