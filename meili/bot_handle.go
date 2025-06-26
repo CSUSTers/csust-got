@@ -16,6 +16,8 @@ import (
 	. "gopkg.in/telebot.v3"
 )
 
+const ellipsisLen = 6
+
 type resultMsg struct {
 	Text string `json:"text"`
 	Id   int64  `json:"message_id"`
@@ -30,11 +32,11 @@ func truncateAndHighlight(text, searchQuery string, maxLength int) string {
 	if len(text) <= maxLength {
 		return text
 	}
-	
+
 	// Find the position of the search query in the text (case insensitive)
 	lowerText := strings.ToLower(text)
 	lowerQuery := strings.ToLower(searchQuery)
-	
+
 	pos := strings.Index(lowerText, lowerQuery)
 	if pos == -1 {
 		// If query not found, just truncate from the beginning
@@ -43,26 +45,26 @@ func truncateAndHighlight(text, searchQuery string, maxLength int) string {
 		}
 		return text
 	}
-	
+
 	// Calculate how much context to show around the match
 	queryLen := len(searchQuery)
-	contextLength := (maxLength - queryLen - 6) / 2 // 6 for "..." on both sides
-	
+	contextLength := (maxLength - queryLen - ellipsisLen) / 2 // ellipsisLen for "..." on both sides
+
 	start := pos - contextLength
 	end := pos + queryLen + contextLength
-	
+
 	if start < 0 {
 		start = 0
-		end = maxLength - 3
+		end = maxLength - ellipsisLen/2
 	}
 	if end > len(text) {
 		end = len(text)
-		start = end - maxLength + 3
+		start = end - maxLength + ellipsisLen/2
 		if start < 0 {
 			start = 0
 		}
 	}
-	
+
 	result := ""
 	if start > 0 {
 		result += "..."
@@ -71,7 +73,7 @@ func truncateAndHighlight(text, searchQuery string, maxLength int) string {
 	if end < len(text) {
 		result += "..."
 	}
-	
+
 	return result
 }
 
@@ -203,7 +205,7 @@ func executeSearch(ctx Context) string {
 	}
 	var rplMsg string
 	searchQuery := command.ArgAllInOneFrom(searchKeywordIdx)
-	
+
 	// Add pagination info header
 	if resp.TotalPages > 1 {
 		rplMsg += fmt.Sprintf("🔍 Search results \\(Page %d of %d, %d total\\):\n\n", page, resp.TotalPages, resp.TotalHits)
@@ -220,7 +222,7 @@ func executeSearch(ctx Context) string {
 			"` " + "message id: [" + respMap[item]["id"] +
 			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
 	}
-	
+
 	// Add pagination buttons if needed
 	if resp.TotalPages > 1 {
 		rplMsg += "\n"
