@@ -25,14 +25,21 @@ jobs:
       - name: Get source
         uses: actions/checkout@v3 
 
+      - name: Sanitize branch name for Docker tag
+        id: sanitize
+        run: |
+          # Replace / with - in branch name to make it valid for Docker tags
+          SANITIZED_BRANCH=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          echo "branch_name=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
       - name: Build Image
         id: build-image
         uses: redhat-actions/buildah-build@v2
         with:
           image: csusters/csust-got
           tags: |
-            latest-${{ github.ref_name }}
-            ${{ github.ref_name }}
+            latest-${{ steps.sanitize.outputs.branch_name }}
+            ${{ steps.sanitize.outputs.branch_name }}
           containerfiles: |
             ./Dockerfile
           layers: true

@@ -123,7 +123,8 @@ func executeSearch(ctx Context) string {
 	searchKeywordIdx := 0
 	if command.Argc() >= 2 {
 		option := command.Arg(0)
-		if option == "-id" {
+		switch option {
+		case "-id":
 			// when search by id, index 0 arg is "-id", 1 arg is id, pass rest to query
 			var err error
 			chatId, err = strconv.ParseInt(command.Arg(1), 10, 64)
@@ -132,7 +133,7 @@ func executeSearch(ctx Context) string {
 				return "Invalid chat id"
 			}
 			searchKeywordIdx = 2
-		} else if option == "-p" {
+		case "-p":
 			// when search with page, index 0 arg is "-p", 1 arg is page, pass rest to query
 			var err error
 			page, err = strconv.ParseInt(command.Arg(1), 10, 64)
@@ -164,7 +165,7 @@ func executeSearch(ctx Context) string {
 		searchRequest := meilisearch.SearchRequest{
 			HitsPerPage: 10,
 			Page:        page,
-			Filter:      "text NOT LIKE '/%'", // Filter out command messages
+			Filter:      "NOT text STARTS WITH '/'", // Filter out command messages
 		}
 		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
