@@ -9,14 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/meilisearch/meilisearch-go"
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
-
-const ellipsisLen = 6
 
 type resultMsg struct {
 	Text string `json:"text"`
@@ -25,56 +22,7 @@ type resultMsg struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
-}
-
-// truncateAndHighlight truncates long text and highlights search terms
-func truncateAndHighlight(text, searchQuery string, maxLength int) string {
-	if len(text) <= maxLength {
-		return text
-	}
-
-	// Find the position of the search query in the text (case insensitive)
-	lowerText := strings.ToLower(text)
-	lowerQuery := strings.ToLower(searchQuery)
-
-	pos := strings.Index(lowerText, lowerQuery)
-	if pos == -1 {
-		// If query not found, just truncate from the beginning
-		if len(text) > maxLength {
-			return text[:maxLength-3] + "..."
-		}
-		return text
-	}
-
-	// Calculate how much context to show around the match
-	queryLen := len(searchQuery)
-	contextLength := (maxLength - queryLen - ellipsisLen) / 2 // ellipsisLen for "..." on both sides
-
-	start := pos - contextLength
-	end := pos + queryLen + contextLength
-
-	if start < 0 {
-		start = 0
-		end = maxLength - ellipsisLen/2
-	}
-	if end > len(text) {
-		end = len(text)
-		start = end - maxLength + ellipsisLen/2
-		if start < 0 {
-			start = 0
-		}
-	}
-
-	result := ""
-	if start > 0 {
-		result += "..."
-	}
-	result += text[start:end]
-	if end < len(text) {
-		result += "..."
-	}
-
-	return result
+	Formatted map[string]any `json:"_formatted,omitempty"`
 }
 
 // ExtractFields extract fields from search result
@@ -98,6 +46,12 @@ func ExtractFields(hits []any) ([]map[string]string, error) {
 			"text": message.Text,
 			"name": message.From.FirstName + message.From.LastName,
 			"id":   strconv.FormatInt(message.Id, 10),
+		}
+		if message.Formatted != nil {
+			// If _formatted field exists, use it to extract text
+			if formattedText, ok := message.Formatted["text"].(string); ok {
+				result[i]["text"] = formattedText
+			}
 		}
 	}
 	return result, nil
@@ -163,9 +117,12 @@ func executeSearch(ctx Context) string {
 	query := &searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
-			HitsPerPage: 10,
-			Page:        page,
-			Filter:      "NOT text STARTS WITH '/'", // Filter out command messages
+			HitsPerPage:      10,
+			Page:             page,
+			Filter:           "text NOT STARTS WITH '/'", // Filter out command messages
+			AttributesToCrop: []string{"text"},           // Crop text field
+			CropLength:       50,                         // Crop length for text
+			CropMarker:       "...",
 		}
 		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
@@ -180,7 +137,6 @@ func executeSearch(ctx Context) string {
 		helpMsg += "• `/search <keyword>` - Search in current chat\n"
 		helpMsg += "• `/search -id <chat_id> <keyword>` - Search in specific chat\n"
 		helpMsg += "• `/search -p <page> <keyword>` - Search specific page\n"
-		helpMsg += "• `/search -id <chat_id> -p <page> <keyword>` - Combined options\n"
 		return helpMsg
 	}
 
@@ -216,8 +172,7 @@ func executeSearch(ctx Context) string {
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
-		// Truncate long text and highlight search terms
-		truncatedText := truncateAndHighlight(respMap[item]["text"], searchQuery, 200)
+		truncatedText := respMap[item]["text"]
 		rplMsg += "内容: " + "`" +
 			util.EscapeTgMDv2ReservedChars(truncatedText) +
 			"` " + "message id: [" + respMap[item]["id"] +

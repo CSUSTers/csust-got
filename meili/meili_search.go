@@ -3,9 +3,10 @@ package meili
 import (
 	"csust-got/config"
 	"csust-got/log"
-	"go.uber.org/zap"
 	"strconv"
 	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/meilisearch/meilisearch-go"
 )
@@ -37,6 +38,9 @@ var (
 	clientMux  sync.Mutex
 	// once init meili at bot start.
 	once sync.Once
+	// filterOnceMap stores sync.Once for each index to ensure UpdateFilterableAttributes is called only once per index
+	filterOnceMap = make(map[string]*sync.Once)
+	filterOnceMux sync.Mutex
 )
 
 // InitMeili will start a meili worker goroutine
@@ -53,6 +57,16 @@ func getClient() meilisearch.ServiceManager {
 		client = meilisearch.New(config.BotConfig.MeiliConfig.HostAddr, meilisearch.WithAPIKey(config.BotConfig.MeiliConfig.ApiKey))
 	}
 	return client
+}
+
+// getFilterOnce returns a sync.Once for the given index name, creating it if it doesn't exist
+func getFilterOnce(indexName string) *sync.Once {
+	filterOnceMux.Lock()
+	defer filterOnceMux.Unlock()
+	if filterOnceMap[indexName] == nil {
+		filterOnceMap[indexName] = &sync.Once{}
+	}
+	return filterOnceMap[indexName]
 }
 
 // StartWorker will start meili worker
@@ -84,6 +98,16 @@ func handleAddData(data meiliData) {
 			return
 		}
 	}
+
+	getFilterOnce(indexName).Do(func() {
+		// Configure filterable attributes
+		_, err := client.Index(indexName).UpdateFilterableAttributes(&[]string{"text"})
+		if err != nil {
+			log.Error("[MeiliSearch]: update filterable attributes failed", zap.Error(err))
+		} else {
+			log.Debug("[MeiliSearch]: update filterable attributes success for index", zap.String("index", indexName))
+		}
+	})
 
 	_, err = client.Index(indexName).AddDocuments(data.Data, "message_id")
 	if err != nil {
