@@ -117,12 +117,13 @@ func executeSearch(ctx Context) string {
 	query := &searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
-			HitsPerPage:      10,
-			Page:             page,
-			Filter:           "text NOT STARTS WITH '/'", // Filter out command messages
-			AttributesToCrop: []string{"text"},           // Crop text field
-			CropLength:       50,                         // Crop length for text
-			CropMarker:       "...",
+			HitsPerPage:           10,
+			Page:                  page,
+			Filter:                "text NOT STARTS WITH '/'", // Filter out command messages
+			RankingScoreThreshold: 0.3,                        // Set a threshold for ranking score
+			AttributesToCrop:      []string{"text"},           // Crop text field
+			CropLength:            30,                         // Crop length for text
+			CropMarker:            "...",
 		}
 		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
