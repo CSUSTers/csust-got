@@ -43,8 +43,8 @@ jobs:
             BRANCH=release
           layers: true
 
-      - name: Push To harbor
-        id: push-to-harbor
+      - name: Push To registry
+        id: push-to-registry
         uses: CSUSTers/push-to-registry@main
         with:
           image: ${{ steps.build-image.outputs.image }}
