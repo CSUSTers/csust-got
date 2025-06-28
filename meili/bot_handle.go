@@ -16,12 +16,14 @@ import (
 )
 
 type resultMsg struct {
-	Text string `json:"text"`
-	Id   int64  `json:"message_id"`
-	From struct {
+	Text    string `json:"text"`
+	Caption string `json:"caption,omitempty"`
+	Id      int64  `json:"message_id"`
+	From    struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
+	Formatted map[string]any `json:"_formatted,omitempty"`
 }
 
 // ExtractFields extract fields from search result
@@ -46,6 +48,19 @@ func ExtractFields(hits []any) ([]map[string]string, error) {
 			"name": message.From.FirstName + message.From.LastName,
 			"id":   strconv.FormatInt(message.Id, 10),
 		}
+		if message.Text == "" && message.Caption != "" {
+			// If text is empty, use caption as text
+			result[i]["text"] = message.Caption
+		}
+		if message.Formatted != nil {
+			// If _formatted field exists, use it to extract text
+			if formattedText, ok := message.Formatted["text"].(string); ok && formattedText != "" {
+				result[i]["text"] = formattedText
+			}
+			if formattedCaption, ok := message.Formatted["caption"].(string); ok && formattedCaption != "" {
+				result[i]["text"] = formattedCaption
+			}
+		}
 	}
 	return result, nil
 }
@@ -64,18 +79,29 @@ func SearchHandle(ctx Context) error {
 func executeSearch(ctx Context) string {
 	command := entities.FromMessage(ctx.Message())
 	chatId := ctx.Chat().ID
+	page := int64(1) // default to page 1
 	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
 	// parse option
 	searchKeywordIdx := 0
 	if command.Argc() >= 2 {
 		option := command.Arg(0)
-		if option == "-id" {
+		switch option {
+		case "-id":
 			// when search by id, index 0 arg is "-id", 1 arg is id, pass rest to query
 			var err error
 			chatId, err = strconv.ParseInt(command.Arg(1), 10, 64)
 			if err != nil {
 				log.Error("[MeiliSearch]: Parse chat id failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
 				return "Invalid chat id"
+			}
+			searchKeywordIdx = 2
+		case "-p":
+			// when search with page, index 0 arg is "-p", 1 arg is page, pass rest to query
+			var err error
+			page, err = strconv.ParseInt(command.Arg(1), 10, 64)
+			if err != nil || page < 1 {
+				log.Error("[MeiliSearch]: Parse page failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
+				return "Invalid page number"
 			}
 			searchKeywordIdx = 2
 		}
@@ -99,7 +125,14 @@ func executeSearch(ctx Context) string {
 	query := &searchQuery{}
 	if command.Argc() > 0 {
 		searchRequest := meilisearch.SearchRequest{
-			Limit: 10,
+			HitsPerPage:           10,
+			Page:                  page,
+			Filter:                "text NOT STARTS WITH '/' AND caption NOT STARTS WITH '/'", // Filter out command messages
+			RankingScoreThreshold: 0.4,                                                        // Set a threshold for ranking score
+			AttributesToSearchOn:  []string{"text", "caption"},                                // Search in text and caption fields
+			AttributesToCrop:      []string{"text", "caption"},                                // Crop text field
+			CropLength:            30,                                                         // Crop length for text
+			CropMarker:            "...",
 		}
 		query = &searchQuery{
 			Query:         command.ArgAllInOneFrom(searchKeywordIdx),
@@ -109,7 +142,12 @@ func executeSearch(ctx Context) string {
 	}
 
 	if query.Query == "" {
-		return fmt.Sprintf("search keyword is empty, use `%s <keyword>` to search", ctx.Message().Text)
+		helpMsg := fmt.Sprintf("search keyword is empty, use `%s <keyword>` to search\n\n", ctx.Message().Text)
+		helpMsg += "Usage:\n"
+		helpMsg += "• `/search <keyword>` - Search in current chat\n"
+		helpMsg += "• `/search -id <chat_id> <keyword>` - Search in specific chat\n"
+		helpMsg += "• `/search -p <page> <keyword>` - Search specific page\n"
+		return helpMsg
 	}
 
 	result, err := SearchMeili(query)
@@ -133,13 +171,31 @@ func executeSearch(ctx Context) string {
 		return "Extract fields failed"
 	}
 	var rplMsg string
+	searchQuery := command.ArgAllInOneFrom(searchKeywordIdx)
+
+	// Add pagination info header
+	if resp.TotalPages > 1 {
+		rplMsg += fmt.Sprintf("🔍 Search results \\(Page %d of %d, %d total\\):\n\n", page, resp.TotalPages, resp.TotalHits)
+	} else {
+		rplMsg += fmt.Sprintf("🔍 Search results \\(%d found\\):\n\n", resp.TotalHits)
+	}
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
-		rplMsg += "内容: “ `" +
-			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]) +
-			"` ” message id: [" + respMap[item]["id"] +
-			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
+		rplMsg += fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
+			respMap[item]["id"], chatUrl, respMap[item]["id"],
+			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]))
+	}
+
+	// Add pagination buttons if needed
+	if resp.TotalPages > 1 {
+		rplMsg += "\n"
+		if page > 1 {
+			rplMsg += "Use `/search -p " + strconv.FormatInt(page-1, 10) + " " + searchQuery + "` for previous page\n"
+		}
+		if page < resp.TotalPages {
+			rplMsg += "Use `/search -p " + strconv.FormatInt(page+1, 10) + " " + searchQuery + "` for next page\n"
+		}
 	}
 	// TODO: format rplMsg
 	return rplMsg

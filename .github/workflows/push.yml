@@ -25,20 +25,27 @@ jobs:
       - name: Get source
         uses: actions/checkout@v3 
 
+      - name: Sanitize branch name for Docker tag
+        id: sanitize
+        run: |
+          # Replace / with - in branch name to make it valid for Docker tags
+          SANITIZED_BRANCH=$(echo "${{ github.ref_name }}" | sed 's/\//-/g')
+          echo "branch_name=$SANITIZED_BRANCH" >> $GITHUB_OUTPUT
+
       - name: Build Image
         id: build-image
         uses: redhat-actions/buildah-build@v2
         with:
           image: csusters/csust-got
           tags: |
-            latest-${{ github.ref_name }}
-            ${{ github.ref_name }}
+            latest-${{ steps.sanitize.outputs.branch_name }}
+            ${{ steps.sanitize.outputs.branch_name }}
           containerfiles: |
             ./Dockerfile
           layers: true
 
-      - name: Push To harbor
-        id: push-to-harbor 
+      - name: Push To registry
+        id: push-to-registry
         uses: CSUSTers/push-to-registry@main
         with:
           image: ${{ steps.build-image.outputs.image }}
@@ -47,8 +54,3 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
           retry: 1000
-          
-      - name: Restart Kubernetes Deployment
-        id: restart-pod
-        run: |
-          if [ "${{ github.ref }}" == "refs/heads/dev" ]; then NAME="csust-got"; elif [ "${{ github.ref }}" == "refs/heads/master" ]; then NAME="csust-got-prod"; fi; curl -sL -X PUT -H "Content-Type: application/yaml" -H "Cookie: ${{ secrets.KubeCookie}}" -d '{"kind":"deployments","namespace":"csust","name":"'"$NAME"'"}' "${{ secrets.KubeURL}}" | jq -r '.status.availableReplicas' | xargs -I{} echo "AvailableReplicas: {}"
