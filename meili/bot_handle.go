@@ -120,7 +120,7 @@ func executeSearch(ctx Context) string {
 			HitsPerPage:           10,
 			Page:                  page,
 			Filter:                "text NOT STARTS WITH '/'", // Filter out command messages
-			RankingScoreThreshold: 0.3,                        // Set a threshold for ranking score
+			RankingScoreThreshold: 0.4,                        // Set a threshold for ranking score
 			AttributesToCrop:      []string{"text"},           // Crop text field
 			CropLength:            30,                         // Crop length for text
 			CropMarker:            "...",
@@ -173,11 +173,9 @@ func executeSearch(ctx Context) string {
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	for item := range respMap {
-		truncatedText := respMap[item]["text"]
-		rplMsg += "内容: " + "`" +
-			util.EscapeTgMDv2ReservedChars(truncatedText) +
-			"` " + "message id: [" + respMap[item]["id"] +
-			"](" + chatUrl + respMap[item]["id"] + ") \n\n"
+		rplMsg += fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
+			respMap[item]["id"], chatUrl, respMap[item]["id"],
+			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]))
 	}
 
 	// Add pagination buttons if needed
