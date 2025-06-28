@@ -101,7 +101,7 @@ func handleAddData(data meiliData) {
 
 	getFilterOnce(indexName).Do(func() {
 		// Configure filterable attributes
-		_, err := client.Index(indexName).UpdateFilterableAttributes(&[]string{"text"})
+		_, err := client.Index(indexName).UpdateFilterableAttributes(&[]string{"text", "caption"})
 		if err != nil {
 			log.Error("[MeiliSearch]: update filterable attributes failed", zap.Error(err))
 		} else {

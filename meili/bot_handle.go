@@ -16,9 +16,10 @@ import (
 )
 
 type resultMsg struct {
-	Text string `json:"text"`
-	Id   int64  `json:"message_id"`
-	From struct {
+	Text    string `json:"text"`
+	Caption string `json:"caption,omitempty"`
+	Id      int64  `json:"message_id"`
+	From    struct {
 		LastName  string `json:"last_name"`
 		FirstName string `json:"first_name"`
 	} `json:"from"`
@@ -47,10 +48,17 @@ func ExtractFields(hits []any) ([]map[string]string, error) {
 			"name": message.From.FirstName + message.From.LastName,
 			"id":   strconv.FormatInt(message.Id, 10),
 		}
+		if message.Text == "" && message.Caption != "" {
+			// If text is empty, use caption as text
+			result[i]["text"] = message.Caption
+		}
 		if message.Formatted != nil {
 			// If _formatted field exists, use it to extract text
-			if formattedText, ok := message.Formatted["text"].(string); ok {
+			if formattedText, ok := message.Formatted["text"].(string); ok && formattedText != "" {
 				result[i]["text"] = formattedText
+			}
+			if formattedCaption, ok := message.Formatted["caption"].(string); ok && formattedCaption != "" {
+				result[i]["text"] = formattedCaption
 			}
 		}
 	}
@@ -119,10 +127,11 @@ func executeSearch(ctx Context) string {
 		searchRequest := meilisearch.SearchRequest{
 			HitsPerPage:           10,
 			Page:                  page,
-			Filter:                "text NOT STARTS WITH '/'", // Filter out command messages
-			RankingScoreThreshold: 0.4,                        // Set a threshold for ranking score
-			AttributesToCrop:      []string{"text"},           // Crop text field
-			CropLength:            30,                         // Crop length for text
+			Filter:                "text NOT STARTS WITH '/' AND caption NOT STARTS WITH '/'", // Filter out command messages
+			RankingScoreThreshold: 0.4,                                                        // Set a threshold for ranking score
+			AttributesToSearchOn:  []string{"text", "caption"},                                // Search in text and caption fields
+			AttributesToCrop:      []string{"text", "caption"},                                // Crop text field
+			CropLength:            30,                                                         // Crop length for text
 			CropMarker:            "...",
 		}
 		query = &searchQuery{
