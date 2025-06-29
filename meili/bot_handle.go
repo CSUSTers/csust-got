@@ -65,6 +65,16 @@ func ExtractFields(hits []any) ([]map[string]string, error) {
 	return result, nil
 }
 
+// generatePaginationCommand generates a pagination command with proper parameters
+func generatePaginationCommand(page int64, searchQuery string, usedChatIdParam bool, chatId int64) string {
+	baseCmd := "/search -p " + strconv.FormatInt(page, 10)
+	if usedChatIdParam {
+		baseCmd += " -id " + strconv.FormatInt(chatId, 10)
+	}
+	baseCmd += " " + searchQuery
+	return baseCmd
+}
+
 // SearchHandle handles search command
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
@@ -83,6 +93,7 @@ func executeSearch(ctx Context) string {
 	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
 	// parse option
 	searchKeywordIdx := 0
+	usedChatIdParam := false
 	if command.Argc() >= 2 {
 		option := command.Arg(0)
 		switch option {
@@ -95,6 +106,7 @@ func executeSearch(ctx Context) string {
 				return "Invalid chat id"
 			}
 			searchKeywordIdx = 2
+			usedChatIdParam = true
 		case "-p":
 			// when search with page, index 0 arg is "-p", 1 arg is page, pass rest to query
 			var err error
@@ -191,10 +203,12 @@ func executeSearch(ctx Context) string {
 	if resp.TotalPages > 1 {
 		rplMsg += "\n"
 		if page > 1 {
-			rplMsg += "Use `/search -p " + strconv.FormatInt(page-1, 10) + " " + searchQuery + "` for previous page\n"
+			prevCmd := generatePaginationCommand(page-1, searchQuery, usedChatIdParam, chatId)
+			rplMsg += "Use `" + prevCmd + "` for previous page\n"
 		}
 		if page < resp.TotalPages {
-			rplMsg += "Use `/search -p " + strconv.FormatInt(page+1, 10) + " " + searchQuery + "` for next page\n"
+			nextCmd := generatePaginationCommand(page+1, searchQuery, usedChatIdParam, chatId)
+			rplMsg += "Use `" + nextCmd + "` for next page\n"
 		}
 	}
 	// TODO: format rplMsg
