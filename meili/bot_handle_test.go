@@ -134,7 +134,7 @@ func TestPaginationCommandGeneration(t *testing.T) {
 			for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
 				arg := command.Arg(i)
 				switch arg {
-				case "-id":
+				case paramIDFlag:
 					usedChatId = true
 					searchKeywordIdx = i + 2
 				case "-p":
@@ -263,7 +263,7 @@ func TestCombinedParameterParsing(t *testing.T) {
 			for i := 0; i < command.Argc()-1; i++ {
 				arg := command.Arg(i)
 				switch arg {
-				case "-id":
+				case paramIDFlag:
 					usedChatId = true
 					searchKeywordIdx = i + 2
 				case "-p":

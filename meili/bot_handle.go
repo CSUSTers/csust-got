@@ -15,6 +15,10 @@ import (
 	. "gopkg.in/telebot.v3"
 )
 
+const (
+	paramIDFlag = "-id"
+)
+
 type resultMsg struct {
 	Text    string `json:"text"`
 	Caption string `json:"caption,omitempty"`
@@ -99,7 +103,7 @@ func executeSearch(ctx Context) string {
 	for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
 		arg := command.Arg(i)
 		switch arg {
-		case "-id":
+		case paramIDFlag:
 			if i+1 >= command.Argc() {
 				return "Missing chat id after -id parameter"
 			}
