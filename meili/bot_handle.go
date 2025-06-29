@@ -91,31 +91,37 @@ func executeSearch(ctx Context) string {
 	chatId := ctx.Chat().ID
 	page := int64(1) // default to page 1
 	log.Debug("[GetChatMember]", zap.String("chatRecipient", ctx.Chat().Recipient()), zap.String("userRecipient", ctx.Sender().Recipient()))
-	// parse option
+	// parse options - support both -id and -p parameters in any order
 	searchKeywordIdx := 0
 	usedChatIdParam := false
-	if command.Argc() >= 2 {
-		option := command.Arg(0)
-		switch option {
+	
+	// Loop through arguments to find and process -id and -p parameters
+	for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
+		arg := command.Arg(i)
+		switch arg {
 		case "-id":
-			// when search by id, index 0 arg is "-id", 1 arg is id, pass rest to query
+			if i+1 >= command.Argc() {
+				return "Missing chat id after -id parameter"
+			}
 			var err error
-			chatId, err = strconv.ParseInt(command.Arg(1), 10, 64)
+			chatId, err = strconv.ParseInt(command.Arg(i+1), 10, 64)
 			if err != nil {
 				log.Error("[MeiliSearch]: Parse chat id failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
 				return "Invalid chat id"
 			}
-			searchKeywordIdx = 2
 			usedChatIdParam = true
+			searchKeywordIdx = i + 2
 		case "-p":
-			// when search with page, index 0 arg is "-p", 1 arg is page, pass rest to query
+			if i+1 >= command.Argc() {
+				return "Missing page number after -p parameter"
+			}
 			var err error
-			page, err = strconv.ParseInt(command.Arg(1), 10, 64)
+			page, err = strconv.ParseInt(command.Arg(i+1), 10, 64)
 			if err != nil || page < 1 {
 				log.Error("[MeiliSearch]: Parse page failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
 				return "Invalid page number"
 			}
-			searchKeywordIdx = 2
+			searchKeywordIdx = i + 2
 		}
 	}
 	if searchKeywordIdx > 0 {
@@ -159,6 +165,7 @@ func executeSearch(ctx Context) string {
 		helpMsg += "• `/search <keyword>` - Search in current chat\n"
 		helpMsg += "• `/search -id <chat_id> <keyword>` - Search in specific chat\n"
 		helpMsg += "• `/search -p <page> <keyword>` - Search specific page\n"
+		helpMsg += "• `/search -id <chat_id> -p <page> <keyword>` - Search specific page in specific chat\n"
 		return helpMsg
 	}
 

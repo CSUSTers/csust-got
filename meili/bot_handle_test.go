@@ -95,6 +95,30 @@ func TestPaginationCommandGeneration(t *testing.T) {
 			shouldHaveNext: true,
 			usedChatId:     false,
 		},
+		{
+			name:           "Combined parameters: -id first, then -p",
+			commandText:    "/search -id -1001234567890 -p 2 hello world",
+			currentPage:    2,
+			totalPages:     5,
+			expectedPrev:   "/search -p 1 -id -1001234567890 hello world",
+			expectedNext:   "/search -p 3 -id -1001234567890 hello world",
+			shouldHavePrev: true,
+			shouldHaveNext: true,
+			usedChatId:     true,
+			chatId:         -1001234567890,
+		},
+		{
+			name:           "Combined parameters: -p first, then -id",
+			commandText:    "/search -p 2 -id -1001234567890 hello world",
+			currentPage:    2,
+			totalPages:     5,
+			expectedPrev:   "/search -p 1 -id -1001234567890 hello world",
+			expectedNext:   "/search -p 3 -id -1001234567890 hello world",
+			shouldHavePrev: true,
+			shouldHaveNext: true,
+			usedChatId:     true,
+			chatId:         -1001234567890,
+		},
 	}
 
 	for _, tt := range tests {
@@ -102,18 +126,19 @@ func TestPaginationCommandGeneration(t *testing.T) {
 			msg := createTestMessage(tt.commandText)
 			command := entities.FromMessage(msg)
 
-			// Parse the command to understand the structure
+			// Parse the command to understand the structure - support both -id and -p parameters
 			searchKeywordIdx := 0
 			usedChatId := false
 
-			if command.Argc() >= 2 {
-				option := command.Arg(0)
-				switch option {
+			// Loop through arguments to find and process -id and -p parameters
+			for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
+				arg := command.Arg(i)
+				switch arg {
 				case "-id":
 					usedChatId = true
-					searchKeywordIdx = 2
+					searchKeywordIdx = i + 2
 				case "-p":
-					searchKeywordIdx = 2
+					searchKeywordIdx = i + 2
 				}
 			}
 
@@ -181,6 +206,73 @@ func TestGeneratePaginationCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := generatePaginationCommand(tt.page, tt.searchQuery, tt.usedChatIdParam, tt.chatId)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestCombinedParameterParsing tests parsing of both -id and -p parameters together
+func TestCombinedParameterParsing(t *testing.T) {
+	tests := []struct {
+		name              string
+		commandText       string
+		expectedChatId    bool
+		expectedKeywordIdx int
+	}{
+		{
+			name:              "No parameters",
+			commandText:       "/search hello world",
+			expectedChatId:    false,
+			expectedKeywordIdx: 0,
+		},
+		{
+			name:              "Only -id parameter",
+			commandText:       "/search -id -1001234567890 hello world",
+			expectedChatId:    true,
+			expectedKeywordIdx: 2,
+		},
+		{
+			name:              "Only -p parameter",
+			commandText:       "/search -p 2 hello world",
+			expectedChatId:    false,
+			expectedKeywordIdx: 2,
+		},
+		{
+			name:              "Combined: -id first, then -p",
+			commandText:       "/search -id -1001234567890 -p 2 hello world",
+			expectedChatId:    true,
+			expectedKeywordIdx: 4,
+		},
+		{
+			name:              "Combined: -p first, then -id",
+			commandText:       "/search -p 2 -id -1001234567890 hello world",
+			expectedChatId:    true,
+			expectedKeywordIdx: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := createTestMessage(tt.commandText)
+			command := entities.FromMessage(msg)
+
+			// Simulate the parsing logic from the main function
+			searchKeywordIdx := 0
+			usedChatId := false
+
+			// Loop through arguments to find and process -id and -p parameters
+			for i := 0; i < command.Argc()-1; i++ {
+				arg := command.Arg(i)
+				switch arg {
+				case "-id":
+					usedChatId = true
+					searchKeywordIdx = i + 2
+				case "-p":
+					searchKeywordIdx = i + 2
+				}
+			}
+
+			assert.Equal(t, tt.expectedChatId, usedChatId, "Chat ID detection should match expected")
+			assert.Equal(t, tt.expectedKeywordIdx, searchKeywordIdx, "Search keyword index should match expected")
 		})
 	}
 }
