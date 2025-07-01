@@ -98,9 +98,3 @@ Located in `attachment` folder.
 ### voiceGen
 
 VoiceGen is a api server to search or generate genshin impact npc's voice for the bot.
-
-## JetBrains Support
-
-We would like to express our gratitude to JetBrains for supporting our open-source project, a Telegram chatbot developed using their GoLand IDE. Their excellent tools have significantly improved our development experience. Check out [JetBrains Open Source Support](https://jb.gg/OpenSourceSupport) for more information.
-
-![JetBrains Logo](https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.svg)
