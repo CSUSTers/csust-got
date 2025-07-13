@@ -13,27 +13,68 @@
 ![GitHub issues](https://img.shields.io/github/issues/csusters/csust-got)
 ![GitHub closed issues](https://img.shields.io/github/issues-closed/csusters/csust-got)
 
-csust new telegram bot in go
+A modern Telegram bot for CSUST, developed in Go.
 
-## Deploy
+[English](README.md) | [中文](README_zh-CN.md)
+
+## Features
+
+- 🤖 AI Chat Conversations (supports multiple models)
+- 🔍 Message Search (powered by MeiliSearch)
+- 🎨 Stable Diffusion Image Generation
+- 🎲 Gacha System
+- 🎭 Entertainment Features
+- 📊 Prometheus Monitoring
+- 🔧 Flexible Configuration System
+- 🎯 Regular Expression Triggers
+- 🛡️ Comprehensive Permission Management
+- 🔗 MCP (Model Context Protocol) Support
+
+## System Requirements
+
+- Go 1.24+
+- Redis
+- Docker & Docker Compose (recommended)
+
+## Quick Deployment
+
+### Using Docker Compose (Recommended)
 
 You need to install Docker first.
 
-Clone the project.
+Clone the project:
 
 ```bash
 git clone git@github.com:CSUSTers/csust-got.git
+cd csust-got
 ```
 
-Then run it with docker-compose.
+Then run with Docker Compose:
 
 ```bash
 docker-compose up -d
 ```
 
-## Upgrade from old version
+### Build from Source
 
-Clone the newest version.
+```bash
+# Clone the project
+git clone git@github.com:CSUSTers/csust-got.git
+cd csust-got
+
+# Install dependencies
+make deps
+
+# Build
+make build
+
+# Run
+./got
+```
+
+## Upgrade
+
+Pull the latest version:
 
 ```bash
 docker-compose pull
@@ -42,65 +83,135 @@ docker-compose up -d
 
 ## Configuration
 
-Please change configuration in `config.yaml`.
+Please modify the configuration in `config.yaml`.
 
-Modify the `token` to your bot's token.
-
-Please modify `redis.pass` in `config.yaml`,and also please modify `requirepass` in `redis.conf`.
+- `token`: Change to your bot token
+- `redis.pass`: Change Redis password
+- `requirepass` in `redis.conf`: Change Redis password (must match the above)
 
 ## Commands
 
+### Basic Functions
+
 ``` text
-say_hello - 我是一只只会嗦hello的咸鱼
-hello_to_all - 大家好才是真的好
-recorder - <msg> 人类的本质就是复读机，Bot也是一样的
-no_sticker - 启动(反向)流量节省模式
-google - <Key Words> 咕果搜索...
-bing - <Key Words> 巨硬搜索...
-bilibili - <Key Words> 在B站搜索...
-github - <Key Words> 在github搜索...
-ban_myself - 把自己ban掉rand[40,120]秒
-ban - 我就是要滥权！【Admin】
-ban_soft - 软禁！使某人失去快乐~【Admin】
-fake_ban - [duration] 虚假(真实)的ban
-fake_ban_myself - 虚假的ban自己
-kill - 虚假(真实)的kill
-hitokoto - [type:ab..kl] 一言
-hitowuta - 一诗
-hito_netease - 一键网抑
-forward - [msgID] 让bot转发一条历史消息(可能消息已经被删了)
-shutdown - 拔掉bot的电源
-boot - 将bot开机
-sleep - 该睡觉了
-no_sleep - 别睡了
-run_after - <duration> <msg> 提醒自己多久之后做什么事
-hoocoder - <text> Hoo编码
-decode - _[decoding]_[encoding] <text> 解个码
-getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 
-getvoice_old - getvoice的旧版入口，没有查询功能，数据来源于mys爬虫
-chat - <text> 聊会天呗
-qiuchat - <text> 聊会天呗
-genvoice - <text> 生成原神语音
-provoice - <text> 使用自定义ssml生成语音
-search - [-id <chat_id>] <key word> 搜索历史记录
-gacha_setting - 设置一个json格式的配置
-gacha - 抽卡，按照你的配置
-bye_world - [duration] 向美好世界说声再见
-hello_world - 向美好世界问声好
-iwant - f=<format> 我要Sticker
-setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
+say_hello - A simple greeting
+hello_to_all - Greet everyone
+recorder - <msg> Repeat messages
+info - Get bot information
+id - Get user ID (private chat)
+cid - Get group ID
 ```
 
-## attachment
+### Search Functions
 
-Located in `attachment` folder.
+``` text
+google - <Key Words> Google search
+bing - <Key Words> Bing search
+bilibili - <Key Words> Search on Bilibili
+github - <Key Words> Search on GitHub
+search - <keyword> Search message history
+search - -id <chat_id> <keyword> Search messages in specific group
+search - -p <page> <keyword> Search with pagination
+```
 
-### voiceGen
+### AI Chat
 
-VoiceGen is a api server to search or generate genshin impact npc's voice for the bot.
+``` text
+chat - <text> Chat with AI
+think - <text> Deep thinking mode
+summary - Summarize replied content (reply to a message)
+```
 
-## JetBrains Support
+### Management Functions
 
-We would like to express our gratitude to JetBrains for supporting our open-source project, a Telegram chatbot developed using their GoLand IDE. Their excellent tools have significantly improved our development experience. Check out [JetBrains Open Source Support](https://jb.gg/OpenSourceSupport) for more information.
+``` text
+ban_myself - Ban yourself for rand[40,120] seconds
+ban - Ban command [Admin]
+ban_soft - Soft ban [Admin]
+fake_ban - [duration] Fake ban
+fake_ban_myself - Fake ban yourself
+kill - Fake kill
+no_sticker - Enable traffic-saving mode
+shutdown - Shutdown bot
+boot - Boot up bot
+```
 
-![JetBrains Logo](https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.svg)
+### Entertainment Functions
+
+``` text
+hitokoto - [type:ab..kl] Random quotes
+hitowuta - Random poems
+hito_netease - NetEase style quotes
+mc - Minecraft mini-game
+reburn - Respawn (MC game)
+gacha_setting - Set JSON gacha configuration
+gacha - Draw cards according to your configuration
+```
+
+### Voice Related
+
+``` text
+getvoice - character=<character> gender=<sex> theme=<topic> type=<type> <text> 
+```
+
+### Stable Diffusion
+
+``` text
+sd - <prompt> Generate images
+sdcfg - Configure SD server
+sdcfg - set <key> <value> Set configuration
+sdcfg - get <key> Get configuration
+sdlast - Get last used prompt
+```
+
+### Utility Functions
+
+``` text
+forward - [msgID] Forward a historical message
+sleep - Time to sleep
+no_sleep - Don't sleep
+run_after - <duration> <msg> Remind yourself to do something later
+hoocoder - <text> Hoo encoding
+decode - _[decoding]_[encoding] <text> Decode text
+bye_world - [duration] Say goodbye to the world
+hello_world - Say hello to the world  
+iwant - f=<format> I want sticker
+setiwant - f=<format> vf=<format> sf=<format> Set sticker format
+```
+
+## Tech Stack
+
+- **Language**: Go 1.24+
+- **Framework**: [telebot.v3](https://github.com/tucnak/telebot)
+- **Database**: Redis
+- **Search**: MeiliSearch
+- **Monitoring**: Prometheus
+- **AI**: OpenAI API Compatible Interface
+- **Image Generation**: Stable Diffusion WebUI
+- **Containerization**: Docker & Docker Compose
+
+## Development
+
+### Local Development
+
+```bash
+# Install dependencies
+make deps
+
+# Run tests
+make test
+
+# Build
+make build
+
+# Code check
+golangci-lint run
+```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+**Note**: This project is for educational and communication purposes only.
