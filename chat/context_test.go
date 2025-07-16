@@ -176,7 +176,7 @@ func TestGetMessageTextWithEntities(t *testing.T) {
 			expected:   "Run the command <code>ls -la</code> now",
 		},
 		{
-			name: "text with mention entity",
+			name: "text with mention entity - markdown format",
 			msg: &tb.Message{
 				Text: "Hello @username how are you?",
 				Entities: []tb.MessageEntity{
@@ -188,7 +188,22 @@ func TestGetMessageTextWithEntities(t *testing.T) {
 				},
 			},
 			htmlFormat: false,
-			expected:   "Hello @username how are you?",
+			expected:   "Hello [@username](tg:username) how are you?",
+		},
+		{
+			name: "text with mention entity - HTML format",
+			msg: &tb.Message{
+				Text: "Hello @username how are you?",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityMention,
+						Offset: 6,
+						Length: 9,
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   `Hello <a href="tg:username">@username</a> how are you?`,
 		},
 		{
 			name: "text with hashtag entity",
@@ -229,7 +244,33 @@ func TestGetMessageTextWithEntities(t *testing.T) {
 				},
 			},
 			htmlFormat: false,
-			expected:   "Visit [Google](https://google.com) and check out @golang for **bold** tips",
+			expected:   "Visit [Google](https://google.com) and check out [@golang](tg:golang) for **bold** tips",
+		},
+		{
+			name: "text with multiple entities - HTML format",
+			msg: &tb.Message{
+				Text: "Visit Google and check out @golang for bold tips",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityTextLink,
+						Offset: 6,
+						Length: 6,
+						URL:    "https://google.com",
+					},
+					{
+						Type:   tb.EntityMention,
+						Offset: 27,
+						Length: 7,
+					},
+					{
+						Type:   tb.EntityBold,
+						Offset: 39,
+						Length: 4,
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   `Visit <a href="https://google.com">Google</a> and check out <a href="tg:golang">@golang</a> for <b>bold</b> tips`,
 		},
 		{
 			name: "caption with entities",

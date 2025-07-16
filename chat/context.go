@@ -129,7 +129,18 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 			} else {
 				result.WriteString(fmt.Sprintf("`%s`", entityText))
 			}
-		case tb.EntityMention, tb.EntityHashtag, tb.EntityEmail:
+		case tb.EntityMention:
+			// Convert mentions to [@username](tg:username) format
+			if htmlFormat {
+				// For HTML format, remove @ and use tg:// scheme
+				username := strings.TrimPrefix(entityText, "@")
+				result.WriteString(fmt.Sprintf(`<a href="tg:%s">%s</a>`, username, entityText))
+			} else {
+				// For markdown format, use [@username](tg:username) format
+				username := strings.TrimPrefix(entityText, "@")
+				result.WriteString(fmt.Sprintf("[%s](tg:%s)", entityText, username))
+			}
+		case tb.EntityHashtag, tb.EntityEmail:
 			// These entities are already properly formatted in the text
 			result.WriteString(entityText)
 		default:
