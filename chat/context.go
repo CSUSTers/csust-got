@@ -52,6 +52,13 @@ func (u *userNames) String() string {
 
 // getMessageTextWithEntities reconstructs the formatted text from a Telegram message
 // using its entities to preserve links and other formatting that would be lost in raw Text field.
+// 
+// This function solves the issue where chat AI models couldn't access URLs from formatted links.
+// When users send messages like [title](url) or <a href="url">title</a>, Telegram stores:
+// - Text field: only the visible text ("title")  
+// - Entities field: formatting info including the actual URL
+//
+// This function reconstructs the original formatted text by combining both fields.
 // It returns markdown-formatted text by default, or HTML if htmlFormat is true.
 func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 	if msg == nil {
