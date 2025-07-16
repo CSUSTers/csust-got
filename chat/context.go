@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,113 @@ func (u *userNames) ShowName() string {
 
 func (u *userNames) String() string {
 	return u.ShowName()
+}
+
+// getMessageTextWithEntities reconstructs the formatted text from a Telegram message
+// using its entities to preserve links and other formatting that would be lost in raw Text field.
+// It returns markdown-formatted text by default, or HTML if htmlFormat is true.
+func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
+	if msg == nil {
+		return ""
+	}
+
+	// Get the raw text - prefer Text over Caption
+	text := msg.Text
+	entities := msg.Entities
+	if text == "" {
+		text = msg.Caption
+		entities = msg.CaptionEntities
+	}
+
+	// If no entities, return the raw text
+	if len(entities) == 0 {
+		return text
+	}
+
+	// Sort entities by offset to process them in order
+	sortedEntities := make([]tb.MessageEntity, len(entities))
+	copy(sortedEntities, entities)
+	sort.Slice(sortedEntities, func(i, j int) bool {
+		return sortedEntities[i].Offset < sortedEntities[j].Offset
+	})
+
+	// Convert text to runes for proper UTF-16 handling
+	runes := []rune(text)
+	var result strings.Builder
+	lastOffset := 0
+
+	for _, entity := range sortedEntities {
+		// Add text before this entity
+		if entity.Offset > lastOffset {
+			result.WriteString(string(runes[lastOffset:entity.Offset]))
+		}
+
+		// Get the entity text using the built-in method
+		entityText := msg.EntityText(entity)
+		
+		// Format the entity based on its type
+		switch entity.Type {
+		case tb.EntityTextLink:
+			// This is a formatted link like [text](url)
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(entity.URL), html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("[%s](%s)", entityText, entity.URL))
+			}
+		case tb.EntityURL:
+			// This is a bare URL
+			result.WriteString(entityText)
+		case tb.EntityBold:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<b>%s</b>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("**%s**", entityText))
+			}
+		case tb.EntityItalic:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<i>%s</i>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("*%s*", entityText))
+			}
+		case tb.EntityCode:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<code>%s</code>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("`%s`", entityText))
+			}
+		case tb.EntityMention, tb.EntityHashtag, tb.EntityEmail:
+			// These entities are already properly formatted in the text
+			result.WriteString(entityText)
+		default:
+			// For unknown entities, just add the text as-is
+			result.WriteString(entityText)
+		}
+
+		lastOffset = entity.Offset + entity.Length
+	}
+
+	// Add remaining text after the last entity
+	if lastOffset < len(runes) {
+		result.WriteString(string(runes[lastOffset:]))
+	}
+
+	return result.String()
+}
+
+// getTextSubstring safely extracts a substring using UTF-16 offsets (like Telegram entities)
+// This is needed because Telegram entities use UTF-16 code unit offsets, not byte offsets
+func getTextSubstring(text string, start, end int) string {
+	runes := []rune(text)
+	if start < 0 {
+		start = 0
+	}
+	if end > len(runes) {
+		end = len(runes)
+	}
+	if start >= end {
+		return ""
+	}
+	return string(runes[start:end])
 }
 
 // GetMessageContext 获取消息的上下文
@@ -104,9 +212,13 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMess
 		}
 
 		visited[currentMsg.ID] = true
-		currentMsgText := currentMsg.Text
+		currentMsgText := getMessageTextWithEntities(currentMsg, false) // Use markdown format
 		if currentMsgText == "" {
-			currentMsgText = currentMsg.Caption
+			// Fallback to raw text if no entities
+			currentMsgText = currentMsg.Text
+			if currentMsgText == "" {
+				currentMsgText = currentMsg.Caption
+			}
 		}
 		if currentMsgText != "" {
 			var replyID *int
@@ -155,8 +267,15 @@ func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMess
 			replyId = &msg.ReplyTo.ID
 		}
 
+		// Use the helper to get formatted text with entities
+		msgText := getMessageTextWithEntities(msg, false) // Use markdown format
+		if msgText == "" {
+			// Fallback to raw text if no entities
+			msgText = msg.Text
+		}
+
 		return &ContextMessage{
-			Text:    msg.Text,
+			Text:    msgText,
 			ID:      msg.ID,
 			ReplyTo: replyId,
 			User:    msg.Sender.Username,
@@ -248,9 +367,13 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 		html.EscapeString(msg.Sender.Username),
 		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
 
-	text := msg.Text
+	text := getMessageTextWithEntities(msg, true) // Use HTML format since this function generates XML/HTML
 	if text == "" {
-		text = msg.Caption
+		// Fallback to raw text
+		text = msg.Text
+		if text == "" {
+			text = msg.Caption
+		}
 	}
 	if text == "" {
 		switch {
