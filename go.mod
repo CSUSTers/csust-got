@@ -3,7 +3,7 @@ module csust-got
 go 1.24
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.3.0
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/meilisearch/meilisearch-go v0.32.0
 	github.com/prometheus/client_golang v1.22.0
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
