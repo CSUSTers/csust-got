@@ -52,10 +52,10 @@ func (u *userNames) String() string {
 
 // getMessageTextWithEntities reconstructs the formatted text from a Telegram message
 // using its entities to preserve links and other formatting that would be lost in raw Text field.
-// 
+//
 // This function solves the issue where chat AI models couldn't access URLs from formatted links.
 // When users send messages like [title](url) or <a href="url">title</a>, Telegram stores:
-// - Text field: only the visible text ("title")  
+// - Text field: only the visible text ("title")
 // - Entities field: formatting info including the actual URL
 //
 // This function reconstructs the original formatted text by combining both fields.
@@ -98,7 +98,7 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 
 		// Get the entity text using the built-in method
 		entityText := msg.EntityText(entity)
-		
+
 		// Format the entity based on its type
 		switch entity.Type {
 		case tb.EntityTextLink:
@@ -129,6 +129,45 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 			} else {
 				result.WriteString(fmt.Sprintf("`%s`", entityText))
 			}
+		case tb.EntityUnderline:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<u>%s</u>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("__%s__", entityText))
+			}
+		case tb.EntityStrikethrough:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<s>%s</s>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("~~%s~~", entityText))
+			}
+		case tb.EntitySpoiler:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf(`<span class="tg-spoiler">%s</span>`, html.EscapeString(entityText)))
+			} else {
+				result.WriteString(fmt.Sprintf("||%s||", entityText))
+			}
+		case tb.EntityCodeBlock:
+			// Pre-formatted code block (with optional language)
+			if htmlFormat {
+				if entity.Language != "" {
+					result.WriteString(fmt.Sprintf(`<pre><code class="language-%s">%s</code></pre>`, html.EscapeString(entity.Language), html.EscapeString(entityText)))
+				} else {
+					result.WriteString(fmt.Sprintf("<pre>%s</pre>", html.EscapeString(entityText)))
+				}
+			} else {
+				if entity.Language != "" {
+					result.WriteString(fmt.Sprintf("```%s\n%s\n```", entity.Language, entityText))
+				} else {
+					result.WriteString(fmt.Sprintf("```\n%s\n```", entityText))
+				}
+			}
+		case tb.EntityBlockquote:
+			if htmlFormat {
+				result.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>", html.EscapeString(entityText)))
+			} else {
+				result.WriteString("> " + entityText)
+			}
 		case tb.EntityMention:
 			// Convert mentions to [@username](tg:username) format
 			if htmlFormat {
@@ -140,8 +179,26 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 				username := strings.TrimPrefix(entityText, "@")
 				result.WriteString(fmt.Sprintf("[%s](tg:%s)", entityText, username))
 			}
-		case tb.EntityHashtag, tb.EntityEmail:
+		case tb.EntityTMention:
+			// Text mention for users without usernames
+			if htmlFormat {
+				if entity.User != nil {
+					result.WriteString(fmt.Sprintf(`<a href="tg:user?id=%d">%s</a>`, entity.User.ID, html.EscapeString(entityText)))
+				} else {
+					result.WriteString(html.EscapeString(entityText))
+				}
+			} else {
+				if entity.User != nil {
+					result.WriteString(fmt.Sprintf("[%s](tg:user?id=%d)", entityText, entity.User.ID))
+				} else {
+					result.WriteString(entityText)
+				}
+			}
+		case tb.EntityHashtag, tb.EntityCashtag, tb.EntityEmail, tb.EntityPhone, tb.EntityCommand:
 			// These entities are already properly formatted in the text
+			result.WriteString(entityText)
+		case tb.EntityCustomEmoji:
+			// Custom emoji - for now just show the text representation
 			result.WriteString(entityText)
 		default:
 			// For unknown entities, just add the text as-is

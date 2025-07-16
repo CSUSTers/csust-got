@@ -382,6 +382,234 @@ func TestGetTextSubstring(t *testing.T) {
 	}
 }
 
+// Test additional entity types according to Telegram API documentation
+func TestGetMessageTextWithAdditionalEntities(t *testing.T) {
+	tests := []struct {
+		name       string
+		msg        *tb.Message
+		htmlFormat bool
+		expected   string
+	}{
+		{
+			name: "underline entity - markdown format",
+			msg: &tb.Message{
+				Text: "This is underlined text",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityUnderline,
+						Offset: 8,
+						Length: 10,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "This is __underlined__ text",
+		},
+		{
+			name: "underline entity - HTML format",
+			msg: &tb.Message{
+				Text: "This is underlined text",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityUnderline,
+						Offset: 8,
+						Length: 10,
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   "This is <u>underlined</u> text",
+		},
+		{
+			name: "strikethrough entity - markdown format",
+			msg: &tb.Message{
+				Text: "This is strikethrough text",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityStrikethrough,
+						Offset: 8,
+						Length: 13,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "This is ~~strikethrough~~ text",
+		},
+		{
+			name: "spoiler entity - markdown format",
+			msg: &tb.Message{
+				Text: "This is spoiler text",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntitySpoiler,
+						Offset: 8,
+						Length: 7,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "This is ||spoiler|| text",
+		},
+		{
+			name: "spoiler entity - HTML format",
+			msg: &tb.Message{
+				Text: "This is spoiler text",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntitySpoiler,
+						Offset: 8,
+						Length: 7,
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   `This is <span class="tg-spoiler">spoiler</span> text`,
+		},
+		{
+			name: "code block entity with language - markdown format",
+			msg: &tb.Message{
+				Text: "Here is some Go code:\nfunc main() {\n    fmt.Println(\"Hello\")\n}",
+				Entities: []tb.MessageEntity{
+					{
+						Type:     tb.EntityCodeBlock,
+						Offset:   22,
+						Length:   40,
+						Language: "go",
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "Here is some Go code:\n```go\nfunc main() {\n    fmt.Println(\"Hello\")\n}\n```",
+		},
+		{
+			name: "code block entity with language - HTML format",
+			msg: &tb.Message{
+				Text: "Here is some Go code:\nfunc main() {\n    fmt.Println(\"Hello\")\n}",
+				Entities: []tb.MessageEntity{
+					{
+						Type:     tb.EntityCodeBlock,
+						Offset:   22,
+						Length:   40,
+						Language: "go",
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   `Here is some Go code:
+<pre><code class="language-go">func main() {
+    fmt.Println(&#34;Hello&#34;)
+}</code></pre>`,
+		},
+		{
+			name: "blockquote entity - HTML format",
+			msg: &tb.Message{
+				Text: "This is a quote: Important message here",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityBlockquote,
+						Offset: 17,
+						Length: 22,
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   "This is a quote: <blockquote>Important message here</blockquote>",
+		},
+		{
+			name: "text mention entity - markdown format",
+			msg: &tb.Message{
+				Text: "Hello John Doe",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityTMention,
+						Offset: 6,
+						Length: 8,
+						User: &tb.User{
+							ID:        12345,
+							FirstName: "John",
+							LastName:  "Doe",
+						},
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "Hello [John Doe](tg:user?id=12345)",
+		},
+		{
+			name: "text mention entity - HTML format",
+			msg: &tb.Message{
+				Text: "Hello John Doe",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityTMention,
+						Offset: 6,
+						Length: 8,
+						User: &tb.User{
+							ID:        12345,
+							FirstName: "John",
+							LastName:  "Doe",
+						},
+					},
+				},
+			},
+			htmlFormat: true,
+			expected:   `Hello <a href="tg:user?id=12345">John Doe</a>`,
+		},
+		{
+			name: "cashtag entity",
+			msg: &tb.Message{
+				Text: "Buy $AAPL stock now",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityCashtag,
+						Offset: 4,
+						Length: 5,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "Buy $AAPL stock now",
+		},
+		{
+			name: "bot command entity",
+			msg: &tb.Message{
+				Text: "Use /start to begin",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityCommand,
+						Offset: 4,
+						Length: 6,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "Use /start to begin",
+		},
+		{
+			name: "phone number entity",
+			msg: &tb.Message{
+				Text: "Call me at +1-212-555-0123",
+				Entities: []tb.MessageEntity{
+					{
+						Type:   tb.EntityPhone,
+						Offset: 11,
+						Length: 15,
+					},
+				},
+			},
+			htmlFormat: false,
+			expected:   "Call me at +1-212-555-0123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getMessageTextWithEntities(tt.msg, tt.htmlFormat)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // Test the integration with context message creation
 func TestContextMessageWithEntities(t *testing.T) {
 	// Create a mock message with entities
