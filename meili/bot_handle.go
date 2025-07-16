@@ -98,9 +98,9 @@ func executeSearch(ctx Context) string {
 	// parse options - support both -id and -p parameters in any order
 	searchKeywordIdx := 0
 	usedChatIdParam := false
-	
+
 	// Loop through arguments to find and process -id and -p parameters
-	for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
+	for i := range command.Argc() - 1 { // -1 because we need at least one argument after each parameter
 		arg := command.Arg(i)
 		switch arg {
 		case paramIDFlag:

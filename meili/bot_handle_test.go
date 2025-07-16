@@ -131,7 +131,7 @@ func TestPaginationCommandGeneration(t *testing.T) {
 			usedChatId := false
 
 			// Loop through arguments to find and process -id and -p parameters
-			for i := 0; i < command.Argc()-1; i++ { // -1 because we need at least one argument after each parameter
+			for i := range command.Argc() - 1 { // -1 because we need at least one argument after each parameter
 				arg := command.Arg(i)
 				switch arg {
 				case paramIDFlag:
@@ -169,36 +169,36 @@ func TestPaginationCommandGeneration(t *testing.T) {
 // TestGeneratePaginationCommand tests the helper function directly
 func TestGeneratePaginationCommand(t *testing.T) {
 	tests := []struct {
-		name           string
-		page           int64
-		searchQuery    string
+		name            string
+		page            int64
+		searchQuery     string
 		usedChatIdParam bool
-		chatId         int64
-		expected       string
+		chatId          int64
+		expected        string
 	}{
 		{
-			name:           "Regular pagination without chat ID",
-			page:           2,
-			searchQuery:    "hello world",
+			name:            "Regular pagination without chat ID",
+			page:            2,
+			searchQuery:     "hello world",
 			usedChatIdParam: false,
-			chatId:         0,
-			expected:       "/search -p 2 hello world",
+			chatId:          0,
+			expected:        "/search -p 2 hello world",
 		},
 		{
-			name:           "Pagination with chat ID",
-			page:           3,
-			searchQuery:    "test query",
+			name:            "Pagination with chat ID",
+			page:            3,
+			searchQuery:     "test query",
 			usedChatIdParam: true,
-			chatId:         -1001234567890,
-			expected:       "/search -p 3 -id -1001234567890 test query",
+			chatId:          -1001234567890,
+			expected:        "/search -p 3 -id -1001234567890 test query",
 		},
 		{
-			name:           "First page with chat ID",
-			page:           1,
-			searchQuery:    "first page",
+			name:            "First page with chat ID",
+			page:            1,
+			searchQuery:     "first page",
 			usedChatIdParam: true,
-			chatId:         -1001111111111,
-			expected:       "/search -p 1 -id -1001111111111 first page",
+			chatId:          -1001111111111,
+			expected:        "/search -p 1 -id -1001111111111 first page",
 		},
 	}
 
@@ -213,39 +213,39 @@ func TestGeneratePaginationCommand(t *testing.T) {
 // TestCombinedParameterParsing tests parsing of both -id and -p parameters together
 func TestCombinedParameterParsing(t *testing.T) {
 	tests := []struct {
-		name              string
-		commandText       string
-		expectedChatId    bool
+		name               string
+		commandText        string
+		expectedChatId     bool
 		expectedKeywordIdx int
 	}{
 		{
-			name:              "No parameters",
-			commandText:       "/search hello world",
-			expectedChatId:    false,
+			name:               "No parameters",
+			commandText:        "/search hello world",
+			expectedChatId:     false,
 			expectedKeywordIdx: 0,
 		},
 		{
-			name:              "Only -id parameter",
-			commandText:       "/search -id -1001234567890 hello world",
-			expectedChatId:    true,
+			name:               "Only -id parameter",
+			commandText:        "/search -id -1001234567890 hello world",
+			expectedChatId:     true,
 			expectedKeywordIdx: 2,
 		},
 		{
-			name:              "Only -p parameter",
-			commandText:       "/search -p 2 hello world",
-			expectedChatId:    false,
+			name:               "Only -p parameter",
+			commandText:        "/search -p 2 hello world",
+			expectedChatId:     false,
 			expectedKeywordIdx: 2,
 		},
 		{
-			name:              "Combined: -id first, then -p",
-			commandText:       "/search -id -1001234567890 -p 2 hello world",
-			expectedChatId:    true,
+			name:               "Combined: -id first, then -p",
+			commandText:        "/search -id -1001234567890 -p 2 hello world",
+			expectedChatId:     true,
 			expectedKeywordIdx: 4,
 		},
 		{
-			name:              "Combined: -p first, then -id",
-			commandText:       "/search -p 2 -id -1001234567890 hello world",
-			expectedChatId:    true,
+			name:               "Combined: -p first, then -id",
+			commandText:        "/search -p 2 -id -1001234567890 hello world",
+			expectedChatId:     true,
 			expectedKeywordIdx: 4,
 		},
 	}
@@ -260,7 +260,7 @@ func TestCombinedParameterParsing(t *testing.T) {
 			usedChatId := false
 
 			// Loop through arguments to find and process -id and -p parameters
-			for i := 0; i < command.Argc()-1; i++ {
+			for i := range command.Argc() - 1 {
 				arg := command.Arg(i)
 				switch arg {
 				case paramIDFlag:
