@@ -20,18 +20,18 @@ type ContextMessage struct {
 	ID        int // 消息ID
 	ReplyTo   *int
 	User      string
-	UserNames UserNames
+	UserNames userNames
 	Text      string
 }
 
-// UserNames represents a user's first and last name
-type UserNames struct {
+// userNames represents a user's first and last name
+type userNames struct {
 	First string
 	Last  string
 }
 
 // ShowName returns the formatted display name
-func (u *UserNames) ShowName() string {
+func (u *userNames) ShowName() string {
 	bs := strings.Builder{}
 
 	if u.First != "" {
@@ -48,7 +48,7 @@ func (u *UserNames) ShowName() string {
 	return bs.String()
 }
 
-func (u *UserNames) String() string {
+func (u *userNames) String() string {
 	return u.ShowName()
 }
 
@@ -308,7 +308,7 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMess
 				ID:      currentMsg.ID,
 				ReplyTo: replyID,
 				User:    currentMsg.Sender.Username,
-				UserNames: UserNames{
+				UserNames: userNames{
 					First: currentMsg.Sender.FirstName,
 					Last:  currentMsg.Sender.LastName,
 				},
@@ -356,7 +356,7 @@ func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMess
 			ID:      msg.ID,
 			ReplyTo: replyId,
 			User:    msg.Sender.Username,
-			UserNames: UserNames{
+			UserNames: userNames{
 				First: msg.Sender.FirstName,
 				Last:  msg.Sender.LastName,
 			},
@@ -400,41 +400,9 @@ func FormatContextMessages(messages []*ContextMessage) string {
 	return result.String()
 }
 
-// FormatContextMessagesWithXml 将上下文消息格式化为XML
-//
-// ```xml
-// <messages>
-//
-//	<message id="1" user="user1"> msg1 escaped</message>
-//	<message id="2" user="user2" replyTo="1"> msg2 escaped</message>
-//
-// </messages>
-// ```
-func FormatContextMessagesWithXml(messages []*ContextMessage) string {
-	buf := strings.Builder{}
-
-	buf.WriteString("<messages>\n")
-
-	for _, msg := range messages {
-		buf.WriteString(fmt.Sprintf(`<message id="%d" username="%s" showname="%s"`, msg.ID,
-			html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName())))
-		if msg.ReplyTo != nil {
-			buf.WriteString(fmt.Sprintf(" replyTo=\"%d\"", msg.ReplyTo))
-		}
-		buf.WriteString(">\n")
-		// 将消息文本转义
-		buf.WriteString(html.EscapeString(msg.Text))
-		buf.WriteString("\n</message>\n")
-	}
-
-	buf.WriteString("</messages>\n")
-
-	return buf.String()
-}
-
-// FormatContextMessagesWithNestedXml 将上下文消息格式化为嵌套XML格式
+// FormatContextMessagesWithXml 将上下文消息格式化为嵌套XML格式
 // 消息回复链被表示为嵌套结构，回复消息嵌入到被回复的消息中
-func FormatContextMessagesWithNestedXml(messages []*ContextMessage) string {
+func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 	if len(messages) == 0 {
 		return ""
 	}
@@ -484,7 +452,7 @@ func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[
 		msg.ID, html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName()))
 
 	if msg.ReplyTo != nil {
-		fmt.Fprintf(buf, ` reply_to="%d"`, *msg.ReplyTo)
+		fmt.Fprintf(buf, ` replyTo="%d"`, *msg.ReplyTo)
 	}
 	buf.WriteString(">\n")
 
@@ -516,7 +484,7 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 
 	buf.WriteString(fmt.Sprintf(`<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
 		html.EscapeString(msg.Sender.Username),
-		html.EscapeString((&UserNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
+		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
 
 	text := getMessageTextWithEntities(msg, true) // Use HTML format since this function generates XML/HTML
 	if text == "" {

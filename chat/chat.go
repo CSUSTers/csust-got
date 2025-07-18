@@ -112,7 +112,6 @@ type promptData struct {
 	ContextMessages []*ContextMessage
 	ContextText     string
 	ContextXml      string
-	ContextXmlNested string // 嵌套XML格式的上下文消息
 	ReplyToXml      string
 	BotUsername     string // 添加 Bot 用户名字段
 }
@@ -149,14 +148,13 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 
 	// 准备模板数据
 	data := promptData{
-		DateTime:         time.Now().Format(time.RFC3339),
-		Input:            input,
-		ContextMessages:  contextMsgs,
-		ContextText:      FormatContextMessages(contextMsgs),
-		ContextXml:       FormatContextMessagesWithXml(contextMsgs),
-		ContextXmlNested: FormatContextMessagesWithNestedXml(contextMsgs),
-		ReplyToXml:       FormatSingleTbMessage(ctx.Message().ReplyTo, "REPLY_TO"),
-		BotUsername:      ctx.Bot().Me.Username, // 添加 Bot 的用户名
+		DateTime:        time.Now().Format(time.RFC3339),
+		Input:           input,
+		ContextMessages: contextMsgs,
+		ContextText:     FormatContextMessages(contextMsgs),
+		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
+		ReplyToXml:      FormatSingleTbMessage(ctx.Message().ReplyTo, "REPLY_TO"),
+		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
 	}
 
 	templs, err := getTemplate(v2, false)

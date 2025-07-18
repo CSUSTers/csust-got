@@ -637,7 +637,7 @@ func TestContextMessageWithEntities(t *testing.T) {
 		ID:   mockMsg.ID,
 		Text: getMessageTextWithEntities(mockMsg, false),
 		User: mockMsg.Sender.Username,
-		UserNames: UserNames{
+		UserNames: userNames{
 			First: mockMsg.Sender.FirstName,
 			Last:  mockMsg.Sender.LastName,
 		},
@@ -649,7 +649,7 @@ func TestContextMessageWithEntities(t *testing.T) {
 }
 
 // Test the new nested XML format functionality
-func TestFormatContextMessagesWithNestedXml(t *testing.T) {
+func TestFormatContextMessagesWithXml(t *testing.T) {
 	tests := []struct {
 		name     string
 		messages []*ContextMessage
@@ -667,7 +667,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Hello world",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -687,7 +687,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Original message",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -697,7 +697,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Reply to original",
 					User:    "user2",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
 					},
@@ -706,7 +706,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 			expected: `<messages>
   <message id="1" username="user1" showname="John Doe">
     Original message
-    <message id="2" username="user2" showname="Jane Smith" reply_to="1">
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
       Reply to original
     </message>
   </message>
@@ -720,7 +720,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Root message",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -730,7 +730,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Reply to root",
 					User:    "user2",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
 					},
@@ -740,7 +740,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Reply to reply",
 					User:    "user3",
 					ReplyTo: intPtr(2),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
 					},
@@ -749,9 +749,9 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 			expected: `<messages>
   <message id="1" username="user1" showname="John Doe">
     Root message
-    <message id="2" username="user2" showname="Jane Smith" reply_to="1">
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
       Reply to root
-      <message id="3" username="user3" showname="Bob Johnson" reply_to="2">
+      <message id="3" username="user3" showname="Bob Johnson" replyTo="2">
         Reply to reply
       </message>
     </message>
@@ -766,7 +766,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Original message",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -776,7 +776,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "First reply",
 					User:    "user2",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
 					},
@@ -786,7 +786,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Second reply",
 					User:    "user3",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
 					},
@@ -795,10 +795,10 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 			expected: `<messages>
   <message id="1" username="user1" showname="John Doe">
     Original message
-    <message id="2" username="user2" showname="Jane Smith" reply_to="1">
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
       First reply
     </message>
-    <message id="3" username="user3" showname="Bob Johnson" reply_to="1">
+    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
       Second reply
     </message>
   </message>
@@ -812,7 +812,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "First root",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -821,7 +821,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   2,
 					Text: "Second root",
 					User: "user2",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
 					},
@@ -831,7 +831,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Reply to first root",
 					User:    "user3",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
 					},
@@ -840,7 +840,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 			expected: `<messages>
   <message id="1" username="user1" showname="John Doe">
     First root
-    <message id="3" username="user3" showname="Bob Johnson" reply_to="1">
+    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
       Reply to first root
     </message>
   </message>
@@ -857,7 +857,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Message with <script>alert('xss')</script> & other HTML",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "John",
 						Last:  "Doe",
 					},
@@ -867,7 +867,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					Text:    "Reply with & more <tags>",
 					User:    "user2",
 					ReplyTo: intPtr(1),
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
 					},
@@ -876,7 +876,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 			expected: `<messages>
   <message id="1" username="user1" showname="John Doe">
     Message with &lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt; &amp; other HTML
-    <message id="2" username="user2" showname="Jane Smith" reply_to="1">
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
       Reply with &amp; more &lt;tags&gt;
     </message>
   </message>
@@ -890,7 +890,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 					ID:   1,
 					Text: "Message from user with no name",
 					User: "user1",
-					UserNames: UserNames{
+					UserNames: userNames{
 						First: "",
 						Last:  "",
 					},
@@ -907,7 +907,7 @@ func TestFormatContextMessagesWithNestedXml(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FormatContextMessagesWithNestedXml(tt.messages)
+			result := FormatContextMessagesWithXml(tt.messages)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
