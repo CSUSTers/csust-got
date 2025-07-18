@@ -24,11 +24,13 @@ type ContextMessage struct {
 	Text      string
 }
 
+// userNames represents a user's first and last name
 type userNames struct {
 	First string
 	Last  string
 }
 
+// ShowName returns the formatted display name
 func (u *userNames) ShowName() string {
 	bs := strings.Builder{}
 
@@ -398,36 +400,78 @@ func FormatContextMessages(messages []*ContextMessage) string {
 	return result.String()
 }
 
-// FormatContextMessagesWithXml 将上下文消息格式化为XML
-//
-// ```xml
-// <messages>
-//
-//	<message id="1" user="user1"> msg1 escaped</message>
-//	<message id="2" user="user2" replyTo="1"> msg2 escaped</message>
-//
-// </messages>
-// ```
+// FormatContextMessagesWithXml 将上下文消息格式化为嵌套XML格式
+// 消息回复链被表示为嵌套结构，回复消息嵌入到被回复的消息中
 func FormatContextMessagesWithXml(messages []*ContextMessage) string {
-	buf := strings.Builder{}
+	if len(messages) == 0 {
+		return ""
+	}
 
+	// 创建消息映射，方便查找
+	msgMap := make(map[int]*ContextMessage)
+	for _, msg := range messages {
+		msgMap[msg.ID] = msg
+	}
+
+	// 找到根消息（没有被回复的消息）
+	rootMessages := make([]*ContextMessage, 0)
+	for _, msg := range messages {
+		if msg.ReplyTo == nil {
+			rootMessages = append(rootMessages, msg)
+		}
+	}
+
+	// 为每个消息找到它的直接回复消息
+	replies := make(map[int][]*ContextMessage)
+	for _, msg := range messages {
+		if msg.ReplyTo != nil {
+			replyToID := *msg.ReplyTo
+			replies[replyToID] = append(replies[replyToID], msg)
+		}
+	}
+
+	buf := strings.Builder{}
 	buf.WriteString("<messages>\n")
 
-	for _, msg := range messages {
-		buf.WriteString(fmt.Sprintf(`<message id="%d" username="%s" showname="%s"`, msg.ID,
-			html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName())))
-		if msg.ReplyTo != nil {
-			buf.WriteString(fmt.Sprintf(" replyTo=\"%d\"", msg.ReplyTo))
-		}
-		buf.WriteString(">\n")
-		// 将消息文本转义
-		buf.WriteString(html.EscapeString(msg.Text))
-		buf.WriteString("\n</message>\n")
+	// 递归渲染每个根消息及其回复链
+	for _, rootMsg := range rootMessages {
+		renderNestedMessage(&buf, rootMsg, replies, 0)
 	}
 
 	buf.WriteString("</messages>\n")
-
 	return buf.String()
+}
+
+// renderNestedMessage 递归渲染嵌套消息
+func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[int][]*ContextMessage, depth int) {
+	indent := strings.Repeat("  ", depth+1)
+
+	// 开始标签
+	buf.WriteString(indent)
+	fmt.Fprintf(buf, `<message id="%d" username="%s" showname="%s"`,
+		msg.ID, html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName()))
+
+	if msg.ReplyTo != nil {
+		fmt.Fprintf(buf, ` replyTo="%d"`, *msg.ReplyTo)
+	}
+	buf.WriteString(">\n")
+
+	// 消息内容
+	buf.WriteString(indent)
+	buf.WriteString("  ")
+	buf.WriteString(html.EscapeString(msg.Text))
+	buf.WriteString("\n")
+
+	// 递归渲染回复消息
+	if msgReplies, exists := replies[msg.ID]; exists {
+		for _, reply := range msgReplies {
+			renderNestedMessage(buf, reply, replies, depth+1)
+		}
+	}
+
+	// 结束标签
+	buf.WriteString(indent)
+	buf.WriteString("</message>\n")
 }
 
 // FormatSingleTbMessage format tb msg to xml with custom tag
