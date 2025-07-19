@@ -1,3 +1,5 @@
+This repo is a modern Telegram bot for CSUST, developed in Go. It includes various features such as AI chat conversations, message search, image generation, and more.
+
 ## Development Guidelines
 1. Follow Go best practices and idiomatic patterns.
 2. Maintain existing code structure and organization.

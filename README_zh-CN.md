@@ -13,7 +13,7 @@
 ![GitHub issues](https://img.shields.io/github/issues/csusters/csust-got)
 ![GitHub closed issues](https://img.shields.io/github/issues-closed/csusters/csust-got)
 
-现代化的长沙理工大学 Telegram 机器人，使用 Go 语言开发
+现代化的 CSUST Telegram 机器人，使用 Go 语言开发
 
 [English](README.md) | [中文](README_zh-CN.md)
 

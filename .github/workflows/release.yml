@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Get source
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Sanitize tag name for Docker tag
         id: sanitize
