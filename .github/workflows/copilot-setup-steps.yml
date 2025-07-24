@@ -19,8 +19,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: dev
 
       - name: Setup Go
         uses: actions/setup-go@v5
