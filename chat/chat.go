@@ -9,8 +9,10 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 	"encoding/base64"
+	"errors"
 	"image"
 	"image/jpeg"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -30,9 +32,301 @@ import (
 var clients map[string]*openai.Client
 var templates *xsync.Map[string, chatTemplate]
 
+const htmlFormat = "html"
+
 type chatTemplate struct {
 	PromptTemplate       *template.Template
 	SystemPromptTemplate *template.Template
+}
+
+// StreamProcessor encapsulates the state and configuration for processing streaming responses
+type StreamProcessor struct {
+	chatCtx       context.Context
+	ctx           tb.Context
+	placeholderMsg *tb.Message
+	format        *config.ChatOutputFormatConfig
+	useMcp        bool
+	client        *openai.Client
+	request       *openai.ChatCompletionRequest
+	messages      *[]openai.ChatCompletionMessage
+	config        *config.ChatConfigSingle
+	
+	// State variables
+	fullResponse  strings.Builder
+	currentBuffer strings.Builder
+	lastSentText  string
+	ticker        *time.Ticker
+	done          chan bool
+}
+
+// newStreamProcessor creates a new StreamProcessor with the provided configuration
+func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, format *config.ChatOutputFormatConfig, useMcp bool, client *openai.Client, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *StreamProcessor {
+	return &StreamProcessor{
+		chatCtx:       chatCtx,
+		ctx:           ctx,
+		placeholderMsg: placeholderMsg,
+		format:        format,
+		useMcp:        useMcp,
+		client:        client,
+		request:       request,
+		messages:      messages,
+		config:        chatConfig,
+		done:          make(chan bool, 1),
+	}
+}
+
+// findLastSentenceDelimiter finds the last occurrence of any sentence delimiter in the text
+func findLastSentenceDelimiter(text string, delimiters []string) int {
+	lastPos := -1
+	for _, delimiter := range delimiters {
+		if pos := strings.LastIndex(text, delimiter); pos > lastPos {
+			lastPos = pos // Return the position of the delimiter
+		}
+	}
+	return lastPos
+}
+
+// startStreamingTicker starts the ticker for real-time message updates
+func (sp *StreamProcessor) startStreamingTicker() {
+	if !sp.format.StreamOutput || sp.placeholderMsg == nil {
+		return
+	}
+	
+	editInterval := sp.format.GetEditInterval()
+	sp.ticker = time.NewTicker(editInterval)
+	
+	go func() {
+		defer sp.ticker.Stop()
+		
+		for {
+			select {
+			case <-sp.ticker.C:
+				sp.updateStreamingMessage()
+			case <-sp.done:
+				return
+			}
+		}
+	}()
+}
+
+// updateStreamingMessage updates the message with accumulated content at sentence boundaries
+func (sp *StreamProcessor) updateStreamingMessage() {
+	currentText := sp.currentBuffer.String()
+	if currentText == "" || currentText == sp.lastSentText {
+		return
+	}
+	
+	delimiters := config.BotConfig.SentenceDelimiters
+	lastDelimPos := findLastSentenceDelimiter(currentText, delimiters)
+	
+	if lastDelimPos <= 0 {
+		return
+	}
+	
+	textToSend := currentText[:lastDelimPos+1]
+	if textToSend == sp.lastSentText {
+		return
+	}
+	
+	formattedText := formatOutput(textToSend, sp.format)
+	formatOpt := sp.getFormatOption()
+	
+	_, err := util.EditMessageWithError(sp.placeholderMsg, formattedText, formatOpt)
+	if err != nil {
+		log.Error("Failed to edit message during streaming", zap.Error(err))
+		return
+	}
+	
+	sp.lastSentText = textToSend
+}
+
+// getFormatOption returns the appropriate Telegram formatting option
+func (sp *StreamProcessor) getFormatOption() tb.ParseMode {
+	if sp.format.Format == htmlFormat {
+		return tb.ModeHTML
+	}
+	return tb.ModeMarkdownV2
+}
+
+// stopTicker stops the streaming ticker
+func (sp *StreamProcessor) stopTicker() {
+	if sp.ticker != nil {
+		sp.done <- true
+		sp.ticker.Stop()
+	}
+}
+
+// handleToolCallsInStream processes MCP tool calls and restarts the stream
+func (sp *StreamProcessor) handleToolCallsInStream(choice openai.ChatCompletionStreamChoice, stream *openai.ChatCompletionStream) (*openai.ChatCompletionStream, error) {
+	// Stop the ticker temporarily for tool processing
+	sp.stopTicker()
+	
+	// Handle the tool calls
+	if err := handleToolCalls(sp.chatCtx, choice, sp.messages, &sp.fullResponse); err != nil {
+		return nil, err
+	}
+	
+	// Close the current stream
+	if closeErr := stream.Close(); closeErr != nil {
+		log.Error("Failed to close stream", zap.Error(closeErr))
+	}
+	
+	// Create a new stream for the follow-up request
+	sp.request.Messages = *sp.messages
+	newStream, err := sp.client.CreateChatCompletionStream(sp.chatCtx, *sp.request)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Reset buffers for the new stream
+	sp.fullResponse.Reset()
+	sp.currentBuffer.Reset()
+	sp.lastSentText = ""
+	
+	// Restart ticker if streaming is enabled
+	sp.startStreamingTicker()
+	
+	return newStream, nil
+}
+
+// processStreamChunk processes a single chunk from the stream
+func (sp *StreamProcessor) processStreamChunk(choice openai.ChatCompletionStreamChoice) {
+	if choice.Delta.Content != "" {
+		sp.fullResponse.WriteString(choice.Delta.Content)
+		sp.currentBuffer.WriteString(choice.Delta.Content)
+	}
+}
+
+// finalizeResponse sends the final response message
+func (sp *StreamProcessor) finalizeResponse() (*tb.Message, error) {
+	// Stop the ticker
+	sp.stopTicker()
+	
+	// Get the final response
+	finalResponse := strings.TrimSpace(sp.fullResponse.String())
+	formattedResponse := formatOutput(finalResponse, sp.format)
+	
+	// Prepare format option
+	formatOpt := sp.getFormatOption()
+	
+	var replyMsg *tb.Message
+	var err error
+	
+	if sp.placeholderMsg != nil {
+		// If we have a placeholder, edit it with the final response
+		if formattedResponse == "" {
+			formattedResponse = sp.config.GetErrorMessage()
+		}
+		replyMsg, err = util.EditMessageWithError(sp.placeholderMsg, formattedResponse, formatOpt)
+		if err != nil {
+			log.Error("Failed to edit placeholder message with final response", zap.Error(err))
+			return nil, err
+		}
+	} else {
+		// If no placeholder, send a new reply
+		replyMsg, err = sp.ctx.Bot().Reply(sp.ctx.Message(), formattedResponse, formatOpt)
+		if err != nil {
+			log.Error("Failed to send reply", zap.Error(err))
+			return nil, err
+		}
+	}
+	
+	// Store the message to Redis
+	if storeErr := orm.PushMessageToStream(replyMsg); storeErr != nil {
+		log.Warn("Store bot's reply message to Redis failed", zap.Error(storeErr))
+	}
+	
+	return replyMsg, nil
+}
+
+// handleToolCalls processes MCP tool calls and returns the updated messages
+func handleToolCalls(chatCtx context.Context, choice openai.ChatCompletionStreamChoice, messages *[]openai.ChatCompletionMessage, fullResponse *strings.Builder) error {
+	// Build the complete message from the stream so far
+	completeMsg := openai.ChatCompletionMessage{
+		Role:      openai.ChatMessageRoleAssistant,
+		Content:   fullResponse.String(),
+		ToolCalls: choice.Delta.ToolCalls,
+	}
+	
+	// Process tool calls similar to the original implementation
+	*messages = append(*messages, completeMsg)
+	for _, toolCall := range choice.Delta.ToolCalls {
+		var result string
+		var toolErr error
+		tool, ok := mcpo.GetTool(toolCall.Function.Name)
+		if !ok {
+			log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
+			result = "MCP tool not found"
+		} else {
+			result, toolErr = tool.Call(chatCtx, toolCall.Function.Arguments)
+			if toolErr != nil {
+				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(toolErr))
+				result = "Failed to call function tool"
+			}
+		}
+		log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
+		
+		toolMsg := openai.ChatCompletionMessage{
+			Role:       openai.ChatMessageRoleTool,
+			ToolCallID: toolCall.ID,
+			Name:       toolCall.Function.Name,
+			Content:    result,
+		}
+		*messages = append(*messages, toolMsg)
+	}
+	return nil
+}
+
+// process handles the complete streaming response process
+func (sp *StreamProcessor) process(stream *openai.ChatCompletionStream) (string, error) {
+	// Start streaming ticker if enabled
+	sp.startStreamingTicker()
+	defer sp.stopTicker()
+	
+	currentStream := stream
+	defer func() {
+		if closeErr := currentStream.Close(); closeErr != nil {
+			log.Error("Failed to close stream", zap.Error(closeErr))
+		}
+	}()
+	
+	// Process the stream
+	for {
+		response, err := currentStream.Recv()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return "", err
+		}
+		
+		if len(response.Choices) == 0 {
+			continue
+		}
+		
+		choice := response.Choices[0]
+		
+		// Handle tool calls if MCP is enabled
+		if choice.FinishReason == openai.FinishReasonToolCalls && sp.useMcp {
+			newStream, err := sp.handleToolCallsInStream(choice, currentStream)
+			if err != nil {
+				return "", err
+			}
+			currentStream = newStream
+			continue
+		}
+		
+		// Accumulate the content
+		sp.processStreamChunk(choice)
+	}
+	
+	// Finalize and send the response
+	_, err := sp.finalizeResponse()
+	if err != nil {
+		return "", err
+	}
+	
+	return strings.TrimSpace(sp.fullResponse.String()), nil
 }
 
 func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
@@ -287,113 +581,41 @@ final:
 		Model:       v2.Model.Model,
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
+		Stream:      true, // Enable streaming
 	}
 	if useMcp {
 		request.Tools = mcpo.GetToolSet("")
 	}
-	resp, err := client.CreateChatCompletion(chatCtx, request)
+
+	// Create a streaming response
+	stream, err := client.CreateChatCompletionStream(chatCtx, request)
 	if err != nil {
-		log.Error("Failed to send chat completion message", zap.Error(err))
-	}
-
-	// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
-	if placeholderMsg != nil && err != nil {
-		_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
-		if editErr != nil {
-			log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
-		}
-		return err
-	} else if err != nil {
-		return err
-	}
-
-	if len(resp.Choices) == 0 {
-		log.Error("No choices in chat completion response")
+		log.Error("Failed to create chat completion stream", zap.Error(err))
+		// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
 		if placeholderMsg != nil {
 			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
 			if editErr != nil {
 				log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
 			}
 		}
-		return nil
+		return err
 	}
 
-	// 处理大模型返回工具调用的情况
-	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls && useMcp {
-		messages = append(messages, resp.Choices[0].Message)
-		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
-			var result string
-			var err error
-			tool, ok := mcpo.GetTool(toolCall.Function.Name)
-			if !ok {
-				log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
-				result = "MCP tool not found"
-				goto finish_each_toolcall
-			}
-			result, err = tool.Call(chatCtx, toolCall.Function.Arguments)
-			if err != nil {
-				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				result = "Failed to call function tool"
-			}
-			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
-
-		finish_each_toolcall:
-			toolMsg := openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				ToolCallID: toolCall.ID,
-				Name:       toolCall.Function.Name,
-				Content:    result,
-			}
-			messages = append(messages, toolMsg)
-		}
-
-		request.Messages = messages
-		resp, err = client.CreateChatCompletion(chatCtx, request)
-		if err != nil {
-			log.Error("Failed to send chat completion message", zap.Error(err))
-			return err
-		}
-		if len(resp.Choices) == 0 {
-			log.Error("No choices in chat completion response")
-			return nil
-		}
-	}
-
-	response := resp.Choices[0].Message.Content
-	// 移除可能的空行
-	response = strings.TrimSpace(response)
-	response = formatOutput(response, &v2.Format)
-	formatOpt := tb.ModeMarkdownV2
-	if v2.Format.Format == "html" {
-		formatOpt = tb.ModeHTML
-	}
-	log.Debug("Chat response", zap.String("response", response))
-
-	// 根据是否有placeholder选择更新或发送新消息
-	var replyMsg *tb.Message
-	if placeholderMsg != nil {
-		// 如果使用了placeholder，更新消息
-		if response == "" {
-			response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
-		}
-		replyMsg, err = util.EditMessageWithError(placeholderMsg, response, formatOpt)
-		if err != nil {
-			log.Error("Failed to edit placeholder message", zap.Error(err))
-			return err
-		}
-	} else {
-		// 如果没有使用placeholder，直接发送响应
-		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, formatOpt)
-		if err != nil {
-			log.Error("Failed to send reply", zap.Error(err))
-			return err
-		}
-	}
-
-	err = orm.PushMessageToStream(replyMsg)
+	// Process the streaming response using StreamProcessor
+	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, &v2.Format, useMcp, client, &request, &messages, v2)
+	response, err := processor.process(stream)
 	if err != nil {
-		log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
+		log.Error("Failed to process streaming response", zap.Error(err))
+		if placeholderMsg != nil {
+			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
+			if editErr != nil {
+				log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
+			}
+		}
+		return err
 	}
+
+	log.Debug("Chat response", zap.String("response", response))
 	return nil
 
 }

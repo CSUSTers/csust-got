@@ -48,6 +48,10 @@ type ChatOutputFormatConfig struct {
 	Reason string `mapstructure:"reason"`
 	// how to show the payload output: plain(default), quote, collapse, block
 	Payload string `mapstructure:"payload"`
+	// stream_output: enable streaming typewriter effect (false by default)
+	StreamOutput bool `mapstructure:"stream_output"`
+	// edit_interval: minimum time interval between message edits for rate limiting
+	EditInterval string `mapstructure:"edit_interval"`
 }
 
 // GetFormat get message format
@@ -98,6 +102,19 @@ func (c *ChatOutputFormatConfig) GetPayloadFormat() string {
 	default:
 		return ""
 	}
+}
+
+// GetEditInterval returns the edit interval as a time.Duration
+func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
+	if c.EditInterval == "" {
+		return 750 * time.Millisecond // default value
+	}
+	d, err := time.ParseDuration(c.EditInterval)
+	if err != nil {
+		log.Printf("Invalid edit_interval format '%s', using default 750ms", c.EditInterval)
+		return 750 * time.Millisecond
+	}
+	return d
 }
 
 // ChatConfigV2 is the configuration for chat
