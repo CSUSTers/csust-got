@@ -100,7 +100,6 @@ chats:
     temperature: 0.1
     place_holder: ""
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     features:
       image: true
       image_resize:
@@ -142,7 +141,6 @@ chats:
     temperature: 0.7
     place_holder: "⏳"
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     features:
       image: true
       image_resize:
@@ -189,7 +187,6 @@ chats:
     temperature: 0.5
     place_holder: "👀"
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     use_mcpo: true
     features:
       image: true

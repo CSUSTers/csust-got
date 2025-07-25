@@ -495,7 +495,7 @@ func TestGetMessageTextWithAdditionalEntities(t *testing.T) {
 				},
 			},
 			htmlFormat: true,
-			expected:   `Here is some Go code:
+			expected: `Here is some Go code:
 <pre><code class="language-go">func main() {
     fmt.Println(&#34;Hello&#34;)
 }</code></pre>`,

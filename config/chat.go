@@ -111,7 +111,6 @@ func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 	}
 	d, err := time.ParseDuration(c.EditInterval)
 	if err != nil {
-		log.Printf("Invalid edit_interval format '%s', using default 750ms", c.EditInterval)
 		return 750 * time.Millisecond
 	}
 	return d
@@ -128,7 +127,6 @@ type ChatConfigSingle struct {
 	Temperature    *float32               `mapstructure:"temperature"`
 	PlaceHolder    string                 `mapstructure:"place_holder"`
 	ErrorMessage   string                 `mapstructure:"error_message"` // 添加错误提示消息配置
-	Steam          bool                   `mapstructure:"stream"`
 	SystemPrompt   JoinableString         `mapstructure:"system_prompt"`
 	PromptTemplate JoinableString         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger         `mapstructure:"trigger"`

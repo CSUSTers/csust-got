@@ -23,7 +23,6 @@ chats:
   - &c1 
     name: test
     message_context: 5
-    stream: true
     system_prompt: "test prompt"
     model: *gpt
   - <<: *c1
@@ -54,14 +53,12 @@ chats:
 		&ChatConfigSingle{
 			Name:           "test",
 			MessageContext: 5,
-			Steam:          true,
 			SystemPrompt:   "test prompt",
 			Model:          &Model{Name: "gpt-3.5", BaseUrl: "http://test.com", ApiKey: "test-key"},
 		},
 		&ChatConfigSingle{
 			Name:           "test",
 			MessageContext: 5,
-			Steam:          true,
 			SystemPrompt:   "line 1\nline 2\nline3 line3 line3\nline4 line4\n\nline6\nline7",
 			Model:          &Model{Name: "gpt-3.5", BaseUrl: "http://test.com", ApiKey: "test-key"},
 		},
