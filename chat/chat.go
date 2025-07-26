@@ -6,7 +6,6 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
-	"csust-got/orm"
 	"csust-got/util"
 	"encoding/base64"
 	"image"
@@ -287,113 +286,41 @@ final:
 		Model:       v2.Model.Model,
 		Messages:    messages,
 		Temperature: v2.GetTemperature(),
+		Stream:      true, // Enable streaming
 	}
 	if useMcp {
 		request.Tools = mcpo.GetToolSet("")
 	}
-	resp, err := client.CreateChatCompletion(chatCtx, request)
+
+	// Create a streaming response
+	stream, err := client.CreateChatCompletionStream(chatCtx, request)
 	if err != nil {
-		log.Error("Failed to send chat completion message", zap.Error(err))
-	}
-
-	// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
-	if placeholderMsg != nil && err != nil {
-		_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
-		if editErr != nil {
-			log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
-		}
-		return err
-	} else if err != nil {
-		return err
-	}
-
-	if len(resp.Choices) == 0 {
-		log.Error("No choices in chat completion response")
+		log.Error("Failed to create chat completion stream", zap.Error(err))
+		// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
 		if placeholderMsg != nil {
 			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
 			if editErr != nil {
 				log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
 			}
 		}
-		return nil
+		return err
 	}
 
-	// 处理大模型返回工具调用的情况
-	for resp.Choices[0].FinishReason == openai.FinishReasonToolCalls && useMcp {
-		messages = append(messages, resp.Choices[0].Message)
-		for _, toolCall := range resp.Choices[0].Message.ToolCalls {
-			var result string
-			var err error
-			tool, ok := mcpo.GetTool(toolCall.Function.Name)
-			if !ok {
-				log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
-				result = "MCP tool not found"
-				goto finish_each_toolcall
-			}
-			result, err = tool.Call(chatCtx, toolCall.Function.Arguments)
-			if err != nil {
-				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(err))
-				result = "Failed to call function tool"
-			}
-			log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
-
-		finish_each_toolcall:
-			toolMsg := openai.ChatCompletionMessage{
-				Role:       openai.ChatMessageRoleTool,
-				ToolCallID: toolCall.ID,
-				Name:       toolCall.Function.Name,
-				Content:    result,
-			}
-			messages = append(messages, toolMsg)
-		}
-
-		request.Messages = messages
-		resp, err = client.CreateChatCompletion(chatCtx, request)
-		if err != nil {
-			log.Error("Failed to send chat completion message", zap.Error(err))
-			return err
-		}
-		if len(resp.Choices) == 0 {
-			log.Error("No choices in chat completion response")
-			return nil
-		}
-	}
-
-	response := resp.Choices[0].Message.Content
-	// 移除可能的空行
-	response = strings.TrimSpace(response)
-	response = formatOutput(response, &v2.Format)
-	formatOpt := tb.ModeMarkdownV2
-	if v2.Format.Format == "html" {
-		formatOpt = tb.ModeHTML
-	}
-	log.Debug("Chat response", zap.String("response", response))
-
-	// 根据是否有placeholder选择更新或发送新消息
-	var replyMsg *tb.Message
-	if placeholderMsg != nil {
-		// 如果使用了placeholder，更新消息
-		if response == "" {
-			response = v2.GetErrorMessage() // 如果响应为空，使用错误提示消息
-		}
-		replyMsg, err = util.EditMessageWithError(placeholderMsg, response, formatOpt)
-		if err != nil {
-			log.Error("Failed to edit placeholder message", zap.Error(err))
-			return err
-		}
-	} else {
-		// 如果没有使用placeholder，直接发送响应
-		replyMsg, err = ctx.Bot().Reply(ctx.Message(), response, formatOpt)
-		if err != nil {
-			log.Error("Failed to send reply", zap.Error(err))
-			return err
-		}
-	}
-
-	err = orm.PushMessageToStream(replyMsg)
+	// Process the streaming response using streamProcessor
+	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, &v2.Format, useMcp, client, &request, &messages, v2)
+	response, err := processor.process(stream)
 	if err != nil {
-		log.Warn("Store bot's reply message to Redis failed", zap.Error(err))
+		log.Error("Failed to process streaming response", zap.Error(err))
+		if placeholderMsg != nil {
+			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
+			if editErr != nil {
+				log.Error("Failed to edit placeholder message with error", zap.Error(editErr))
+			}
+		}
+		return err
 	}
+
+	log.Debug("Chat response", zap.String("response", response))
 	return nil
 
 }

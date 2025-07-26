@@ -495,7 +495,7 @@ func TestGetMessageTextWithAdditionalEntities(t *testing.T) {
 				},
 			},
 			htmlFormat: true,
-			expected:   `Here is some Go code:
+			expected: `Here is some Go code:
 <pre><code class="language-go">func main() {
     fmt.Println(&#34;Hello&#34;)
 }</code></pre>`,
@@ -646,4 +646,274 @@ func TestContextMessageWithEntities(t *testing.T) {
 	assert.Equal(t, "Check out [Google](https://google.com) for more info", contextMsg.Text)
 	assert.Equal(t, 123, contextMsg.ID)
 	assert.Equal(t, "testuser", contextMsg.User)
+}
+
+// Test the new nested XML format functionality
+func TestFormatContextMessagesWithXml(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []*ContextMessage
+		expected string
+	}{
+		{
+			name:     "empty messages",
+			messages: []*ContextMessage{},
+			expected: "",
+		},
+		{
+			name: "single message without reply",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Hello world",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    Hello world
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "simple reply chain",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Original message",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+				{
+					ID:      2,
+					Text:    "Reply to original",
+					User:    "user2",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Jane",
+						Last:  "Smith",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    Original message
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+      Reply to original
+    </message>
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "multiple level nesting",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Root message",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+				{
+					ID:      2,
+					Text:    "Reply to root",
+					User:    "user2",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Jane",
+						Last:  "Smith",
+					},
+				},
+				{
+					ID:      3,
+					Text:    "Reply to reply",
+					User:    "user3",
+					ReplyTo: intPtr(2),
+					UserNames: userNames{
+						First: "Bob",
+						Last:  "Johnson",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    Root message
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+      Reply to root
+      <message id="3" username="user3" showname="Bob Johnson" replyTo="2">
+        Reply to reply
+      </message>
+    </message>
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "multiple replies to same message",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Original message",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+				{
+					ID:      2,
+					Text:    "First reply",
+					User:    "user2",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Jane",
+						Last:  "Smith",
+					},
+				},
+				{
+					ID:      3,
+					Text:    "Second reply",
+					User:    "user3",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Bob",
+						Last:  "Johnson",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    Original message
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+      First reply
+    </message>
+    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
+      Second reply
+    </message>
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "multiple root messages",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "First root",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+				{
+					ID:   2,
+					Text: "Second root",
+					User: "user2",
+					UserNames: userNames{
+						First: "Jane",
+						Last:  "Smith",
+					},
+				},
+				{
+					ID:      3,
+					Text:    "Reply to first root",
+					User:    "user3",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Bob",
+						Last:  "Johnson",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    First root
+    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
+      Reply to first root
+    </message>
+  </message>
+  <message id="2" username="user2" showname="Jane Smith">
+    Second root
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "HTML escaping in nested format",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Message with <script>alert('xss')</script> & other HTML",
+					User: "user1",
+					UserNames: userNames{
+						First: "John",
+						Last:  "Doe",
+					},
+				},
+				{
+					ID:      2,
+					Text:    "Reply with & more <tags>",
+					User:    "user2",
+					ReplyTo: intPtr(1),
+					UserNames: userNames{
+						First: "Jane",
+						Last:  "Smith",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="John Doe">
+    Message with &lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt; &amp; other HTML
+    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+      Reply with &amp; more &lt;tags&gt;
+    </message>
+  </message>
+</messages>
+`,
+		},
+		{
+			name: "empty usernames",
+			messages: []*ContextMessage{
+				{
+					ID:   1,
+					Text: "Message from user with no name",
+					User: "user1",
+					UserNames: userNames{
+						First: "",
+						Last:  "",
+					},
+				},
+			},
+			expected: `<messages>
+  <message id="1" username="user1" showname="">
+    Message from user with no name
+  </message>
+</messages>
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FormatContextMessagesWithXml(tt.messages)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// Helper function to create int pointer
+func intPtr(i int) *int {
+	return &i
 }

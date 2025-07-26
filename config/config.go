@@ -73,6 +73,9 @@ type Config struct {
 	SkipDuration int64
 	LogFileDir   string
 
+	// SentenceDelimiters for intelligent sentence breaking in streaming
+	SentenceDelimiters []string
+
 	RedisConfig     *redisConfig
 	RestrictConfig  *restrictConfig
 	RateLimitConfig *rateLimitConfig
@@ -136,6 +139,15 @@ func readConfig() {
 	BotConfig.Listen = viper.GetString("listen")
 	BotConfig.SkipDuration = viper.GetInt64("skip_duration")
 	BotConfig.LogFileDir = viper.GetString("log_file_dir")
+
+	// sentence delimiters for streaming
+	BotConfig.SentenceDelimiters = viper.GetStringSlice("sentence_delimiters")
+	if len(BotConfig.SentenceDelimiters) == 0 {
+		// Set default sentence delimiters if none provided
+		BotConfig.SentenceDelimiters = []string{
+			"\n", ".", "!", "?", "。", "！", "？", ")", "）", ";",
+		}
+	}
 
 	// other
 	BotConfig.RedisConfig.readConfig()
