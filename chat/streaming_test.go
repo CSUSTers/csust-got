@@ -86,12 +86,12 @@ func TestChatOutputFormatConfig_GetEditInterval(t *testing.T) {
 		{
 			name:     "empty string uses default",
 			interval: "",
-			expected: 750 * time.Millisecond,
+			expected: time.Second,
 		},
 		{
 			name:     "invalid string uses default",
 			interval: "invalid",
-			expected: 750 * time.Millisecond,
+			expected: time.Second,
 		},
 	}
 

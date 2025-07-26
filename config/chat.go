@@ -107,11 +107,11 @@ func (c *ChatOutputFormatConfig) GetPayloadFormat() string {
 // GetEditInterval returns the edit interval as a time.Duration
 func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 	if c.EditInterval == "" {
-		return 750 * time.Millisecond // default value
+		return time.Second
 	}
 	d, err := time.ParseDuration(c.EditInterval)
 	if err != nil {
-		return 750 * time.Millisecond
+		return time.Second
 	}
 	return d
 }
