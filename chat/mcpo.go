@@ -177,6 +177,12 @@ func (t *McpoTool) Call(ctx context.Context, param string) (result string, err e
 	default:
 		return result, ErrInvaliableParameter
 	}
+
+	// Add Authorization header if API key is configured
+	if config.BotConfig.McpoServer.ApiKey != "" {
+		req.Header.Add("Authorization", "Bearer "+config.BotConfig.McpoServer.ApiKey)
+	}
+
 	resp, err := mcpo.c.Do(req)
 	if err != nil {
 		return result, err

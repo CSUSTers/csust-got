@@ -8,6 +8,7 @@ import (
 	"csust-got/util"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,10 +31,11 @@ type streamProcessor struct {
 	config         *config.ChatConfigSingle
 
 	// State variables
-	fullResponse strings.Builder
-	lastSentText string
-	ticker       *time.Ticker
-	done         chan bool
+	fullResponse           strings.Builder
+	lastSentText           string
+	ticker                 *time.Ticker
+	done                   chan bool
+	currentToolCallsChunks []openai.ToolCall // Store all tool call chunks in a flat slice
 
 	// Mutex to protect concurrent access to strings.Builder
 	mu sync.RWMutex
@@ -56,14 +58,20 @@ func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg 
 }
 
 // findLastSentenceDelimiter finds the last occurrence of any sentence delimiter in the text
+// Returns the end position of the delimiter (position after the delimiter)
 func findLastSentenceDelimiter(text string, delimiters []string) int {
 	lastPos := -1
+	lastDelimiterLen := 0
 	for _, delimiter := range delimiters {
 		if pos := strings.LastIndex(text, delimiter); pos > lastPos {
-			lastPos = pos // Return the position of the delimiter
+			lastPos = pos
+			lastDelimiterLen = len(delimiter)
 		}
 	}
-	return lastPos
+	if lastPos == -1 {
+		return -1
+	}
+	return lastPos + lastDelimiterLen // Return the position after the delimiter
 }
 
 // startStreamingTicker starts the ticker for real-time message updates
@@ -100,13 +108,13 @@ func (sp *streamProcessor) updateStreamingMessage() {
 	}
 
 	delimiters := config.BotConfig.SentenceDelimiters
-	lastDelimPos := findLastSentenceDelimiter(currentText, delimiters)
+	lastDelimEndPos := findLastSentenceDelimiter(currentText, delimiters)
 
-	if lastDelimPos <= 0 {
+	if lastDelimEndPos <= 0 {
 		return
 	}
 
-	textToSend := currentText[:lastDelimPos+1]
+	textToSend := currentText[:lastDelimEndPos]
 	if textToSend == sp.lastSentText {
 		return
 	}
@@ -155,12 +163,12 @@ func (sp *streamProcessor) stopTicker() {
 }
 
 // handleToolCallsInStream processes MCP tool calls and restarts the stream
-func (sp *streamProcessor) handleToolCallsInStream(choice openai.ChatCompletionStreamChoice) (*openai.ChatCompletionStream, error) {
+func (sp *streamProcessor) handleToolCallsInStream(toolCalls []openai.ToolCall) (*openai.ChatCompletionStream, error) {
 	// Stop the ticker temporarily for tool processing
 	sp.stopTicker()
 
-	// Handle the tool calls
-	if err := sp.handleToolCalls(choice); err != nil {
+	// Handle the tool calls using the provided aggregated data
+	if err := sp.handleToolCalls(toolCalls); err != nil {
 		return nil, err
 	}
 
@@ -171,9 +179,10 @@ func (sp *streamProcessor) handleToolCallsInStream(choice openai.ChatCompletionS
 		return nil, err
 	}
 
-	// Reset buffer for the new stream
+	// Reset buffer and tool calls for the new stream
 	sp.mu.Lock()
 	sp.fullResponse.Reset()
+	sp.currentToolCallsChunks = nil
 	sp.mu.Unlock()
 	sp.lastSentText = ""
 
@@ -190,6 +199,74 @@ func (sp *streamProcessor) processStreamChunk(choice openai.ChatCompletionStream
 		sp.fullResponse.WriteString(choice.Delta.Content)
 		sp.mu.Unlock()
 	}
+
+	// Handle tool calls in delta
+	if len(choice.Delta.ToolCalls) > 0 {
+		sp.mu.Lock()
+		sp.currentToolCallsChunks = append(sp.currentToolCallsChunks, choice.Delta.ToolCalls...)
+		sp.mu.Unlock()
+	}
+}
+
+// aggregateToolCalls combines all stored tool call chunks into complete tool calls
+func (sp *streamProcessor) aggregateToolCalls() []openai.ToolCall {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+
+	// If no tool calls, return empty slice
+	if len(sp.currentToolCallsChunks) == 0 {
+		return nil
+	}
+
+	toolCallMap := make(map[int]*openai.ToolCall)         // Map to store aggregated tool calls by index
+	argumentsBuilderMap := make(map[int]*strings.Builder) // Map to store arguments builders by index, because arguments may vary in length
+
+	// Process all stored tool call chunks
+	for _, deltaToolCall := range sp.currentToolCallsChunks {
+		// Get the index, default to 0 if nil
+		index := 0
+		if deltaToolCall.Index != nil {
+			index = *deltaToolCall.Index
+		}
+
+		// Create entry if it doesn't exist
+		if _, exists := toolCallMap[index]; !exists {
+			toolCallMap[index] = &openai.ToolCall{
+				Index: &index,
+				Type:  deltaToolCall.Type,
+			}
+			argumentsBuilderMap[index] = &strings.Builder{}
+		}
+
+		// Accumulate the tool call data
+		currentTool := toolCallMap[index]
+		if deltaToolCall.ID != "" {
+			currentTool.ID += deltaToolCall.ID
+		}
+		if deltaToolCall.Function.Name != "" {
+			currentTool.Function.Name += deltaToolCall.Function.Name
+		}
+		if deltaToolCall.Function.Arguments != "" {
+			argumentsBuilderMap[index].WriteString(deltaToolCall.Function.Arguments)
+		}
+	}
+
+	// Convert map to slice and sort by index
+	result := make([]openai.ToolCall, 0, len(toolCallMap))
+
+	// Build the final tool calls from the map
+	for index, toolCall := range toolCallMap {
+		// Set the arguments from the builder
+		toolCall.Function.Arguments = argumentsBuilderMap[index].String()
+		result = append(result, *toolCall)
+	}
+
+	// Sort the result by index
+	sort.Slice(result, func(i, j int) bool {
+		return *result[i].Index < *result[j].Index
+	})
+
+	return result
 }
 
 // finalizeResponse sends the final response message
@@ -239,7 +316,7 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 }
 
 // handleToolCalls processes MCP tool calls and returns the updated messages
-func (sp *streamProcessor) handleToolCalls(choice openai.ChatCompletionStreamChoice) error {
+func (sp *streamProcessor) handleToolCalls(toolCalls []openai.ToolCall) error {
 	// Build the complete message from the stream so far
 	sp.mu.RLock()
 	content := sp.fullResponse.String()
@@ -248,12 +325,12 @@ func (sp *streamProcessor) handleToolCalls(choice openai.ChatCompletionStreamCho
 	completeMsg := openai.ChatCompletionMessage{
 		Role:      openai.ChatMessageRoleAssistant,
 		Content:   content,
-		ToolCalls: choice.Delta.ToolCalls,
+		ToolCalls: toolCalls,
 	}
 
 	// Process tool calls similar to the original implementation
 	*sp.messages = append(*sp.messages, completeMsg)
-	for _, toolCall := range choice.Delta.ToolCalls {
+	for _, toolCall := range toolCalls {
 		var result string
 		var toolErr error
 		tool, ok := mcpo.GetTool(toolCall.Function.Name)
@@ -311,22 +388,31 @@ func (sp *streamProcessor) process(stream *openai.ChatCompletionStream) (string,
 
 		choice := response.Choices[0]
 
-		// Handle tool calls if MCP is enabled
-		if choice.FinishReason == openai.FinishReasonToolCalls && sp.useMcp {
-			newStream, err := sp.handleToolCallsInStream(choice)
-			if err != nil {
-				return "", err
+		// Accumulate the content and tool calls
+		sp.processStreamChunk(choice)
+
+		// Handle tool calls when the stream indicates completion
+		if choice.FinishReason == openai.FinishReasonStop && sp.useMcp {
+			// Check if we have accumulated tool calls
+			toolCalls := sp.aggregateToolCalls()
+
+			if len(toolCalls) > 0 {
+				// Send bot is typing
+				_ = sp.ctx.Bot().Notify(sp.ctx.Chat(), tb.Typing)
+				// Handle tool calls in the stream
+				newStream, err := sp.handleToolCallsInStream(toolCalls)
+				if err != nil {
+					return "", err
+				}
+				// Close current stream and switch to new stream
+				if err := currentStream.Close(); err != nil {
+					log.Error("Failed to close current stream", zap.Error(err))
+				}
+				currentStream = newStream
+				continue
 			}
-			// 关闭当前的流并将新的流设置为当前流
-			if err := currentStream.Close(); err != nil {
-				log.Error("Failed to close current stream", zap.Error(err))
-			}
-			currentStream = newStream
-			continue
 		}
 
-		// Accumulate the content
-		sp.processStreamChunk(choice)
 	}
 
 	// Finalize and send the response

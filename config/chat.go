@@ -181,6 +181,7 @@ type McpoConfig struct {
 	Enable bool     `mapstructure:"enable"`
 	Url    string   `mapstructure:"url"`
 	Tools  []string `mapstructure:"tools"`
+	ApiKey string   `mapstructure:"api_key"` // Optional API key for MCP servers
 }
 
 func (c *McpoConfig) readConfig() {

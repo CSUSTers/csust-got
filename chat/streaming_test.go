@@ -8,7 +8,7 @@ import (
 )
 
 func TestFindLastSentenceDelimiter(t *testing.T) {
-	delimiters := []string{"\n", ".", "!", "?", "。", "！", "？", ")", "）", ";"}
+	delimiters := []string{"\n", ".", "!", "?", "。", "！", "？", ")", "）", ";", "..."}
 
 	tests := []struct {
 		name     string
@@ -18,17 +18,17 @@ func TestFindLastSentenceDelimiter(t *testing.T) {
 		{
 			name:     "text with period",
 			text:     "Hello world. This is a test",
-			expected: 11, // Position of '.'
+			expected: 12, // Position after '.'
 		},
 		{
 			name:     "text with newline",
 			text:     "Hello world\nThis is a test",
-			expected: 11, // Position of '\n'
+			expected: 12, // Position after '\n'
 		},
 		{
 			name:     "text with multiple delimiters",
 			text:     "Hello world. This is a test! How are you?",
-			expected: 40, // Position of last '?'
+			expected: 41, // Position after last '?'
 		},
 		{
 			name:     "text with no delimiters",
@@ -38,12 +38,22 @@ func TestFindLastSentenceDelimiter(t *testing.T) {
 		{
 			name:     "text with Chinese punctuation",
 			text:     "你好世界。这是一个测试！",
-			expected: 33, // Position of '！' (index in bytes)
+			expected: 36, // Position after '！' (index in bytes)
 		},
 		{
 			name:     "empty text",
 			text:     "",
 			expected: -1,
+		},
+		{
+			name:     "text with multi-character delimiter",
+			text:     "This is interesting... What do you think?",
+			expected: 41, // Position after '?'
+		},
+		{
+			name:     "text with only multi-character delimiter",
+			text:     "This is interesting...",
+			expected: 22, // Position after '...'
 		},
 	}
 
