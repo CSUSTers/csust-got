@@ -2,6 +2,19 @@
 debug: false
 worker: 4               # number of goroutine to recv update [int]
 
+# [新增] 用于智能断句的句子分界符列表 (全局共享)
+sentence_delimiters:
+  - "\n"
+  - "."
+  - "!"
+  - "?"
+  - "。"
+  - "！"
+  - "？"
+  - ")"
+  - "）"
+  - ";"
+
 # bot config
 url: "" # optional, leave empty to use telegram official api
 token: ""
@@ -87,7 +100,6 @@ chats:
     temperature: 0.1
     place_holder: ""
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     features:
       image: true
       image_resize:
@@ -121,10 +133,14 @@ chats:
       - reply: true
     format:
       payload: "markdown-block"
+      # [新增] 是否启用流式输出（打字机效果）。默认为 false。
+      stream_output: true
+      # [新增] 流式输出时，两次编辑消息的最小时间间隔。用于控制速率，防止被 Telegram 限制。
+      # 建议值: "1s"
+      edit_interval: "1s"
     temperature: 0.7
     place_holder: "⏳"
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     features:
       image: true
       image_resize:
@@ -171,7 +187,6 @@ chats:
     temperature: 0.5
     place_holder: "👀"
     error_message: "😔很抱歉，我无法处理您的请求"
-    stream: false
     use_mcpo: true
     features:
       image: true

@@ -48,6 +48,10 @@ type ChatOutputFormatConfig struct {
 	Reason string `mapstructure:"reason"`
 	// how to show the payload output: plain(default), quote, collapse, block
 	Payload string `mapstructure:"payload"`
+	// stream_output: enable streaming typewriter effect (false by default)
+	StreamOutput bool `mapstructure:"stream_output"`
+	// edit_interval: minimum time interval between message edits for rate limiting
+	EditInterval string `mapstructure:"edit_interval"`
 }
 
 // GetFormat get message format
@@ -100,6 +104,18 @@ func (c *ChatOutputFormatConfig) GetPayloadFormat() string {
 	}
 }
 
+// GetEditInterval returns the edit interval as a time.Duration
+func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
+	if c.EditInterval == "" {
+		return time.Second
+	}
+	d, err := time.ParseDuration(c.EditInterval)
+	if err != nil {
+		return time.Second
+	}
+	return d
+}
+
 // ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
@@ -111,7 +127,6 @@ type ChatConfigSingle struct {
 	Temperature    *float32               `mapstructure:"temperature"`
 	PlaceHolder    string                 `mapstructure:"place_holder"`
 	ErrorMessage   string                 `mapstructure:"error_message"` // 添加错误提示消息配置
-	Steam          bool                   `mapstructure:"stream"`
 	SystemPrompt   JoinableString         `mapstructure:"system_prompt"`
 	PromptTemplate JoinableString         `mapstructure:"prompt_template"`
 	Trigger        []*ChatTrigger         `mapstructure:"trigger"`
@@ -166,6 +181,7 @@ type McpoConfig struct {
 	Enable bool     `mapstructure:"enable"`
 	Url    string   `mapstructure:"url"`
 	Tools  []string `mapstructure:"tools"`
+	ApiKey string   `mapstructure:"api_key"` // Optional API key for MCP servers
 }
 
 func (c *McpoConfig) readConfig() {

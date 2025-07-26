@@ -177,6 +177,17 @@ func (t *McpoTool) Call(ctx context.Context, param string) (result string, err e
 	default:
 		return result, ErrInvaliableParameter
 	}
+
+	// Add Authorization header if API key is configured
+	if config.BotConfig.McpoServer.ApiKey != "" {
+		req.Header.Add("Authorization", "Bearer "+config.BotConfig.McpoServer.ApiKey)
+	}
+
+	log.Debug("call mcpo tool",
+		zap.String("url", t.Url),
+		zap.String("name", t.Name),
+		zap.String("param", param))
+
 	resp, err := mcpo.c.Do(req)
 	if err != nil {
 		return result, err
@@ -214,10 +225,39 @@ func derefJSONSchemaRef(spec *openapi31.Spec, ref map[string]any) (done map[stri
 	rr := strings.TrimPrefix(s, componentsSchemas)
 	os, found := spec.Components.Schemas[rr]
 
-	if found {
-		delete(done, "$ref")
-		maps.Copy(done, os)
+	if !found {
+		return done, false
 	}
+
+	delete(done, "$ref")
+	if osp, ok := os["properties"].(map[string]any); ok {
+		// If properties are present, we dereference them
+		for k, v := range osp {
+			if propRef, ok := v.(map[string]any); ok {
+				switch propRef["type"] {
+				case "string", "number", "integer", "boolean":
+					continue // Primitive types do not need dereferencing
+				case "array":
+					// If it's an array, we need to dereference the items
+					if items, ok := propRef["items"].(map[string]any); ok {
+						derefItems, derefed := derefJSONSchemaRef(spec, items)
+						if derefed {
+							propRef["items"] = derefItems
+						}
+					}
+					continue
+				default:
+					// Recursively dereference the property
+					derefProp, derefed := derefJSONSchemaRef(spec, propRef)
+					if derefed {
+						osp[k] = derefProp
+					}
+				}
+			}
+		}
+		os["properties"] = osp
+	}
+	maps.Copy(done, os)
 
 	return done, found
 }
