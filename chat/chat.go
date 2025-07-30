@@ -325,7 +325,7 @@ final:
 
 }
 
-var extractReasonPatt = regexp.MustCompile(`(?smi)^\s*<think>\s*(?P<reason>.*?)\s*</think>\s*`)
+var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 
 func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
