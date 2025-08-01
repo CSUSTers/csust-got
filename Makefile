@@ -34,7 +34,7 @@ test:
 	go test -v -race -covermode=atomic -test.short ./...
 
 fmt:
-	gofmt -l -w .
+	gofmt -l -w . && golangci-lint run
 
 deploy:
 	CGO_ENABLED=$(CGOFLAG) \

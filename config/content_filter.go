@@ -33,6 +33,6 @@ func (c *contentFilterConfig) checkConfig() {
 	if c.UrlFilterConfig.Enabled &&
 		(c.UrlFilterConfig.Tw2fx.EnabledUserList == nil ||
 			c.UrlFilterConfig.Bv2av.EnabledUserList == nil) {
-		zap.L().Warn(noGithubMsg)
+		zap.L().Warn("content filter is enabled but user lists are not properly configured")
 	}
 }

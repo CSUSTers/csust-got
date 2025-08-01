@@ -61,7 +61,6 @@ func main() {
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
-	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler, whiteMiddleware)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)

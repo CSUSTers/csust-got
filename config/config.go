@@ -14,10 +14,9 @@ import (
 var BotConfig *Config
 
 var (
-	noTokenMsg  = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
-	noRedisMsg  = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
-	noMeiliMsg  = "meili configuration is not set! Please set config file config.yaml!"
-	noGithubMsg = "github configuration is not set! Please set config file config.yaml!"
+	noTokenMsg = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
+	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+	noMeiliMsg = "meili configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -47,7 +46,6 @@ func NewBotConfig() *Config {
 		GetVoiceConfig:      new(GetVoiceConfig),
 		MeiliConfig:         new(meiliConfig),
 		McConfig:            new(mcConfig),
-		GithubConfig:        new(githubConfig),
 		ContentFilterConfig: new(contentFilterConfig),
 		DebugOptConfig:      new(debugOptConfig),
 		ChatConfigV2:        new(ChatConfigV2),
@@ -86,7 +84,6 @@ type Config struct {
 	McpoServer          *McpoConfig
 	MeiliConfig         *meiliConfig
 	McConfig            *mcConfig
-	GithubConfig        *githubConfig
 	ContentFilterConfig *contentFilterConfig
 
 	DebugOptConfig *debugOptConfig
@@ -156,7 +153,6 @@ func readConfig() {
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
-	BotConfig.GithubConfig.readConfig()
 	BotConfig.ContentFilterConfig.readConfig()
 	BotConfig.ChatConfigV2.readConfig()
 	BotConfig.McpoServer.readConfig()
@@ -198,7 +194,6 @@ func checkConfig() {
 	BotConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
-	BotConfig.GithubConfig.checkConfig()
 	BotConfig.ContentFilterConfig.checkConfig()
 
 	BotConfig.DebugOptConfig.checkConfig()
