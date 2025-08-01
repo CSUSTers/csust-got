@@ -52,10 +52,6 @@ message:
   boot_failed: "我不愿面对这苦涩的一天……:("
   welcome: "Welcome to this group!"
 
-prometheus:
-  enabled: false
-
-
 llm_models:
   _default: &default
     base_url: "xxx"

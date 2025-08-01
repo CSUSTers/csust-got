@@ -44,7 +44,6 @@ func NewBotConfig() *Config {
 		MessageConfig:       new(messageConfig),
 		WhiteListConfig:     new(specialListConfig),
 		BlockListConfig:     new(specialListConfig),
-		PromConfig:          new(promConfig),
 		GetVoiceConfig:      new(GetVoiceConfig),
 		MeiliConfig:         new(meiliConfig),
 		McConfig:            new(mcConfig),
@@ -82,7 +81,6 @@ type Config struct {
 	MessageConfig   *messageConfig
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
-	PromConfig      *promConfig
 	*GetVoiceConfig
 	ChatConfigV2        *ChatConfigV2
 	McpoServer          *McpoConfig
@@ -156,7 +154,6 @@ func readConfig() {
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlockListConfig.readConfig()
-	BotConfig.PromConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
 	BotConfig.GithubConfig.readConfig()
@@ -198,7 +195,6 @@ func checkConfig() {
 	BotConfig.MessageConfig.checkConfig()
 	BotConfig.BlockListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
-	BotConfig.PromConfig.checkConfig()
 	BotConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()

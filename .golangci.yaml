@@ -154,8 +154,6 @@ linters:
         - min
         - max
       qualified-name: false
-    promlinter:
-      strict: false
     revive:
       confidence: 0.8
       severity: warning

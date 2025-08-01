@@ -19,7 +19,6 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
-	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
 
@@ -31,7 +30,6 @@ func main() {
 	config.InitConfig("config.yaml", "BOT")
 	log.InitLogger()
 	defer log.Sync()
-	prom.InitPrometheus()
 	orm.InitRedis()
 
 	orm.LoadWhiteList()

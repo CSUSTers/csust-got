@@ -24,7 +24,6 @@
 - 🎨 Stable Diffusion 图像生成
 - 🎲 抽卡系统
 - 🎭 各种娱乐功能
-- 📊 Prometheus 监控
 - 🔧 灵活的配置系统
 - 🎯 正则表达式触发器
 - 🛡️ 完善的权限管理
@@ -185,7 +184,6 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 - **框架**: [telebot.v3](https://github.com/tucnak/telebot)
 - **数据库**: Redis
 - **搜索**: MeiliSearch
-- **监控**: Prometheus
 - **AI**: OpenAI API 兼容接口
 - **图像生成**: Stable Diffusion WebUI
 - **容器化**: Docker & Docker Compose
