@@ -37,19 +37,18 @@ func InitConfig(configFile, envPrefix string) {
 // In general, you don't need to NewBotConfig, global BotConfig should be used.
 func NewBotConfig() *Config {
 	config := &Config{
-		RateLimitConfig:     new(rateLimitConfig),
-		RedisConfig:         new(redisConfig),
-		RestrictConfig:      new(restrictConfig),
-		MessageConfig:       new(messageConfig),
-		WhiteListConfig:     new(specialListConfig),
-		BlockListConfig:     new(specialListConfig),
-		GetVoiceConfig:      new(GetVoiceConfig),
-		MeiliConfig:         new(meiliConfig),
-		McConfig:            new(mcConfig),
-		ContentFilterConfig: new(contentFilterConfig),
-		DebugOptConfig:      new(debugOptConfig),
-		ChatConfigV2:        new(ChatConfigV2),
-		McpoServer:          new(McpoConfig),
+		RateLimitConfig: new(rateLimitConfig),
+		RedisConfig:     new(redisConfig),
+		RestrictConfig:  new(restrictConfig),
+		MessageConfig:   new(messageConfig),
+		WhiteListConfig: new(specialListConfig),
+		BlockListConfig: new(specialListConfig),
+		GetVoiceConfig:  new(GetVoiceConfig),
+		MeiliConfig:     new(meiliConfig),
+		McConfig:        new(mcConfig),
+		DebugOptConfig:  new(debugOptConfig),
+		ChatConfigV2:    new(ChatConfigV2),
+		McpoServer:      new(McpoConfig),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -80,11 +79,10 @@ type Config struct {
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	*GetVoiceConfig
-	ChatConfigV2        *ChatConfigV2
-	McpoServer          *McpoConfig
-	MeiliConfig         *meiliConfig
-	McConfig            *mcConfig
-	ContentFilterConfig *contentFilterConfig
+	ChatConfigV2 *ChatConfigV2
+	McpoServer   *McpoConfig
+	MeiliConfig  *meiliConfig
+	McConfig     *mcConfig
 
 	DebugOptConfig *debugOptConfig
 }
@@ -153,7 +151,6 @@ func readConfig() {
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
-	BotConfig.ContentFilterConfig.readConfig()
 	BotConfig.ChatConfigV2.readConfig()
 	BotConfig.McpoServer.readConfig()
 
@@ -194,7 +191,6 @@ func checkConfig() {
 	BotConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
-	BotConfig.ContentFilterConfig.checkConfig()
 
 	BotConfig.DebugOptConfig.checkConfig()
 }
