@@ -29,8 +29,8 @@ jobs:
         run: make deps
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.0
+          version: v2.1
           args: --issues-exit-code=0
           only-new-issues: false

@@ -8,11 +8,11 @@ on:
 jobs:
   lint:
     name: Lint
-    uses: CSUSTers/csust-got/.github/workflows/lint.yml@master
+    uses: ./.github/workflows/lint.yml
 
   test:
     name: Test
-    uses: CSUSTers/csust-got/.github/workflows/test.yml@master
+    uses: ./.github/workflows/test.yml
 
   build:
     name: Build and Push

@@ -2,6 +2,9 @@ name: Go Build
 
 on:
   workflow_call:
+  push:
+    paths:
+      - .github/workflows/go-build.yml
 
 jobs:
 
@@ -13,25 +16,25 @@ jobs:
         include:
           - platform: linux/amd64
             goarch: amd64
-            goarm:
+            goarm: ""
           - platform: linux/386
             goarch: 386
-            goarm:
+            goarm: ""
           - platform: linux/arm64
             goarch: arm64
-            goarm:
+            goarm: ""
           - platform: linux/arm/v7
             goarch: arm
             goarm: 7
     steps:
 
+      - name: Get source
+        uses: actions/checkout@v4
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ^1.24
-
-      - name: Get source
-        uses: actions/checkout@v4
 
       - name: Get deps
         run: make deps
