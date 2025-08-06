@@ -52,10 +52,6 @@ message:
   boot_failed: "我不愿面对这苦涩的一天……:("
   welcome: "Welcome to this group!"
 
-prometheus:
-  enabled: false
-
-
 llm_models:
   _default: &default
     base_url: "xxx"
@@ -250,14 +246,3 @@ github:
   branch: "master"
   path: "config.yaml"
   short_url_prefix: "s.csu.st"
-
-content_filter:
-  url_filter:
-    enabled: true
-    bv2av:
-      # telegram uids here
-      enable_user_list:
-        - 123123123
-    tw2fx:
-      enable_user_list:
-        - 123123123

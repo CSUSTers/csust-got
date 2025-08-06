@@ -9,12 +9,12 @@ jobs:
 
   lint:
     name: Lint
-    uses: CSUSTers/csust-got/.github/workflows/lint.yml@dev
+    uses: ./.github/workflows/lint.yml
 
 
   test:
     name: Test
-    uses: CSUSTers/csust-got/.github/workflows/test.yml@dev
+    uses: ./.github/workflows/test.yml
 
 
   build:

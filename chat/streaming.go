@@ -23,9 +23,7 @@ type streamProcessor struct {
 	chatCtx        context.Context
 	ctx            tb.Context
 	placeholderMsg *tb.Message
-	format         *config.ChatOutputFormatConfig
 	useMcp         bool
-	client         *openai.Client
 	request        *openai.ChatCompletionRequest
 	messages       *[]openai.ChatCompletionMessage
 	config         *config.ChatConfigSingle
@@ -34,7 +32,7 @@ type streamProcessor struct {
 	fullResponse           strings.Builder
 	lastSentText           string
 	ticker                 *time.Ticker
-	done                   chan bool
+	done                   chan struct{}
 	currentToolCallsChunks []openai.ToolCall // Store all tool call chunks in a flat slice
 
 	// Mutex to protect concurrent access to strings.Builder
@@ -42,18 +40,16 @@ type streamProcessor struct {
 }
 
 // newStreamProcessor creates a new streamProcessor with the provided configuration
-func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, format *config.ChatOutputFormatConfig, useMcp bool, client *openai.Client, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *streamProcessor {
+func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, useMcp bool, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *streamProcessor {
 	return &streamProcessor{
 		chatCtx:        chatCtx,
 		ctx:            ctx,
 		placeholderMsg: placeholderMsg,
-		format:         format,
 		useMcp:         useMcp,
-		client:         client,
 		request:        request,
 		messages:       messages,
 		config:         chatConfig,
-		done:           make(chan bool, 1),
+		done:           make(chan struct{}), // dont use a buffered channel to ensure proper synchronization
 	}
 }
 
@@ -76,11 +72,11 @@ func findLastSentenceDelimiter(text string, delimiters []string) int {
 
 // startStreamingTicker starts the ticker for real-time message updates
 func (sp *streamProcessor) startStreamingTicker() {
-	if !sp.format.StreamOutput {
+	if !sp.config.Format.StreamOutput {
 		return
 	}
 
-	editInterval := sp.format.GetEditInterval()
+	editInterval := sp.config.Format.GetEditInterval()
 	sp.ticker = time.NewTicker(editInterval)
 
 	go func() {
@@ -119,7 +115,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 		return
 	}
 
-	formattedText := formatOutput(textToSend, sp.format)
+	formattedText := formatOutput(textToSend, &sp.config.Format)
 	formatOpt := sp.getFormatOption()
 
 	if formattedText == "" {
@@ -148,7 +144,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 
 // getFormatOption returns the appropriate Telegram formatting option
 func (sp *streamProcessor) getFormatOption() tb.ParseMode {
-	if sp.format.Format == "html" {
+	if sp.config.Format.Format == "html" {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
@@ -157,7 +153,7 @@ func (sp *streamProcessor) getFormatOption() tb.ParseMode {
 // stopTicker stops the streaming ticker
 func (sp *streamProcessor) stopTicker() {
 	if sp.ticker != nil {
-		sp.done <- true
+		sp.done <- struct{}{}
 		sp.ticker.Stop()
 	}
 }
@@ -174,7 +170,7 @@ func (sp *streamProcessor) handleToolCallsInStream(toolCalls []openai.ToolCall) 
 
 	// Create a new stream for the follow-up request
 	sp.request.Messages = *sp.messages
-	newStream, err := sp.client.CreateChatCompletionStream(sp.chatCtx, *sp.request)
+	newStream, err := clients[sp.config.Model.Name].CreateChatCompletionStream(sp.chatCtx, *sp.request)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +275,7 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 	finalResponse := strings.TrimSpace(sp.fullResponse.String())
 	sp.mu.RUnlock()
 
-	formattedResponse := formatOutput(finalResponse, sp.format)
+	formattedResponse := formatOutput(finalResponse, &sp.config.Format)
 	if formattedResponse == "" {
 		log.Warn("Final response is empty, sending error message instead")
 		formattedResponse = sp.config.GetErrorMessage()

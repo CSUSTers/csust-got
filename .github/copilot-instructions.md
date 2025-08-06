@@ -14,8 +14,12 @@ This repo is a modern Telegram bot for CSUST, developed in Go. It includes vario
 3.  **Configuration**: If a new feature requires configuration, add a new section to `config.yaml` and a corresponding struct in the `config/` package.
 4.  **Dependencies**: Use `make deps` to install dependencies.
 5.  **Testing**: Use the `github.com/stretchr/testify` framework for unit tests.
-6.  **Build & Lint**: Before committing, ensure the code compiles with `go build .` and passes linting checks with `golangci-lint run`. Fix any reported issues, run `make fmt` to format the code, and ensure all tests pass with `make test`.
-7.  **Directory Structure**: Maintain the existing feature-based package structure. Ignore any files in the `dict/` directory.
+6.  **Directory Structure**: Maintain the existing feature-based package structure. Ignore any files in the `dict/` directory.
+
+## Code Quality Requirements
+1.  **Build**: Before committing, ensure the code compiles with `go build .`.
+2.  **Format**: Before committing, ensure the code is formatted by running `make fmt`.
+3.  **Test**: Before committing, ensure all tests pass with `make test`.
 
 ## Pull Request Guidelines
 1. Always create pull requests based on the `dev` branch, unless otherwise specified.

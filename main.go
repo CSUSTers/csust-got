@@ -19,7 +19,6 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
-	"csust-got/prom"
 	"csust-got/restrict"
 	"csust-got/util"
 
@@ -31,7 +30,6 @@ func main() {
 	config.InitConfig("config.yaml", "BOT")
 	log.InitLogger()
 	defer log.Sync()
-	prom.InitPrometheus()
 	orm.InitRedis()
 
 	orm.LoadWhiteList()
@@ -63,7 +61,6 @@ func main() {
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
-	// bot.Handle("/iwatch", util.PrivateCommand(iwatch.WatchHandler))
 	bot.Handle("/sd", sd.Handler, whiteMiddleware)
 	bot.Handle("/sdcfg", sd.ConfigHandler)
 	bot.Handle("/sdlast", sd.LastPromptHandler)

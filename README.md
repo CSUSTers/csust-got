@@ -24,7 +24,6 @@ A modern Telegram bot for CSUST, developed in Go.
 - 🎨 Stable Diffusion Image Generation
 - 🎲 Gacha System
 - 🎭 Entertainment Features
-- 📊 Prometheus Monitoring
 - 🔧 Flexible Configuration System
 - 🎯 Regular Expression Triggers
 - 🛡️ Comprehensive Permission Management
@@ -185,7 +184,6 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 - **Framework**: [telebot.v3](https://github.com/tucnak/telebot)
 - **Database**: Redis
 - **Search**: MeiliSearch
-- **Monitoring**: Prometheus
 - **AI**: OpenAI API Compatible Interface
 - **Image Generation**: Stable Diffusion WebUI
 - **Containerization**: Docker & Docker Compose

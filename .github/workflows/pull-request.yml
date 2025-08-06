@@ -7,14 +7,14 @@ jobs:
 
   lint:
     name: Lint
-    uses: CSUSTers/csust-got/.github/workflows/lint.yml@dev
+    uses: ./.github/workflows/lint.yml
 
 
   test:
     name: Test
-    uses: CSUSTers/csust-got/.github/workflows/test.yml@dev
+    uses: ./.github/workflows/test.yml
 
 
   go-build:
     name: Go Build
-    uses: CSUSTers/csust-got/.github/workflows/go-build.yml@dev
+    uses: ./.github/workflows/go-build.yml

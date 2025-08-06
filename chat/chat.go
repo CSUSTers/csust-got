@@ -307,7 +307,7 @@ final:
 	}
 
 	// Process the streaming response using streamProcessor
-	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, &v2.Format, useMcp, client, &request, &messages, v2)
+	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useMcp, &request, &messages, v2)
 	response, err := processor.process(stream)
 	if err != nil {
 		log.Error("Failed to process streaming response", zap.Error(err))
@@ -325,7 +325,7 @@ final:
 
 }
 
-var extractReasonPatt = regexp.MustCompile(`(?smi)^\s*<think>\s*(?P<reason>.*?)\s*</think>\s*`)
+var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 
 func formatOutput(text string, format *config.ChatOutputFormatConfig) string {

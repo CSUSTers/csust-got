@@ -14,10 +14,9 @@ import (
 var BotConfig *Config
 
 var (
-	noTokenMsg  = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
-	noRedisMsg  = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
-	noMeiliMsg  = "meili configuration is not set! Please set config file config.yaml!"
-	noGithubMsg = "github configuration is not set! Please set config file config.yaml!"
+	noTokenMsg = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
+	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
+	noMeiliMsg = "meili configuration is not set! Please set config file config.yaml!"
 )
 
 // interface for module config
@@ -38,21 +37,18 @@ func InitConfig(configFile, envPrefix string) {
 // In general, you don't need to NewBotConfig, global BotConfig should be used.
 func NewBotConfig() *Config {
 	config := &Config{
-		RateLimitConfig:     new(rateLimitConfig),
-		RedisConfig:         new(redisConfig),
-		RestrictConfig:      new(restrictConfig),
-		MessageConfig:       new(messageConfig),
-		WhiteListConfig:     new(specialListConfig),
-		BlockListConfig:     new(specialListConfig),
-		PromConfig:          new(promConfig),
-		GetVoiceConfig:      new(GetVoiceConfig),
-		MeiliConfig:         new(meiliConfig),
-		McConfig:            new(mcConfig),
-		GithubConfig:        new(githubConfig),
-		ContentFilterConfig: new(contentFilterConfig),
-		DebugOptConfig:      new(debugOptConfig),
-		ChatConfigV2:        new(ChatConfigV2),
-		McpoServer:          new(McpoConfig),
+		RateLimitConfig: new(rateLimitConfig),
+		RedisConfig:     new(redisConfig),
+		RestrictConfig:  new(restrictConfig),
+		MessageConfig:   new(messageConfig),
+		WhiteListConfig: new(specialListConfig),
+		BlockListConfig: new(specialListConfig),
+		GetVoiceConfig:  new(GetVoiceConfig),
+		MeiliConfig:     new(meiliConfig),
+		McConfig:        new(mcConfig),
+		DebugOptConfig:  new(debugOptConfig),
+		ChatConfigV2:    new(ChatConfigV2),
+		McpoServer:      new(McpoConfig),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -82,14 +78,11 @@ type Config struct {
 	MessageConfig   *messageConfig
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
-	PromConfig      *promConfig
 	*GetVoiceConfig
-	ChatConfigV2        *ChatConfigV2
-	McpoServer          *McpoConfig
-	MeiliConfig         *meiliConfig
-	McConfig            *mcConfig
-	GithubConfig        *githubConfig
-	ContentFilterConfig *contentFilterConfig
+	ChatConfigV2 *ChatConfigV2
+	McpoServer   *McpoConfig
+	MeiliConfig  *meiliConfig
+	McConfig     *mcConfig
 
 	DebugOptConfig *debugOptConfig
 }
@@ -156,11 +149,8 @@ func readConfig() {
 	BotConfig.MessageConfig.readConfig()
 	BotConfig.WhiteListConfig.readConfig()
 	BotConfig.BlockListConfig.readConfig()
-	BotConfig.PromConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
-	BotConfig.GithubConfig.readConfig()
-	BotConfig.ContentFilterConfig.readConfig()
 	BotConfig.ChatConfigV2.readConfig()
 	BotConfig.McpoServer.readConfig()
 
@@ -198,12 +188,9 @@ func checkConfig() {
 	BotConfig.MessageConfig.checkConfig()
 	BotConfig.BlockListConfig.checkConfig()
 	BotConfig.WhiteListConfig.checkConfig()
-	BotConfig.PromConfig.checkConfig()
 	BotConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
-	BotConfig.GithubConfig.checkConfig()
-	BotConfig.ContentFilterConfig.checkConfig()
 
 	BotConfig.DebugOptConfig.checkConfig()
 }
