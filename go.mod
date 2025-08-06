@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
-	github.com/meilisearch/meilisearch-go v0.32.0
+	github.com/meilisearch/meilisearch-go v0.33.0
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quic-go/quic-go v0.54.0
 	github.com/redis/go-redis/v9 v9.12.0
@@ -40,8 +40,6 @@ require (
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/josharian/intern v1.0.0 // indirect
-	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
