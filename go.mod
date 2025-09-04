@@ -7,7 +7,7 @@ require (
 	github.com/meilisearch/meilisearch-go v0.33.3
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quic-go/quic-go v0.54.0
-	github.com/redis/go-redis/v9 v9.12.1
+	github.com/redis/go-redis/v9 v9.13.0
 	github.com/sashabaranov/go-openai v1.41.1
 	github.com/spf13/viper v1.20.1
 	github.com/stretchr/testify v1.11.1
