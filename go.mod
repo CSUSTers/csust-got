@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
-	github.com/meilisearch/meilisearch-go v0.33.2
+	github.com/meilisearch/meilisearch-go v0.33.3
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quic-go/quic-go v0.54.0
 	github.com/redis/go-redis/v9 v9.12.1
