@@ -1,6 +1,6 @@
 module csust-got
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
@@ -17,7 +17,7 @@ require (
 	golang.org/x/image v0.30.0
 	golang.org/x/sync v0.16.0
 	golang.org/x/text v0.28.0
-	golang.org/x/time v0.12.0
+	golang.org/x/time v0.13.0
 	gopkg.in/telebot.v3 v3.3.8
 )
 
