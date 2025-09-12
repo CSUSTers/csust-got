@@ -8,7 +8,7 @@ require (
 	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/quic-go/quic-go v0.54.0
 	github.com/redis/go-redis/v9 v9.13.0
-	github.com/sashabaranov/go-openai v1.41.1
+	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggest/openapi-go v0.2.59
