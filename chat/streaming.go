@@ -378,6 +378,8 @@ func (sp *streamProcessor) process(stream *openai.ChatCompletionStream) (string,
 			return "", err
 		}
 
+		log.Debug("llm stream", zap.Any("resp", response))
+
 		if len(response.Choices) == 0 {
 			continue
 		}
