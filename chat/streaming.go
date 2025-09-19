@@ -400,7 +400,8 @@ loop:
 			finished = true
 			fallthrough
 		case openai.FinishReasonFunctionCall, openai.FinishReasonToolCalls:
-			if sp.useMcp {
+			switch {
+			case sp.useMcp:
 				// Check if we have accumulated tool calls
 				toolCalls := sp.aggregateToolCalls()
 
@@ -419,9 +420,10 @@ loop:
 					currentStream = newStream
 					continue loop
 				}
-			} else if finished {
+			case finished:
 				break loop
-			} else {
+			default:
+				// nolint: err113
 				return "", errors.New("model requested function call but MCP is disabled")
 			}
 		case openai.FinishReasonLength, openai.FinishReasonContentFilter:
@@ -434,6 +436,8 @@ loop:
 			log.Warn("Unknown finish reason", zap.String("reason", string(finishReason)))
 		}
 	}
+
+	log.Debug("Stream finished", zap.String("reason", string(finishReason)))
 
 	// Finalize and send the response
 	_, err := sp.finalizeResponse()
