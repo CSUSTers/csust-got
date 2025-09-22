@@ -369,6 +369,8 @@ func (sp *streamProcessor) process(stream *openai.ChatCompletionStream) (string,
 	}()
 
 	// Process the stream
+	finishReason := openai.FinishReasonNull
+loop:
 	for {
 		response, err := currentStream.Recv()
 		if err != nil {
@@ -389,29 +391,53 @@ func (sp *streamProcessor) process(stream *openai.ChatCompletionStream) (string,
 		// Accumulate the content and tool calls
 		sp.processStreamChunk(choice)
 
+		finished := false
+		finishReason = choice.FinishReason
+
 		// Handle tool calls when the stream indicates completion
-		if choice.FinishReason == openai.FinishReasonStop && sp.useMcp {
-			// Check if we have accumulated tool calls
-			toolCalls := sp.aggregateToolCalls()
+		switch finishReason {
+		case openai.FinishReasonStop:
+			finished = true
+			fallthrough
+		case openai.FinishReasonFunctionCall, openai.FinishReasonToolCalls:
+			switch {
+			case sp.useMcp:
+				// Check if we have accumulated tool calls
+				toolCalls := sp.aggregateToolCalls()
 
-			if len(toolCalls) > 0 {
-				// Send bot is typing
-				_ = sp.ctx.Bot().Notify(sp.ctx.Chat(), tb.Typing)
-				// Handle tool calls in the stream
-				newStream, err := sp.handleToolCallsInStream(toolCalls)
-				if err != nil {
-					return "", err
+				if len(toolCalls) > 0 {
+					// Send bot is typing
+					_ = sp.ctx.Bot().Notify(sp.ctx.Chat(), tb.Typing)
+					// Handle tool calls in the stream
+					newStream, err := sp.handleToolCallsInStream(toolCalls)
+					if err != nil {
+						return "", err
+					}
+					// Close current stream and switch to new stream
+					if err := currentStream.Close(); err != nil {
+						log.Error("Failed to close current stream", zap.Error(err))
+					}
+					currentStream = newStream
+					continue loop
 				}
-				// Close current stream and switch to new stream
-				if err := currentStream.Close(); err != nil {
-					log.Error("Failed to close current stream", zap.Error(err))
-				}
-				currentStream = newStream
-				continue
+			case finished:
+				break loop
+			default:
+				// nolint: err113
+				return "", errors.New("model requested function call but MCP is disabled")
 			}
+		case openai.FinishReasonLength, openai.FinishReasonContentFilter:
+			log.Warn("Stream finished unexpected",
+				zap.String("reason", string(finishReason)), zap.Any("response", sp.fullResponse.String()))
+			break loop
+		case openai.FinishReasonNull:
+			// Continue streaming
+		default:
+			log.Warn("Unknown finish reason", zap.String("reason", string(finishReason)))
 		}
-
 	}
+
+	log.Debug("Stream finished", zap.String("reason", string(finishReason)))
 
 	// Finalize and send the response
 	_, err := sp.finalizeResponse()

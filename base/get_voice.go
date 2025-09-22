@@ -466,7 +466,7 @@ func getVoice(ctx tb.Context, index string, text string) error {
 
 // GetVoice for get voice handle
 func GetVoice(ctx tb.Context) error {
-	if !config.BotConfig.GetVoiceConfig.Enable {
+	if !config.BotConfig.Enable {
 		return ctx.Reply("功能未启用")
 	}
 

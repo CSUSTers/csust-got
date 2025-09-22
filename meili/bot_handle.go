@@ -188,7 +188,12 @@ func executeSearch(ctx Context) string {
 		return "No result found"
 	}
 	log.Debug("[MeiliSearch]: Search success", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Any("result", resp.Hits))
-	respMap, err := ExtractFields(resp.Hits)
+	// Convert meilisearch.Hits to []any
+	hits := make([]any, len(resp.Hits))
+	for i, hit := range resp.Hits {
+		hits[i] = hit
+	}
+	respMap, err := ExtractFields(hits)
 	if err != nil {
 		log.Error("[MeiliSearch]: Extract fields failed", zap.String("Search args", command.ArgAllInOneFrom(0)), zap.Error(err))
 		return "Extract fields failed"
