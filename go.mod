@@ -11,7 +11,7 @@ require (
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
-	github.com/swaggest/openapi-go v0.2.59
+	github.com/swaggest/openapi-go v0.2.60
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/image v0.31.0
