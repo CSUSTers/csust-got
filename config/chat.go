@@ -116,6 +116,21 @@ func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 	return d
 }
 
+// ChatFilterConfig represents the configuration for a filter
+type ChatFilterConfig struct {
+	// Type is the type of filter (e.g., "whitelist")
+	Type string `mapstructure:"type"`
+
+	// Whitelist filter configuration
+	Whitelist []int64 `mapstructure:"whitelist,omitempty"`
+}
+
+// ChatFilterSetting represents the filter settings for a chat configuration
+type ChatFilterSetting struct {
+	// Filters is a list of filters to apply in order
+	Filters []ChatFilterConfig `mapstructure:"filters"`
+}
+
 // ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
@@ -133,8 +148,9 @@ type ChatConfigSingle struct {
 	Timeout        int                    `mapstructure:"timeout"` // seconds
 	Format         ChatOutputFormatConfig `mapstructure:"format"`
 
-	Features FeatureSetting `mapstructure:"features"`
-	UseMcpo  bool           `mapstructure:"use_mcpo"`
+	Features FeatureSetting     `mapstructure:"features"`
+	UseMcpo  bool               `mapstructure:"use_mcpo"`
+	Filters  ChatFilterSetting  `mapstructure:"filters"`
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
