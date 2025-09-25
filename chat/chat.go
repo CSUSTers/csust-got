@@ -126,6 +126,12 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		}
 	}
 
+	// 处理过滤器
+	if result := ProcessFilters(ctx, v2); result == FilterDeny {
+		// 消息被过滤器拒绝，直接返回
+		return nil
+	}
+
 	input := ctx.Message().Text
 	if input == "" {
 		input = ctx.Message().Caption
@@ -146,7 +152,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	}
 
 	// 准备模板数据
-	data := promptData{
+	data := &promptData{
 		DateTime:        time.Now().Format(time.RFC3339),
 		Input:           input,
 		ContextMessages: contextMsgs,
@@ -154,6 +160,15 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		ContextXml:      FormatContextMessagesWithXml(contextMsgs),
 		ReplyToXml:      FormatSingleTbMessage(ctx.Message().ReplyTo, "REPLY_TO"),
 		BotUsername:     ctx.Bot().Me.Username, // 添加 Bot 的用户名
+	}
+
+	// 处理过滤器的PromptData
+	for _, filterConfig := range v2.Filters.Filters {
+		filter := createFilter(&filterConfig)
+		if filter == nil {
+			continue
+		}
+		data = filter.ProcessPromptData(data, ctx, v2)
 	}
 
 	templs, err := getTemplate(v2, false)
@@ -318,6 +333,15 @@ final:
 			}
 		}
 		return err
+	}
+
+	// 处理过滤器的Outgoing
+	for _, filterConfig := range v2.Filters.Filters {
+		filter := createFilter(&filterConfig)
+		if filter == nil {
+			continue
+		}
+		response = filter.ProcessOutgoing(response, ctx, v2)
 	}
 
 	log.Debug("Chat response", zap.String("response", response))
