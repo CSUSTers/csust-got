@@ -36,9 +36,9 @@ type whitelistFilter struct {
 }
 
 // newWhitelistFilter creates a new whitelist filter
-func newWhitelistFilter(config *config.ChatFilterConfig) *whitelistFilter {
+func newWhitelistFilter(filterConfig *config.ChatFilterConfig) *whitelistFilter {
 	wl := make(map[int64]bool)
-	for _, id := range config.Whitelist {
+	for _, id := range filterConfig.Whitelist {
 		wl[id] = true
 	}
 	return &whitelistFilter{whitelist: wl}
@@ -71,10 +71,10 @@ func (w *whitelistFilter) ProcessPromptData(data *promptData, ctx tb.Context, ch
 }
 
 // createFilter creates a filter based on its configuration
-func createFilter(config *config.ChatFilterConfig) Filter {
-	switch config.Type {
+func createFilter(filterConfig *config.ChatFilterConfig) Filter {
+	switch filterConfig.Type {
 	case "whitelist":
-		return newWhitelistFilter(config)
+		return newWhitelistFilter(filterConfig)
 	default:
 		return nil
 	}

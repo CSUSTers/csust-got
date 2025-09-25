@@ -50,7 +50,7 @@ func (m *mockContext) Notify(action tb.ChatAction) error            { return nil
 func (m *mockContext) Ship(opts ...interface{}) error {
 	return nil
 }
-func (m *mockContext) Checkout(OK bool, opts ...interface{}) error {
+func (m *mockContext) Checkout(ok bool, opts ...interface{}) error {
 	return nil
 }
 func (m *mockContext) Acknowledge() error {
