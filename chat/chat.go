@@ -298,10 +298,11 @@ final:
 	useMcp := v2.UseMcpo && config.BotConfig.McpoServer.Enable
 
 	request := openai.ChatCompletionRequest{
-		Model:       v2.Model.Model,
-		Messages:    messages,
-		Temperature: v2.GetTemperature(),
-		Stream:      true, // Enable streaming
+		Model:           v2.Model.Model,
+		Messages:        messages,
+		Temperature:     v2.GetTemperature(),
+		Stream:          true, // Enable streaming
+		ReasoningEffort: v2.ReasoningEffort,
 	}
 	if useMcp {
 		request.Tools = mcpo.GetToolSet("")

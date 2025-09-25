@@ -1,6 +1,6 @@
 # global config
 debug: false
-worker: 4               # number of goroutine to recv update [int]
+worker: 4 # number of goroutine to recv update [int]
 
 # [新增] 用于智能断句的句子分界符列表 (全局共享)
 sentence_delimiters:
@@ -28,14 +28,14 @@ black_list:
 white_list:
   enabled: true
 restrict:
-  kill_duration: 300       # restrict duration for command `kill` [second]
-  fake_ban_max_add: 120    # max add ban time for command `kill` or `fake ban xxx` [second]
+  kill_duration: 300 # restrict duration for command `kill` [second]
+  fake_ban_max_add: 120 # max add ban time for command `kill` or `fake ban xxx` [second]
 rate_limit:
-  max_token: 20         # token bucket size, must [int]
-  limit: 0.5            # how many tokens get every second [float64]
-  cost: 1               # default cost every message [int]
-  cost_sticker: 3       # cost of every sticker, sticker message use this cost [int]
-  cost_command: 2       # cost of every command, command message use this cost [int]
+  max_token: 20 # token bucket size, must [int]
+  limit: 0.5 # how many tokens get every second [float64]
+  cost: 1 # default cost every message [int]
+  cost_sticker: 3 # cost of every sticker, sticker message use this cost [int]
+  cost_command: 2 # cost of every command, command message use this cost [int]
 
 # redis config
 redis:
@@ -58,7 +58,7 @@ llm_models:
     api_key: "xxx"
     prompt_limit: 1000
     retry_nums: 5
-    retry_interval: 1  # 单位：秒
+    retry_interval: 1 # 单位：秒
 
   gpt: &gpt
     <<: *default
@@ -72,6 +72,11 @@ llm_models:
     <<: *default
     name: "qwen"
     model: "qwen-xxx"
+
+chat_whitelist: &whitelist_filter
+  filters:
+    - type: "whitelist"
+      white_list: [123, 345]
 
 mcpo_server:
   enable: true
@@ -156,14 +161,16 @@ chats:
       <USER_INPUT>
       {{ .Input }}
       </USER_INPUT>
-  - 
-    <<: *chat_c
+  - <<: *chat_c
+    message_context: 1
     name: 思考bot
     trigger:
       - command: "think"
     format:
       reason: "collapse"
       payload: "markdown-block"
+    reasoning_effort: "medium"
+    filter: *whitelist_filter
     system_prompt: |-
       /think 你是一个Telegram聊天机器人，你的名字是{{.BotUsername}}，现在需要你需要参与到用户的聊天中。请遵循以下规则：
       1、回答尽量简短，不要长篇大论。
@@ -205,7 +212,6 @@ chats:
       {{with .ReplyToXml}}{{.}}{{end}}
       </USER_INPUT>
 
-
 # meili search
 meili:
   enabled: false
@@ -233,7 +239,6 @@ get_voice:
       alias: [hsr, 铁道, 崩坏星穹铁道, 星铁, 铁]
       index_uid: hsr
       voice_base_url: "https://api.csu.st/file/gameAudio/HSR"
-
 
 mc:
   max_count: 10
