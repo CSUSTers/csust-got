@@ -119,6 +119,8 @@ data/
 .vscode/
 .idea/
 
+.claude/
+
 # output
 got
 csust-got
