@@ -398,7 +398,11 @@ loop:
 		switch finishReason {
 		case openai.FinishReasonStop:
 			finished = true
-			fallthrough
+
+			// fallthrough
+
+			// maybe should we break the loop here directly?
+			break loop
 		case openai.FinishReasonFunctionCall, openai.FinishReasonToolCalls:
 			switch {
 			case sp.useMcp:
@@ -420,6 +424,7 @@ loop:
 					currentStream = newStream
 					continue loop
 				}
+				fallthrough
 			case finished:
 				break loop
 			default:
