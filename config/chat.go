@@ -116,25 +116,42 @@ func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 	return d
 }
 
+// ChatFilterConfig represents the configuration for a filter
+type ChatFilterConfig struct {
+	// Type is the type of filter (e.g., "whitelist")
+	Type string `mapstructure:"type"`
+
+	// Whitelist filter configuration
+	Whitelist []int64 `mapstructure:"whitelist,omitempty"`
+}
+
+// ChatFilterSetting represents the filter settings for a chat configuration
+type ChatFilterSetting struct {
+	// Filters is a list of filters to apply in order
+	Filters []ChatFilterConfig `mapstructure:"filters"`
+}
+
 // ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
 // ChatConfigSingle is the configuration for a single chat
 type ChatConfigSingle struct {
-	Name           string                 `mapstructure:"name"`
-	Model          *Model                 `mapstructure:"model"`
-	MessageContext int                    `mapstructure:"message_context"`
-	Temperature    *float32               `mapstructure:"temperature"`
-	PlaceHolder    string                 `mapstructure:"place_holder"`
-	ErrorMessage   string                 `mapstructure:"error_message"` // 添加错误提示消息配置
-	SystemPrompt   JoinableString         `mapstructure:"system_prompt"`
-	PromptTemplate JoinableString         `mapstructure:"prompt_template"`
-	Trigger        []*ChatTrigger         `mapstructure:"trigger"`
-	Timeout        int                    `mapstructure:"timeout"` // seconds
-	Format         ChatOutputFormatConfig `mapstructure:"format"`
+	Name            string                 `mapstructure:"name"`
+	Model           *Model                 `mapstructure:"model"`
+	MessageContext  int                    `mapstructure:"message_context"`
+	Temperature     *float32               `mapstructure:"temperature"`
+	PlaceHolder     string                 `mapstructure:"place_holder"`
+	ErrorMessage    string                 `mapstructure:"error_message"` // 添加错误提示消息配置
+	SystemPrompt    JoinableString         `mapstructure:"system_prompt"`
+	PromptTemplate  JoinableString         `mapstructure:"prompt_template"`
+	Trigger         []*ChatTrigger         `mapstructure:"trigger"`
+	Timeout         int                    `mapstructure:"timeout"` // seconds
+	Format          ChatOutputFormatConfig `mapstructure:"format"`
+	ReasoningEffort string                 `mapstructure:"reasoning_effort"`
 
-	Features FeatureSetting `mapstructure:"features"`
-	UseMcpo  bool           `mapstructure:"use_mcpo"`
+	Features FeatureSetting    `mapstructure:"features"`
+	UseMcpo  bool              `mapstructure:"use_mcpo"`
+	Filters  ChatFilterSetting `mapstructure:"filters"`
 }
 
 // TriggerOnReply checks if the chat will trigger on reply

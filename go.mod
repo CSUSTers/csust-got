@@ -6,12 +6,12 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/meilisearch/meilisearch-go v0.34.0
 	github.com/puzpuzpuz/xsync/v4 v4.2.0
-	github.com/quic-go/quic-go v0.54.0
+	github.com/quic-go/quic-go v0.54.1
 	github.com/redis/go-redis/v9 v9.14.0
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
-	github.com/swaggest/openapi-go v0.2.59
+	github.com/swaggest/openapi-go v0.2.60
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/image v0.31.0

@@ -420,6 +420,7 @@ loop:
 					currentStream = newStream
 					continue loop
 				}
+				fallthrough
 			case finished:
 				break loop
 			default:
