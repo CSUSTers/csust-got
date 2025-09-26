@@ -170,7 +170,7 @@ chats:
       reason: "collapse"
       payload: "markdown-block"
     reasoning_effort: "medium"
-    filter: *whitelist_filter
+    filters: *whitelist_filter
     system_prompt: |-
       /think 你是一个Telegram聊天机器人，你的名字是{{.BotUsername}}，现在需要你需要参与到用户的聊天中。请遵循以下规则：
       1、回答尽量简短，不要长篇大论。
