@@ -391,14 +391,13 @@ loop:
 		// Accumulate the content and tool calls
 		sp.processStreamChunk(choice)
 
-		finished := false
+		// finished := false
 		finishReason = choice.FinishReason
 
 		// Handle tool calls when the stream indicates completion
 		switch finishReason {
 		case openai.FinishReasonStop:
-			finished = true
-
+			// finished = true
 			// fallthrough
 
 			// maybe should we break the loop here directly?
@@ -424,9 +423,9 @@ loop:
 					currentStream = newStream
 					continue loop
 				}
-				fallthrough
-			case finished:
 				break loop
+			// case finished:
+			// 	break loop
 			default:
 				// nolint: err113
 				return "", errors.New("model requested function call but MCP is disabled")
