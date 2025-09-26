@@ -439,7 +439,6 @@ loop:
 			// Continue streaming
 		default:
 			log.Warn("Unknown finish reason", zap.String("reason", string(finishReason)))
-			break loop
 		}
 	}
 
