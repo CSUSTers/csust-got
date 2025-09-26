@@ -152,7 +152,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	}
 
 	// 准备模板数据
-	data := promptData{
+	data := &promptData{
 		DateTime:        time.Now().Format(time.RFC3339),
 		Input:           input,
 		ContextMessages: contextMsgs,
