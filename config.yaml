@@ -76,7 +76,7 @@ llm_models:
 chat_whitelist: &whitelist_filter
   filters:
     - type: "whitelist"
-      white_list: [123, 345]
+      whitelist: [123, 345]
 
 mcpo_server:
   enable: true
