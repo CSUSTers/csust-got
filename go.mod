@@ -17,7 +17,7 @@ require (
 	golang.org/x/image v0.32.0
 	golang.org/x/sync v0.17.0
 	golang.org/x/text v0.30.0
-	golang.org/x/time v0.13.0
+	golang.org/x/time v0.14.0
 	gopkg.in/telebot.v3 v3.3.8
 )
 
