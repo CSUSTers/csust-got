@@ -31,7 +31,7 @@
 
 ## 系统要求
 
-- Go 1.24+
+- Go 1.25+
 - Redis
 - Docker & Docker Compose（推荐）
 
@@ -180,7 +180,7 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 
 ## 技术栈
 
-- **语言**: Go 1.24+
+- **语言**: Go 1.25+
 - **框架**: [telebot.v3](https://github.com/tucnak/telebot)
 - **数据库**: Redis
 - **搜索**: MeiliSearch
