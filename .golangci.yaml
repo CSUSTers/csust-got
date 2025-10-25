@@ -238,8 +238,6 @@ linters:
         - XMPP
         - XSRF
         - XSS
-      dot-import-whitelist:
-        - gopkg.in/telebot.v3
       http-status-code-whitelist:
         - "200"
         - "400"
