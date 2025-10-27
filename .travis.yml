@@ -1,5 +1,5 @@
 language: go
-go: "1.24"
+go: "1.25"
 scripts:
   - make build
   - echo "Test Complete"
