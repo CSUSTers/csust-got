@@ -14,7 +14,7 @@ require (
 	github.com/swaggest/openapi-go v0.2.60
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/image v0.32.0
+	golang.org/x/image v0.33.0
 	golang.org/x/sync v0.18.0
 	golang.org/x/text v0.31.0
 	golang.org/x/time v0.14.0
