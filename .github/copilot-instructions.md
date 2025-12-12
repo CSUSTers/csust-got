@@ -28,7 +28,7 @@ byeWorldMiddleware → mcMiddleware
 
 ### Command Scope Helpers (util/utils.go)
 - `util.PrivateCommand(handler)` - Only in private chats
-- `util.GroupCommand(handler)` - Only in group chats  
+- `util.GroupCommand(handler)` - Only in group chats
 - `util.GroupCommandCtx(handler)` - Group-only with context tracking
 - `whiteMiddleware` - Whitelist enforcement (only for sensitive commands like `/sd`)
 
