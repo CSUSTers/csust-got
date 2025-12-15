@@ -431,7 +431,7 @@ loop:
 			log.Warn("Stream finished unexpected",
 				zap.String("reason", string(finishReason)), zap.Any("response", sp.fullResponse.String()))
 			break loop
-		case openai.FinishReasonNull:
+		case openai.FinishReasonNull, "":
 			// Continue streaming
 		default:
 			log.Warn("Unknown finish reason", zap.String("reason", string(finishReason)))
