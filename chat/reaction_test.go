@@ -3,6 +3,7 @@ package chat
 import (
 	"csust-got/config"
 	"csust-got/orm"
+	"sync"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -12,7 +13,7 @@ import (
 
 func TestHandleMessageReaction_NoReaction(t *testing.T) {
 	ctx := &mockContext{}
-	
+
 	err := HandleMessageReaction(ctx)
 	assert.NoError(t, err)
 }
@@ -29,7 +30,7 @@ func TestHandleMessageReaction_NonThumbsDownReaction(t *testing.T) {
 			},
 		},
 	}
-	
+
 	err := HandleMessageReaction(ctx)
 	assert.NoError(t, err)
 }
@@ -56,7 +57,7 @@ func TestGetParseMode(t *testing.T) {
 			expected: tb.ModeMarkdownV2,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chatConfig := &config.ChatConfigSingle{
@@ -81,10 +82,10 @@ func TestAIResponseMetadata_NilMessages(t *testing.T) {
 		Messages:        nil,
 		RegenerateCount: 0,
 	}
-	
+
 	// The code should handle nil Messages gracefully
 	assert.Nil(t, metadata.Messages)
-	
+
 	// When appending, it should initialize an empty slice
 	messages := metadata.Messages
 	if messages == nil {
@@ -96,7 +97,7 @@ func TestAIResponseMetadata_NilMessages(t *testing.T) {
 			Content: "test",
 		},
 	)
-	
+
 	assert.Len(t, messages, 1)
 	assert.Equal(t, "test", messages[0].Content)
 }
@@ -133,20 +134,20 @@ func TestMessageContentExtraction(t *testing.T) {
 			expected: "",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			msg := &tb.Message{
 				Text:    tt.text,
 				Caption: tt.caption,
 			}
-			
+
 			// Simulate the logic used in reaction.go
 			content := msg.Text
 			if content == "" {
 				content = msg.Caption
 			}
-			
+
 			assert.Equal(t, tt.expected, content)
 		})
 	}
@@ -160,4 +161,54 @@ type mockContextWithUpdate struct {
 
 func (m *mockContextWithUpdate) Update() tb.Update {
 	return m.update
+}
+
+func TestRegeneratingLock(t *testing.T) {
+	chatID := int64(123)
+	messageID := 456
+	
+	// Initially should not be regenerating
+	assert.False(t, isRegenerating(chatID, messageID))
+	
+	// Mark as regenerating
+	setRegenerating(chatID, messageID, true)
+	assert.True(t, isRegenerating(chatID, messageID))
+	
+	// Mark as not regenerating
+	setRegenerating(chatID, messageID, false)
+	assert.False(t, isRegenerating(chatID, messageID))
+	
+	// Test concurrent access
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			setRegenerating(chatID, messageID, true)
+			setRegenerating(chatID, messageID, false)
+		}()
+	}
+	wg.Wait()
+	
+	// Should end up as not regenerating
+	assert.False(t, isRegenerating(chatID, messageID))
+}
+
+func TestMakeRegeneratingKey(t *testing.T) {
+	tests := []struct {
+		chatID    int64
+		messageID int
+		expected  string
+	}{
+		{123, 456, "123:456"},
+		{-1001234567890, 999, "-1001234567890:999"},
+		{0, 0, "0:0"},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			result := makeRegeneratingKey(tt.chatID, tt.messageID)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }

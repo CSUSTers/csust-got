@@ -6,11 +6,46 @@ import (
 	"csust-got/log"
 	"csust-got/orm"
 	"csust-got/util"
+	"fmt"
+	"sync"
 
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
+
+// regeneratingMessages tracks messages currently being regenerated to prevent concurrent regeneration
+var regeneratingMessages = struct {
+	sync.Mutex
+	msgs map[string]bool
+}{
+	msgs: make(map[string]bool),
+}
+
+// isRegenerating checks if a message is currently being regenerated
+func isRegenerating(chatID int64, messageID int) bool {
+	regeneratingMessages.Lock()
+	defer regeneratingMessages.Unlock()
+	key := makeRegeneratingKey(chatID, messageID)
+	return regeneratingMessages.msgs[key]
+}
+
+// setRegenerating marks a message as being regenerated
+func setRegenerating(chatID int64, messageID int, value bool) {
+	regeneratingMessages.Lock()
+	defer regeneratingMessages.Unlock()
+	key := makeRegeneratingKey(chatID, messageID)
+	if value {
+		regeneratingMessages.msgs[key] = true
+	} else {
+		delete(regeneratingMessages.msgs, key)
+	}
+}
+
+// makeRegeneratingKey creates a unique key for tracking regenerating messages
+func makeRegeneratingKey(chatID int64, messageID int) string {
+	return fmt.Sprintf("%d:%d", chatID, messageID)
+}
 
 // HandleMessageReaction handles user reactions to bot messages
 // When a user reacts with 👎 to an AI-generated message, regenerate the response
@@ -32,6 +67,18 @@ func HandleMessageReaction(ctx tb.Context) error {
 	if !hasThumbsDown {
 		return nil
 	}
+
+	// Check if this message is already being regenerated
+	if isRegenerating(reaction.Chat.ID, reaction.MessageID) {
+		log.Debug("Message already being regenerated, skipping",
+			zap.Int64("chat", reaction.Chat.ID),
+			zap.Int("msg", reaction.MessageID))
+		return nil
+	}
+
+	// Mark as regenerating and ensure cleanup on exit
+	setRegenerating(reaction.Chat.ID, reaction.MessageID, true)
+	defer setRegenerating(reaction.Chat.ID, reaction.MessageID, false)
 
 	// Get the bot message metadata
 	metadata, err := orm.GetAIResponseMetadata(reaction.Chat.ID, reaction.MessageID)
