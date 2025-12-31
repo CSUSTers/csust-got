@@ -115,7 +115,9 @@ func handleAddData(data meiliData) {
 	})
 
 	messageID := "message_id"
-	_, err = client.Index(indexName).AddDocuments([]map[string]any{data.Data}, &messageID)
+	_, err = client.Index(indexName).AddDocuments([]map[string]any{data.Data}, &meilisearch.DocumentOptions{
+		PrimaryKey: &messageID,
+	})
 	if err != nil {
 		log.Error("[MeiliSearch]: add data to index failed", zap.Error(err))
 		return
