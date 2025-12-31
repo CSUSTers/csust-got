@@ -918,6 +918,8 @@ type AIResponseMetadata struct {
 	// Messages contains the conversation history leading to this response; can be nil for responses without context
 	Messages        []openai.ChatCompletionMessage `json:"messages"`
 	RegenerateCount int                            `json:"regenerate_count"`
+	// AllowRegenerate indicates whether this message supports regeneration via 👎 reaction
+	AllowRegenerate bool `json:"allow_regenerate"`
 }
 
 // SetAIResponseMetadata stores AI response metadata for regeneration

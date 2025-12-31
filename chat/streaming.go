@@ -326,6 +326,7 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 			OriginalPrompt:  originalPrompt,
 			Messages:        *sp.messages,
 			RegenerateCount: 0,
+			AllowRegenerate: sp.config.Features.AllowRegenerate,
 		}
 		if storeErr := orm.SetAIResponseMetadata(metadata); storeErr != nil {
 			log.Warn("Failed to store AI response metadata", zap.Error(storeErr))

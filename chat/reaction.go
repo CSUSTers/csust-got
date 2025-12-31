@@ -91,6 +91,14 @@ func HandleMessageReaction(ctx tb.Context) error {
 		return nil
 	}
 
+	// Check if regeneration is allowed based on stored metadata flag
+	if !metadata.AllowRegenerate {
+		log.Debug("Regeneration not allowed for this message",
+			zap.Int64("chat", reaction.Chat.ID),
+			zap.Int("msg", reaction.MessageID))
+		return nil
+	}
+
 	// Limit regeneration attempts
 	if metadata.RegenerateCount >= 3 {
 		log.Info("Max regeneration count reached",
@@ -137,11 +145,15 @@ func HandleMessageReaction(ctx tb.Context) error {
 		return nil
 	}
 
-	// Check if regeneration is allowed for this chat config
-	if !chatConfig.Features.AllowRegenerate {
-		log.Debug("Regeneration disabled for this chat config",
-			zap.String("configName", metadata.ConfigName))
-		return nil
+	// Update original message with processing emoji to indicate regeneration is in progress
+	processingPrefix := "⏳ "
+	botMsgContent := botMsg.Text
+	if botMsgContent == "" {
+		botMsgContent = botMsg.Caption
+	}
+	_, editErr := util.EditMessageWithError(botMsg, processingPrefix+botMsgContent, getParseMode(chatConfig))
+	if editErr != nil {
+		log.Warn("Failed to add processing indicator to message", zap.Error(editErr))
 	}
 
 	// Create a regeneration context
@@ -258,6 +270,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 		OriginalPrompt:  originalPrompt,
 		Messages:        messages,
 		RegenerateCount: regenerateCount,
+		AllowRegenerate: chatConfig.Features.AllowRegenerate,
 	}
 	if err := orm.SetAIResponseMetadata(metadata); err != nil {
 		log.Warn("Failed to update AI response metadata after regeneration", zap.Error(err))
