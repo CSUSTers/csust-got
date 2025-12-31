@@ -210,13 +210,13 @@ func executeSearch(ctx Context) string {
 	}
 	// group id warping to url. e.g.: -1001817319583 -> 1817319583
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
-	var rplMsgSb212 strings.Builder
+	var sb strings.Builder
 	for item := range respMap {
-		rplMsgSb212.WriteString(fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
+		sb.WriteString(fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
 			respMap[item]["id"], chatUrl, respMap[item]["id"],
 			util.EscapeTgMDv2ReservedChars(respMap[item]["text"])))
 	}
-	rplMsg += rplMsgSb212.String()
+	rplMsg += sb.String()
 
 	// Add pagination buttons if needed
 	if resp.TotalPages > 1 {

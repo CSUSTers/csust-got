@@ -113,7 +113,7 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
-	bot.Use(loggerMiddleware, skipMiddleware, reactionMiddleware, blockMiddleware, fakeBanMiddleware,
+	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, reactionMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
 		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)

@@ -94,9 +94,19 @@ func HandleMessageReaction(ctx tb.Context) error {
 		return nil
 	}
 
+	// Check if regeneration is allowed for this chat config
+	if !chatConfig.Features.AllowRegenerate {
+		log.Debug("Regeneration disabled for this chat config",
+			zap.String("configName", metadata.ConfigName))
+		return nil
+	}
+
 	// Create a regeneration context
 	// Add the previous bot response and user feedback to messages
 	regenerateMessages := metadata.Messages
+	if regenerateMessages == nil {
+		regenerateMessages = make([]openai.ChatCompletionMessage, 0)
+	}
 	regenerateMessages = append(regenerateMessages,
 		openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleAssistant,
@@ -128,7 +138,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 	client := clients[chatConfig.Model.Name]
 	if client == nil {
 		log.Error("AI client not found", zap.String("model", chatConfig.Model.Name))
-		return nil
+		return orm.ErrClientNotFound
 	}
 
 	// Notify user that we're regenerating

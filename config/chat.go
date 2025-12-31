@@ -191,6 +191,7 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
+	AllowRegenerate bool `mapstructure:"allow_regenerate"` // Allow regeneration on 👎 reaction
 }
 
 // McpoConfig is the configuration for mcpo server
