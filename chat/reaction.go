@@ -12,6 +12,10 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+const (
+	formatHTML = "html"
+)
+
 // HandleMessageReaction handles user reactions to bot messages
 // When a user reacts with 👎 to an AI-generated message, regenerate the response
 func HandleMessageReaction(ctx tb.Context) error {
@@ -37,8 +41,8 @@ func HandleMessageReaction(ctx tb.Context) error {
 	metadata, err := orm.GetAIResponseMetadata(reaction.Chat.ID, reaction.MessageID)
 	if err != nil {
 		// Not an AI-generated message or metadata not found
-		log.Debug("AI response metadata not found", 
-			zap.Int64("chat", reaction.Chat.ID), 
+		log.Debug("AI response metadata not found",
+			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("msg", reaction.MessageID),
 			zap.Error(err))
 		return nil
@@ -46,22 +50,22 @@ func HandleMessageReaction(ctx tb.Context) error {
 
 	// Limit regeneration attempts
 	if metadata.RegenerateCount >= 3 {
-		log.Info("Max regeneration count reached", 
-			zap.Int64("chat", reaction.Chat.ID), 
+		log.Info("Max regeneration count reached",
+			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("msg", reaction.MessageID))
 		return nil
 	}
 
-	log.Info("Regenerating response due to 👎 reaction", 
-		zap.Int64("chat", reaction.Chat.ID), 
+	log.Info("Regenerating response due to 👎 reaction",
+		zap.Int64("chat", reaction.Chat.ID),
 		zap.Int("msg", reaction.MessageID),
 		zap.Int("userMsg", metadata.UserMessageID))
 
 	// Get the original user message
 	userMsg, err := orm.GetMessage(reaction.Chat.ID, metadata.UserMessageID)
 	if err != nil {
-		log.Error("Failed to get original user message", 
-			zap.Int64("chat", reaction.Chat.ID), 
+		log.Error("Failed to get original user message",
+			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("userMsg", metadata.UserMessageID),
 			zap.Error(err))
 		return nil
@@ -70,8 +74,8 @@ func HandleMessageReaction(ctx tb.Context) error {
 	// Get the bot message that needs to be edited
 	botMsg, err := orm.GetMessage(reaction.Chat.ID, reaction.MessageID)
 	if err != nil {
-		log.Error("Failed to get bot message", 
-			zap.Int64("chat", reaction.Chat.ID), 
+		log.Error("Failed to get bot message",
+			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("botMsg", reaction.MessageID),
 			zap.Error(err))
 		return nil
@@ -91,27 +95,24 @@ func HandleMessageReaction(ctx tb.Context) error {
 	}
 
 	// Create a regeneration context
-	// Add the previous bot response to messages with negative feedback
-	regenerateMessages := make([]openai.ChatCompletionMessage, len(metadata.Messages))
-	copy(regenerateMessages, metadata.Messages)
-	
-	// Add the previous assistant's response (the one user disliked)
-	regenerateMessages = append(regenerateMessages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleAssistant,
-		Content: botMsg.Text,
-	})
-	
-	// Add user feedback about the previous response
-	regenerateMessages = append(regenerateMessages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleUser,
-		Content: "用户认为上次的回答👎",
-	})
+	// Add the previous bot response and user feedback to messages
+	regenerateMessages := metadata.Messages
+	regenerateMessages = append(regenerateMessages,
+		openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleAssistant,
+			Content: botMsg.Text,
+		},
+		openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: "用户认为上次的回答👎",
+		},
+	)
 
 	// Regenerate with the updated context
 	err = regenerateResponse(ctx.Bot(), userMsg, botMsg, chatConfig, regenerateMessages, metadata.RegenerateCount+1)
 	if err != nil {
-		log.Error("Failed to regenerate response", 
-			zap.Int64("chat", reaction.Chat.ID), 
+		log.Error("Failed to regenerate response",
+			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("botMsg", reaction.MessageID),
 			zap.Error(err))
 		return err
@@ -121,9 +122,9 @@ func HandleMessageReaction(ctx tb.Context) error {
 }
 
 // regenerateResponse regenerates an AI response and edits the original message
-func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *config.ChatConfigSingle, 
+func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *config.ChatConfigSingle,
 	messages []openai.ChatCompletionMessage, regenerateCount int) error {
-	
+
 	client := clients[chatConfig.Model.Name]
 	if client == nil {
 		log.Error("AI client not found", zap.String("model", chatConfig.Model.Name))
@@ -197,8 +198,8 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 		log.Warn("Failed to update AI response metadata after regeneration", zap.Error(err))
 	}
 
-	log.Info("Successfully regenerated response", 
-		zap.Int64("chat", botMsg.Chat.ID), 
+	log.Info("Successfully regenerated response",
+		zap.Int64("chat", botMsg.Chat.ID),
 		zap.Int("botMsg", botMsg.ID),
 		zap.String("response", response))
 
@@ -206,7 +207,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 }
 
 func getParseMode(chatConfig *config.ChatConfigSingle) tb.ParseMode {
-	if chatConfig.Format.Format == "html" {
+	if chatConfig.Format.Format == formatHTML {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
