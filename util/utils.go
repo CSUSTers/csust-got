@@ -243,10 +243,12 @@ func DeleteSlice(a []string, subSlice string) []string {
 // GetAllReplyMessagesText get all reply messages text.
 func GetAllReplyMessagesText(m *tb.Message) string {
 	var ret string
+	var retSb246 strings.Builder
 	for m.ReplyTo != nil {
-		ret += m.ReplyTo.Text + "\n"
+		retSb246.WriteString(m.ReplyTo.Text + "\n")
 		m = m.ReplyTo
 	}
+	ret += retSb246.String()
 	return ret
 }
 
