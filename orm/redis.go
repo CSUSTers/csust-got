@@ -907,3 +907,70 @@ func GetFileCache(keys []string, expire ...time.Duration) (*FileCache, error) {
 	}
 	return file, nil
 }
+
+// AIResponseMetadata stores metadata about an AI-generated response
+type AIResponseMetadata struct {
+	BotMessageID   int                               `json:"bot_message_id"`
+	UserMessageID  int                               `json:"user_message_id"`
+	ChatID         int64                             `json:"chat_id"`
+	ConfigName     string                            `json:"config_name"`
+	OriginalPrompt string                            `json:"original_prompt"`
+	Messages       []openai.ChatCompletionMessage    `json:"messages"`
+	RegenerateCount int                              `json:"regenerate_count"`
+}
+
+// SetAIResponseMetadata stores AI response metadata for regeneration
+func SetAIResponseMetadata(metadata *AIResponseMetadata) error {
+	if metadata == nil {
+		return errors.New("metadata is nil")
+	}
+	
+	key := wrapKeyWithChatMsg("ai_response_meta", metadata.ChatID, metadata.BotMessageID)
+	
+	jsonData, err := json.Marshal(metadata)
+	if err != nil {
+		log.Error("marshal ai response metadata to json failed", 
+			zap.Int64("chat", metadata.ChatID), 
+			zap.Int("botMsg", metadata.BotMessageID), 
+			zap.Error(err))
+		return err
+	}
+	
+	// Store for 24 hours
+	err = rc.Set(context.TODO(), key, jsonData, 24*time.Hour).Err()
+	if err != nil {
+		log.Error("set ai response metadata to redis failed", 
+			zap.Int64("chat", metadata.ChatID), 
+			zap.Int("botMsg", metadata.BotMessageID), 
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// GetAIResponseMetadata retrieves AI response metadata
+func GetAIResponseMetadata(chatID int64, botMessageID int) (*AIResponseMetadata, error) {
+	key := wrapKeyWithChatMsg("ai_response_meta", chatID, botMessageID)
+	
+	jsonData, err := rc.Get(context.TODO(), key).Bytes()
+	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			log.Error("get ai response metadata from redis failed", 
+				zap.Int64("chat", chatID), 
+				zap.Int("botMsg", botMessageID), 
+				zap.Error(err))
+		}
+		return nil, err
+	}
+	
+	var metadata AIResponseMetadata
+	if err := json.Unmarshal(jsonData, &metadata); err != nil {
+		log.Error("unmarshal ai response metadata failed", 
+			zap.Int64("chat", chatID), 
+			zap.Int("botMsg", botMessageID), 
+			zap.Error(err))
+		return nil, err
+	}
+	
+	return &metadata, nil
+}
