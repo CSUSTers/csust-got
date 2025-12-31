@@ -54,15 +54,20 @@ type ChatOutputFormatConfig struct {
 	EditInterval string `mapstructure:"edit_interval"`
 }
 
+const (
+	// OutputFormatMarkdown is the markdown format type
+	OutputFormatMarkdown = "markdown"
+	// OutputFormatHTML is the HTML format type
+	OutputFormatHTML = "html"
+)
+
 // GetFormat get message format
-//
-// nolint: goconst
 func (c *ChatOutputFormatConfig) GetFormat() string {
 	switch strings.ToLower(c.Format) {
 	case "", "md", "mdv2", "markdown", "markdownv2":
-		return "markdown"
+		return OutputFormatMarkdown
 	case "html":
-		return "html"
+		return OutputFormatHTML
 	default:
 		return ""
 	}

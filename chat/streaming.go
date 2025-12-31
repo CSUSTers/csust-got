@@ -144,7 +144,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 
 // getFormatOption returns the appropriate Telegram formatting option
 func (sp *streamProcessor) getFormatOption() tb.ParseMode {
-	if sp.config.Format.Format == "html" {
+	if sp.config.Format.Format == config.OutputFormatHTML {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
@@ -313,12 +313,17 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 
 	// Store AI response metadata for potential regeneration
 	if sp.ctx.Message() != nil {
+		originalPrompt := sp.ctx.Message().Text
+		if originalPrompt == "" {
+			originalPrompt = sp.ctx.Message().Caption
+		}
+
 		metadata := &orm.AIResponseMetadata{
 			BotMessageID:    replyMsg.ID,
 			UserMessageID:   sp.ctx.Message().ID,
 			ChatID:          replyMsg.Chat.ID,
 			ConfigName:      sp.config.Name,
-			OriginalPrompt:  sp.ctx.Message().Text,
+			OriginalPrompt:  originalPrompt,
 			Messages:        *sp.messages,
 			RegenerateCount: 0,
 		}

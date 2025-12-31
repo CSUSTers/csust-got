@@ -910,11 +910,12 @@ func GetFileCache(keys []string, expire ...time.Duration) (*FileCache, error) {
 
 // AIResponseMetadata stores metadata about an AI-generated response
 type AIResponseMetadata struct {
-	BotMessageID    int                            `json:"bot_message_id"`
-	UserMessageID   int                            `json:"user_message_id"`
-	ChatID          int64                          `json:"chat_id"`
-	ConfigName      string                         `json:"config_name"`
-	OriginalPrompt  string                         `json:"original_prompt"`
+	BotMessageID   int    `json:"bot_message_id"`
+	UserMessageID  int    `json:"user_message_id"`
+	ChatID         int64  `json:"chat_id"`
+	ConfigName     string `json:"config_name"`
+	OriginalPrompt string `json:"original_prompt"`
+	// Messages contains the conversation history leading to this response; can be nil for responses without context
 	Messages        []openai.ChatCompletionMessage `json:"messages"`
 	RegenerateCount int                            `json:"regenerate_count"`
 }

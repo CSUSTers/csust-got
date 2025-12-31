@@ -12,10 +12,6 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-const (
-	formatHTML = "html"
-)
-
 // HandleMessageReaction handles user reactions to bot messages
 // When a user reacts with 👎 to an AI-generated message, regenerate the response
 func HandleMessageReaction(ctx tb.Context) error {
@@ -107,10 +103,17 @@ func HandleMessageReaction(ctx tb.Context) error {
 	if regenerateMessages == nil {
 		regenerateMessages = make([]openai.ChatCompletionMessage, 0)
 	}
+
+	// Get bot message content (prefer Text, fallback to Caption)
+	assistantContent := botMsg.Text
+	if assistantContent == "" {
+		assistantContent = botMsg.Caption
+	}
+
 	regenerateMessages = append(regenerateMessages,
 		openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleAssistant,
-			Content: botMsg.Text,
+			Content: assistantContent,
 		},
 		openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleUser,
@@ -195,12 +198,17 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 	}
 
 	// Update metadata with new regenerate count
+	originalPrompt := userMsg.Text
+	if originalPrompt == "" {
+		originalPrompt = userMsg.Caption
+	}
+
 	metadata := &orm.AIResponseMetadata{
 		BotMessageID:    botMsg.ID,
 		UserMessageID:   userMsg.ID,
 		ChatID:          botMsg.Chat.ID,
 		ConfigName:      chatConfig.Name,
-		OriginalPrompt:  userMsg.Text,
+		OriginalPrompt:  originalPrompt,
 		Messages:        messages,
 		RegenerateCount: regenerateCount,
 	}
@@ -217,7 +225,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 }
 
 func getParseMode(chatConfig *config.ChatConfigSingle) tb.ParseMode {
-	if chatConfig.Format.Format == formatHTML {
+	if chatConfig.Format.Format == config.OutputFormatHTML {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
