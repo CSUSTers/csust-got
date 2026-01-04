@@ -353,17 +353,19 @@ final:
 var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 
-// formatOutputWithReason formats the output with native reasoning content from OpenAI protocol.
-// If nativeReason is empty, it falls back to parsing <think> tags from the text for backward compatibility.
+// formatOutputWithReason formats the output with reasoning content.
+// The reasoning source is controlled by config.UseNativeReasoning:
+//   - true (default): use native OpenAI protocol ReasoningContent field (nativeReason parameter)
+//   - false: parse <think>...</think> tags from the response text
 func formatOutputWithReason(text string, nativeReason string, format *config.ChatOutputFormatConfig) string {
 	var reason, payload string
 
-	if nativeReason != "" {
+	if format.GetUseNativeReasoning() {
 		// Use native reasoning content from OpenAI protocol
 		reason = nativeReason
 		payload = text
 	} else {
-		// Fall back to parsing <think> tags for backward compatibility
+		// Use legacy parsing: extract reasoning from <think> tags
 		matches := extractReasonPatt.FindStringSubmatchIndex(text)
 		if len(matches) != 0 {
 			payload = text[matches[1]:]
