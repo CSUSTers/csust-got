@@ -30,6 +30,7 @@ type streamProcessor struct {
 
 	// State variables
 	fullResponse           strings.Builder
+	reasoningContent       strings.Builder // Native reasoning content from OpenAI protocol
 	lastSentText           string
 	ticker                 *time.Ticker
 	done                   chan struct{}
@@ -97,6 +98,7 @@ func (sp *streamProcessor) startStreamingTicker() {
 func (sp *streamProcessor) updateStreamingMessage() {
 	sp.mu.RLock()
 	currentText := sp.fullResponse.String()
+	nativeReason := sp.reasoningContent.String()
 	sp.mu.RUnlock()
 
 	if currentText == "" || currentText == sp.lastSentText {
@@ -115,7 +117,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 		return
 	}
 
-	formattedText := formatOutput(textToSend, &sp.config.Format)
+	formattedText := formatOutputWithReason(textToSend, nativeReason, &sp.config.Format)
 	formatOpt := sp.getFormatOption()
 
 	if formattedText == "" {
@@ -175,9 +177,10 @@ func (sp *streamProcessor) handleToolCallsInStream(toolCalls []openai.ToolCall) 
 		return nil, err
 	}
 
-	// Reset buffer and tool calls for the new stream
+	// Reset buffer, reasoning content, and tool calls for the new stream
 	sp.mu.Lock()
 	sp.fullResponse.Reset()
+	sp.reasoningContent.Reset()
 	sp.currentToolCallsChunks = nil
 	sp.mu.Unlock()
 	sp.lastSentText = ""
@@ -193,6 +196,13 @@ func (sp *streamProcessor) processStreamChunk(choice openai.ChatCompletionStream
 	if choice.Delta.Content != "" {
 		sp.mu.Lock()
 		sp.fullResponse.WriteString(choice.Delta.Content)
+		sp.mu.Unlock()
+	}
+
+	// Handle native reasoning content from OpenAI protocol
+	if choice.Delta.ReasoningContent != "" {
+		sp.mu.Lock()
+		sp.reasoningContent.WriteString(choice.Delta.ReasoningContent)
 		sp.mu.Unlock()
 	}
 
@@ -270,12 +280,13 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 	// Stop the ticker
 	sp.stopTicker()
 
-	// Get the final response
+	// Get the final response and native reasoning content
 	sp.mu.RLock()
 	finalResponse := strings.TrimSpace(sp.fullResponse.String())
+	nativeReason := strings.TrimSpace(sp.reasoningContent.String())
 	sp.mu.RUnlock()
 
-	formattedResponse := formatOutput(finalResponse, &sp.config.Format)
+	formattedResponse := formatOutputWithReason(finalResponse, nativeReason, &sp.config.Format)
 	if formattedResponse == "" {
 		log.Warn("Final response is empty, sending error message instead")
 		formattedResponse = sp.config.GetErrorMessage()

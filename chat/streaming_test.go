@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -103,6 +104,132 @@ func TestChatOutputFormatConfig_GetEditInterval(t *testing.T) {
 			result := cfg.GetEditInterval()
 			if result != tt.expected {
 				t.Errorf("GetEditInterval() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatOutputWithReason(t *testing.T) {
+	boolTrue := true
+	boolFalse := false
+
+	tests := []struct {
+		name         string
+		text         string
+		nativeReason string
+		format       *config.ChatOutputFormatConfig
+		wantContains []string
+	}{
+		{
+			name:         "native reasoning content with collapse format",
+			text:         "Hello world",
+			nativeReason: "Let me think about this...",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "collapse",
+				UseNativeReasoning: &boolTrue,
+			},
+			wantContains: []string{"Let me think about this", "Hello world"},
+		},
+		{
+			name:         "native reasoning content with quote format",
+			text:         "Hello world",
+			nativeReason: "Let me think about this...",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "quote",
+				UseNativeReasoning: &boolTrue,
+			},
+			wantContains: []string{">", "Let me think about this", "Hello world"},
+		},
+		{
+			name:         "native reasoning content with none format - reason hidden",
+			text:         "Hello world",
+			nativeReason: "Let me think about this...",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "none",
+				UseNativeReasoning: &boolTrue,
+			},
+			wantContains: []string{"Hello world"},
+		},
+		{
+			name:         "legacy mode: parse think tags when use_native_reasoning is false",
+			text:         "<think>This is my reasoning</think>And the answer is 42",
+			nativeReason: "",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "collapse",
+				UseNativeReasoning: &boolFalse,
+			},
+			wantContains: []string{"This is my reasoning", "And the answer is 42"},
+		},
+		{
+			name:         "legacy mode: no reasoning in text",
+			text:         "Just a plain response",
+			nativeReason: "",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "collapse",
+				UseNativeReasoning: &boolFalse,
+			},
+			wantContains: []string{"Just a plain response"},
+		},
+		{
+			name:         "native mode ignores think tags in text",
+			text:         "<think>Old reasoning</think>Some content",
+			nativeReason: "Native reasoning",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "quote",
+				UseNativeReasoning: &boolTrue,
+			},
+			// Native mode uses nativeReason, text with <think> tags is kept as-is (escaped)
+			wantContains: []string{"Native reasoning", "Old reasoning", "Some content"},
+		},
+		{
+			name:         "HTML format with native reasoning",
+			text:         "Response text",
+			nativeReason: "My thoughts",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "html",
+				Reason:             "collapse",
+				UseNativeReasoning: &boolTrue,
+			},
+			wantContains: []string{"blockquote expandable", "My thoughts", "Response text"},
+		},
+		{
+			name:         "default config (nil) uses native reasoning",
+			text:         "Hello world",
+			nativeReason: "Native thoughts",
+			format: &config.ChatOutputFormatConfig{
+				Format: "markdown",
+				Reason: "collapse",
+				// UseNativeReasoning is nil, should default to true
+			},
+			wantContains: []string{"Native thoughts", "Hello world"},
+		},
+		{
+			name:         "legacy mode with think tags and native reason provided - uses tags",
+			text:         "<think>Tag reasoning</think>Content",
+			nativeReason: "Native reasoning",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "collapse",
+				UseNativeReasoning: &boolFalse,
+			},
+			// Legacy mode parses <think> tags, ignores nativeReason
+			wantContains: []string{"Tag reasoning", "Content"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatOutputWithReason(tt.text, tt.nativeReason, tt.format)
+			for _, want := range tt.wantContains {
+				if !strings.Contains(result, want) {
+					t.Errorf("formatOutputWithReason() = %q, want it to contain %q", result, want)
+				}
 			}
 		})
 	}

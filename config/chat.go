@@ -52,6 +52,9 @@ type ChatOutputFormatConfig struct {
 	StreamOutput bool `mapstructure:"stream_output"`
 	// edit_interval: minimum time interval between message edits for rate limiting
 	EditInterval string `mapstructure:"edit_interval"`
+	// use_native_reasoning: use native OpenAI protocol ReasoningContent field (true by default)
+	// When false, falls back to parsing <think>...</think> tags from response text
+	UseNativeReasoning *bool `mapstructure:"use_native_reasoning"`
 }
 
 const (
@@ -119,6 +122,14 @@ func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 		return time.Second
 	}
 	return d
+}
+
+// GetUseNativeReasoning returns whether to use native OpenAI protocol reasoning (default: true)
+func (c *ChatOutputFormatConfig) GetUseNativeReasoning() bool {
+	if c.UseNativeReasoning == nil {
+		return true // default to using native reasoning
+	}
+	return *c.UseNativeReasoning
 }
 
 // ChatFilterConfig represents the configuration for a filter
