@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -193,24 +194,10 @@ func TestFormatOutputWithReason(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatOutputWithReason(tt.text, tt.nativeReason, tt.format)
 			for _, want := range tt.wantContains {
-				if !contains(result, want) {
+				if !strings.Contains(result, want) {
 					t.Errorf("formatOutputWithReason() = %q, want it to contain %q", result, want)
 				}
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr) >= 0))
-}
-
-func findSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }
