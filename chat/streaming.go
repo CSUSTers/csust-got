@@ -318,6 +318,7 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 			originalPrompt = sp.ctx.Message().Caption
 		}
 
+		allowRegenerate := sp.config.Features.AllowRegenerate
 		metadata := &orm.AIResponseMetadata{
 			BotMessageID:    replyMsg.ID,
 			UserMessageID:   sp.ctx.Message().ID,
@@ -326,6 +327,7 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 			OriginalPrompt:  originalPrompt,
 			Messages:        *sp.messages,
 			RegenerateCount: 0,
+			AllowRegenerate: &allowRegenerate,
 		}
 		if storeErr := orm.SetAIResponseMetadata(metadata); storeErr != nil {
 			log.Warn("Failed to store AI response metadata", zap.Error(storeErr))

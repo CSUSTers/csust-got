@@ -102,6 +102,52 @@ func TestAIResponseMetadata_NilMessages(t *testing.T) {
 	assert.Equal(t, "test", messages[0].Content)
 }
 
+func TestAIResponseMetadata_AllowRegenerate(t *testing.T) {
+	tests := []struct {
+		name            string
+		allowRegenerate *bool
+		expected        *bool
+	}{
+		{
+			name:            "AllowRegenerate enabled",
+			allowRegenerate: boolPtr(true),
+			expected:        boolPtr(true),
+		},
+		{
+			name:            "AllowRegenerate disabled",
+			allowRegenerate: boolPtr(false),
+			expected:        boolPtr(false),
+		},
+		{
+			name:            "AllowRegenerate nil (legacy/not set)",
+			allowRegenerate: nil,
+			expected:        nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata := &orm.AIResponseMetadata{
+				BotMessageID:    123,
+				UserMessageID:   456,
+				ChatID:          789,
+				ConfigName:      "test-config",
+				OriginalPrompt:  "test prompt",
+				Messages:        nil,
+				RegenerateCount: 0,
+				AllowRegenerate: tt.allowRegenerate,
+			}
+
+			assert.Equal(t, tt.expected, metadata.AllowRegenerate)
+		})
+	}
+}
+
+// boolPtr is a helper function to get a pointer to a bool value
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestMessageContentExtraction(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -166,21 +212,21 @@ func (m *mockContextWithUpdate) Update() tb.Update {
 func TestRegeneratingLock(t *testing.T) {
 	chatID := int64(123)
 	messageID := 456
-	
+
 	// Initially should not be regenerating
 	assert.False(t, isRegenerating(chatID, messageID))
-	
+
 	// Mark as regenerating
 	setRegenerating(chatID, messageID, true)
 	assert.True(t, isRegenerating(chatID, messageID))
-	
+
 	// Mark as not regenerating
 	setRegenerating(chatID, messageID, false)
 	assert.False(t, isRegenerating(chatID, messageID))
-	
+
 	// Test concurrent access
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -189,7 +235,7 @@ func TestRegeneratingLock(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	
+
 	// Should end up as not regenerating
 	assert.False(t, isRegenerating(chatID, messageID))
 }
@@ -204,7 +250,7 @@ func TestMakeRegeneratingKey(t *testing.T) {
 		{-1001234567890, 999, "-1001234567890:999"},
 		{0, 0, "0:0"},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			result := makeRegeneratingKey(tt.chatID, tt.messageID)
