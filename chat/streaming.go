@@ -146,7 +146,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 
 // getFormatOption returns the appropriate Telegram formatting option
 func (sp *streamProcessor) getFormatOption() tb.ParseMode {
-	if sp.config.Format.Format == config.OutputFormatHTML {
+	if sp.config.Format.GetFormat() == config.OutputFormatHTML {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
