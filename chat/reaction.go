@@ -154,12 +154,16 @@ func HandleMessageReaction(ctx tb.Context) error {
 	}
 
 	// Update original message with processing emoji to indicate regeneration is in progress
+	parseMode := getParseMode(chatConfig)
 	processingPrefix := "⏳ "
+	if parseMode == tb.ModeHTML {
+		processingPrefix = "&#x23F3; "
+	}
 	botMsgContent := botMsg.Text
 	if botMsgContent == "" {
 		botMsgContent = botMsg.Caption
 	}
-	_, editErr := util.EditMessageWithError(botMsg, processingPrefix+botMsgContent, getParseMode(chatConfig))
+	_, editErr := util.EditMessageWithError(botMsg, processingPrefix+botMsgContent, parseMode)
 	if editErr != nil {
 		log.Warn("Failed to add processing indicator to message", zap.Error(editErr))
 	}
@@ -299,7 +303,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 }
 
 func getParseMode(chatConfig *config.ChatConfigSingle) tb.ParseMode {
-	if chatConfig.Format.Format == config.OutputFormatHTML {
+	if chatConfig.Format.GetFormat() == config.OutputFormatHTML {
 		return tb.ModeHTML
 	}
 	return tb.ModeMarkdownV2
