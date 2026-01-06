@@ -156,9 +156,6 @@ func HandleMessageReaction(ctx tb.Context) error {
 	// Update original message with processing emoji to indicate regeneration is in progress
 	parseMode := getParseMode(chatConfig)
 	processingPrefix := "⏳ "
-	if parseMode == tb.ModeHTML {
-		processingPrefix = "&#x23F3; "
-	}
 	botMsgContent := botMsg.Text
 	if botMsgContent == "" {
 		botMsgContent = botMsg.Caption
