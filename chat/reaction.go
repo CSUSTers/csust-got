@@ -200,7 +200,7 @@ func HandleMessageReaction(ctx tb.Context) error {
 			zap.Int("botMsg", reaction.MessageID),
 			zap.Error(err))
 		// Restore original message content by removing the processing indicator
-		_, restoreErr := util.EditMessageWithError(botMsg, botMsgContent, getParseMode(chatConfig))
+		_, restoreErr := util.EditMessageWithError(botMsg, botMsgContent, parseMode)
 		if restoreErr != nil {
 			log.Warn("Failed to restore original message after regeneration failure", zap.Error(restoreErr))
 		}
