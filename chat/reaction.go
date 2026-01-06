@@ -91,6 +91,13 @@ func HandleMessageReaction(ctx tb.Context) error {
 		return nil
 	}
 
+	// Find the chat config by name using O(1) map lookup
+	chatConfig, ok := chatConfigs.Load(metadata.ConfigName)
+	if !ok {
+		log.Error("Chat config not found", zap.String("configName", metadata.ConfigName))
+		return nil
+	}
+
 	// Check if regeneration is allowed based on stored metadata flag
 	// If AllowRegenerate is nil (not set), fall back to config setting for backward compatibility
 	if metadata.AllowRegenerate != nil && !*metadata.AllowRegenerate {
@@ -101,7 +108,7 @@ func HandleMessageReaction(ctx tb.Context) error {
 	}
 
 	// Limit regeneration attempts
-	if metadata.RegenerateCount >= 3 {
+	if metadata.RegenerateCount >= chatConfig.Features.GetMaxRegenerateCount() {
 		log.Info("Max regeneration count reached",
 			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("msg", reaction.MessageID))
@@ -130,19 +137,6 @@ func HandleMessageReaction(ctx tb.Context) error {
 			zap.Int64("chat", reaction.Chat.ID),
 			zap.Int("botMsg", reaction.MessageID),
 			zap.Error(err))
-		return nil
-	}
-
-	// Find the chat config by name
-	var chatConfig *config.ChatConfigSingle
-	for _, cfg := range *config.BotConfig.ChatConfigV2 {
-		if cfg.Name == metadata.ConfigName {
-			chatConfig = cfg
-			break
-		}
-	}
-	if chatConfig == nil {
-		log.Error("Chat config not found", zap.String("configName", metadata.ConfigName))
 		return nil
 	}
 
@@ -185,7 +179,7 @@ func HandleMessageReaction(ctx tb.Context) error {
 		},
 		openai.ChatCompletionMessage{
 			Role:    openai.ChatMessageRoleUser,
-			Content: "用户认为上次的回答👎",
+			Content: chatConfig.Features.GetRegenerateFeedback(),
 		},
 	)
 

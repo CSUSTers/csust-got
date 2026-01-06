@@ -28,6 +28,7 @@ import (
 
 var clients map[string]*openai.Client
 var templates *xsync.Map[string, chatTemplate]
+var chatConfigs *xsync.Map[string, *config.ChatConfigSingle]
 
 type chatTemplate struct {
 	PromptTemplate       *template.Template
@@ -65,8 +66,12 @@ func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	// templates = make(map[string]*template.Template)
 	templates = xsync.NewMap[string, chatTemplate](xsync.WithPresize(len(configs)))
+	chatConfigs = xsync.NewMap[string, *config.ChatConfigSingle](xsync.WithPresize(len(configs)))
 
 	for _, c := range configs {
+		// Store chat config in map for O(1) lookup
+		chatConfigs.Store(c.Name, c)
+
 		// 初始化模板
 		if _, ok := templates.Load(c.Name); !ok {
 			var sysPrompt *template.Template
