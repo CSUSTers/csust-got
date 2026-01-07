@@ -161,14 +161,25 @@ chats:
       <USER_INPUT>
       {{ .Input }}
       </USER_INPUT>
+  # 思考bot: Uses native OpenAI protocol reasoning support (ReasoningContent field).
+  # When the model returns reasoning_content in the response, it will be used directly
+  # instead of parsing <think> tags. This provides better integration with models like
+  # DeepSeek-reasoner that natively support reasoning content.
   - <<: *chat_c
     message_context: 1
     name: 思考bot
     trigger:
       - command: "think"
     format:
+      # reason: Controls how reasoning content is displayed.
+      # Values: "none" (hide), "quote" (blockquote), "collapse" (collapsible blockquote)
       reason: "collapse"
       payload: "markdown-block"
+      # use_native_reasoning: Controls the source of reasoning content.
+      # - true (default): Use native OpenAI protocol ReasoningContent field (for DeepSeek-reasoner, etc.)
+      # - false: Parse <think>...</think> tags from the response text (legacy mode)
+      use_native_reasoning: true
+    # reasoning_effort: OpenAI reasoning effort parameter for o1/o3 models
     reasoning_effort: "medium"
     filters: *whitelist_filter
     system_prompt: |-

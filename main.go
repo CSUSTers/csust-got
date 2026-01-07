@@ -113,7 +113,7 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
-	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
+	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, reactionMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
 		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
@@ -331,6 +331,17 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 			}
 		}
 
+		return next(ctx)
+	}
+}
+
+func reactionMiddleware(next HandlerFunc) HandlerFunc {
+	return func(ctx Context) error {
+		// Check if this is a message reaction update
+		if ctx.Update().MessageReaction != nil {
+			// Handle the reaction
+			return chat.HandleMessageReaction(ctx)
+		}
 		return next(ctx)
 	}
 }
@@ -569,8 +580,12 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 		if m != nil && (m.Text != "" || m.Caption != "") {
 			// 异步存储完整消息结构体到Redis
 			go func() {
-				err := orm.PushMessageToStream(m)
-				if err != nil {
+				// Store to stream
+				if err := orm.PushMessageToStream(m); err != nil {
+					log.Error("Store message to Redis stream failed", zap.Error(err))
+				}
+				// Also store as a retrievable message
+				if err := orm.SetMessage(m); err != nil {
 					log.Error("Store message to Redis failed", zap.Error(err))
 				}
 			}()

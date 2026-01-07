@@ -28,6 +28,7 @@ import (
 
 var clients map[string]*openai.Client
 var templates *xsync.Map[string, chatTemplate]
+var chatConfigs *xsync.Map[string, *config.ChatConfigSingle]
 
 type chatTemplate struct {
 	PromptTemplate       *template.Template
@@ -65,8 +66,12 @@ func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	// templates = make(map[string]*template.Template)
 	templates = xsync.NewMap[string, chatTemplate](xsync.WithPresize(len(configs)))
+	chatConfigs = xsync.NewMap[string, *config.ChatConfigSingle](xsync.WithPresize(len(configs)))
 
 	for _, c := range configs {
+		// Store chat config in map for O(1) lookup
+		chatConfigs.Store(c.Name, c)
+
 		// 初始化模板
 		if _, ok := templates.Load(c.Name); !ok {
 			var sysPrompt *template.Template
@@ -353,16 +358,27 @@ final:
 var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 
-func formatOutput(text string, format *config.ChatOutputFormatConfig) string {
-	matches := extractReasonPatt.FindStringSubmatchIndex(text)
-
+// formatOutputWithReason formats the output with reasoning content.
+// The reasoning source is controlled by config.UseNativeReasoning:
+//   - true (default): use native OpenAI protocol ReasoningContent field (nativeReason parameter)
+//   - false: parse <think>...</think> tags from the response text
+func formatOutputWithReason(text string, nativeReason string, format *config.ChatOutputFormatConfig) string {
 	var reason, payload string
-	if len(matches) != 0 {
-		payload = text[matches[1]:]
-		rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
-		reason = text[rIdx1:rIdx2]
-	} else {
+
+	if format.GetUseNativeReasoning() {
+		// Use native reasoning content from OpenAI protocol
+		reason = nativeReason
 		payload = text
+	} else {
+		// Use legacy parsing: extract reasoning from <think> tags
+		matches := extractReasonPatt.FindStringSubmatchIndex(text)
+		if len(matches) != 0 {
+			payload = text[matches[1]:]
+			rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
+			reason = text[rIdx1:rIdx2]
+		} else {
+			payload = text
+		}
 	}
 
 	buf := strings.Builder{}

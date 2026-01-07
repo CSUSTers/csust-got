@@ -52,17 +52,25 @@ type ChatOutputFormatConfig struct {
 	StreamOutput bool `mapstructure:"stream_output"`
 	// edit_interval: minimum time interval between message edits for rate limiting
 	EditInterval string `mapstructure:"edit_interval"`
+	// use_native_reasoning: use native OpenAI protocol ReasoningContent field (true by default)
+	// When false, falls back to parsing <think>...</think> tags from response text
+	UseNativeReasoning *bool `mapstructure:"use_native_reasoning"`
 }
 
+const (
+	// OutputFormatMarkdown is the markdown format type
+	OutputFormatMarkdown = "markdown"
+	// OutputFormatHTML is the HTML format type
+	OutputFormatHTML = "html"
+)
+
 // GetFormat get message format
-//
-// nolint: goconst
 func (c *ChatOutputFormatConfig) GetFormat() string {
 	switch strings.ToLower(c.Format) {
 	case "", "md", "mdv2", "markdown", "markdownv2":
-		return "markdown"
+		return OutputFormatMarkdown
 	case "html":
-		return "html"
+		return OutputFormatHTML
 	default:
 		return ""
 	}
@@ -114,6 +122,14 @@ func (c *ChatOutputFormatConfig) GetEditInterval() time.Duration {
 		return time.Second
 	}
 	return d
+}
+
+// GetUseNativeReasoning returns whether to use native OpenAI protocol reasoning (default: true)
+func (c *ChatOutputFormatConfig) GetUseNativeReasoning() bool {
+	if c.UseNativeReasoning == nil {
+		return true // default to using native reasoning
+	}
+	return *c.UseNativeReasoning
 }
 
 // ChatFilterConfig represents the configuration for a filter
@@ -191,6 +207,9 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
+	AllowRegenerate      bool   `mapstructure:"allow_regenerate"`       // Allow regeneration on 👎 reaction
+	MaxRegenerateCount   int    `mapstructure:"max_regenerate_count"`   // Maximum number of regenerations allowed
+	RegenerateFeedback   string `mapstructure:"regenerate_feedback"`    // User feedback message for regeneration
 }
 
 // McpoConfig is the configuration for mcpo server
@@ -257,6 +276,22 @@ func (ccs *ChatConfigSingle) GetErrorMessage() string {
 		return ccs.ErrorMessage
 	}
 	return "😔很抱歉，我无法处理您的请求"
+}
+
+// GetMaxRegenerateCount returns the maximum regeneration count for the chat model
+func (f *FeatureSetting) GetMaxRegenerateCount() int {
+	if f.MaxRegenerateCount > 0 {
+		return f.MaxRegenerateCount
+	}
+	return 3 // default value
+}
+
+// GetRegenerateFeedback returns the user feedback message for regeneration
+func (f *FeatureSetting) GetRegenerateFeedback() string {
+	if f.RegenerateFeedback != "" {
+		return f.RegenerateFeedback
+	}
+	return "用户认为上次的回答👎" // default message
 }
 
 func (c *ChatConfigV2) readConfig() {

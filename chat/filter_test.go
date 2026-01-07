@@ -24,29 +24,29 @@ func (m *mockContext) Sender() *tb.User {
 }
 
 // Add other required methods as no-op implementations
-func (m *mockContext) Message() *tb.Message                         { return nil }
-func (m *mockContext) Callback() *tb.Callback                       { return nil }
-func (m *mockContext) Query() *tb.Query                             { return nil }
-func (m *mockContext) InlineResult() *tb.InlineResult               { return nil }
-func (m *mockContext) ShippingQuery() *tb.ShippingQuery             { return nil }
-func (m *mockContext) PreCheckoutQuery() *tb.PreCheckoutQuery       { return nil }
-func (m *mockContext) Poll() *tb.Poll                               { return nil }
-func (m *mockContext) PollAnswer() *tb.PollAnswer                   { return nil }
-func (m *mockContext) ChatMember() *tb.ChatMemberUpdate             { return nil }
-func (m *mockContext) MenuButton() *tb.MenuButton                   { return nil }
-func (m *mockContext) BoostUpdated() *tb.BoostUpdated               { return nil }
-func (m *mockContext) BoostRemoved() *tb.BoostRemoved               { return nil }
-func (m *mockContext) Bot() *tb.Bot                                 { return nil }
-func (m *mockContext) Update() tb.Update                            { return tb.Update{} }
-func (m *mockContext) Get(key string) interface{}                   { return nil }
-func (m *mockContext) Set(key string, val interface{})              {}
+func (m *mockContext) Message() *tb.Message                   { return nil }
+func (m *mockContext) Callback() *tb.Callback                 { return nil }
+func (m *mockContext) Query() *tb.Query                       { return nil }
+func (m *mockContext) InlineResult() *tb.InlineResult         { return nil }
+func (m *mockContext) ShippingQuery() *tb.ShippingQuery       { return nil }
+func (m *mockContext) PreCheckoutQuery() *tb.PreCheckoutQuery { return nil }
+func (m *mockContext) Poll() *tb.Poll                         { return nil }
+func (m *mockContext) PollAnswer() *tb.PollAnswer             { return nil }
+func (m *mockContext) ChatMember() *tb.ChatMemberUpdate       { return nil }
+func (m *mockContext) MenuButton() *tb.MenuButton             { return nil }
+func (m *mockContext) BoostUpdated() *tb.BoostUpdated         { return nil }
+func (m *mockContext) BoostRemoved() *tb.BoostRemoved         { return nil }
+func (m *mockContext) Bot() *tb.Bot                           { return nil }
+func (m *mockContext) Update() tb.Update                      { return tb.Update{} }
+func (m *mockContext) Get(key string) interface{}             { return nil }
+func (m *mockContext) Set(key string, val interface{})        {}
 func (m *mockContext) Reply(what interface{}, opts ...interface{}) error {
 	return nil
 }
-func (m *mockContext) Accept(opts ...string) error                  { return nil }
-func (m *mockContext) Answer(resp *tb.QueryResponse) error          { return nil }
-func (m *mockContext) Respond(resp ...*tb.CallbackResponse) error   { return nil }
-func (m *mockContext) Notify(action tb.ChatAction) error            { return nil }
+func (m *mockContext) Accept(opts ...string) error                { return nil }
+func (m *mockContext) Answer(resp *tb.QueryResponse) error        { return nil }
+func (m *mockContext) Respond(resp ...*tb.CallbackResponse) error { return nil }
+func (m *mockContext) Notify(action tb.ChatAction) error          { return nil }
 func (m *mockContext) Ship(opts ...interface{}) error {
 	return nil
 }
@@ -209,19 +209,19 @@ func TestWhitelistFilter(t *testing.T) {
 
 	// Create mock context with chat ID in whitelist
 	ctx1 := &mockContext{
-		chat: &tb.Chat{ID: 12345},
+		chat:   &tb.Chat{ID: 12345},
 		sender: &tb.User{ID: 11111},
 	}
 
 	// Create mock context with sender ID in whitelist
 	ctx2 := &mockContext{
-		chat: &tb.Chat{ID: 54321},
+		chat:   &tb.Chat{ID: 54321},
 		sender: &tb.User{ID: 67890},
 	}
 
 	// Create mock context with neither chat ID nor sender ID in whitelist
 	ctx3 := &mockContext{
-		chat: &tb.Chat{ID: 54321},
+		chat:   &tb.Chat{ID: 54321},
 		sender: &tb.User{ID: 11111},
 	}
 
@@ -244,7 +244,7 @@ func TestWhitelistFilter(t *testing.T) {
 	resultData := filter.ProcessPromptData(promptData, ctx1, chatConfig)
 	assert.Equal(t, promptData, resultData, "Expected same promptData from ProcessPromptData")
 
-	}
+}
 
 func TestProcessFilters(t *testing.T) {
 	// Create a chat configuration with a whitelist filter
@@ -261,13 +261,13 @@ func TestProcessFilters(t *testing.T) {
 
 	// Create mock context with chat ID in whitelist
 	ctx1 := &mockContext{
-		chat: &tb.Chat{ID: 12345},
+		chat:   &tb.Chat{ID: 12345},
 		sender: &tb.User{ID: 11111},
 	}
 
 	// Create mock context with chat ID not in whitelist
 	ctx2 := &mockContext{
-		chat: &tb.Chat{ID: 54321},
+		chat:   &tb.Chat{ID: 54321},
 		sender: &tb.User{ID: 11111},
 	}
 
