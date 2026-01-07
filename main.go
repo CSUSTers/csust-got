@@ -581,13 +581,11 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 			// 异步存储完整消息结构体到Redis
 			go func() {
 				// Store to stream
-				err := orm.PushMessageToStream(m)
-				if err != nil {
+				if err := orm.PushMessageToStream(m); err != nil {
 					log.Error("Store message to Redis stream failed", zap.Error(err))
 				}
 				// Also store as a retrievable message
-				err = orm.SetMessage(m)
-				if err != nil {
+				if err := orm.SetMessage(m); err != nil {
 					log.Error("Store message to Redis failed", zap.Error(err))
 				}
 			}()

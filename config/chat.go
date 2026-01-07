@@ -207,7 +207,9 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
-	AllowRegenerate bool `mapstructure:"allow_regenerate"` // Allow regeneration on 👎 reaction
+	AllowRegenerate      bool   `mapstructure:"allow_regenerate"`       // Allow regeneration on 👎 reaction
+	MaxRegenerateCount   int    `mapstructure:"max_regenerate_count"`   // Maximum number of regenerations allowed
+	RegenerateFeedback   string `mapstructure:"regenerate_feedback"`    // User feedback message for regeneration
 }
 
 // McpoConfig is the configuration for mcpo server
@@ -274,6 +276,22 @@ func (ccs *ChatConfigSingle) GetErrorMessage() string {
 		return ccs.ErrorMessage
 	}
 	return "😔很抱歉，我无法处理您的请求"
+}
+
+// GetMaxRegenerateCount returns the maximum regeneration count for the chat model
+func (f *FeatureSetting) GetMaxRegenerateCount() int {
+	if f.MaxRegenerateCount > 0 {
+		return f.MaxRegenerateCount
+	}
+	return 3 // default value
+}
+
+// GetRegenerateFeedback returns the user feedback message for regeneration
+func (f *FeatureSetting) GetRegenerateFeedback() string {
+	if f.RegenerateFeedback != "" {
+		return f.RegenerateFeedback
+	}
+	return "用户认为上次的回答👎" // default message
 }
 
 func (c *ChatConfigV2) readConfig() {
