@@ -6,7 +6,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/meilisearch/meilisearch-go v0.35.1
 	github.com/puzpuzpuz/xsync/v4 v4.3.0
-	github.com/quic-go/quic-go v0.58.0
+	github.com/quic-go/quic-go v0.59.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
