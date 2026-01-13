@@ -3,7 +3,7 @@ module csust-got
 go 1.25
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.4.0
+	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/meilisearch/meilisearch-go v0.35.1
 	github.com/puzpuzpuz/xsync/v4 v4.3.0
 	github.com/quic-go/quic-go v0.58.0
