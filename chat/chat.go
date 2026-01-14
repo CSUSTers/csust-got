@@ -120,6 +120,19 @@ type promptData struct {
 	BotUsername     string // 添加 Bot 用户名字段
 }
 
+func extractInputFromMessage(msg *tb.Message, trigger *config.ChatTrigger) string {
+	input := msg.Text
+	if input == "" {
+		input = msg.Caption
+	}
+	if trigger.Command != "" {
+		if _, text, err := entities.CommandFromText(input, 0); err == nil {
+			input = text
+		}
+	}
+	return input
+}
+
 // Chat 处理聊天请求
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
 
@@ -137,16 +150,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 		return nil
 	}
 
-	input := ctx.Message().Text
-	if input == "" {
-		input = ctx.Message().Caption
-	}
-	if trigger.Command != "" {
-		_, text, err := entities.CommandFromText(input, 0)
-		if err != nil {
-			input = text
-		}
-	}
+	input := extractInputFromMessage(ctx.Message(), trigger)
 
 	// if gacha, reply and not send placeholder
 	isGacha := trigger.Gacha > 0
