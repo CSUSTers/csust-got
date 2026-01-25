@@ -35,6 +35,7 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
+	chat.InitInternalTools()
 	chat.InitMcpoClient()
 	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)

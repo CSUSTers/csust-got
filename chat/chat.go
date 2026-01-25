@@ -301,6 +301,7 @@ final:
 	defer cancel()
 
 	useMcp := v2.UseMcpo && config.BotConfig.McpoServer.Enable
+	useInternalTools := v2.UseInternalTools
 
 	request := openai.ChatCompletionRequest{
 		Model:           v2.Model.Model,
@@ -309,8 +310,17 @@ final:
 		Stream:          true, // Enable streaming
 		ReasoningEffort: v2.ReasoningEffort,
 	}
-	if useMcp {
-		request.Tools = mcpo.GetToolSet("")
+
+	// Add tools to request
+	var allTools []openai.Tool
+	if useInternalTools {
+		allTools = append(allTools, GetInternalToolDefinitions()...)
+	}
+	if useMcp && mcpo != nil {
+		allTools = append(allTools, mcpo.GetToolSet("")...)
+	}
+	if len(allTools) > 0 {
+		request.Tools = allTools
 	}
 
 	// Create a streaming response
@@ -328,7 +338,8 @@ final:
 	}
 
 	// Process the streaming response using streamProcessor
-	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useMcp, &request, &messages, v2)
+	useTools := useMcp || useInternalTools
+	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useTools, &request, &messages, v2)
 	response, err := processor.process(stream)
 	if err != nil {
 		log.Error("Failed to process streaming response", zap.Error(err))
