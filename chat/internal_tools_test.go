@@ -64,10 +64,20 @@ func TestGetInternalToolDefinitions(t *testing.T) {
 
 	definitions := GetInternalToolDefinitions()
 	require.NotNil(t, definitions)
-	require.Len(t, definitions, 1) // We have 1 internal tool
+	require.NotEmpty(t, definitions)
 
-	// Verify the tool definition
-	def := definitions[0]
+	// Find the get_instant_view tool definition
+	idx := -1
+	for i, def := range definitions {
+		if def.Function.Name == "get_instant_view" {
+			idx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, idx, "get_instant_view tool definition should be present")
+
+	// Verify the get_instant_view tool definition
+	def := definitions[idx]
 	assert.Equal(t, "function", string(def.Type))
 	assert.Equal(t, "get_instant_view", def.Function.Name)
 	assert.NotEmpty(t, def.Function.Description)

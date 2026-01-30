@@ -338,8 +338,7 @@ final:
 	}
 
 	// Process the streaming response using streamProcessor
-	useTools := useMcp || useInternalTools
-	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useTools, &request, &messages, v2)
+	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useMcp || useInternalTools, &request, &messages, v2)
 	response, err := processor.process(stream)
 	if err != nil {
 		log.Error("Failed to process streaming response", zap.Error(err))
