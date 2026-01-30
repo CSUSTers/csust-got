@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/meilisearch/meilisearch-go v0.35.1
+	github.com/meilisearch/meilisearch-go v0.36.0
 	github.com/puzpuzpuz/xsync/v4 v4.4.0
 	github.com/quic-go/quic-go v0.59.0
 	github.com/redis/go-redis/v9 v9.17.3
@@ -23,6 +23,7 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/swaggest/jsonschema-go v0.3.74 // indirect
 	github.com/swaggest/refl v1.3.1 // indirect
@@ -37,7 +38,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
