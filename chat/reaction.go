@@ -219,6 +219,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 
 	// Create chat completion request
 	useMcp := chatConfig.UseMcpo && config.BotConfig.McpoServer.Enable
+	useInternalTools := chatConfig.UseInternalTools
 	request := openai.ChatCompletionRequest{
 		Model:           chatConfig.Model.Model,
 		Messages:        messages,
@@ -226,8 +227,17 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 		Stream:          true,
 		ReasoningEffort: chatConfig.ReasoningEffort,
 	}
-	if useMcp {
-		request.Tools = mcpo.GetToolSet("")
+
+	// Add tools to request
+	var allTools []openai.Tool
+	if useInternalTools {
+		allTools = append(allTools, GetInternalToolDefinitions()...)
+	}
+	if useMcp && mcpo != nil {
+		allTools = append(allTools, mcpo.GetToolSet("")...)
+	}
+	if len(allTools) > 0 {
+		request.Tools = allTools
 	}
 
 	// Create streaming context
@@ -253,7 +263,7 @@ func regenerateResponse(bot *tb.Bot, userMsg, botMsg *tb.Message, chatConfig *co
 	mockCtx := bot.NewContext(mockUpdate)
 
 	// Process the streaming response
-	processor := newStreamProcessor(chatCtx, mockCtx, botMsg, useMcp, &request, &messages, chatConfig)
+	processor := newStreamProcessor(chatCtx, mockCtx, botMsg, useMcp || useInternalTools, &request, &messages, chatConfig)
 	response, err := processor.process(stream)
 	if err != nil {
 		log.Error("Failed to process streaming response for regeneration", zap.Error(err))
