@@ -37,6 +37,7 @@ func main() {
 
 	chat.InitMcpoClient()
 	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
+	chat.InitLangchainModels(*config.BotConfig.ChatConfigV2)
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
 	chat.InitGachaConfigs()

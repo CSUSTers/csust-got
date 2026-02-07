@@ -150,6 +150,23 @@ type ChatFilterSetting struct {
 // ChatConfigV2 is the configuration for chat
 type ChatConfigV2 []*ChatConfigSingle
 
+// AgentConfig is the configuration for the langchaingo agent-based execution mode.
+type AgentConfig struct {
+	// Enabled controls whether to use the agent-based execution path.
+	// When false (default), the legacy direct OpenAI SDK path is used.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxIterations limits the number of tool-calling rounds in the agent loop.
+	MaxIterations int `mapstructure:"max_iterations"`
+}
+
+// GetMaxIterations returns the maximum number of agent iterations, with a sensible default.
+func (a *AgentConfig) GetMaxIterations() int {
+	if a.MaxIterations > 0 {
+		return a.MaxIterations
+	}
+	return 10
+}
+
 // ChatConfigSingle is the configuration for a single chat
 type ChatConfigSingle struct {
 	Name            string                 `mapstructure:"name"`
@@ -168,6 +185,7 @@ type ChatConfigSingle struct {
 	Features FeatureSetting    `mapstructure:"features"`
 	UseMcpo  bool              `mapstructure:"use_mcpo"`
 	Filters  ChatFilterSetting `mapstructure:"filters"`
+	Agent    AgentConfig       `mapstructure:"agent"`
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
