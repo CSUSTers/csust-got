@@ -38,6 +38,7 @@ type agentProcessor struct {
 	lastSentText   string
 	ticker         *time.Ticker
 	done           chan struct{}
+	stopOnce       sync.Once
 	mu             sync.RWMutex
 }
 
@@ -306,10 +307,12 @@ func (ap *agentProcessor) updateStreamingMessage() {
 
 // stopTicker stops the streaming ticker.
 func (ap *agentProcessor) stopTicker() {
-	if ap.ticker != nil {
-		ap.done <- struct{}{}
-		ap.ticker.Stop()
-	}
+	ap.stopOnce.Do(func() {
+		if ap.ticker != nil {
+			close(ap.done)
+			ap.ticker.Stop()
+		}
+	})
 }
 
 // getFormatOption returns the Telegram parse mode.
