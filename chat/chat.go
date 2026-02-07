@@ -302,7 +302,7 @@ final:
 	// Use agent-based execution path if enabled
 	if v2.Agent.Enabled {
 		return chatWithAgent(chatCtx, ctx, v2, systemPrompt, promptBuf.String(),
-			multiPartContent, imageDataURL, placeholderMsg)
+			multiPartContent, imageDataURL, placeholderMsg, messages)
 	}
 
 	// Legacy execution path using direct OpenAI SDK
@@ -316,11 +316,12 @@ func chatWithAgent(
 	systemPrompt string, userPrompt string,
 	multiPartContent bool, imageURL string,
 	placeholderMsg *tb.Message,
+	messages []openai.ChatCompletionMessage,
 ) error {
 	model := getLangchainModel(v2.Model.Name)
 	if model == nil {
 		log.Error("langchain model not found, falling back to legacy path", zap.String("model", v2.Model.Name))
-		return nil
+		return chatWithLegacy(chatCtx, ctx, v2, messages, placeholderMsg)
 	}
 
 	lcMessages := convertToLangchainMessages(systemPrompt, userPrompt, multiPartContent, imageURL)

@@ -31,15 +31,16 @@ type agentProcessor struct {
 	// Messages accumulated during conversation
 	messages []llms.MessageContent
 
-	// Streaming state
+	// Streaming state — all fields below are protected by mu
 	placeholderMsg *tb.Message
 	fullResponse   strings.Builder
 	reasonContent  strings.Builder
 	lastSentText   string
 	ticker         *time.Ticker
 	done           chan struct{}
+	tickerDone     chan struct{} // closed when ticker goroutine exits
 	stopOnce       sync.Once
-	mu             sync.RWMutex
+	mu             sync.Mutex
 }
 
 // newAgentProcessor creates a new agentProcessor for handling agent-based chat.
@@ -59,6 +60,7 @@ func newAgentProcessor(
 		messages:       messages,
 		placeholderMsg: placeholderMsg,
 		done:           make(chan struct{}),
+		tickerDone:     make(chan struct{}),
 	}
 
 	// Set up tools if MCP is enabled
@@ -142,8 +144,8 @@ func (ap *agentProcessor) run() (string, error) {
 			ap.mu.Lock()
 			ap.fullResponse.Reset()
 			ap.reasonContent.Reset()
-			ap.mu.Unlock()
 			ap.lastSentText = ""
+			ap.mu.Unlock()
 
 			continue
 		}
@@ -241,6 +243,7 @@ func (ap *agentProcessor) executeToolCalls(toolCalls []llms.ToolCall) error {
 // startStreamingTicker starts the ticker for real-time message updates.
 func (ap *agentProcessor) startStreamingTicker() {
 	if !ap.config.Format.StreamOutput {
+		close(ap.tickerDone) // no goroutine to wait for
 		return
 	}
 
@@ -248,6 +251,7 @@ func (ap *agentProcessor) startStreamingTicker() {
 	ap.ticker = time.NewTicker(editInterval)
 
 	go func() {
+		defer close(ap.tickerDone)
 		defer ap.ticker.Stop()
 		for {
 			select {
@@ -262,10 +266,11 @@ func (ap *agentProcessor) startStreamingTicker() {
 
 // updateStreamingMessage sends partial content updates to the Telegram message.
 func (ap *agentProcessor) updateStreamingMessage() {
-	ap.mu.RLock()
+	ap.mu.Lock()
+	defer ap.mu.Unlock()
+
 	currentText := ap.fullResponse.String()
 	nativeReason := ap.reasonContent.String()
-	ap.mu.RUnlock()
 
 	if currentText == "" || currentText == ap.lastSentText {
 		return
@@ -305,14 +310,15 @@ func (ap *agentProcessor) updateStreamingMessage() {
 	ap.lastSentText = textToSend
 }
 
-// stopTicker stops the streaming ticker.
+// stopTicker stops the streaming ticker and waits for the goroutine to exit.
 func (ap *agentProcessor) stopTicker() {
 	ap.stopOnce.Do(func() {
 		if ap.ticker != nil {
 			close(ap.done)
-			ap.ticker.Stop()
 		}
 	})
+	// Wait for the ticker goroutine to finish so no concurrent edits remain.
+	<-ap.tickerDone
 }
 
 // getFormatOption returns the Telegram parse mode.
@@ -327,10 +333,11 @@ func (ap *agentProcessor) getFormatOption() tb.ParseMode {
 func (ap *agentProcessor) finalizeResponse() (string, error) {
 	ap.stopTicker()
 
-	ap.mu.RLock()
+	ap.mu.Lock()
 	finalResponse := strings.TrimSpace(ap.fullResponse.String())
 	nativeReason := strings.TrimSpace(ap.reasonContent.String())
-	ap.mu.RUnlock()
+	placeholderMsg := ap.placeholderMsg
+	ap.mu.Unlock()
 
 	formattedResponse := formatOutputWithReason(finalResponse, nativeReason, &ap.config.Format)
 	if formattedResponse == "" {
@@ -342,8 +349,8 @@ func (ap *agentProcessor) finalizeResponse() (string, error) {
 	var replyMsg *tb.Message
 	var err error
 
-	if ap.placeholderMsg != nil {
-		replyMsg, err = util.EditMessageWithError(ap.placeholderMsg, formattedResponse, formatOpt)
+	if placeholderMsg != nil {
+		replyMsg, err = util.EditMessageWithError(placeholderMsg, formattedResponse, formatOpt)
 		if err != nil {
 			log.Error("agent: failed to edit placeholder with final response", zap.Error(err))
 			return "", err
