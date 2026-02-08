@@ -397,6 +397,7 @@ func chatWithLegacy(
 		return err
 	}
 
+	// Process the streaming response using streamProcessor
 	processor := newStreamProcessor(chatCtx, ctx, placeholderMsg, useMcp || useInternalTools, &request, &messages, v2)
 	response, err := processor.process(stream)
 	if err != nil {
