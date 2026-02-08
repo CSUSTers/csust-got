@@ -248,6 +248,12 @@ func (ap *agentProcessor) startStreamingTicker() {
 	}
 
 	editInterval := ap.config.Format.GetEditInterval()
+	if editInterval <= 0 {
+		log.Warn("agent: streaming disabled due to non-positive edit interval",
+			zap.Duration("editInterval", editInterval))
+		close(ap.tickerDone)
+		return
+	}
 	ap.ticker = time.NewTicker(editInterval)
 
 	go func() {
