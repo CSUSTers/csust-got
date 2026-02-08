@@ -182,10 +182,11 @@ type ChatConfigSingle struct {
 	Format          ChatOutputFormatConfig `mapstructure:"format"`
 	ReasoningEffort string                 `mapstructure:"reasoning_effort"`
 
-	Features FeatureSetting    `mapstructure:"features"`
-	UseMcpo  bool              `mapstructure:"use_mcpo"`
-	Filters  ChatFilterSetting `mapstructure:"filters"`
-	Agent    AgentConfig       `mapstructure:"agent"`
+	Features         FeatureSetting    `mapstructure:"features"`
+	UseMcpo          bool              `mapstructure:"use_mcpo"`
+	UseInternalTools bool              `mapstructure:"use_internal_tools"` // Enable built-in internal tools like get_instant_view
+	Filters          ChatFilterSetting `mapstructure:"filters"`
+	Agent            AgentConfig       `mapstructure:"agent"`
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -225,9 +226,9 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
-	AllowRegenerate      bool   `mapstructure:"allow_regenerate"`       // Allow regeneration on 👎 reaction
-	MaxRegenerateCount   int    `mapstructure:"max_regenerate_count"`   // Maximum number of regenerations allowed
-	RegenerateFeedback   string `mapstructure:"regenerate_feedback"`    // User feedback message for regeneration
+	AllowRegenerate    bool   `mapstructure:"allow_regenerate"`     // Allow regeneration on 👎 reaction
+	MaxRegenerateCount int    `mapstructure:"max_regenerate_count"` // Maximum number of regenerations allowed
+	RegenerateFeedback string `mapstructure:"regenerate_feedback"`  // User feedback message for regeneration
 }
 
 // McpoConfig is the configuration for mcpo server

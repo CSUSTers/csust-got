@@ -3,11 +3,11 @@ module csust-got
 go 1.25
 
 require (
-	github.com/go-viper/mapstructure/v2 v2.4.0
-	github.com/meilisearch/meilisearch-go v0.35.1
-	github.com/puzpuzpuz/xsync/v4 v4.2.0
-	github.com/quic-go/quic-go v0.58.0
-	github.com/redis/go-redis/v9 v9.17.2
+	github.com/go-viper/mapstructure/v2 v2.5.0
+	github.com/meilisearch/meilisearch-go v0.36.0
+	github.com/puzpuzpuz/xsync/v4 v4.4.0
+	github.com/quic-go/quic-go v0.59.0
+	github.com/redis/go-redis/v9 v9.17.3
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -15,9 +15,9 @@ require (
 	github.com/tmc/langchaingo v0.1.14
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/image v0.34.0
+	golang.org/x/image v0.35.0
 	golang.org/x/sync v0.19.0
-	golang.org/x/text v0.32.0
+	golang.org/x/text v0.33.0
 	golang.org/x/time v0.14.0
 	gopkg.in/telebot.v3 v3.3.8
 )
@@ -25,6 +25,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.10.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
 	github.com/swaggest/jsonschema-go v0.3.74 // indirect
@@ -41,7 +42,6 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect

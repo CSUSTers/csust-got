@@ -366,16 +366,30 @@ func (sp *streamProcessor) handleToolCalls(toolCalls []openai.ToolCall) error {
 	for _, toolCall := range toolCalls {
 		var result string
 		var toolErr error
-		tool, ok := mcpo.GetTool(toolCall.Function.Name)
-		if !ok {
-			log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
-			result = "MCP tool not found"
-		} else {
-			result, toolErr = tool.Call(sp.chatCtx, toolCall.Function.Arguments)
+
+		// First try internal tools
+		if internalTool, ok := GetInternalTool(toolCall.Function.Name); ok {
+			result, toolErr = internalTool.Call(sp.chatCtx, toolCall.Function.Arguments)
 			if toolErr != nil {
-				log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(toolErr))
-				result = "Failed to call function tool"
+				log.Error("Failed to call internal tool", zap.String("toolName", toolCall.Function.Name), zap.Error(toolErr))
+				result = "Failed to call internal tool"
 			}
+		} else if mcpo != nil {
+			// Then try external mcpo tools
+			tool, ok := mcpo.GetTool(toolCall.Function.Name)
+			if !ok {
+				log.Error("MCP tool not found", zap.String("toolName", toolCall.Function.Name))
+				result = "MCP tool not found"
+			} else {
+				result, toolErr = tool.Call(sp.chatCtx, toolCall.Function.Arguments)
+				if toolErr != nil {
+					log.Error("Failed to call tool", zap.String("toolName", toolCall.Function.Name), zap.Error(toolErr))
+					result = "Failed to call function tool"
+				}
+			}
+		} else {
+			log.Error("No tool provider available", zap.String("toolName", toolCall.Function.Name))
+			result = "No tool provider available"
 		}
 		log.Debug("Tool call result", zap.String("toolName", toolCall.Function.Name), zap.String("result", result))
 
