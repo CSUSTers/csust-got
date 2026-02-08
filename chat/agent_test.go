@@ -54,8 +54,8 @@ type fakeTool struct {
 	result string
 }
 
-func (ft *fakeTool) Name() string                                    { return ft.name }
-func (ft *fakeTool) Description() string                             { return ft.desc }
+func (ft *fakeTool) Name() string                                     { return ft.name }
+func (ft *fakeTool) Description() string                              { return ft.desc }
 func (ft *fakeTool) Call(_ context.Context, _ string) (string, error) { return ft.result, nil }
 
 var _ lctools.Tool = (*fakeTool)(nil)
@@ -230,9 +230,9 @@ func TestStreamingCallback_Accumulation(t *testing.T) {
 	close(ap.tickerDone) // no ticker goroutine
 
 	// Simulate streaming chunks
-	require.NoError(t, ap.streamingCallback(context.Background(), []byte("Hello ")))
-	require.NoError(t, ap.streamingCallback(context.Background(), []byte("world")))
-	require.NoError(t, ap.streamingCallback(context.Background(), []byte("!")))
+	require.NoError(t, ap.streamingCallback(t.Context(), []byte("Hello ")))
+	require.NoError(t, ap.streamingCallback(t.Context(), []byte("world")))
+	require.NoError(t, ap.streamingCallback(t.Context(), []byte("!")))
 
 	ap.mu.Lock()
 	result := ap.fullResponse.String()
