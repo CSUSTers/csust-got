@@ -210,6 +210,7 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 	}
 
 	multiPartContent := false
+	var imageDataURL string
 	var contents []openai.ChatMessagePart
 	if v2.Model.Features.Image && v2.Features.Image {
 		// TODO handle multi photos album
@@ -248,11 +249,12 @@ func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigg
 			base64Img := []byte("data:image/jpeg;base64,")
 			base64Img = base64.StdEncoding.AppendEncode(base64Img, buf.Bytes())
 			log.Info("encoded base64 image data url size", zap.Int("size", len(base64Img)))
+			imageDataURL = string(base64Img)
 			contents = append(contents,
 				openai.ChatMessagePart{
 					Type: openai.ChatMessagePartTypeImageURL,
 					ImageURL: &openai.ChatMessageImageURL{
-						URL: string(base64Img),
+						URL: imageDataURL,
 					},
 				},
 				openai.ChatMessagePart{
@@ -279,8 +281,6 @@ final:
 
 	// zap.L().Debug("Chat context messages", zap.Any("messages", messages))
 
-	client := clients[v2.Model.Name]
-
 	// 处理place_holder功能
 	var placeholderMsg *tb.Message
 	switch {
@@ -292,7 +292,6 @@ final:
 		placeholderMsg, placeHolderErr = ctx.Bot().Reply(ctx.Message(), v2.PlaceHolder, tb.ModeMarkdownV2)
 		if placeHolderErr != nil {
 			log.Error("Failed to send placeholder message", zap.Error(placeHolderErr))
-			// 如果发送placeholder失败，继续正常流程，不使用placeholder功能
 		}
 	default:
 		err = ctx.Bot().Notify(ctx.Chat(), tb.Typing)
@@ -304,6 +303,65 @@ final:
 	chatCtx, cancel := context.WithTimeout(context.Background(), v2.GetTimeout())
 	defer cancel()
 
+	// Use agent-based execution path if enabled
+	if v2.Agent.Enabled {
+		return chatWithAgent(chatCtx, ctx, v2, systemPrompt, promptBuf.String(),
+			multiPartContent, imageDataURL, placeholderMsg, messages)
+	}
+
+	// Legacy execution path using direct OpenAI SDK
+	return chatWithLegacy(chatCtx, ctx, v2, messages, placeholderMsg)
+
+}
+
+// chatWithAgent executes the chat using the langchaingo agent-based path.
+func chatWithAgent(
+	chatCtx context.Context, ctx tb.Context, v2 *config.ChatConfigSingle,
+	systemPrompt string, userPrompt string,
+	multiPartContent bool, imageURL string,
+	placeholderMsg *tb.Message,
+	messages []openai.ChatCompletionMessage,
+) error {
+	model := getLangchainModel(v2.Model.Name)
+	if model == nil {
+		log.Error("langchain model not found, falling back to legacy path", zap.String("model", v2.Model.Name))
+		return chatWithLegacy(chatCtx, ctx, v2, messages, placeholderMsg)
+	}
+
+	lcMessages := convertToLangchainMessages(systemPrompt, userPrompt, multiPartContent, imageURL)
+
+	ap := newAgentProcessor(chatCtx, ctx, model, v2, lcMessages, placeholderMsg)
+	response, err := ap.run()
+	if err != nil {
+		log.Error("agent execution failed", zap.Error(err))
+		if placeholderMsg != nil {
+			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
+			if editErr != nil {
+				log.Error("Failed to edit placeholder with error", zap.Error(editErr))
+			}
+		}
+		return err
+	}
+
+	// Process outgoing filters
+	for _, filterConfig := range v2.Filters.Filters {
+		filter := createFilter(&filterConfig)
+		if filter == nil {
+			continue
+		}
+		response = filter.ProcessOutgoing(response, ctx, v2)
+	}
+
+	log.Debug("Agent chat response", zap.String("response", response))
+	return nil
+}
+
+// chatWithLegacy executes the chat using the legacy direct OpenAI SDK path.
+func chatWithLegacy(
+	chatCtx context.Context, ctx tb.Context, v2 *config.ChatConfigSingle,
+	messages []openai.ChatCompletionMessage, placeholderMsg *tb.Message,
+) error {
+	client := clients[v2.Model.Name]
 	useMcp := v2.UseMcpo && config.BotConfig.McpoServer.Enable
 	useInternalTools := v2.UseInternalTools
 
@@ -311,7 +369,7 @@ final:
 		Model:           v2.Model.Model,
 		Messages:        messages,
 		Temperature:     v2.GetTemperature(),
-		Stream:          true, // Enable streaming
+		Stream:          true,
 		ReasoningEffort: v2.ReasoningEffort,
 	}
 
@@ -327,11 +385,9 @@ final:
 		request.Tools = allTools
 	}
 
-	// Create a streaming response
 	stream, err := client.CreateChatCompletionStream(chatCtx, request)
 	if err != nil {
 		log.Error("Failed to create chat completion stream", zap.Error(err))
-		// 如果使用了placeholder且出现错误，更新placeholder消息为错误提示
 		if placeholderMsg != nil {
 			_, editErr := util.EditMessageWithError(placeholderMsg, v2.GetErrorMessage(), tb.ModeMarkdownV2)
 			if editErr != nil {
@@ -355,7 +411,7 @@ final:
 		return err
 	}
 
-	// 处理过滤器的Outgoing
+	// Process outgoing filters
 	for _, filterConfig := range v2.Filters.Filters {
 		filter := createFilter(&filterConfig)
 		if filter == nil {
@@ -366,7 +422,6 @@ final:
 
 	log.Debug("Chat response", zap.String("response", response))
 	return nil
-
 }
 
 var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
