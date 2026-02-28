@@ -2,12 +2,14 @@ package main
 
 import (
 	"csust-got/chat"
+	"csust-got/chatv2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
 	"csust-got/store"
 	"csust-got/util/gacha"
 	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,6 +39,10 @@ func main() {
 
 	chat.InitMcpoClient()
 	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
+	if err := chatv2.Init(context.Background()); err != nil {
+		zap.L().Error("chatv2: init failed", zap.Error(err))
+	}
+	defer chatv2.Close()
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
 	chat.InitGachaConfigs()
@@ -277,6 +283,9 @@ func registerChatConfigHandler(bot *Bot) {
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
+					if vCopy.IsAgentEnabled() {
+						return chatv2.Chat(ctx, vCopy, trCopy)
+					}
 					return chat.Chat(ctx, vCopy, trCopy)
 				})
 			}
@@ -299,6 +308,9 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
+					if vCopy.IsAgentEnabled() {
+						return chatv2.Chat(context, vCopy, trCopy)
+					}
 					return chat.Chat(context, vCopy, trCopy)
 				}})
 			}
