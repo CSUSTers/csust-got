@@ -237,6 +237,9 @@ func customHandler(ctx Context) error {
 		if reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, v2 := range *config.BotConfig.ChatConfigV2 {
 				if trigger, ok := v2.TriggerOnReply(); ok {
+					if v2.IsAgentEnabled() && chatv2.HasCompiledChat(v2.Name) {
+						return chatv2.Chat(ctx, v2, trigger)
+					}
 					return chat.Chat(ctx, v2, trigger)
 				}
 			}

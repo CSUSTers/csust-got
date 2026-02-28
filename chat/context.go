@@ -106,67 +106,67 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 		case tb.EntityTextLink:
 			// This is a formatted link like [text](url)
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(entity.URL), html.EscapeString(entityText)))
+				fmt.Fprintf(&result, `<a href="%s">%s</a>`, html.EscapeString(entity.URL), html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("[%s](%s)", entityText, entity.URL))
+				fmt.Fprintf(&result, "[%s](%s)", entityText, entity.URL)
 			}
 		case tb.EntityURL:
 			// This is a bare URL
 			result.WriteString(entityText)
 		case tb.EntityBold:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<b>%s</b>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<b>%s</b>", html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("**%s**", entityText))
+				fmt.Fprintf(&result, "**%s**", entityText)
 			}
 		case tb.EntityItalic:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<i>%s</i>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<i>%s</i>", html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("*%s*", entityText))
+				fmt.Fprintf(&result, "*%s*", entityText)
 			}
 		case tb.EntityCode:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<code>%s</code>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<code>%s</code>", html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("`%s`", entityText))
+				fmt.Fprintf(&result, "`%s`", entityText)
 			}
 		case tb.EntityUnderline:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<u>%s</u>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<u>%s</u>", html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("__%s__", entityText))
+				fmt.Fprintf(&result, "__%s__", entityText)
 			}
 		case tb.EntityStrikethrough:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<s>%s</s>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<s>%s</s>", html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("~~%s~~", entityText))
+				fmt.Fprintf(&result, "~~%s~~", entityText)
 			}
 		case tb.EntitySpoiler:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf(`<span class="tg-spoiler">%s</span>`, html.EscapeString(entityText)))
+				fmt.Fprintf(&result, `<span class="tg-spoiler">%s</span>`, html.EscapeString(entityText))
 			} else {
-				result.WriteString(fmt.Sprintf("||%s||", entityText))
+				fmt.Fprintf(&result, "||%s||", entityText)
 			}
 		case tb.EntityCodeBlock:
 			// Pre-formatted code block (with optional language)
 			if htmlFormat {
 				if entity.Language != "" {
-					result.WriteString(fmt.Sprintf(`<pre><code class="language-%s">%s</code></pre>`, html.EscapeString(entity.Language), html.EscapeString(entityText)))
+					fmt.Fprintf(&result, `<pre><code class="language-%s">%s</code></pre>`, html.EscapeString(entity.Language), html.EscapeString(entityText))
 				} else {
-					result.WriteString(fmt.Sprintf("<pre>%s</pre>", html.EscapeString(entityText)))
+					fmt.Fprintf(&result, "<pre>%s</pre>", html.EscapeString(entityText))
 				}
 			} else {
 				if entity.Language != "" {
-					result.WriteString(fmt.Sprintf("```%s\n%s\n```", entity.Language, entityText))
+					fmt.Fprintf(&result, "```%s\n%s\n```", entity.Language, entityText)
 				} else {
-					result.WriteString(fmt.Sprintf("```\n%s\n```", entityText))
+					fmt.Fprintf(&result, "```\n%s\n```", entityText)
 				}
 			}
 		case tb.EntityBlockquote:
 			if htmlFormat {
-				result.WriteString(fmt.Sprintf("<blockquote>%s</blockquote>", html.EscapeString(entityText)))
+				fmt.Fprintf(&result, "<blockquote>%s</blockquote>", html.EscapeString(entityText))
 			} else {
 				result.WriteString("> " + entityText)
 			}
@@ -175,23 +175,23 @@ func getMessageTextWithEntities(msg *tb.Message, htmlFormat bool) string {
 			if htmlFormat {
 				// For HTML format, remove @ and use tg:// scheme
 				username := strings.TrimPrefix(entityText, "@")
-				result.WriteString(fmt.Sprintf(`<a href="tg:%s">%s</a>`, username, entityText))
+				fmt.Fprintf(&result, `<a href="tg:%s">%s</a>`, username, entityText)
 			} else {
 				// For markdown format, use [@username](tg:username) format
 				username := strings.TrimPrefix(entityText, "@")
-				result.WriteString(fmt.Sprintf("[%s](tg:%s)", entityText, username))
+				fmt.Fprintf(&result, "[%s](tg:%s)", entityText, username)
 			}
 		case tb.EntityTMention:
 			// Text mention for users without usernames
 			if htmlFormat {
 				if entity.User != nil {
-					result.WriteString(fmt.Sprintf(`<a href="tg:user?id=%d">%s</a>`, entity.User.ID, html.EscapeString(entityText)))
+					fmt.Fprintf(&result, `<a href="tg:user?id=%d">%s</a>`, entity.User.ID, html.EscapeString(entityText))
 				} else {
 					result.WriteString(html.EscapeString(entityText))
 				}
 			} else {
 				if entity.User != nil {
-					result.WriteString(fmt.Sprintf("[%s](tg:user?id=%d)", entityText, entity.User.ID))
+					fmt.Fprintf(&result, "[%s](tg:user?id=%d)", entityText, entity.User.ID)
 				} else {
 					result.WriteString(entityText)
 				}
@@ -482,9 +482,9 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 
 	buf := strings.Builder{}
 
-	buf.WriteString(fmt.Sprintf(`<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
+	fmt.Fprintf(&buf, `<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
 		html.EscapeString(msg.Sender.Username),
-		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName())))
+		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName()))
 
 	text := getMessageTextWithEntities(msg, true) // Use HTML format since this function generates XML/HTML
 	if text == "" {

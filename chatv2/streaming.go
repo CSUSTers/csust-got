@@ -245,7 +245,5 @@ func NonStreamResponse(
 			ReplyTo: tbCtx.Message(),
 		})
 	}
-
-
 	return sent, err
 }
