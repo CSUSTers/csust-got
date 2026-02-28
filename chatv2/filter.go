@@ -1,3 +1,5 @@
+//go:build !386 && !arm
+
 package chatv2
 
 import (
