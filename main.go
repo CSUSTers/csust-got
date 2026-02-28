@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"csust-got/chat"
+	"csust-got/chatv2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
@@ -37,6 +39,10 @@ func main() {
 
 	chat.InitMcpoClient()
 	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
+	if err := chatv2.Init(context.Background()); err != nil {
+		zap.L().Error("chatv2: init failed", zap.Error(err))
+	}
+	defer chatv2.Close()
 	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
 
 	chat.InitGachaConfigs()
@@ -231,6 +237,9 @@ func customHandler(ctx Context) error {
 		if reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, v2 := range *config.BotConfig.ChatConfigV2 {
 				if trigger, ok := v2.TriggerOnReply(); ok {
+					if v2.IsAgentEnabled() && chatv2.HasCompiledChat(v2.Name) {
+						return chatv2.Chat(ctx, v2, trigger)
+					}
 					return chat.Chat(ctx, v2, trigger)
 				}
 			}
@@ -277,6 +286,9 @@ func registerChatConfigHandler(bot *Bot) {
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
+						return chatv2.Chat(ctx, vCopy, trCopy)
+					}
 					return chat.Chat(ctx, vCopy, trCopy)
 				})
 			}
@@ -299,6 +311,9 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
+						return chatv2.Chat(context, vCopy, trCopy)
+					}
 					return chat.Chat(context, vCopy, trCopy)
 				}})
 			}

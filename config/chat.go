@@ -165,9 +165,51 @@ type ChatConfigSingle struct {
 	Format          ChatOutputFormatConfig `mapstructure:"format"`
 	ReasoningEffort string                 `mapstructure:"reasoning_effort"`
 
+	Agent    *AgentConfig      `mapstructure:"agent"`
 	Features FeatureSetting    `mapstructure:"features"`
 	UseMcpo  bool              `mapstructure:"use_mcpo"`
 	Filters  ChatFilterSetting `mapstructure:"filters"`
+}
+
+// SubAgentConfig defines a subagent that can be invoked by the main agent as a tool
+type SubAgentConfig struct {
+	Name         string         `mapstructure:"name"`
+	Description  string         `mapstructure:"description"`
+	Model        *Model         `mapstructure:"model"`
+	SystemPrompt JoinableString `mapstructure:"system_prompt"`
+	Tools        []string       `mapstructure:"tools"`
+	MaxSteps     int            `mapstructure:"max_steps"`
+	McpServers   []*McpoConfig  `mapstructure:"mcp_servers"`
+}
+
+// GetMaxSteps returns the max tool call steps for the subagent
+func (c *SubAgentConfig) GetMaxSteps() int {
+	if c != nil && c.MaxSteps > 0 {
+		return c.MaxSteps
+	}
+	return 5
+}
+
+// AgentConfig defines the agent mode configuration for chatv2
+type AgentConfig struct {
+	Enable     bool              `mapstructure:"enable"`
+	Tools      []string          `mapstructure:"tools"`
+	MaxSteps   int               `mapstructure:"max_steps"`
+	SubAgents  []*SubAgentConfig `mapstructure:"subagents"`
+	McpServers []*McpoConfig     `mapstructure:"mcp_servers"`
+}
+
+// GetMaxSteps returns the max tool call steps for the main agent
+func (c *AgentConfig) GetMaxSteps() int {
+	if c != nil && c.MaxSteps > 0 {
+		return c.MaxSteps
+	}
+	return 12
+}
+
+// IsAgentEnabled returns true if chatv2 agent mode is enabled for this chat config
+func (ccs *ChatConfigSingle) IsAgentEnabled() bool {
+	return ccs.Agent != nil && ccs.Agent.Enable
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -207,9 +249,9 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
-	AllowRegenerate      bool   `mapstructure:"allow_regenerate"`       // Allow regeneration on 👎 reaction
-	MaxRegenerateCount   int    `mapstructure:"max_regenerate_count"`   // Maximum number of regenerations allowed
-	RegenerateFeedback   string `mapstructure:"regenerate_feedback"`    // User feedback message for regeneration
+	AllowRegenerate    bool   `mapstructure:"allow_regenerate"`     // Allow regeneration on 👎 reaction
+	MaxRegenerateCount int    `mapstructure:"max_regenerate_count"` // Maximum number of regenerations allowed
+	RegenerateFeedback string `mapstructure:"regenerate_feedback"`  // User feedback message for regeneration
 }
 
 // McpoConfig is the configuration for mcpo server

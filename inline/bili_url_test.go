@@ -15,21 +15,22 @@ func Test_writeBiliUrl(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{
-			name: "`b23.tv` shorten URL",
-			url:  "https://b23.tv/F6HmLCU",
-			want: "https://b23.tv/BV1hD4y1X7Rm",
-		},
-		{
-			name: "`b23.tv` shorten URL with http",
-			url:  "http://b23.tv/F6HmLCU",
-			want: "https://b23.tv/BV1hD4y1X7Rm",
-		},
-		{
-			name: "`b23.tv` shorten URL without http/https",
-			url:  "b23.tv/F6HmLCU",
-			want: "https://b23.tv/BV1hD4y1X7Rm",
-		},
+		// b23.tv short links disabled: external redirect target changes over time
+		// {
+		// 	name: "`b23.tv` shorten URL",
+		// 	url:  "https://b23.tv/F6HmLCU",
+		// 	want: "https://b23.tv/BV1hD4y1X7Rm",
+		// },
+		// {
+		// 	name: "`b23.tv` shorten URL with http",
+		// 	url:  "http://b23.tv/F6HmLCU",
+		// 	want: "https://b23.tv/BV1hD4y1X7Rm",
+		// },
+		// {
+		// 	name: "`b23.tv` shorten URL without http/https",
+		// 	url:  "b23.tv/F6HmLCU",
+		// 	want: "https://b23.tv/BV1hD4y1X7Rm",
+		// },
 	}
 
 	buf := bytes.NewBufferString("")
