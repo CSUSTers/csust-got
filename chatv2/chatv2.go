@@ -144,6 +144,7 @@ func handleStreaming(
 	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, placeholder)
 	if streamErr != nil {
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
+		return sendErrorMessage(tbCtx, chatCfg)
 	}
 	// Save response to Redis for future context
 	if response != "" && sentMsg != nil {

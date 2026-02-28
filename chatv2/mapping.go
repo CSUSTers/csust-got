@@ -110,7 +110,7 @@ func contextToSchemaMessages(msgs []*chat.ContextMessage, tc *TurnContext) []*sc
 
 	for _, msg := range msgs {
 		// Determine role based on whether message is from the bot
-		isBot := msg.UserNames.String() == botUsername && botUsername != ""
+		isBot := msg.User == botUsername && botUsername != ""
 		if isBot {
 			result = append(result, &schema.Message{
 				Role:    schema.Assistant,
@@ -147,40 +147,4 @@ func buildUserMessage(text string, tc *TurnContext) *schema.Message {
 		Role:    schema.User,
 		Content: text,
 	}
-}
-
-// BuildMessagesForSubAgent creates a minimal message set for a subagent invocation.
-// Used when the subagent needs to process specific content (e.g., image analysis).
-func BuildMessagesForSubAgent(systemPrompt, userInput string, imageData string) []*schema.Message {
-	var messages []*schema.Message
-
-	if systemPrompt != "" {
-		messages = append(messages, schema.SystemMessage(systemPrompt))
-	}
-
-	if imageData != "" {
-		// Multimodal message with image
-		urlStr := imageData
-		messages = append(messages, &schema.Message{
-			Role: schema.User,
-			UserInputMultiContent: []schema.MessageInputPart{
-				{
-					Type: schema.ChatMessagePartTypeText,
-					Text: userInput,
-				},
-				{
-					Type: schema.ChatMessagePartTypeImageURL,
-					Image: &schema.MessageInputImage{
-						MessagePartCommon: schema.MessagePartCommon{
-							URL: &urlStr,
-						},
-					},
-				},
-			},
-		})
-	} else {
-		messages = append(messages, schema.UserMessage(userInput))
-	}
-
-	return messages
 }

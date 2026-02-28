@@ -2,6 +2,7 @@ package chatv2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"text/template"
 
@@ -156,18 +157,10 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		allTools = append(allTools, subTool)
 	}
 
-	// Build system prompt modifier
-	systemPrompt := chatCfg.SystemPrompt.String()
-	var messageModifier react.MessageModifier
-	if systemPrompt != "" {
-		messageModifier = react.NewPersonaModifier(systemPrompt)
-	}
-
 	// Create the react agent
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: mainModel,
 		MaxStep:          agentCfg.GetMaxSteps(),
-		MessageModifier:  messageModifier,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: allTools,
 		},

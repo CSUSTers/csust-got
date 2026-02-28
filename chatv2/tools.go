@@ -6,9 +6,12 @@ import (
 	"csust-got/orm"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -161,8 +164,12 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 		}
 		mimeType = "image/jpeg" // Telegram typically serves JPEG
 	} else if args.URL != "" {
-		// Download from URL
-		resp, err := http.Get(args.URL) //nolint:gosec
+		// Download from URL with timeout and scheme restriction
+		if !strings.HasPrefix(args.URL, "http://") && !strings.HasPrefix(args.URL, "https://") {
+			return "", errors.New("get_image: only http and https URLs are allowed")
+		}
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Get(args.URL) //nolint:gosec
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to fetch URL: %w", err)
 		}

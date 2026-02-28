@@ -41,8 +41,12 @@ func (f *whitelistFilter) Check(tbCtx tb.Context, chatCfg *config.ChatConfigSing
 		}
 
 		// Whitelist configured but user not in it
+		var userID int64
+		if msg.Sender != nil {
+			userID = msg.Sender.ID
+		}
 		zap.L().Debug("chatv2/filter: user not in whitelist",
-			zap.Int64("user_id", msg.Sender.ID),
+			zap.Int64("user_id", userID),
 			zap.String("chat", chatCfg.Name),
 		)
 		return false
