@@ -90,6 +90,17 @@ func TestWhitelistFilter_Check(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "nil sender not in whitelist blocked without panic",
+			msg: &tb.Message{
+				Sender: nil,
+				Chat:   &tb.Chat{ID: 888},
+			},
+			filters: []config.ChatFilterConfig{
+				{Type: "whitelist", Whitelist: []int64{100, 200}},
+			},
+			want: false,
+		},
+		{
 			name: "empty filters allows all",
 			msg: &tb.Message{
 				Sender: &tb.User{ID: 999},

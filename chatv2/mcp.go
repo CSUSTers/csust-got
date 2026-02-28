@@ -55,14 +55,18 @@ func (m *McpManager) GetToolsFromConfig(ctx context.Context, mcpConfigs []*confi
 
 // getToolsFromServer connects to an MCP server and retrieves filtered tools.
 func (m *McpManager) getToolsFromServer(ctx context.Context, cfg *config.McpoConfig) ([]tool.BaseTool, error) {
-	// Create SSE client for HTTP-based MCP servers
-	cli, err := mcpclient.NewSSEMCPClient(cfg.Url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP client for %s: %w", cfg.Url, err)
+	// Reuse existing client if one exists for this URL
+	cli, exists := m.clients[cfg.Url]
+	if !exists {
+		// Create SSE client for HTTP-based MCP servers
+		var err error
+		cli, err = mcpclient.NewSSEMCPClient(cfg.Url)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create MCP client for %s: %w", cfg.Url, err)
+		}
+		// Store for cleanup
+		m.clients[cfg.Url] = cli
 	}
-
-	// Store for cleanup
-	m.clients[cfg.Url] = cli
 
 	// Build tool name filter
 	var toolNames []string

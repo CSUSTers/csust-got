@@ -61,6 +61,12 @@ func Close() {
 	}
 }
 
+// IsCompiled returns true if the given chat config was successfully compiled at init.
+func IsCompiled(name string) bool {
+	_, ok := compiledChats.Load(name)
+	return ok
+}
+
 // Chat is the main handler function for chatv2.
 // Signature matches chat.Chat() for compatibility with the bot's handler registration.
 func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.ChatTrigger) error {

@@ -89,24 +89,36 @@ func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		return "", fmt.Errorf("get_context: invalid arguments: %w", err)
 	}
 
-	limit := args.Limit
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
+	scope := args.Scope
+	if scope == "" {
+		scope = "recent"
 	}
 
-	messages, err := chat.GetMessageContext(tc.Bot, tc.Message, limit)
-	if err != nil {
-		return "", fmt.Errorf("get_context: failed to get message context: %w", err)
-	}
+	switch scope {
+	case "recent":
+		limit := args.Limit
+		if limit <= 0 {
+			limit = 10
+		}
+		if limit > 50 {
+			limit = 50
+		}
 
-	if len(messages) == 0 {
-		return "No conversation context available.", nil
-	}
+		messages, err := chat.GetMessageContext(tc.Bot, tc.Message, limit)
+		if err != nil {
+			return "", fmt.Errorf("get_context: failed to get message context: %w", err)
+		}
 
-	return chat.FormatContextMessagesWithXml(messages), nil
+		if len(messages) == 0 {
+			return "No conversation context available.", nil
+		}
+
+		return chat.FormatContextMessagesWithXml(messages), nil
+	case "reply_chain":
+		return "The \"reply_chain\" scope is not supported yet. Please use scope: \"recent\" instead.", nil
+	default:
+		return "", fmt.Errorf("get_context: invalid scope %q (expected \"recent\" or \"reply_chain\")", scope)
+	}
 }
 
 // ---- get_image Tool ----
@@ -114,9 +126,8 @@ func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 type getImageTool struct{}
 
 type getImageArgs struct {
-	FileID string `json:"file_id"`          // Telegram file ID
-	URL    string `json:"url,omitempty"`    // Alternative: direct URL
-	Format string `json:"format,omitempty"` // "base64" (default) or "description"
+	FileID string `json:"file_id"`       // Telegram file ID
+	URL    string `json:"url,omitempty"` // Alternative: direct URL
 }
 
 func (t *getImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {

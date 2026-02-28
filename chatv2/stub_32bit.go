@@ -16,5 +16,8 @@ func Init(_ context.Context) error { return nil }
 // Close is a no-op on 386.
 func Close() {}
 
+// IsCompiled always returns false on 386.
+func IsCompiled(_ string) bool { return false }
+
 // Chat is a no-op on 386.
 func Chat(_ tb.Context, _ *config.ChatConfigSingle, _ *config.ChatTrigger) error { return nil }

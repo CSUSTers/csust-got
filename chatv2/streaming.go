@@ -35,6 +35,7 @@ func StreamToTelegram(
 		sentenceDelims: config.BotConfig.SentenceDelimiters,
 		editInterval:   getEditInterval(format),
 		done:           make(chan struct{}),
+		tickerDone:     make(chan struct{}),
 	}
 
 	return sp.process(placeholder)
@@ -56,7 +57,8 @@ type streamProcessor struct {
 	placeholderMsg   *tb.Message
 
 	// Ticker control
-	done chan struct{}
+	done       chan struct{}
+	tickerDone chan struct{}
 }
 
 func getEditInterval(format *config.ChatOutputFormatConfig) time.Duration {
@@ -74,7 +76,7 @@ func (sp *streamProcessor) process(placeholder string) (string, string, *tb.Mess
 	sent, err := sp.tbCtx.Bot().Send(
 		sp.tbCtx.Chat(),
 		placeholder,
-		&tb.SendOptions{ParseMode: parseMode},
+		&tb.SendOptions{ParseMode: parseMode, ReplyTo: sp.tbCtx.Message()},
 	)
 	if err != nil {
 		return "", "", nil, err
@@ -95,14 +97,16 @@ func (sp *streamProcessor) process(placeholder string) (string, string, *tb.Mess
 		}
 		if recvErr != nil {
 			close(sp.done)
+			<-sp.tickerDone
 			return sp.getResponse(), sp.getReasoning(), sp.placeholderMsg, recvErr
 		}
 
 		sp.processChunk(msg)
 	}
 
-	// Signal ticker to stop
+	// Signal ticker to stop and wait for it to finish
 	close(sp.done)
+	<-sp.tickerDone
 
 	// Finalize
 	return sp.finalize()
@@ -110,6 +114,7 @@ func (sp *streamProcessor) process(placeholder string) (string, string, *tb.Mess
 
 // tickerLoop periodically updates the Telegram message.
 func (sp *streamProcessor) tickerLoop(ticker *time.Ticker) {
+	defer close(sp.tickerDone)
 	for {
 		select {
 		case <-sp.done:

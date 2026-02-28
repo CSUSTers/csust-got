@@ -112,7 +112,7 @@ func contextToSchemaMessages(msgs []*chat.ContextMessage, tc *TurnContext) []*sc
 
 	for _, msg := range msgs {
 		// Determine role based on whether message is from the bot
-		isBot := msg.UserNames.String() == botUsername && botUsername != ""
+		isBot := msg.User == botUsername && botUsername != ""
 		if isBot {
 			result = append(result, &schema.Message{
 				Role:    schema.Assistant,

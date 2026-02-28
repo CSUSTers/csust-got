@@ -110,6 +110,16 @@ func TestContextToSchemaMessages(t *testing.T) {
 			wantLen:   1,
 			wantRoles: []schema.RoleType{schema.User},
 		},
+		{
+			name:        "bot message detected by username",
+			botUsername: "testbot",
+			msgs: []*chat.ContextMessage{
+				{ID: 1, User: "testbot", Text: "I am the bot"},
+				{ID: 2, User: "alice", Text: "hello bot"},
+			},
+			wantLen:   2,
+			wantRoles: []schema.RoleType{schema.Assistant, schema.User},
+		},
 	}
 
 	for _, tt := range tests {
