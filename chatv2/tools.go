@@ -107,9 +107,8 @@ func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 type getImageTool struct{}
 
 type getImageArgs struct {
-	FileID string `json:"file_id"`          // Telegram file ID
-	URL    string `json:"url,omitempty"`    // Alternative: direct URL
-	Format string `json:"format,omitempty"` // "base64" (default) or "description"
+	FileID string `json:"file_id"`       // Telegram file ID
+	URL    string `json:"url,omitempty"` // Alternative: direct URL
 }
 
 func (t *getImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
