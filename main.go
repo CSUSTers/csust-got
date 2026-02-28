@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"csust-got/chat"
 	"csust-got/chatv2"
 	"csust-got/inline"
@@ -9,7 +10,6 @@ import (
 	"csust-got/store"
 	"csust-got/util/gacha"
 	"encoding/json"
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -283,7 +283,7 @@ func registerChatConfigHandler(bot *Bot) {
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
-					if vCopy.IsAgentEnabled() {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
 						return chatv2.Chat(ctx, vCopy, trCopy)
 					}
 					return chat.Chat(ctx, vCopy, trCopy)
@@ -308,7 +308,7 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
-					if vCopy.IsAgentEnabled() {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
 						return chatv2.Chat(context, vCopy, trCopy)
 					}
 					return chat.Chat(context, vCopy, trCopy)

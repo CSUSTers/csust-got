@@ -54,25 +54,18 @@ func BuildBuiltinTools(names []string) ([]tool.BaseTool, error) {
 type getContextTool struct{}
 
 type getContextArgs struct {
-	Limit int    `json:"limit,omitempty"` // max messages to retrieve (default: 10)
-	Scope string `json:"scope,omitempty"` // "recent" (default) or "reply_chain"
+	Limit int `json:"limit,omitempty"` // max messages to retrieve (default: 10)
 }
 
 func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "get_context",
-		Desc: "Retrieve conversation history from the current chat. " +
-			"Use 'recent' scope for recent messages, or 'reply_chain' for the reply chain of the current message. " +
+		Desc: "Retrieve recent conversation history from the current chat. " +
 			"Returns formatted message history with sender info and timestamps.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"limit": {
 				Type: "integer",
 				Desc: "Maximum number of messages to retrieve. Default: 10, Max: 50",
-			},
-			"scope": {
-				Type: "string",
-				Desc: "Context scope: 'recent' for recent messages, 'reply_chain' for reply chain. Default: 'recent'",
-				Enum: []string{"recent", "reply_chain"},
 			},
 		}),
 	}, nil

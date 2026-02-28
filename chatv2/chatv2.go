@@ -54,6 +54,12 @@ func Init(ctx context.Context) error {
 	return nil
 }
 
+// HasCompiledChat reports whether a compiled chat config exists for the given name.
+func HasCompiledChat(name string) bool {
+	_, ok := compiledChats.Load(name)
+	return ok
+}
+
 // Close shuts down all chatv2 resources.
 func Close() {
 	if mcpManager != nil {

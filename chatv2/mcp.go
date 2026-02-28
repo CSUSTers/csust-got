@@ -61,6 +61,10 @@ func (m *McpManager) getToolsFromServer(ctx context.Context, cfg *config.McpoCon
 		return nil, fmt.Errorf("failed to create MCP client for %s: %w", cfg.Url, err)
 	}
 
+	// Close existing client for this URL if present
+	if old, ok := m.clients[cfg.Url]; ok {
+		_ = old.Close()
+	}
 	// Store for cleanup
 	m.clients[cfg.Url] = cli
 
