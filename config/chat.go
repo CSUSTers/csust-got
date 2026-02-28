@@ -55,6 +55,22 @@ type ChatOutputFormatConfig struct {
 	// use_native_reasoning: use native OpenAI protocol ReasoningContent field (true by default)
 	// When false, falls back to parsing <think>...</think> tags from response text
 	UseNativeReasoning *bool `mapstructure:"use_native_reasoning"`
+	// ProgressSummary configures progress summarization during agent execution.
+	// When enabled, the agent can call update_progress to send status updates
+	// to the user via a small/cheap model.
+	ProgressSummary *ProgressSummaryConfig `mapstructure:"progress_summary"`
+}
+
+// ProgressSummaryConfig configures the progress summarization feature.
+// A small model processes the agent's progress updates before displaying to the user.
+type ProgressSummaryConfig struct {
+	// Enable turns on progress summarization
+	Enable bool `mapstructure:"enable"`
+	// Model is the small/cheap model used for summarizing progress (optional).
+	// If nil, the agent's raw update_progress content is displayed directly.
+	Model *Model `mapstructure:"model"`
+	// Prompt is the system prompt for the summarizer model.
+	Prompt JoinableString `mapstructure:"prompt"`
 }
 
 const (
@@ -147,7 +163,10 @@ type ChatFilterSetting struct {
 	Filters []ChatFilterConfig `mapstructure:"filters"`
 }
 
-// ChatConfigV2 is the configuration for chat
+// ChatConfigV1 is the configuration for chat
+type ChatConfigV1 []*ChatConfigSingle
+
+// ChatConfigV2 is the configuration for agent
 type ChatConfigV2 []*ChatConfigSingle
 
 // ChatConfigSingle is the configuration for a single chat
@@ -173,13 +192,14 @@ type ChatConfigSingle struct {
 
 // SubAgentConfig defines a subagent that can be invoked by the main agent as a tool
 type SubAgentConfig struct {
-	Name         string         `mapstructure:"name"`
-	Description  string         `mapstructure:"description"`
-	Model        *Model         `mapstructure:"model"`
-	SystemPrompt JoinableString `mapstructure:"system_prompt"`
-	Tools        []string       `mapstructure:"tools"`
-	MaxSteps     int            `mapstructure:"max_steps"`
-	McpServers   []*McpoConfig  `mapstructure:"mcp_servers"`
+	Name         string            `mapstructure:"name"`
+	Description  string            `mapstructure:"description"`
+	Model        *Model            `mapstructure:"model"`
+	SystemPrompt JoinableString    `mapstructure:"system_prompt"`
+	Tools        []string          `mapstructure:"tools"`
+	MaxSteps     int               `mapstructure:"max_steps"`
+	McpServers   []*McpoConfig     `mapstructure:"mcp_servers"`
+	ToolModels   map[string]*Model `mapstructure:"tool_models"`
 }
 
 // GetMaxSteps returns the max tool call steps for the subagent
@@ -197,6 +217,7 @@ type AgentConfig struct {
 	MaxSteps   int               `mapstructure:"max_steps"`
 	SubAgents  []*SubAgentConfig `mapstructure:"subagents"`
 	McpServers []*McpoConfig     `mapstructure:"mcp_servers"`
+	ToolModels map[string]*Model `mapstructure:"tool_models"`
 }
 
 // GetMaxSteps returns the max tool call steps for the main agent
@@ -336,7 +357,7 @@ func (f *FeatureSetting) GetRegenerateFeedback() string {
 	return "用户认为上次的回答👎" // default message
 }
 
-func (c *ChatConfigV2) readConfig() {
+func (c *ChatConfigV1) readConfig() {
 	v := viper.GetViper()
 	err := v.UnmarshalKey("chats", c, viper.DecodeHook(DispatchFor()))
 	if err != nil {
@@ -344,3 +365,18 @@ func (c *ChatConfigV2) readConfig() {
 	}
 
 }
+
+func (c *ChatConfigV2) readConfig() {
+	v := viper.GetViper()
+	err := v.UnmarshalKey("agents", c, viper.DecodeHook(DispatchFor()))
+	if err != nil {
+		zap.L().Warn("cannot parse agents config", zap.Error(err))
+		return
+	}
+	// Auto-enable agent mode for each entry in agents[]
+	for _, cfg := range *c {
+		if cfg.Agent == nil {
+			cfg.Agent = &AgentConfig{Enable: true}
+		}
+	}
+	}

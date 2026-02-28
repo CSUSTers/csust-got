@@ -18,15 +18,16 @@ import (
 )
 
 // StreamToTelegram reads from an eino StreamReader and streams the output to a Telegram message.
-// It sends a placeholder message first, then periodically edits it with accumulated content.
-// Returns the final response text, reasoning content, and any error.
+// If existingMsg is provided (e.g. from progress placeholder), it reuses that message instead
+// of creating a new one. Returns the final response text, reasoning content, and any error.
 func StreamToTelegram(
 	ctx context.Context,
 	tbCtx tb.Context,
 	reader *schema.StreamReader[*schema.Message],
 	format *config.ChatOutputFormatConfig,
-	placeholder string,
+	existingMsg *tb.Message,
 ) (response string, reasoning string, sentMsg *tb.Message, err error) {
+	tc := GetTurnContext(ctx) // may be nil outside chatv2
 	sp := &streamProcessor{
 		ctx:            ctx,
 		tbCtx:          tbCtx,
@@ -35,9 +36,10 @@ func StreamToTelegram(
 		sentenceDelims: config.BotConfig.SentenceDelimiters,
 		editInterval:   getEditInterval(format),
 		done:           make(chan struct{}),
+		tc:             tc,
 	}
 
-	return sp.process(placeholder)
+	return sp.process(existingMsg)
 }
 
 // streamProcessor manages the streaming output lifecycle.
@@ -54,6 +56,7 @@ type streamProcessor struct {
 	fullResponse     strings.Builder
 	reasoningContent strings.Builder
 	placeholderMsg   *tb.Message
+	tc               *TurnContext // For editMu locking and lifecycle flags
 
 	// Ticker control
 	done chan struct{}
@@ -69,27 +72,27 @@ func getEditInterval(format *config.ChatOutputFormatConfig) time.Duration {
 }
 
 // process is the main streaming loop.
-func (sp *streamProcessor) process(placeholder string) (string, string, *tb.Message, error) {
-	// Send placeholder message
-	parseMode := GetParseMode(sp.format)
-	sent, err := sp.tbCtx.Bot().Send(
-		sp.tbCtx.Chat(),
-		placeholder,
-		&tb.SendOptions{ParseMode: parseMode, ReplyTo: sp.tbCtx.Message()},
-	)
-	if err != nil {
-		return "", "", nil, err
+func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb.Message, error) {
+	if existingMsg != nil {
+		// Reuse existing progress placeholder message
+		sp.placeholderMsg = existingMsg
+	} else {
+		// Send new placeholder message
+		parseMode := GetParseMode(sp.format)
+		sent, err := sp.tbCtx.Bot().Send(
+			sp.tbCtx.Chat(),
+			"...",
+			&tb.SendOptions{ParseMode: parseMode, ReplyTo: sp.tbCtx.Message()},
+		)
+		if err != nil {
+			return "", "", nil, err
+		}
+		sp.placeholderMsg = sent
 	}
-	sp.placeholderMsg = sent
-
 	// Start periodic update ticker
 	ticker := time.NewTicker(sp.editInterval)
 	defer ticker.Stop()
-
-	sp.wg.Add(1)
 	go sp.tickerLoop(ticker)
-
-	// Read from eino StreamReader
 	for {
 		msg, recvErr := sp.reader.Recv()
 		if errors.Is(recvErr, io.EOF) {
@@ -100,14 +103,11 @@ func (sp *streamProcessor) process(placeholder string) (string, string, *tb.Mess
 			sp.wg.Wait()
 			return sp.getResponse(), sp.getReasoning(), sp.placeholderMsg, recvErr
 		}
-
 		sp.processChunk(msg)
 	}
-
 	// Signal ticker to stop
 	close(sp.done)
 	sp.wg.Wait()
-
 	// Finalize
 	return sp.finalize()
 }
@@ -171,24 +171,36 @@ func (sp *streamProcessor) updateMessage() {
 	sp.editPlaceholder(formatted)
 }
 
-// finalize sends the final complete message.
+// finalize sends the final complete message and sets the finalized lifecycle flag.
 func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	text := sp.getResponse()
 	reason := sp.getReasoning()
 	if text == "" && reason == "" {
+		if sp.tc != nil {
+			sp.tc.finalized.Store(true)
+		}
 		return "", "", sp.placeholderMsg, nil
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
 	sp.editPlaceholder(formatted)
+	if sp.tc != nil {
+		sp.tc.finalized.Store(true)
+	}
 	return text, reason, sp.placeholderMsg, nil
 }
 
 // editPlaceholder edits the placeholder message with new content.
+// If a TurnContext is available, uses editMu to prevent races with update_progress.
 func (sp *streamProcessor) editPlaceholder(formatted string) {
 	if sp.placeholderMsg == nil || formatted == "" {
 		return
 	}
 
+	// Lock editMu if available (prevents race with update_progress)
+	if sp.tc != nil {
+		sp.tc.editMu.Lock()
+		defer sp.tc.editMu.Unlock()
+	}
 	parseMode := GetParseMode(sp.format)
 	_, err := sp.tbCtx.Bot().Edit(
 		sp.placeholderMsg,
@@ -221,16 +233,34 @@ func (sp *streamProcessor) getReasoning() string {
 }
 
 // NonStreamResponse sends a complete response without streaming.
-// Used when stream_output is disabled.
+// If existingMsg is provided, edits it instead of sending a new message.
 func NonStreamResponse(
 	tbCtx tb.Context,
 	text string,
 	reasoning string,
 	format *config.ChatOutputFormatConfig,
+	existingMsg *tb.Message,
 ) (*tb.Message, error) {
 	formatted := FormatOutputWithReason(text, reasoning, format)
 	parseMode := GetParseMode(format)
+	if existingMsg != nil {
+		// Edit existing progress placeholder
+		_, err := tbCtx.Bot().Edit(
+			existingMsg,
+			formatted,
+			&tb.SendOptions{ParseMode: parseMode},
+		)
+		if err != nil {
+			// Fallback: edit without formatting
+			_, err = tbCtx.Bot().Edit(existingMsg, text)
+			if err != nil {
+				zap.L().Debug("chatv2: failed to edit non-stream message", zap.Error(err))
+			}
+		}
+		return existingMsg, nil
+	}
 
+	// Send new message (original behavior)
 	sent, err := tbCtx.Bot().Send(
 		tbCtx.Chat(),
 		formatted,

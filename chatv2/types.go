@@ -4,11 +4,12 @@ package chatv2
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"text/template"
-
 	"csust-got/chat"
 	"csust-got/config"
-
+	model "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/flow/agent/react"
 	tb "gopkg.in/telebot.v3"
 )
@@ -25,6 +26,15 @@ type TurnContext struct {
 	Config  *config.ChatConfigSingle
 	Trigger *config.ChatTrigger
 	BotUser *tb.User
+	// Progress tracking — used by update_progress tool and streaming handlers.
+	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
+	editMu           sync.Mutex
+	progressMsg      *tb.Message       // Placeholder message for progress/streaming
+	progressModel    model.ChatModel   // Lazily-built small model for summarization
+	progressOnce     sync.Once         // Ensures progressModel is built once
+	progressModelErr error             // Error from building progressModel
+	streamingStarted atomic.Bool       // Set true when streaming/final output begins
+	finalized        atomic.Bool       // Set true after final response sent
 }
 
 // WithTurnContext stores TurnContext in a Go context.
@@ -38,6 +48,33 @@ func GetTurnContext(ctx context.Context) *TurnContext {
 		return v
 	}
 	return nil
+}
+
+// SetProgressMsg atomically sets the Telegram placeholder message for progress updates.
+func (tc *TurnContext) SetProgressMsg(msg *tb.Message) {
+	tc.editMu.Lock()
+	defer tc.editMu.Unlock()
+	tc.progressMsg = msg
+}
+
+// GetProgressMsg atomically retrieves the current progress placeholder message.
+func (tc *TurnContext) GetProgressMsg() *tb.Message {
+	tc.editMu.Lock()
+	defer tc.editMu.Unlock()
+	return tc.progressMsg
+}
+
+// GetOrBuildProgressModel lazily builds and returns the progress summarization model.
+// Returns (nil, nil) if no progress summary model is configured.
+func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ChatModel, error) {
+	psCfg := tc.Config.Format.ProgressSummary
+	if psCfg == nil || psCfg.Model == nil {
+		return nil, nil
+	}
+	tc.progressOnce.Do(func() {
+		tc.progressModel, tc.progressModelErr = buildModel(ctx, psCfg.Model)
+	})
+	return tc.progressModel, tc.progressModelErr
 }
 
 // CompiledChat is a pre-compiled chat configuration ready for concurrent reuse.

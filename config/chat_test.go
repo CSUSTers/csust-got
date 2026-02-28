@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestChatConfigV2_ReadConfig(t *testing.T) {
+func TestChatConfigV1_ReadConfig(t *testing.T) {
 	const config = `
 models:
   - &gpt
@@ -46,10 +46,10 @@ chats:
 	viper.SetConfigType("yaml")
 	assert.NoError(t, viper.ReadConfig(strings.NewReader(config)))
 
-	var c ChatConfigV2
+	var c ChatConfigV1
 	c.readConfig()
 	assert.Len(t, c, 2)
-	assert.Equal(t, ChatConfigV2{
+	assert.Equal(t, ChatConfigV1{
 		&ChatConfigSingle{
 			Name:           "test",
 			MessageContext: 5,

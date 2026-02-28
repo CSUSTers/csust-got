@@ -60,7 +60,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 	var subTools []tool.BaseTool
 
 	if len(subCfg.Tools) > 0 {
-		builtins, err := BuildBuiltinTools(subCfg.Tools)
+		builtins, err := BuildBuiltinTools(subCfg.Tools, subCfg.ToolModels)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build tools for subagent %q: %w", subCfg.Name, err)
 		}
@@ -131,7 +131,7 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 
 	// 1. Built-in tools
 	if len(agentCfg.Tools) > 0 {
-		builtins, err := BuildBuiltinTools(agentCfg.Tools)
+		builtins, err := BuildBuiltinTools(agentCfg.Tools, agentCfg.ToolModels)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build tools for chat %q: %w", chatCfg.Name, err)
 		}

@@ -5,6 +5,7 @@ package chatv2
 import (
 	"context"
 	"csust-got/chat"
+	"csust-got/config"
 	"csust-got/orm"
 	"encoding/base64"
 	"encoding/json"
@@ -12,10 +13,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
+	tb "gopkg.in/telebot.v3"
 )
 
 var (
@@ -26,25 +27,42 @@ var (
 	errBadHTTPStatus = errors.New("unexpected HTTP status")
 )
 
+
+// modelConfigurable is implemented by tools that support a model override.
+// If a tool implements this interface and a matching entry exists in ToolModels,
+// BuildBuiltinTools will inject the model config at creation time.
+type modelConfigurable interface {
+	SetModelConfig(m *config.Model)
+}
 // ---- Tool Registry ----
 
 // builtinToolFactories maps tool names to factory functions.
 // Each factory creates a tool.InvokableTool instance.
 var builtinToolFactories = map[string]func() tool.InvokableTool{
-	"get_context": func() tool.InvokableTool { return &getContextTool{} },
-	"get_image":   func() tool.InvokableTool { return &getImageTool{} },
-	"get_message": func() tool.InvokableTool { return &getMessageTool{} },
+	"get_context":   func() tool.InvokableTool { return &getContextTool{} },
+	"get_image":     func() tool.InvokableTool { return &getImageTool{} },
+	"get_message":   func() tool.InvokableTool { return &getMessageTool{} },
+	"analyze_image":    func() tool.InvokableTool { return &analyzeImageTool{} },
+	"update_progress": func() tool.InvokableTool { return &updateProgressTool{} },
 }
 
 // BuildBuiltinTools creates tool instances from a list of tool names.
-func BuildBuiltinTools(names []string) ([]tool.BaseTool, error) {
+// toolModels provides optional per-tool model overrides (may be nil).
+func BuildBuiltinTools(names []string, toolModels map[string]*config.Model) ([]tool.BaseTool, error) {
 	var tools []tool.BaseTool
 	for _, name := range names {
 		factory, ok := builtinToolFactories[name]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s", errUnknownTool, name)
 		}
-		tools = append(tools, factory())
+		t := factory()
+		// Inject model config if tool supports it and config exists
+		if mc, ok := t.(modelConfigurable); ok && toolModels != nil {
+			if m, exists := toolModels[name]; exists {
+				mc.SetModelConfig(m)
+			}
+		}
+		tools = append(tools, t)
 	}
 	return tools, nil
 }
@@ -136,56 +154,233 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 	if tc == nil {
 		return "", fmt.Errorf("get_image: %w", errNoTurnContext)
 	}
-
 	var args getImageArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("get_image: invalid arguments: %w", err)
 	}
 
+	return downloadImage(tc, args.FileID, args.URL)
+}
+
+// ---- analyze_image Tool ----
+
+type analyzeImageTool struct {
+	modelCfg *config.Model // optional: override model for vision calls
+}
+
+type analyzeImageArgs struct {
+	FileID string `json:"file_id"`        // Telegram file ID
+	URL    string `json:"url,omitempty"`   // Alternative: direct URL
+	Query  string `json:"query,omitempty"` // What to analyze about the image
+}
+
+
+func (t *analyzeImageTool) SetModelConfig(m *config.Model) {
+	t.modelCfg = m
+}
+func (t *analyzeImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: "analyze_image",
+		Desc: "Download an image and analyze its content using vision capabilities. " +
+			"Returns a text description or answer about the image. Use this when you need to " +
+			"understand what an image contains. Provide a specific query to focus the analysis.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"file_id": {
+				Type:     "string",
+				Desc:     "Telegram file ID of the image to analyze",
+				Required: true,
+			},
+			"url": {
+				Type: "string",
+				Desc: "Alternative: direct URL of the image to analyze",
+			},
+			"query": {
+				Type: "string",
+				Desc: "Specific question about the image, e.g. 'What text is in this image?' Default: describe the image",
+			},
+		}),
+	}, nil
+}
+
+func (t *analyzeImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	tc := GetTurnContext(ctx)
+	if tc == nil {
+		return "", fmt.Errorf("analyze_image: %w", errNoTurnContext)
+	}
+
+	var args analyzeImageArgs
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("analyze_image: invalid arguments: %w", err)
+	}
+
+	// Download image
+	imageData, err := downloadImage(tc, args.FileID, args.URL)
+	if err != nil {
+		return "", fmt.Errorf("analyze_image: %w", err)
+	}
+
+	// Use tool-specific model if configured, otherwise fallback to chat's model
+	modelCfg := t.modelCfg
+	if modelCfg == nil {
+		modelCfg = tc.Config.Model
+	}
+	visionModel, err := buildModel(ctx, modelCfg)
+	if err != nil {
+		return "", fmt.Errorf("analyze_image: failed to build vision model: %w", err)
+	}
+
+	// Prepare query
+	query := args.Query
+	if query == "" {
+		query = "请描述这张图片的内容。"
+	}
+
+	// Build multimodal messages and call vision model
+	messages := BuildMessagesForSubAgent("", query, imageData)
+	result, err := visionModel.Generate(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("analyze_image: vision model call failed: %w", err)
+	}
+
+	return result.Content, nil
+}
+
+// ---- Image Download Helper ----
+
+// downloadImage downloads an image from Telegram file ID or URL, returns base64 data URI.
+func downloadImage(tc *TurnContext, fileID, url string) (string, error) {
 	var data []byte
 	var mimeType string
-
 	switch {
-	case args.FileID != "":
-		// Download from Telegram
-		file, err := tc.Bot.FileByID(args.FileID)
+	case fileID != "":
+		file, err := tc.Bot.FileByID(fileID)
 		if err != nil {
-			return "", fmt.Errorf("get_image: failed to get file info: %w", err)
+			return "", fmt.Errorf("failed to get file info: %w", err)
 		}
 		reader, err := tc.Bot.File(&file)
 		if err != nil {
-			return "", fmt.Errorf("get_image: failed to download file: %w", err)
+			return "", fmt.Errorf("failed to download file: %w", err)
 		}
 		defer func() { _ = reader.Close() }()
 		data, err = io.ReadAll(io.LimitReader(reader, 10*1024*1024)) // 10MB limit
 		if err != nil {
-			return "", fmt.Errorf("get_image: failed to read file data: %w", err)
+			return "", fmt.Errorf("failed to read file data: %w", err)
 		}
 		mimeType = "image/jpeg" // Telegram typically serves JPEG
-	case args.URL != "":
-		// Download from URL
-		resp, err := http.Get(args.URL) //nolint:gosec
+	case url != "":
+		resp, err := http.Get(url) //nolint:gosec
 		if err != nil {
-			return "", fmt.Errorf("get_image: failed to fetch URL: %w", err)
+			return "", fmt.Errorf("failed to fetch URL: %w", err)
 		}
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("get_image: %w: %d", errBadHTTPStatus, resp.StatusCode)
+			return "", fmt.Errorf("%w: %d", errBadHTTPStatus, resp.StatusCode)
 		}
 		data, err = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		if err != nil {
-			return "", fmt.Errorf("get_image: failed to read URL data: %w", err)
+			return "", fmt.Errorf("failed to read URL data: %w", err)
 		}
 		mimeType = resp.Header.Get("Content-Type")
 		if mimeType == "" {
 			mimeType = "image/jpeg"
 		}
 	default:
-		return "", fmt.Errorf("get_image: %w", errNoImageSource)
+		return "", errNoImageSource
 	}
-
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
+}
+
+// ---- update_progress Tool ----
+
+type updateProgressTool struct{}
+
+type updateProgressArgs struct {
+	Content string `json:"content"` // Progress description to display
+}
+
+func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: "update_progress",
+		Desc: "Send a progress update to the user. Use this to report intermediate status " +
+			"during multi-step tasks (e.g. 'Searching web...', 'Analyzing results 3/5...'). " +
+			"The update will be displayed by editing the bot's placeholder message.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"content": {
+				Type:     "string",
+				Desc:     "Progress description to show the user",
+				Required: true,
+			},
+		}),
+	}, nil
+}
+
+func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	tc := GetTurnContext(ctx)
+	if tc == nil {
+		return "", fmt.Errorf("update_progress: %w", errNoTurnContext)
+	}
+
+	// Lifecycle gate: no-op once streaming/final output has started
+	if tc.streamingStarted.Load() || tc.finalized.Load() {
+		return "ok (output already started)", nil
+	}
+
+	var args updateProgressArgs
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("update_progress: invalid arguments: %w", err)
+	}
+	if args.Content == "" {
+		return "ok (empty content)", nil
+	}
+
+	// Optionally summarize via the configured small model
+	displayText := args.Content
+	if psCfg := tc.Config.Format.ProgressSummary; psCfg != nil && psCfg.Model != nil {
+		summaryModel, err := tc.GetOrBuildProgressModel(ctx)
+		if err != nil {
+			zap.L().Warn("update_progress: failed to build progress model, using raw content", zap.Error(err))
+		} else if summaryModel != nil {
+			sysPrompt := string(psCfg.Prompt)
+			if sysPrompt == "" {
+				sysPrompt = "你是一个进度总结助手。根据以下内容，生成简洁的进度摘要。"
+			}
+			messages := []*schema.Message{
+				{Role: schema.System, Content: sysPrompt},
+				{Role: schema.User, Content: args.Content},
+			}
+			result, err := summaryModel.Generate(ctx, messages)
+			if err != nil {
+				zap.L().Warn("update_progress: summary model call failed, using raw content", zap.Error(err))
+			} else {
+				displayText = result.Content
+			}
+		}
+	}
+
+	// Edit the progress placeholder message under lock
+	tc.editMu.Lock()
+	defer tc.editMu.Unlock()
+
+	progressMsg := tc.progressMsg
+	if progressMsg == nil {
+		// No placeholder yet — send a new message and store it
+		msg, err := tc.Bot.Send(&tb.Chat{ID: tc.ChatID}, displayText)
+		if err != nil {
+			zap.L().Warn("update_progress: failed to send progress message", zap.Error(err))
+			return "ok (send failed)", nil
+		}
+		tc.progressMsg = msg
+		return "ok", nil
+	}
+
+	// Edit existing placeholder
+	_, err := tc.Bot.Edit(progressMsg, displayText)
+	if err != nil {
+		// "message is not modified" is not a real error
+		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))
+	}
+	return "ok", nil
 }
 
 // ---- get_message Tool ----

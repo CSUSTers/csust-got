@@ -132,19 +132,44 @@ func contextToSchemaMessages(msgs []*chat.ContextMessage, tc *TurnContext) []*sc
 	return result
 }
 
-// buildUserMessage creates the user message, adding image file ID hints
-// when the replied-to message contains a photo.
+// buildUserMessage creates the user message, adding hints about available
+// media attachments so the agent can decide whether to fetch them via tools.
 func buildUserMessage(text string, tc *TurnContext) *schema.Message {
-	// Check if reply-to message has an image
-	if tc.Message.ReplyTo != nil && tc.Message.ReplyTo.Photo != nil {
-		photo := tc.Message.ReplyTo.Photo
-		fileID := photo.FileID
-		// Add image reference hint to the text so the agent can use get_image tool
-		text = fmt.Sprintf("%s\n\n[Referenced message contains an image (file_id: %s). "+
-			"Use the get_image tool with this file_id to view the image if needed.]",
-			text, fileID)
+	var mediaHints []string
+
+	// Current message attachments
+	if tc.Message.Photo != nil {
+		fileID := tc.Message.Photo.FileID
+		mediaHints = append(mediaHints, fmt.Sprintf(
+			"[This message contains an attached image (file_id: %s). "+
+				"Use the analyze_image tool to view and analyze it if needed.]", fileID))
+	}
+	if tc.Message.Document != nil {
+		doc := tc.Message.Document
+		mediaHints = append(mediaHints, fmt.Sprintf(
+			"[This message has an attached file: %s (file_id: %s, mime: %s).]",
+			doc.FileName, doc.FileID, doc.MIME))
 	}
 
+	// Reply-to message attachments
+	if tc.Message.ReplyTo != nil {
+		if tc.Message.ReplyTo.Photo != nil {
+			fileID := tc.Message.ReplyTo.Photo.FileID
+			mediaHints = append(mediaHints, fmt.Sprintf(
+				"[Referenced message contains an image (file_id: %s). "+
+					"Use the analyze_image tool to view and analyze it if needed.]", fileID))
+		}
+		if tc.Message.ReplyTo.Document != nil {
+			doc := tc.Message.ReplyTo.Document
+			mediaHints = append(mediaHints, fmt.Sprintf(
+				"[Referenced message has an attached file: %s (file_id: %s, mime: %s).]",
+				doc.FileName, doc.FileID, doc.MIME))
+		}
+	}
+
+	if len(mediaHints) > 0 {
+		text = text + "\n\n" + strings.Join(mediaHints, "\n")
+	}
 	return &schema.Message{
 		Role:    schema.User,
 		Content: text,

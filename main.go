@@ -38,12 +38,12 @@ func main() {
 	orm.LoadBlockList()
 
 	chat.InitMcpoClient()
-	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
+	chat.InitAiClients(config.BotConfig.ActiveChatConfig())
 	if err := chatv2.Init(context.Background()); err != nil {
 		zap.L().Error("chatv2: init failed", zap.Error(err))
 	}
 	defer chatv2.Close()
-	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
+	initChatRegexHandlers(config.BotConfig.ActiveChatConfig())
 
 	chat.InitGachaConfigs()
 
@@ -235,7 +235,7 @@ func customHandler(ctx Context) error {
 	if text != "" && ctx.Message().ReplyTo != nil {
 		reply := ctx.Message().ReplyTo
 		if reply.Sender.Username == ctx.Bot().Me.Username {
-			for _, v2 := range *config.BotConfig.ChatConfigV2 {
+			for _, v2 := range config.BotConfig.ActiveChatConfig() {
 				if trigger, ok := v2.TriggerOnReply(); ok {
 					if v2.IsAgentEnabled() && chatv2.HasCompiledChat(v2.Name) {
 						return chatv2.Chat(ctx, v2, trigger)
@@ -279,7 +279,7 @@ func registerEventHandler(bot *Bot) {
 }
 
 func registerChatConfigHandler(bot *Bot) {
-	for _, v := range *config.BotConfig.ChatConfigV2 {
+	for _, v := range config.BotConfig.ActiveChatConfig() {
 		for _, tr := range v.Trigger {
 			if tr.Command != "" {
 				// 创建局部副本以避免闭包捕获循环变量

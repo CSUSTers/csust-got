@@ -205,7 +205,7 @@ func TestSpecialListConfig(t *testing.T) {
 	req.True(BotConfig.WhiteListConfig.Enabled)
 }
 
-func TestChatConfigV2(t *testing.T) {
+func TestChatConfigV1(t *testing.T) {
 	req := testInit(t)
 
 	// init config
@@ -216,10 +216,10 @@ func TestChatConfigV2(t *testing.T) {
 
 	defer viper.Reset()
 
-	t.Logf("%+v", BotConfig.ChatConfigV2)
-	req.Greater(len(*BotConfig.ChatConfigV2), 0)
-	req.NotNil((*BotConfig.ChatConfigV2)[0].Model)
-	req.NotEmpty((*BotConfig.ChatConfigV2)[0].Model.Model)
+	t.Logf("%+v", BotConfig.Chats)
+	req.Greater(len(*BotConfig.Chats), 0)
+	req.NotNil((*BotConfig.Chats)[0].Model)
+	req.NotEmpty((*BotConfig.Chats)[0].Model.Model)
 }
 
 func TestCustomConfig(t *testing.T) {

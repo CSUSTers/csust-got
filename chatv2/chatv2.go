@@ -27,11 +27,11 @@ var (
 func Init(ctx context.Context) error {
 	mcpManager = NewMcpManager()
 
-	if config.BotConfig.ChatConfigV2 == nil {
+	if config.BotConfig.Agents == nil || len(*config.BotConfig.Agents) == 0 {
 		return nil
 	}
 
-	for _, chatCfg := range *config.BotConfig.ChatConfigV2 {
+	for _, chatCfg := range *config.BotConfig.Agents {
 		if !chatCfg.IsAgentEnabled() {
 			continue
 		}
@@ -124,6 +124,21 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	// Send typing indicator
 	_ = tbCtx.Bot().Notify(tbCtx.Chat(), tb.Typing)
 
+	// Send progress placeholder if progress summary is enabled
+	if ps := chatCfg.Format.ProgressSummary; ps != nil && ps.Enable {
+		ph := chatCfg.PlaceHolder
+		if ph == "" {
+			ph = "..."
+		}
+		placeholderMsg, phErr := tbCtx.Bot().Send(tbCtx.Chat(), ph, &tb.SendOptions{
+			ReplyTo: msg,
+		})
+		if phErr != nil {
+			zap.L().Warn("chatv2: failed to send progress placeholder", zap.Error(phErr))
+		} else {
+			tc.SetProgressMsg(placeholderMsg)
+		}
+	}
 	// Execute agent
 	if chatCfg.Format.StreamOutput {
 		return handleStreaming(ctx, tbCtx, compiled, messages, chatCfg)
@@ -139,12 +154,7 @@ func handleStreaming(
 	messages []*schema.Message,
 	chatCfg *config.ChatConfigSingle,
 ) error {
-	// Get placeholder text
-	placeholder := chatCfg.PlaceHolder
-	if placeholder == "" {
-		placeholder = "..."
-	}
-
+	tc := GetTurnContext(ctx)
 	// Stream from agent
 	reader, err := compiled.Agent.Stream(ctx, messages)
 	if err != nil {
@@ -152,8 +162,13 @@ func handleStreaming(
 		return sendErrorMessage(tbCtx, chatCfg)
 	}
 
+	// Reuse progress placeholder if it exists
+	existingMsg := tc.GetProgressMsg()
+
+	// Mark streaming started — gates future update_progress calls
+	tc.streamingStarted.Store(true)
 	// Stream to Telegram
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, placeholder)
+	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, existingMsg)
 	if streamErr != nil {
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
 		if response == "" {
@@ -177,16 +192,21 @@ func handleNonStreaming(
 	messages []*schema.Message,
 	chatCfg *config.ChatConfigSingle,
 ) error {
+	tc := GetTurnContext(ctx)
 	result, err := compiled.Agent.Generate(ctx, messages)
 	if err != nil {
 		zap.L().Error("chatv2: agent generate failed", zap.Error(err))
 		return sendErrorMessage(tbCtx, chatCfg)
 	}
-
 	response := result.Content
 	reasoning := result.ReasoningContent
+	// Reuse progress placeholder if it exists
+	existingMsg := tc.GetProgressMsg()
 
-	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format)
+	// Mark streaming started + finalized
+	tc.streamingStarted.Store(true)
+
+	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, existingMsg)
 	if sendErr != nil {
 		zap.L().Error("chatv2: failed to send response", zap.Error(sendErr))
 		return sendErr

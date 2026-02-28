@@ -19,7 +19,7 @@ var gachaConfigs map[int]*config.ChatConfigSingle
 func InitGachaConfigs() {
 	gachaConfigs = make(map[int]*config.ChatConfigSingle)
 
-	for _, ccs := range *config.BotConfig.ChatConfigV2 {
+	for _, ccs := range config.BotConfig.ActiveChatConfig() {
 		stars, _ := ccs.TriggerForGacha()
 		for _, star := range stars {
 			gachaConfigs[star] = ccs
