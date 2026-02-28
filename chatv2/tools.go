@@ -70,7 +70,7 @@ func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_context: no turn context available")
+		return "", errors.New("get_context: no turn context available")
 	}
 
 	var args getContextArgs
@@ -131,7 +131,7 @@ func (t *getImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_image: no turn context available")
+		return "", errors.New("get_image: no turn context available")
 	}
 
 	var args getImageArgs
@@ -181,7 +181,7 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 			mimeType = "image/jpeg"
 		}
 	} else {
-		return "", fmt.Errorf("get_image: either file_id or url must be provided")
+		return "", errors.New("get_image: either file_id or url must be provided")
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
@@ -214,7 +214,7 @@ func (t *getMessageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getMessageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_message: no turn context available")
+		return "", errors.New("get_message: no turn context available")
 	}
 
 	var args getMessageArgs
@@ -223,7 +223,7 @@ func (t *getMessageTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	}
 
 	if args.MessageID <= 0 {
-		return "", fmt.Errorf("get_message: invalid message_id")
+		return "", errors.New("get_message: invalid message_id")
 	}
 
 	// Try direct Redis lookup first

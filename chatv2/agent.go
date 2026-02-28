@@ -18,7 +18,7 @@ import (
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
 	if modelCfg == nil {
-		return nil, fmt.Errorf("model config is nil")
+		return nil, errors.New("model config is nil")
 	}
 
 	cfg := &einoopenai.ChatModelConfig{
@@ -39,7 +39,7 @@ func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatMo
 // The subagent uses the ADK ChatModelAgent and is callable by the main agent.
 func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMgr *McpManager) (tool.BaseTool, error) {
 	if subCfg == nil {
-		return nil, fmt.Errorf("subagent config is nil")
+		return nil, errors.New("subagent config is nil")
 	}
 
 	// Build the subagent's model
