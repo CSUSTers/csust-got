@@ -212,9 +212,9 @@ func executeSearch(ctx Context) string {
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	var sb strings.Builder
 	for item := range respMap {
-		fmt.Fprintf(&sb, "消息[%s](%s%s): `%s` \n\n",
+		sb.WriteString(fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
 			respMap[item]["id"], chatUrl, respMap[item]["id"],
-			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]))
+			util.EscapeTgMDv2ReservedChars(respMap[item]["text"])))
 	}
 	rplMsg += sb.String()
 
