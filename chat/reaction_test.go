@@ -227,12 +227,10 @@ func TestRegeneratingLock(t *testing.T) {
 	// Test concurrent access
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			setRegenerating(chatID, messageID, true)
 			setRegenerating(chatID, messageID, false)
-		}()
+		})
 	}
 	wg.Wait()
 

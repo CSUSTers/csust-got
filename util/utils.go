@@ -272,10 +272,10 @@ func EscapeTgHTMLReservedChars(s string) string {
 
 // ParseKeyValueMapStr parse string format like `key=value` or `key`
 func ParseKeyValueMapStr(s string) (key, value string) {
-	idx := strings.Index(s, "=")
-	if idx >= 0 {
-		key = s[:idx]
-		value = s[idx+1:]
+	before, after, ok := strings.Cut(s, "=")
+	if ok {
+		key = before
+		value = after
 		return key, value
 	}
 	return s, ""

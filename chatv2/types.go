@@ -30,7 +30,7 @@ type TurnContext struct {
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex
 	progressMsg      *tb.Message       // Placeholder message for progress/streaming
-	progressModel    model.ChatModel   // Lazily-built small model for summarization
+	progressModel    model.ToolCallingChatModel // Lazily-built small model for summarization
 	progressOnce     sync.Once         // Ensures progressModel is built once
 	progressModelErr error             // Error from building progressModel
 	streamingStarted atomic.Bool       // Set true when streaming/final output begins
@@ -66,7 +66,7 @@ func (tc *TurnContext) GetProgressMsg() *tb.Message {
 
 // GetOrBuildProgressModel lazily builds and returns the progress summarization model.
 // Returns (nil, nil) if no progress summary model is configured.
-func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ChatModel, error) {
+func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ToolCallingChatModel, error) {
 	psCfg := tc.Config.Format.ProgressSummary
 	if psCfg == nil || psCfg.Model == nil {
 		return nil, nil

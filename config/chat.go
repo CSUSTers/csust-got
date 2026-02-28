@@ -379,4 +379,4 @@ func (c *ChatConfigV2) readConfig() {
 			cfg.Agent = &AgentConfig{Enable: true}
 		}
 	}
-	}
+}
