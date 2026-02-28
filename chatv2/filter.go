@@ -7,6 +7,8 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+const filterTypeWhitelist = "whitelist"
+
 // Filter is the interface for message filters in chatv2.
 // Filters can modify or block messages at various stages.
 type Filter interface {
@@ -19,7 +21,7 @@ type Filter interface {
 // whitelistFilter checks if the user/chat is allowed to use this chat config.
 type whitelistFilter struct{}
 
-func (f *whitelistFilter) Name() string { return "whitelist" }
+func (f *whitelistFilter) Name() string { return filterTypeWhitelist }
 
 func (f *whitelistFilter) Check(tbCtx tb.Context, chatCfg *config.ChatConfigSingle) bool {
 	msg := tbCtx.Message()
@@ -29,7 +31,7 @@ func (f *whitelistFilter) Check(tbCtx tb.Context, chatCfg *config.ChatConfigSing
 
 	// Check each filter setting
 	for _, filterCfg := range chatCfg.Filters.Filters {
-		if filterCfg.Type != "whitelist" {
+		if filterCfg.Type != filterTypeWhitelist {
 			continue
 		}
 
@@ -85,7 +87,7 @@ func buildFilters(chatCfg *config.ChatConfigSingle) []Filter {
 		seen[filterCfg.Type] = true
 
 		switch filterCfg.Type {
-		case "whitelist":
+		case filterTypeWhitelist:
 			filters = append(filters, &whitelistFilter{})
 		default:
 			zap.L().Warn("chatv2/filter: unknown filter type",

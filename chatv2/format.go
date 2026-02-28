@@ -10,6 +10,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const defaultOutputFormat = "markdown"
+
 // extractReasonPatt matches <think>...</think> blocks at the start of output.
 var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
 var reasonGroup = extractReasonPatt.SubexpIndex("reason")
@@ -38,7 +40,7 @@ func FormatOutputWithReason(text string, nativeReason string, format *config.Cha
 	outputFormat := format.GetFormat()
 	if outputFormat == "" {
 		zap.L().Warn("chatv2: text output format empty, defaulting to markdown")
-		outputFormat = "markdown"
+		outputFormat = defaultOutputFormat
 	}
 
 	if reason != "" {

@@ -2,10 +2,10 @@ package chatv2
 
 import (
 	"context"
+	"csust-got/config"
+	"errors"
 	"fmt"
 	"text/template"
-
-	"csust-got/config"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
@@ -15,10 +15,16 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	errModelConfigNil    = errors.New("model config is nil")
+	errSubAgentConfigNil = errors.New("subagent config is nil")
+	errAgentConfigNil    = errors.New("agent config is nil")
+)
+
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
 	if modelCfg == nil {
-		return nil, fmt.Errorf("model config is nil")
+		return nil, errModelConfigNil
 	}
 
 	cfg := &einoopenai.ChatModelConfig{
@@ -39,7 +45,7 @@ func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatMo
 // The subagent uses the ADK ChatModelAgent and is callable by the main agent.
 func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMgr *McpManager) (tool.BaseTool, error) {
 	if subCfg == nil {
-		return nil, fmt.Errorf("subagent config is nil")
+		return nil, errSubAgentConfigNil
 	}
 
 	// Build the subagent's model
@@ -109,7 +115,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*react.Agent, error) {
 	agentCfg := chatCfg.Agent
 	if agentCfg == nil {
-		return nil, fmt.Errorf("agent config is nil for chat %q", chatCfg.Name)
+		return nil, fmt.Errorf("%w for chat %q", errAgentConfigNil, chatCfg.Name)
 	}
 
 	// Build the main model
@@ -156,18 +162,11 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		allTools = append(allTools, subTool)
 	}
 
-	// Build system prompt modifier
-	systemPrompt := chatCfg.SystemPrompt.String()
-	var messageModifier react.MessageModifier
-	if systemPrompt != "" {
-		messageModifier = react.NewPersonaModifier(systemPrompt)
-	}
-
 	// Create the react agent
+	// System prompt is included via BuildMessages(), not MessageModifier
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: mainModel,
 		MaxStep:          agentCfg.GetMaxSteps(),
-		MessageModifier:  messageModifier,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: allTools,
 		},

@@ -27,7 +27,13 @@ func SaveResponse(botMsg *tb.Message, userMsg *tb.Message) {
 	}
 
 	// Store the bot's response message
-	orm.SetMessage(botMsg)
+	if err := orm.SetMessage(botMsg); err != nil {
+		zap.L().Error("chatv2: failed to store response message",
+			zap.Error(err),
+			zap.Int64("chat_id", botMsg.Chat.ID),
+			zap.Int("msg_id", botMsg.ID),
+		)
+	}
 
 	// Push to the chat's message stream for future context retrieval
 	if err := orm.PushMessageToStream(botMsg); err != nil {

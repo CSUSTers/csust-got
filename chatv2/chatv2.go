@@ -2,13 +2,17 @@ package chatv2
 
 import (
 	"context"
+	"csust-got/config"
+	"errors"
 	"fmt"
 	"sync"
-	"csust-got/config"
+
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
+
+var errNoCompiledConfig = errors.New("no compiled config found")
 
 // compiledChats stores pre-compiled chat configurations, keyed by chat config name.
 var (
@@ -61,7 +65,7 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	// Look up pre-compiled chat
 	val, ok := compiledChats.Load(chatCfg.Name)
 	if !ok {
-		return fmt.Errorf("chatv2: no compiled config found for %q", chatCfg.Name)
+		return fmt.Errorf("chatv2: %w for %q", errNoCompiledConfig, chatCfg.Name)
 	}
 	compiled := val.(*CompiledChat)
 
@@ -183,7 +187,6 @@ func handleNonStreaming(
 
 	return nil
 }
-
 
 // sendErrorMessage sends the configured error message to the user.
 func sendErrorMessage(tbCtx tb.Context, chatCfg *config.ChatConfigSingle) error {

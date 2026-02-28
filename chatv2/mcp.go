@@ -78,10 +78,8 @@ func (m *McpManager) getToolsFromServer(ctx context.Context, cfg *config.McpoCon
 	}
 
 	// Convert to BaseTool slice
-	var baseTools []tool.BaseTool
-	for _, t := range mcpTools {
-		baseTools = append(baseTools, t)
-	}
+	baseTools := make([]tool.BaseTool, 0, len(mcpTools))
+	baseTools = append(baseTools, mcpTools...)
 
 	zap.L().Info("chatv2/mcp: discovered tools",
 		zap.String("url", cfg.Url),

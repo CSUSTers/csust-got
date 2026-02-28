@@ -6,6 +6,7 @@ import (
 	"csust-got/orm"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,14 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
+)
+
+var (
+	errUnknownTool   = errors.New("unknown built-in tool")
+	errNoTurnContext = errors.New("no turn context available")
+	errInvalidMsgID  = errors.New("invalid message_id")
+	errNoImageSource = errors.New("either file_id or url must be provided")
+	errBadHTTPStatus = errors.New("unexpected HTTP status")
 )
 
 // ---- Tool Registry ----
@@ -31,7 +40,7 @@ func BuildBuiltinTools(names []string) ([]tool.BaseTool, error) {
 	for _, name := range names {
 		factory, ok := builtinToolFactories[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown built-in tool: %s", name)
+			return nil, fmt.Errorf("%w: %s", errUnknownTool, name)
 		}
 		tools = append(tools, factory())
 	}
@@ -70,7 +79,7 @@ func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_context: no turn context available")
+		return "", fmt.Errorf("get_context: %w", errNoTurnContext)
 	}
 
 	var args getContextArgs
@@ -131,7 +140,7 @@ func (t *getImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_image: no turn context available")
+		return "", fmt.Errorf("get_image: %w", errNoTurnContext)
 	}
 
 	var args getImageArgs
@@ -142,36 +151,33 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 	var data []byte
 	var mimeType string
 
-	if args.FileID != "" {
+	switch {
+	case args.FileID != "":
 		// Download from Telegram
 		file, err := tc.Bot.FileByID(args.FileID)
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to get file info: %w", err)
 		}
-
 		reader, err := tc.Bot.File(&file)
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to download file: %w", err)
 		}
-		defer reader.Close()
-
+		defer func() { _ = reader.Close() }()
 		data, err = io.ReadAll(io.LimitReader(reader, 10*1024*1024)) // 10MB limit
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to read file data: %w", err)
 		}
 		mimeType = "image/jpeg" // Telegram typically serves JPEG
-	} else if args.URL != "" {
+	case args.URL != "":
 		// Download from URL
 		resp, err := http.Get(args.URL) //nolint:gosec
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to fetch URL: %w", err)
 		}
-		defer resp.Body.Close()
-
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("get_image: URL returned status %d", resp.StatusCode)
+			return "", fmt.Errorf("get_image: %w: %d", errBadHTTPStatus, resp.StatusCode)
 		}
-
 		data, err = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 		if err != nil {
 			return "", fmt.Errorf("get_image: failed to read URL data: %w", err)
@@ -180,8 +186,8 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 		if mimeType == "" {
 			mimeType = "image/jpeg"
 		}
-	} else {
-		return "", fmt.Errorf("get_image: either file_id or url must be provided")
+	default:
+		return "", fmt.Errorf("get_image: %w", errNoImageSource)
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(data)
@@ -214,7 +220,7 @@ func (t *getMessageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 func (t *getMessageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
-		return "", fmt.Errorf("get_message: no turn context available")
+		return "", fmt.Errorf("get_message: %w", errNoTurnContext)
 	}
 
 	var args getMessageArgs
@@ -223,7 +229,7 @@ func (t *getMessageTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	}
 
 	if args.MessageID <= 0 {
-		return "", fmt.Errorf("get_message: invalid message_id")
+		return "", fmt.Errorf("get_message: %w", errInvalidMsgID)
 	}
 
 	// Try direct Redis lookup first
