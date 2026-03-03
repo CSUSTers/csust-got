@@ -37,18 +37,23 @@ type streamProcessor struct {
 	currentToolCallsChunks []openai.ToolCall // Store all tool call chunks in a flat slice
 
 	// Draft API support (for private chats)
-	useDraft bool // whether to use sendMessageDraft API
-	draftID  int  // unique draft identifier for animated updates
+	useDraft bool  // whether to use sendMessageDraft API
+	draftID  int   // unique draft identifier for animated updates
+	chatID   int64 // cached chat ID to avoid nil dereference during stream lifecycle
 
 	// Mutex to protect concurrent access to strings.Builder
 	mu sync.RWMutex
 }
 
+// shouldUseDraft checks if the draft API should be used for the given chat and config.
+// The draft API (sendMessageDraft) only works in private chats.
+func shouldUseDraft(ctx tb.Context, chatConfig *config.ChatConfigSingle) bool {
+	return ctx.Chat() != nil && ctx.Chat().Type == tb.ChatPrivate && chatConfig.Format.StreamOutput
+}
+
 // newStreamProcessor creates a new streamProcessor with the provided configuration
 func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, useMcp bool, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *streamProcessor {
-	// Use draft API for private chats when streaming is enabled
-	isPrivate := ctx.Chat() != nil && ctx.Chat().Type == tb.ChatPrivate
-	useDraft := isPrivate && chatConfig.Format.StreamOutput
+	useDraft := shouldUseDraft(ctx, chatConfig)
 
 	sp := &streamProcessor{
 		chatCtx:        chatCtx,
@@ -63,11 +68,13 @@ func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg 
 	}
 
 	if useDraft {
+		sp.chatID = ctx.Chat().ID
 		// Use the user message ID as draft_id for uniqueness
 		if ctx.Message() != nil {
 			sp.draftID = ctx.Message().ID
 		} else {
 			sp.draftID = 1
+			log.Warn("Draft mode enabled but message is nil, using fallback draft_id=1")
 		}
 	}
 
@@ -146,7 +153,7 @@ func (sp *streamProcessor) updateStreamingMessage() {
 
 	// Use sendMessageDraft API for private chats
 	if sp.useDraft {
-		err := util.SendMessageDraft(sp.ctx.Chat().ID, sp.draftID, formattedText, formatOpt)
+		err := util.SendMessageDraft(sp.chatID, sp.draftID, formattedText, formatOpt)
 		if err != nil {
 			log.Error("Failed to send message draft during streaming", zap.Error(err))
 			return

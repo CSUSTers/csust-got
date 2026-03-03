@@ -278,8 +278,7 @@ final:
 	client := clients[v2.Model.Name]
 
 	// Check if we'll use draft API (for private chats with stream output enabled)
-	isPrivateChat := ctx.Chat() != nil && ctx.Chat().Type == tb.ChatPrivate
-	willUseDraft := isPrivateChat && v2.Format.StreamOutput
+	willUseDraft := shouldUseDraft(ctx, v2)
 
 	// 处理place_holder功能
 	var placeholderMsg *tb.Message
