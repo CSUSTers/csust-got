@@ -53,7 +53,9 @@ func shouldUseDraft(ctx tb.Context, chatConfig *config.ChatConfigSingle) bool {
 
 // newStreamProcessor creates a new streamProcessor with the provided configuration
 func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, useMcp bool, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *streamProcessor {
-	useDraft := shouldUseDraft(ctx, chatConfig)
+	// Disable draft mode when a placeholder message is provided (e.g., regeneration flow),
+	// since the caller expects in-place editing of that message.
+	useDraft := placeholderMsg == nil && shouldUseDraft(ctx, chatConfig)
 
 	sp := &streamProcessor{
 		chatCtx:        chatCtx,
