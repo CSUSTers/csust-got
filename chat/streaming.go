@@ -36,13 +36,21 @@ type streamProcessor struct {
 	done                   chan struct{}
 	currentToolCallsChunks []openai.ToolCall // Store all tool call chunks in a flat slice
 
+	// Draft API support (for private chats)
+	useDraft bool // whether to use sendMessageDraft API
+	draftID  int  // unique draft identifier for animated updates
+
 	// Mutex to protect concurrent access to strings.Builder
 	mu sync.RWMutex
 }
 
 // newStreamProcessor creates a new streamProcessor with the provided configuration
 func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg *tb.Message, useMcp bool, request *openai.ChatCompletionRequest, messages *[]openai.ChatCompletionMessage, chatConfig *config.ChatConfigSingle) *streamProcessor {
-	return &streamProcessor{
+	// Use draft API for private chats when streaming is enabled
+	isPrivate := ctx.Chat() != nil && ctx.Chat().Type == tb.ChatPrivate
+	useDraft := isPrivate && chatConfig.Format.StreamOutput
+
+	sp := &streamProcessor{
 		chatCtx:        chatCtx,
 		ctx:            ctx,
 		placeholderMsg: placeholderMsg,
@@ -51,7 +59,19 @@ func newStreamProcessor(chatCtx context.Context, ctx tb.Context, placeholderMsg 
 		messages:       messages,
 		config:         chatConfig,
 		done:           make(chan struct{}), // dont use a buffered channel to ensure proper synchronization
+		useDraft:       useDraft,
 	}
+
+	if useDraft {
+		// Use the user message ID as draft_id for uniqueness
+		if ctx.Message() != nil {
+			sp.draftID = ctx.Message().ID
+		} else {
+			sp.draftID = 1
+		}
+	}
+
+	return sp
 }
 
 // findLastSentenceDelimiter finds the last occurrence of any sentence delimiter in the text
@@ -124,6 +144,18 @@ func (sp *streamProcessor) updateStreamingMessage() {
 		return // Skip if formatted text is empty
 	}
 
+	// Use sendMessageDraft API for private chats
+	if sp.useDraft {
+		err := util.SendMessageDraft(sp.ctx.Chat().ID, sp.draftID, formattedText, formatOpt)
+		if err != nil {
+			log.Error("Failed to send message draft during streaming", zap.Error(err))
+			return
+		}
+		sp.lastSentText = textToSend
+		return
+	}
+
+	// Fallback: use editMessage for group chats
 	var err error
 	if sp.placeholderMsg == nil {
 		// If no placeholder message exists, create a reply message for the first time
@@ -298,14 +330,23 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 	var replyMsg *tb.Message
 	var err error
 
-	if sp.placeholderMsg != nil {
+	switch {
+	case sp.useDraft:
+		// When using draft API, always send a new reply as the final message
+		// (the draft is just a preview and gets replaced automatically)
+		replyMsg, err = sp.ctx.Bot().Reply(sp.ctx.Message(), formattedResponse, formatOpt)
+		if err != nil {
+			log.Error("Failed to send final reply after draft streaming", zap.Error(err))
+			return nil, err
+		}
+	case sp.placeholderMsg != nil:
 		// If we have a placeholder, edit it with the final response
 		replyMsg, err = util.EditMessageWithError(sp.placeholderMsg, formattedResponse, formatOpt)
 		if err != nil {
 			log.Error("Failed to edit placeholder message with final response", zap.Error(err))
 			return nil, err
 		}
-	} else {
+	default:
 		// If no placeholder, send a new reply
 		replyMsg, err = sp.ctx.Bot().Reply(sp.ctx.Message(), formattedResponse, formatOpt)
 		if err != nil {

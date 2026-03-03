@@ -277,11 +277,17 @@ final:
 
 	client := clients[v2.Model.Name]
 
+	// Check if we'll use draft API (for private chats with stream output enabled)
+	isPrivateChat := ctx.Chat() != nil && ctx.Chat().Type == tb.ChatPrivate
+	willUseDraft := isPrivateChat && v2.Format.StreamOutput
+
 	// 处理place_holder功能
 	var placeholderMsg *tb.Message
 	switch {
 	case isGacha:
 		// 如果是gacha模式，不使用placeholder
+	case willUseDraft:
+		// Draft API handles streaming preview in private chats, no placeholder needed
 	case v2.PlaceHolder != "":
 		// 如果有place_holder，先发送placeholder消息
 		var placeHolderErr error

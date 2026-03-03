@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"csust-got/config"
+
+	"github.com/sashabaranov/go-openai"
+	tb "gopkg.in/telebot.v3"
 )
 
 func TestFindLastSentenceDelimiter(t *testing.T) {
@@ -230,6 +233,87 @@ func TestFormatOutputWithReason(t *testing.T) {
 				if !strings.Contains(result, want) {
 					t.Errorf("formatOutputWithReason() = %q, want it to contain %q", result, want)
 				}
+			}
+		})
+	}
+}
+
+func TestNewStreamProcessorDraftMode(t *testing.T) {
+	tests := []struct {
+		name         string
+		chatType     tb.ChatType
+		streamOutput bool
+		messageID    int
+		wantDraft    bool
+		wantDraftID  int
+	}{
+		{
+			name:         "private chat with stream output enabled",
+			chatType:     tb.ChatPrivate,
+			streamOutput: true,
+			messageID:    42,
+			wantDraft:    true,
+			wantDraftID:  42,
+		},
+		{
+			name:         "private chat with stream output disabled",
+			chatType:     tb.ChatPrivate,
+			streamOutput: false,
+			messageID:    42,
+			wantDraft:    false,
+			wantDraftID:  0,
+		},
+		{
+			name:         "group chat with stream output enabled",
+			chatType:     tb.ChatGroup,
+			streamOutput: true,
+			messageID:    42,
+			wantDraft:    false,
+			wantDraftID:  0,
+		},
+		{
+			name:         "supergroup chat with stream output enabled",
+			chatType:     tb.ChatSuperGroup,
+			streamOutput: true,
+			messageID:    42,
+			wantDraft:    false,
+			wantDraftID:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &mockContext{
+				chat: &tb.Chat{
+					ID:   123456789,
+					Type: tt.chatType,
+				},
+				message: &tb.Message{
+					ID: tt.messageID,
+				},
+			}
+
+			chatConfig := &config.ChatConfigSingle{
+				Format: config.ChatOutputFormatConfig{
+					StreamOutput: tt.streamOutput,
+				},
+			}
+
+			sp := newStreamProcessor(
+				t.Context(),
+				ctx,
+				nil,
+				false,
+				nil,
+				&[]openai.ChatCompletionMessage{},
+				chatConfig,
+			)
+
+			if sp.useDraft != tt.wantDraft {
+				t.Errorf("useDraft = %v, want %v", sp.useDraft, tt.wantDraft)
+			}
+			if sp.draftID != tt.wantDraftID {
+				t.Errorf("draftID = %v, want %v", sp.draftID, tt.wantDraftID)
 			}
 		})
 	}

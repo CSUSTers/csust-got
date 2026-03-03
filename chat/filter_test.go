@@ -11,8 +11,9 @@ import (
 
 // mockContext is a mock implementation of tb.Context for testing
 type mockContext struct {
-	chat   *tb.Chat
-	sender *tb.User
+	chat    *tb.Chat
+	sender  *tb.User
+	message *tb.Message
 }
 
 func (m *mockContext) Chat() *tb.Chat {
@@ -24,7 +25,7 @@ func (m *mockContext) Sender() *tb.User {
 }
 
 // Add other required methods as no-op implementations
-func (m *mockContext) Message() *tb.Message                   { return nil }
+func (m *mockContext) Message() *tb.Message                   { return m.message }
 func (m *mockContext) Callback() *tb.Callback                 { return nil }
 func (m *mockContext) Query() *tb.Query                       { return nil }
 func (m *mockContext) InlineResult() *tb.InlineResult         { return nil }
