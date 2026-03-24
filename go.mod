@@ -3,7 +3,7 @@ module csust-got
 go 1.25.0
 
 require (
-	github.com/cloudwego/eino v0.8.4
+	github.com/cloudwego/eino v0.8.5
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.10
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/go-viper/mapstructure/v2 v2.5.0
