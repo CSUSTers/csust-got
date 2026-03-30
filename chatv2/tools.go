@@ -18,6 +18,7 @@ import (
 	tb "gopkg.in/telebot.v3"
 	"io"
 	"net/http"
+	"strings"
 )
 
 var (
@@ -210,12 +211,15 @@ func (t *analyzeImageTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 
 	var args analyzeImageArgs
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("analyze_image: invalid arguments: %w", err)
+		return "当前图片分析参数无效。请提供 Telegram 图片的 file_id，或提供一个可直接访问的图片 url。", nil
 	}
 
 	// Download image
 	imageData, err := downloadImage(tc, args.FileID, args.URL)
 	if err != nil {
+		if msg, ok := recoverableImageToolMessage(err); ok {
+			return msg, nil
+		}
 		return "", fmt.Errorf("analyze_image: %w", err)
 	}
 
@@ -289,6 +293,32 @@ func downloadImage(tc *TurnContext, fileID, url string) (string, error) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
+}
+
+func recoverableImageToolMessage(err error) (string, bool) {
+	switch {
+	case err == nil:
+		return "", false
+	case errors.Is(err, errNoImageSource):
+		return "当前消息里没有可分析的图片。请直接发送图片、回复一张图片，或提供一个可直接访问的图片 URL。", true
+	case errors.Is(err, errBadHTTPStatus):
+		return "图片 URL 当前不可访问，或者返回的不是可下载的图片内容。请换一个可直接访问的图片链接再试。", true
+	case isTelegramImageUnavailableError(err):
+		return "当前引用的 Telegram 图片不可用：可能没有真实图片附件，或者 file_id 已失效。请让用户直接发送/回复图片后再试。", true
+	default:
+		return "", false
+	}
+}
+
+func isTelegramImageUnavailableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "wrong file_id") ||
+		strings.Contains(msg, "file is temporarily unavailable") ||
+		(strings.Contains(msg, "telegram: bad request") && strings.Contains(msg, "file_id"))
 }
 
 // ---- update_progress Tool ----

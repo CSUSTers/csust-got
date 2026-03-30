@@ -4,14 +4,14 @@ package chatv2
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
-	"text/template"
 	"csust-got/chat"
 	"csust-got/config"
 	model "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/flow/agent/react"
 	tb "gopkg.in/telebot.v3"
+	"sync"
+	"sync/atomic"
+	"text/template"
 )
 
 // turnContextKey is the Go context key for per-request runtime data.
@@ -29,12 +29,12 @@ type TurnContext struct {
 	// Progress tracking — used by update_progress tool and streaming handlers.
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex
-	progressMsg      *tb.Message       // Placeholder message for progress/streaming
+	progressMsg      *tb.Message                // Placeholder message for progress/streaming
 	progressModel    model.ToolCallingChatModel // Lazily-built small model for summarization
-	progressOnce     sync.Once         // Ensures progressModel is built once
-	progressModelErr error             // Error from building progressModel
-	streamingStarted atomic.Bool       // Set true when streaming/final output begins
-	finalized        atomic.Bool       // Set true after final response sent
+	progressOnce     sync.Once                  // Ensures progressModel is built once
+	progressModelErr error                      // Error from building progressModel
+	streamingStarted atomic.Bool                // Set true when streaming/final output begins
+	finalized        atomic.Bool                // Set true after final response sent
 }
 
 // WithTurnContext stores TurnContext in a Go context.
@@ -90,6 +90,7 @@ type CompiledChat struct {
 // promptData is the template rendering data, compatible with existing chat prompt templates.
 type promptData struct {
 	DateTime        string
+	CurrentDateCN   string
 	Input           string
 	ContextMessages []*chat.ContextMessage
 	ContextText     string

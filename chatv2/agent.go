@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
+	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
 
@@ -22,6 +23,8 @@ var (
 	errSubAgentConfigNil = errors.New("subagent config is nil")
 	errAgentConfigNil    = errors.New("agent config is nil")
 )
+
+const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
@@ -84,13 +87,21 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 	if systemPrompt == "" {
 		systemPrompt = fmt.Sprintf("You are %s. %s", subCfg.Name, subCfg.Description)
 	}
+	maxSteps := subCfg.GetMaxSteps()
+	if subCfg.MaxSteps > 0 && subAgentHasTools(subCfg) && maxSteps != subCfg.MaxSteps {
+		zap.L().Warn("chatv2/agent: subagent max_steps too low for tool-enabled workflow, clamped",
+			zap.String("subagent", subCfg.Name),
+			zap.Int("configured", subCfg.MaxSteps),
+			zap.Int("effective", maxSteps),
+		)
+	}
 
 	adkAgent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:          subCfg.Name,
 		Description:   subCfg.Description,
 		Instruction:   systemPrompt,
 		Model:         subModel,
-		MaxIterations: subCfg.GetMaxSteps(),
+		MaxIterations: maxSteps,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
 				Tools: subTools,
@@ -107,6 +118,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 	zap.L().Info("chatv2/agent: built subagent tool",
 		zap.String("name", subCfg.Name),
 		zap.Int("tools", len(subTools)),
+		zap.Int("max_steps", maxSteps),
 	)
 
 	return agentTool, nil
@@ -163,12 +175,21 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		}
 		allTools = append(allTools, subTool)
 	}
+	maxSteps := agentCfg.GetMaxSteps()
+	if agentCfg.MaxSteps > 0 && agentHasTools(agentCfg) && maxSteps != agentCfg.MaxSteps {
+		zap.L().Warn("chatv2/agent: main agent max_steps too low for tool-enabled workflow, clamped",
+			zap.String("chat", chatCfg.Name),
+			zap.Int("configured", agentCfg.MaxSteps),
+			zap.Int("effective", maxSteps),
+		)
+	}
 
 	// Create the react agent
 	// System prompt is included via BuildMessages(), not MessageModifier
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: mainModel,
-		MaxStep:          agentCfg.GetMaxSteps(),
+		MaxStep:          maxSteps,
+		MessageModifier:  newFinalTurnMessageModifier(maxSteps),
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools: allTools,
 		},
@@ -181,9 +202,49 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		zap.String("chat", chatCfg.Name),
 		zap.Int("total_tools", len(allTools)),
 		zap.Int("subagents", len(agentCfg.SubAgents)),
+		zap.Int("max_steps", maxSteps),
 	)
 
 	return agent, nil
+}
+
+func newFinalTurnMessageModifier(maxSteps int) react.MessageModifier {
+	return func(_ context.Context, input []*schema.Message) []*schema.Message {
+		if !shouldInjectFinalTurnGuidance(input, maxSteps) {
+			return input
+		}
+
+		out := make([]*schema.Message, 0, len(input)+1)
+		out = append(out, schema.SystemMessage(finalTurnGuidance))
+		out = append(out, input...)
+		return out
+	}
+}
+
+func shouldInjectFinalTurnGuidance(messages []*schema.Message, maxSteps int) bool {
+	if maxSteps <= 0 {
+		return false
+	}
+
+	toolRounds := 0
+	for _, msg := range messages {
+		if msg == nil || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		toolRounds++
+	}
+
+	// Current model step is 2*toolRounds+1. If another tool call is made now,
+	// the agent would need two more graph steps (tools + final model answer).
+	return toolRounds*2+3 > maxSteps
+}
+
+func subAgentHasTools(cfg *config.SubAgentConfig) bool {
+	return cfg != nil && (len(cfg.Tools) > 0 || len(cfg.McpServers) > 0)
+}
+
+func agentHasTools(cfg *config.AgentConfig) bool {
+	return cfg != nil && (len(cfg.Tools) > 0 || len(cfg.McpServers) > 0 || len(cfg.SubAgents) > 0)
 }
 
 // CompileChat pre-compiles templates and builds the main agent for a chat configuration.

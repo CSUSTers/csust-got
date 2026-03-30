@@ -4,6 +4,7 @@ package chatv2
 
 import (
 	"testing"
+	"time"
 
 	"csust-got/chat"
 	"csust-got/config"
@@ -31,16 +32,16 @@ func TestExtractInput(t *testing.T) {
 			want: "image caption",
 		},
 		{
-			name: "command trigger uses payload",
-			msg:  &tb.Message{Text: "/ask how are you", Payload: "how are you"},
+			name:    "command trigger uses payload",
+			msg:     &tb.Message{Text: "/ask how are you", Payload: "how are you"},
 			trigger: []*config.ChatTrigger{{Command: "ask"}},
-			want: "how are you",
+			want:    "how are you",
 		},
 		{
-			name: "command trigger with empty payload",
-			msg:  &tb.Message{Text: "/ask", Payload: ""},
+			name:    "command trigger with empty payload",
+			msg:     &tb.Message{Text: "/ask", Payload: ""},
 			trigger: []*config.ChatTrigger{{Command: "ask"}},
-			want: "",
+			want:    "",
 		},
 		{
 			name: "slash prefix stripped for non-command trigger",
@@ -53,16 +54,16 @@ func TestExtractInput(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "nil trigger falls through",
-			msg:  &tb.Message{Text: "hello world"},
+			name:    "nil trigger falls through",
+			msg:     &tb.Message{Text: "hello world"},
 			trigger: []*config.ChatTrigger{nil},
-			want: "hello world",
+			want:    "hello world",
 		},
 		{
-			name: "regex trigger no command",
-			msg:  &tb.Message{Text: "hello world"},
+			name:    "regex trigger no command",
+			msg:     &tb.Message{Text: "hello world"},
 			trigger: []*config.ChatTrigger{{Regex: "hello"}},
-			want: "hello world",
+			want:    "hello world",
 		},
 		{
 			name: "whitespace trimmed",
@@ -77,6 +78,18 @@ func TestExtractInput(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestBuildPromptDataIncludesCurrentDateCN(t *testing.T) {
+	tc := &TurnContext{
+		Message: &tb.Message{Text: "hello"},
+	}
+
+	pd := buildPromptData(tc, nil)
+
+	assert.Equal(t, beijingNow().Format("2006年01月02日"), pd.CurrentDateCN)
+	_, err := time.ParseInLocation("2006年01月02日", pd.CurrentDateCN, beijingFallbackLocation)
+	assert.NoError(t, err)
 }
 
 func TestContextToSchemaMessages(t *testing.T) {
@@ -171,11 +184,11 @@ func TestBuildUserMessage(t *testing.T) {
 
 func TestBuildMessagesForSubAgent(t *testing.T) {
 	tests := []struct {
-		name         string
-		systemPrompt string
-		userInput    string
-		imageData    string
-		wantLen      int
+		name          string
+		systemPrompt  string
+		userInput     string
+		imageData     string
+		wantLen       int
 		wantFirstRole schema.RoleType
 	}{
 		{

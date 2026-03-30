@@ -8,8 +8,10 @@ import (
 	"csust-got/util"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
@@ -119,7 +121,7 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	messages, err := BuildMessages(compiled, tc, history)
 	if err != nil {
 		zap.L().Error("chatv2: failed to build messages", zap.Error(err))
-		return sendErrorMessage(tbCtx, chatCfg)
+		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
 
 	// Send typing indicator
@@ -160,7 +162,7 @@ func handleStreaming(
 	reader, err := compiled.Agent.Stream(ctx, messages)
 	if err != nil {
 		zap.L().Error("chatv2: agent stream failed", zap.Error(err))
-		return sendErrorMessage(tbCtx, chatCfg)
+		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
 
 	// Reuse progress placeholder if it exists
@@ -173,7 +175,7 @@ func handleStreaming(
 	if streamErr != nil {
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
 		if response == "" {
-			return sendErrorMessage(tbCtx, chatCfg)
+			return sendAgentErrorMessage(tbCtx, chatCfg, streamErr)
 		}
 	}
 	// Save response to Redis for future context
@@ -197,7 +199,7 @@ func handleNonStreaming(
 	result, err := compiled.Agent.Generate(ctx, messages)
 	if err != nil {
 		zap.L().Error("chatv2: agent generate failed", zap.Error(err))
-		return sendErrorMessage(tbCtx, chatCfg)
+		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
 	response := result.Content
 	reasoning := result.ReasoningContent
@@ -227,4 +229,58 @@ func sendErrorMessage(tbCtx tb.Context, chatCfg *config.ChatConfigSingle) error 
 		errMsg = "抱歉，处理请求时发生错误。"
 	}
 	return tbCtx.Reply(errMsg)
+}
+
+func sendAgentErrorMessage(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, err error) error {
+	msg := friendlyAgentErrorMessage(err)
+	if msg == "" {
+		return sendErrorMessage(tbCtx, chatCfg)
+	}
+	return tbCtx.Reply(msg)
+}
+
+func friendlyAgentErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if errors.Is(err, compose.ErrExceedMaxSteps) {
+		return "这次处理卡在 agent 的步骤上限了：它已经跑完了可用轮次，但还没来得及收束成最终答案。请稍后重试；如果这是搜索或总结类 bot，通常需要把对应配置里的 max_steps 调高。"
+	}
+
+	detail := sanitizeAgentErrorDetail(err)
+	if detail == "" {
+		return ""
+	}
+
+	if strings.Contains(err.Error(), "node path: [tools]") {
+		return "这次处理卡在工具调用阶段：" + detail
+	}
+
+	return "这次处理卡在回答生成阶段：" + detail
+}
+
+func sanitizeAgentErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if msg, ok := recoverableImageToolMessage(err); ok {
+		return msg
+	}
+
+	detail := err.Error()
+	if idx := strings.Index(detail, "\n------------------------"); idx >= 0 {
+		detail = detail[:idx]
+	}
+	detail = strings.TrimPrefix(detail, "[GraphRunError] ")
+	detail = strings.TrimPrefix(detail, "[NodeRunError] ")
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	if len(detail) > 180 {
+		return detail[:177] + "..."
+	}
+	return detail
 }

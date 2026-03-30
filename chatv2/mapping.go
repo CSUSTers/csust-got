@@ -14,10 +14,14 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+var beijingFallbackLocation = time.FixedZone("CST", 8*60*60)
+
 // buildPromptData creates the template rendering data from the current turn context.
 func buildPromptData(tc *TurnContext, contextMsgs []*chat.ContextMessage) promptData {
+	now := beijingNow()
 	pd := promptData{
-		DateTime:        time.Now().Format("2006-01-02 15:04:05"),
+		DateTime:        now.Format("2006-01-02 15:04:05"),
+		CurrentDateCN:   now.Format("2006年01月02日"),
 		Input:           extractInput(tc.Message, tc.Trigger),
 		ContextMessages: contextMsgs,
 		ContextText:     chat.FormatContextMessages(contextMsgs),
@@ -35,6 +39,14 @@ func buildPromptData(tc *TurnContext, contextMsgs []*chat.ContextMessage) prompt
 	}
 
 	return pd
+}
+
+func beijingNow() time.Time {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = beijingFallbackLocation
+	}
+	return time.Now().In(loc)
 }
 
 // extractInput gets the user's text input from the Telegram message.

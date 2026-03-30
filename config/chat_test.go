@@ -64,3 +64,31 @@ chats:
 		},
 	}, c)
 }
+
+func TestAgentGetMaxSteps(t *testing.T) {
+	t.Run("tool-enabled main agent clamps too-low max steps", func(t *testing.T) {
+		cfg := &AgentConfig{
+			MaxSteps: 1,
+			Tools:    []string{"update_progress"},
+		}
+		assert.Equal(t, minToolAgentMaxSteps, cfg.GetMaxSteps())
+	})
+
+	t.Run("tool-enabled subagent clamps too-low max steps", func(t *testing.T) {
+		cfg := &SubAgentConfig{
+			MaxSteps: 2,
+			Tools:    []string{"get_context"},
+		}
+		assert.Equal(t, minToolAgentMaxSteps, cfg.GetMaxSteps())
+	})
+
+	t.Run("tool-free agent preserves explicit low max steps", func(t *testing.T) {
+		cfg := &AgentConfig{MaxSteps: 1}
+		assert.Equal(t, 1, cfg.GetMaxSteps())
+	})
+
+	t.Run("default values stay unchanged when max steps unset", func(t *testing.T) {
+		assert.Equal(t, defaultAgentMaxSteps, (&AgentConfig{}).GetMaxSteps())
+		assert.Equal(t, defaultSubAgentMaxSteps, (&SubAgentConfig{}).GetMaxSteps())
+	})
+}

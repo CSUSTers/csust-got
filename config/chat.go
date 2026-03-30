@@ -78,6 +78,10 @@ const (
 	OutputFormatMarkdown = "markdown"
 	// OutputFormatHTML is the HTML format type
 	OutputFormatHTML = "html"
+
+	defaultSubAgentMaxSteps = 5
+	defaultAgentMaxSteps    = 12
+	minToolAgentMaxSteps    = 4
 )
 
 // GetFormat get message format
@@ -204,10 +208,18 @@ type SubAgentConfig struct {
 
 // GetMaxSteps returns the max tool call steps for the subagent
 func (c *SubAgentConfig) GetMaxSteps() int {
-	if c != nil && c.MaxSteps > 0 {
-		return c.MaxSteps
+	if c == nil {
+		return defaultSubAgentMaxSteps
 	}
-	return 5
+
+	maxSteps := c.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = defaultSubAgentMaxSteps
+	}
+	if c.usesTools() && maxSteps < minToolAgentMaxSteps {
+		return minToolAgentMaxSteps
+	}
+	return maxSteps
 }
 
 // AgentConfig defines the agent mode configuration for chatv2
@@ -222,10 +234,26 @@ type AgentConfig struct {
 
 // GetMaxSteps returns the max tool call steps for the main agent
 func (c *AgentConfig) GetMaxSteps() int {
-	if c != nil && c.MaxSteps > 0 {
-		return c.MaxSteps
+	if c == nil {
+		return defaultAgentMaxSteps
 	}
-	return 12
+
+	maxSteps := c.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = defaultAgentMaxSteps
+	}
+	if c.usesTools() && maxSteps < minToolAgentMaxSteps {
+		return minToolAgentMaxSteps
+	}
+	return maxSteps
+}
+
+func (c *SubAgentConfig) usesTools() bool {
+	return c != nil && (len(c.Tools) > 0 || len(c.McpServers) > 0)
+}
+
+func (c *AgentConfig) usesTools() bool {
+	return c != nil && (len(c.Tools) > 0 || len(c.McpServers) > 0 || len(c.SubAgents) > 0)
 }
 
 // IsAgentEnabled returns true if chatv2 agent mode is enabled for this chat config
