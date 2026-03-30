@@ -3,7 +3,9 @@
 package chatv2
 
 import (
+	"bytes"
 	"testing"
+	"text/template"
 	"time"
 
 	"csust-got/chat"
@@ -92,6 +94,21 @@ func TestBuildPromptDataIncludesCurrentDateCN(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestPromptTemplateCanAccessCurrentDateCN(t *testing.T) {
+	tc := &TurnContext{
+		Message: &tb.Message{Text: "hello"},
+	}
+
+	pd := buildPromptData(tc, nil)
+	tpl := template.Must(template.New("system").Parse("现在是北京时间{{ .CurrentDateCN }}"))
+
+	var buf bytes.Buffer
+	err := tpl.Execute(&buf, pd)
+
+	assert.NoError(t, err)
+	assert.Contains(t, buf.String(), pd.CurrentDateCN)
+}
+
 func TestContextToSchemaMessages(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -175,7 +192,7 @@ func TestBuildUserMessage(t *testing.T) {
 				msg.ReplyTo = &tb.Message{Photo: tt.replyPhoto}
 			}
 			tc := &TurnContext{Message: msg}
-			result := buildUserMessage(tt.text, tc)
+			result := buildUserMessage(tt.text, tc, nil)
 			assert.Equal(t, tt.wantRole, result.Role)
 			assert.Contains(t, result.Content, tt.wantContains)
 		})

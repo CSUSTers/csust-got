@@ -87,8 +87,15 @@ type CompiledChat struct {
 	PromptTemplate *template.Template
 }
 
-// promptData is the template rendering data, compatible with existing chat prompt templates.
-type promptData struct {
+// RichHistory keeps both the rendered text context and the underlying Telegram
+// messages so chatv2 can recover media attachments for multimodal input.
+type RichHistory struct {
+	ContextMessages []*chat.ContextMessage
+	FullMessages    []*tb.Message
+}
+
+// PromptData is the template rendering data exposed to chatv2 prompt templates.
+type PromptData struct {
 	DateTime        string
 	CurrentDateCN   string
 	Input           string

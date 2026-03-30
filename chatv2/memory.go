@@ -10,16 +10,71 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-// LoadHistory retrieves conversation history for the current message.
-// It reuses the existing chat.GetMessageContext which handles:
-// - Reply chain reconstruction
-// - Previous messages from Redis stream
-// - Entity-aware text extraction
-func LoadHistory(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*chat.ContextMessage, error) {
+const defaultHistoryContext = 10
+
+// LoadHistory retrieves both the rendered text context and the underlying
+// Telegram messages so chatv2 can recover images for multimodal input.
+func LoadHistory(bot *tb.Bot, msg *tb.Message, maxContext int) (*RichHistory, error) {
 	if maxContext <= 0 {
-		maxContext = 10
+		maxContext = defaultHistoryContext
 	}
-	return chat.GetMessageContext(bot, msg, maxContext)
+
+	contextMsgs, err := chat.GetMessageContext(bot, msg, maxContext)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RichHistory{
+		ContextMessages: contextMsgs,
+		FullMessages:    loadFullContextMessages(msg, contextMsgs),
+	}, nil
+}
+
+func loadFullContextMessages(current *tb.Message, contextMsgs []*chat.ContextMessage) []*tb.Message {
+	if current == nil || current.Chat == nil || len(contextMsgs) == 0 {
+		return nil
+	}
+
+	liveMessages := make(map[int]*tb.Message, len(contextMsgs))
+	collectReplyChainMessages(current.ReplyTo, liveMessages)
+
+	fullMessages := make([]*tb.Message, 0, len(contextMsgs))
+	for _, contextMsg := range contextMsgs {
+		if contextMsg == nil {
+			fullMessages = append(fullMessages, nil)
+			continue
+		}
+
+		if msg, ok := liveMessages[contextMsg.ID]; ok {
+			fullMessages = append(fullMessages, msg)
+			continue
+		}
+
+		msg, err := loadStoredTelegramMessage(current.Chat.ID, contextMsg.ID)
+		if err != nil {
+			zap.L().Debug("chatv2: failed to load full context message",
+				zap.Int64("chat_id", current.Chat.ID),
+				zap.Int("message_id", contextMsg.ID),
+				zap.Error(err),
+			)
+			fullMessages = append(fullMessages, nil)
+			continue
+		}
+		fullMessages = append(fullMessages, msg)
+	}
+
+	return fullMessages
+}
+
+func collectReplyChainMessages(msg *tb.Message, messages map[int]*tb.Message) {
+	visited := make(map[int]struct{})
+	for current := msg; current != nil; current = current.ReplyTo {
+		if _, ok := visited[current.ID]; ok {
+			return
+		}
+		visited[current.ID] = struct{}{}
+		messages[current.ID] = current
+	}
 }
 
 // SaveResponse stores the bot's response and metadata to Redis for future context.

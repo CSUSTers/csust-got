@@ -17,9 +17,9 @@ import (
 var beijingFallbackLocation = time.FixedZone("CST", 8*60*60)
 
 // buildPromptData creates the template rendering data from the current turn context.
-func buildPromptData(tc *TurnContext, contextMsgs []*chat.ContextMessage) promptData {
+func buildPromptData(tc *TurnContext, contextMsgs []*chat.ContextMessage) PromptData {
 	now := beijingNow()
-	pd := promptData{
+	pd := PromptData{
 		DateTime:        now.Format("2006-01-02 15:04:05"),
 		CurrentDateCN:   now.Format("2006年01月02日"),
 		Input:           extractInput(tc.Message, tc.Trigger),
@@ -75,8 +75,12 @@ func extractInput(msg *tb.Message, trigger ...*config.ChatTrigger) string {
 
 // BuildMessages converts the turn context into eino schema.Message slice
 // for passing to the agent. Returns [system, ...history, user].
-func BuildMessages(cc *CompiledChat, tc *TurnContext, contextMsgs []*chat.ContextMessage) ([]*schema.Message, error) {
-	pd := buildPromptData(tc, contextMsgs)
+func BuildMessages(cc *CompiledChat, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
+	if history == nil {
+		history = &RichHistory{}
+	}
+
+	pd := buildPromptData(tc, history.ContextMessages)
 	var messages []*schema.Message
 
 	// 1. System message from rendered template
@@ -91,7 +95,7 @@ func BuildMessages(cc *CompiledChat, tc *TurnContext, contextMsgs []*chat.Contex
 	}
 
 	// 2. History messages (from Redis context)
-	historyMsgs := contextToSchemaMessages(contextMsgs, tc)
+	historyMsgs := contextToSchemaMessages(history.ContextMessages, tc)
 	messages = append(messages, historyMsgs...)
 
 	// 3. User message from rendered prompt template
@@ -107,8 +111,8 @@ func BuildMessages(cc *CompiledChat, tc *TurnContext, contextMsgs []*chat.Contex
 		userText = pd.Input
 	}
 
-	// Build user message - add image hints if reply contains images
-	userMsg := buildUserMessage(userText, tc)
+	// Build user message - attach multimodal image context when available.
+	userMsg := buildUserMessage(userText, tc, history)
 	messages = append(messages, userMsg)
 
 	return messages, nil
@@ -142,50 +146,6 @@ func contextToSchemaMessages(msgs []*chat.ContextMessage, tc *TurnContext) []*sc
 		}
 	}
 	return result
-}
-
-// buildUserMessage creates the user message, adding hints about available
-// media attachments so the agent can decide whether to fetch them via tools.
-func buildUserMessage(text string, tc *TurnContext) *schema.Message {
-	var mediaHints []string
-
-	// Current message attachments
-	if tc.Message.Photo != nil {
-		fileID := tc.Message.Photo.FileID
-		mediaHints = append(mediaHints, fmt.Sprintf(
-			"[This message contains an attached image (file_id: %s). "+
-				"Use the analyze_image tool to view and analyze it if needed.]", fileID))
-	}
-	if tc.Message.Document != nil {
-		doc := tc.Message.Document
-		mediaHints = append(mediaHints, fmt.Sprintf(
-			"[This message has an attached file: %s (file_id: %s, mime: %s).]",
-			doc.FileName, doc.FileID, doc.MIME))
-	}
-
-	// Reply-to message attachments
-	if tc.Message.ReplyTo != nil {
-		if tc.Message.ReplyTo.Photo != nil {
-			fileID := tc.Message.ReplyTo.Photo.FileID
-			mediaHints = append(mediaHints, fmt.Sprintf(
-				"[Referenced message contains an image (file_id: %s). "+
-					"Use the analyze_image tool to view and analyze it if needed.]", fileID))
-		}
-		if tc.Message.ReplyTo.Document != nil {
-			doc := tc.Message.ReplyTo.Document
-			mediaHints = append(mediaHints, fmt.Sprintf(
-				"[Referenced message has an attached file: %s (file_id: %s, mime: %s).]",
-				doc.FileName, doc.FileID, doc.MIME))
-		}
-	}
-
-	if len(mediaHints) > 0 {
-		text = text + "\n\n" + strings.Join(mediaHints, "\n")
-	}
-	return &schema.Message{
-		Role:    schema.User,
-		Content: text,
-	}
 }
 
 // BuildMessagesForSubAgent creates a minimal message set for a subagent invocation.

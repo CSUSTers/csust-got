@@ -114,7 +114,7 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	history, err := LoadHistory(tc.Bot, msg, chatCfg.MessageContext)
 	if err != nil {
 		zap.L().Warn("chatv2: failed to load history", zap.Error(err))
-		// Continue without history — pass nil
+		history = &RichHistory{}
 	}
 
 	// Build messages for the agent
