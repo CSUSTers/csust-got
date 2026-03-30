@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"csust-got/orm"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -36,6 +37,7 @@ var (
 	currentAlbumSiblingWindow          = 16
 	loadStoredTelegramMessage          = orm.GetMessage
 	encodeTelegramPhotoDataURL         = encodePhotoForLLM
+	errMissingTelegramPhotoContext     = errors.New("missing telegram photo context")
 )
 
 type imageContextEntry struct {
@@ -212,7 +214,7 @@ func buildImageContextManifest(entries []imageContextEntry) string {
 	var builder strings.Builder
 	builder.WriteString("Image Context:\n")
 	for i, entry := range entries {
-		builder.WriteString(fmt.Sprintf("%d. %s message %d", i+1, imageContextSourceLabel(entry.Source), entry.MessageID))
+		fmt.Fprintf(&builder, "%d. %s message %d", i+1, imageContextSourceLabel(entry.Source), entry.MessageID)
 		if caption := summarizeImageCaption(entry.Caption); caption != "" {
 			builder.WriteString(" - ")
 			builder.WriteString(caption)
@@ -300,7 +302,7 @@ func joinUserMessageSections(sections ...string) string {
 
 func encodePhotoForLLM(tc *TurnContext, photo *tb.Photo) (string, error) {
 	if tc == nil || tc.Bot == nil || photo == nil {
-		return "", fmt.Errorf("missing telegram photo context")
+		return "", errMissingTelegramPhotoContext
 	}
 
 	file, err := tc.Bot.FileByID(photo.FileID)

@@ -16,6 +16,11 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+var (
+	errTestImageContextBoom    = errors.New("boom")
+	errTestImageContextMissing = errors.New("missing")
+)
+
 func TestBuildUserMessageBuildsMultimodalImageContext(t *testing.T) {
 	oldEncoder := encodeTelegramPhotoDataURL
 	encodeTelegramPhotoDataURL = func(_ *TurnContext, photo *tb.Photo) (string, error) {
@@ -73,7 +78,7 @@ func TestBuildUserMessageSkipsBrokenImages(t *testing.T) {
 	oldEncoder := encodeTelegramPhotoDataURL
 	encodeTelegramPhotoDataURL = func(_ *TurnContext, photo *tb.Photo) (string, error) {
 		if photo.FileID == "reply" {
-			return "", errors.New("boom")
+			return "", errTestImageContextBoom
 		}
 		return "data:image/jpeg;base64," + photo.FileID, nil
 	}
@@ -163,7 +168,7 @@ func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
 				Photo:   &tb.Photo{File: tb.File{FileID: "other"}},
 			}, nil
 		default:
-			return nil, errors.New("missing")
+			return nil, errTestImageContextMissing
 		}
 	}
 
@@ -192,7 +197,7 @@ func TestLoadFullContextMessagesUsesReplyChainAndStoredMessages(t *testing.T) {
 				Photo: &tb.Photo{File: tb.File{FileID: "stored"}},
 			}, nil
 		}
-		return nil, errors.New("missing")
+		return nil, errTestImageContextMissing
 	}
 
 	current := &tb.Message{
