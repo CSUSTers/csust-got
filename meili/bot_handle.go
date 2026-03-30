@@ -84,7 +84,7 @@ func generatePaginationCommand(page int64, searchQuery string, usedChatIdParam b
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
 		rplMsg := executeSearch(ctx)
-		err := ctx.Reply(rplMsg, ModeMarkdownV2)
+		_, err := util.ReplyWithError(ctx, util.RawTgText(rplMsg), ModeMarkdownV2)
 		return err
 	}
 	err := ctx.Reply("MeiliSearch is not enabled")

@@ -5,6 +5,7 @@ package chatv2
 import (
 	"context"
 	"csust-got/config"
+	"csust-got/util"
 	"errors"
 	"fmt"
 	"sync"
@@ -130,7 +131,7 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 		if ph == "" {
 			ph = "..."
 		}
-		placeholderMsg, phErr := tbCtx.Bot().Send(tbCtx.Chat(), ph, &tb.SendOptions{
+		placeholderMsg, phErr := util.SendMessageWithError(tbCtx.Chat(), ph, &tb.SendOptions{
 			ReplyTo: msg,
 		})
 		if phErr != nil {

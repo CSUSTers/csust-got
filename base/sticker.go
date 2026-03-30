@@ -916,10 +916,13 @@ func SetStickerConfig(ctx tb.Context) error {
 				_ = ctx.Reply("failed to marshal iwant config")
 				return err
 			}
-			return ctx.Reply(
-				fmt.Sprintf("iwant config: ```\n%s```",
-					util.EscapeTgMDv2ReservedChars(string(cs))),
-				&tb.SendOptions{ParseMode: tb.ModeMarkdownV2})
+			_, err = util.ReplyWithError(
+				ctx,
+				util.RawTgText(fmt.Sprintf("iwant config: ```\n%s```",
+					util.EscapeTgMDv2ReservedChars(string(cs)))),
+				&tb.SendOptions{ParseMode: tb.ModeMarkdownV2},
+			)
+			return err
 		}
 
 		ok, k, v := normalizeParams(k, v)

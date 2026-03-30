@@ -39,7 +39,8 @@ func Info(ctx Context) error {
 	}
 	msg += "```"
 
-	return ctx.Send(msg, ModeMarkdownV2)
+	_, err := util.SendWithError(ctx, util.RawTgText(msg), ModeMarkdownV2)
+	return err
 }
 
 // GetUserID is handle for command `/id`.

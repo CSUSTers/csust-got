@@ -7,16 +7,17 @@ import (
 	"csust-got/chat"
 	"csust-got/config"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
+	"io"
+	"net/http"
 )
 
 var (
@@ -27,22 +28,22 @@ var (
 	errBadHTTPStatus = errors.New("unexpected HTTP status")
 )
 
-
 // modelConfigurable is implemented by tools that support a model override.
 // If a tool implements this interface and a matching entry exists in ToolModels,
 // BuildBuiltinTools will inject the model config at creation time.
 type modelConfigurable interface {
 	SetModelConfig(m *config.Model)
 }
+
 // ---- Tool Registry ----
 
 // builtinToolFactories maps tool names to factory functions.
 // Each factory creates a tool.InvokableTool instance.
 var builtinToolFactories = map[string]func() tool.InvokableTool{
-	"get_context":   func() tool.InvokableTool { return &getContextTool{} },
-	"get_image":     func() tool.InvokableTool { return &getImageTool{} },
-	"get_message":   func() tool.InvokableTool { return &getMessageTool{} },
-	"analyze_image":    func() tool.InvokableTool { return &analyzeImageTool{} },
+	"get_context":     func() tool.InvokableTool { return &getContextTool{} },
+	"get_image":       func() tool.InvokableTool { return &getImageTool{} },
+	"get_message":     func() tool.InvokableTool { return &getMessageTool{} },
+	"analyze_image":   func() tool.InvokableTool { return &analyzeImageTool{} },
 	"update_progress": func() tool.InvokableTool { return &updateProgressTool{} },
 }
 
@@ -169,11 +170,10 @@ type analyzeImageTool struct {
 }
 
 type analyzeImageArgs struct {
-	FileID string `json:"file_id"`        // Telegram file ID
+	FileID string `json:"file_id"`         // Telegram file ID
 	URL    string `json:"url,omitempty"`   // Alternative: direct URL
 	Query  string `json:"query,omitempty"` // What to analyze about the image
 }
-
 
 func (t *analyzeImageTool) SetModelConfig(m *config.Model) {
 	t.modelCfg = m
@@ -365,7 +365,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	progressMsg := tc.progressMsg
 	if progressMsg == nil {
 		// No placeholder yet — send a new message and store it
-		msg, err := tc.Bot.Send(&tb.Chat{ID: tc.ChatID}, displayText)
+		msg, err := util.SendMessageWithError(&tb.Chat{ID: tc.ChatID}, displayText)
 		if err != nil {
 			zap.L().Warn("update_progress: failed to send progress message", zap.Error(err))
 			return "ok (send failed)", nil
@@ -375,7 +375,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	}
 
 	// Edit existing placeholder
-	_, err := tc.Bot.Edit(progressMsg, displayText)
+	_, err := util.EditMessageWithError(progressMsg, displayText)
 	if err != nil {
 		// "message is not modified" is not a real error
 		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))

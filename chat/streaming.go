@@ -127,14 +127,14 @@ func (sp *streamProcessor) updateStreamingMessage() {
 	var err error
 	if sp.placeholderMsg == nil {
 		// If no placeholder message exists, create a reply message for the first time
-		sp.placeholderMsg, err = sp.ctx.Bot().Reply(sp.ctx.Message(), formattedText, formatOpt)
+		sp.placeholderMsg, err = util.SendReplyWithError(sp.ctx.Chat(), util.RawTgText(formattedText), sp.ctx.Message(), formatOpt)
 		if err != nil {
 			log.Error("Failed to create initial reply message during streaming", zap.Error(err))
 			return
 		}
 	} else {
 		// Edit the existing placeholder message
-		_, err = util.EditMessageWithError(sp.placeholderMsg, formattedText, formatOpt)
+		_, err = util.EditMessageWithError(sp.placeholderMsg, util.RawTgText(formattedText), formatOpt)
 		if err != nil {
 			log.Error("Failed to edit message during streaming", zap.Error(err))
 			return
@@ -300,14 +300,14 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 
 	if sp.placeholderMsg != nil {
 		// If we have a placeholder, edit it with the final response
-		replyMsg, err = util.EditMessageWithError(sp.placeholderMsg, formattedResponse, formatOpt)
+		replyMsg, err = util.EditMessageWithError(sp.placeholderMsg, util.RawTgText(formattedResponse), formatOpt)
 		if err != nil {
 			log.Error("Failed to edit placeholder message with final response", zap.Error(err))
 			return nil, err
 		}
 	} else {
 		// If no placeholder, send a new reply
-		replyMsg, err = sp.ctx.Bot().Reply(sp.ctx.Message(), formattedResponse, formatOpt)
+		replyMsg, err = util.SendReplyWithError(sp.ctx.Chat(), util.RawTgText(formattedResponse), sp.ctx.Message(), formatOpt)
 		if err != nil {
 			log.Error("Failed to send reply", zap.Error(err))
 			return nil, err

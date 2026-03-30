@@ -58,6 +58,53 @@ func TestGetParseMode(t *testing.T) {
 	}
 }
 
+func TestFormatTextEscapesReservedChars(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		format string
+		whole  wholeTextType
+		want   string
+	}{
+		{
+			name:   "markdown plain escapes reserved chars",
+			text:   "a.b_c[1](2)!",
+			format: "markdown",
+			whole:  wholeTextTypePlain,
+			want:   "a\\.b\\_c\\[1\\]\\(2\\)\\!",
+		},
+		{
+			name:   "markdown code block escapes reserved chars",
+			text:   "a.b_c",
+			format: "markdown",
+			whole:  wholeTextTypeBlock,
+			want:   "```\na\\.b\\_c\n```\n",
+		},
+		{
+			name:   "html plain escapes tags and ampersand",
+			text:   "<b>a&b</b>",
+			format: "html",
+			whole:  wholeTextTypePlain,
+			want:   "&lt;b&gt;a&amp;b&lt;/b&gt;",
+		},
+		{
+			name:   "html markdown block wraps code tag",
+			text:   "line 1",
+			format: "html",
+			whole:  wholeTextTypeMdBlock,
+			want:   "<pre><code class=\"language-markdown\">line 1</code></pre>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf strings.Builder
+			formatText(&buf, tt.text, tt.format, tt.whole)
+			assert.Equal(t, tt.want, buf.String())
+		})
+	}
+}
+
 func TestFormatText(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -74,6 +121,7 @@ func TestFormatText(t *testing.T) {
 		{"html markdown-block", "hello", "html", wholeTextTypeMdBlock, `<code class="language-markdown">`},
 		{"html markdown-block closing", "hello", "html", wholeTextTypeMdBlock, "</code>"},
 		{"markdown plain", "hello*world", "markdown", wholeTextTypePlain, "hello\\*world"},
+		{"markdown plain escapes dot", "a.b", "markdown", wholeTextTypePlain, "a\\.b"},
 		{"markdown block", "hello", "markdown", wholeTextTypeBlock, "```\nhello\n```"},
 		{"markdown md-block", "hello", "markdown", wholeTextTypeMdBlock, "```markdown"},
 		{"unknown format passes through", "hello", "unknown", wholeTextTypePlain, "hello"},
@@ -87,6 +135,63 @@ func TestFormatText(t *testing.T) {
 				assert.Empty(t, buf.String())
 			} else {
 				assert.Contains(t, buf.String(), tt.contains)
+			}
+		})
+	}
+}
+
+func TestFormatOutputWithReasonEscapesReservedChars(t *testing.T) {
+	useNative := true
+
+	tests := []struct {
+		name         string
+		text         string
+		nativeReason string
+		format       *config.ChatOutputFormatConfig
+		wantContains []string
+	}{
+		{
+			name:         "markdown escapes payload and reasoning",
+			text:         "answer.a",
+			nativeReason: "think_b",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Reason:             "quote",
+				Payload:            "plain",
+				UseNativeReasoning: &useNative,
+			},
+			wantContains: []string{"think\\_b", "answer\\.a"},
+		},
+		{
+			name:         "html escapes payload and reasoning",
+			text:         "answer<a>",
+			nativeReason: "think&b",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "html",
+				Reason:             "quote",
+				Payload:            "plain",
+				UseNativeReasoning: &useNative,
+			},
+			wantContains: []string{"think&amp;b", "answer&lt;a&gt;"},
+		},
+		{
+			name:         "markdown block escapes content",
+			text:         "code.a",
+			nativeReason: "",
+			format: &config.ChatOutputFormatConfig{
+				Format:             "markdown",
+				Payload:            "block",
+				UseNativeReasoning: &useNative,
+			},
+			wantContains: []string{"```", "code\\.a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatOutputWithReason(tt.text, tt.nativeReason, tt.format)
+			for _, s := range tt.wantContains {
+				assert.Contains(t, got, s)
 			}
 		})
 	}

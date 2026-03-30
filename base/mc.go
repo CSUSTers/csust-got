@@ -11,6 +11,7 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 	"csust-got/util/restrict"
 
 	"go.uber.org/zap"
@@ -208,6 +209,7 @@ func Reburn(ctx tb.Context) error {
 	if len(missingUsers) > 0 {
 		log.Info("reburn missing users", zap.Int64("chat", chatID), zap.Int64s("users", missingUsers))
 	}
-	return ctx.Send(strings.Join(append(replyText, replyText2...), "\n"),
+	_, err = util.SendWithError(ctx, util.RawTgText(strings.Join(append(replyText, replyText2...), "\n")),
 		&tb.SendOptions{ParseMode: tb.ModeHTML})
+	return err
 }

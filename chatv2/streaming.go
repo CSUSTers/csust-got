@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"csust-got/config"
+	"csust-got/util"
 
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
@@ -79,7 +80,7 @@ func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb
 	} else {
 		// Send new placeholder message
 		parseMode := GetParseMode(sp.format)
-		sent, err := sp.tbCtx.Bot().Send(
+		sent, err := util.SendMessageWithError(
 			sp.tbCtx.Chat(),
 			"...",
 			&tb.SendOptions{ParseMode: parseMode, ReplyTo: sp.tbCtx.Message()},
@@ -92,6 +93,7 @@ func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb
 	// Start periodic update ticker
 	ticker := time.NewTicker(sp.editInterval)
 	defer ticker.Stop()
+	sp.wg.Add(1)
 	go sp.tickerLoop(ticker)
 	for {
 		msg, recvErr := sp.reader.Recv()
@@ -202,9 +204,9 @@ func (sp *streamProcessor) editPlaceholder(formatted string) {
 		defer sp.tc.editMu.Unlock()
 	}
 	parseMode := GetParseMode(sp.format)
-	_, err := sp.tbCtx.Bot().Edit(
+	_, err := util.EditMessageWithError(
 		sp.placeholderMsg,
-		formatted,
+		util.RawTgText(formatted),
 		&tb.SendOptions{ParseMode: parseMode},
 	)
 	if err != nil {
@@ -245,9 +247,9 @@ func NonStreamResponse(
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
 		// Edit existing progress placeholder
-		_, err := tbCtx.Bot().Edit(
+		_, err := util.EditMessageWithError(
 			existingMsg,
-			formatted,
+			util.RawTgText(formatted),
 			&tb.SendOptions{ParseMode: parseMode},
 		)
 		if err != nil {
@@ -261,9 +263,9 @@ func NonStreamResponse(
 	}
 
 	// Send new message (original behavior)
-	sent, err := tbCtx.Bot().Send(
+	sent, err := util.SendMessageWithError(
 		tbCtx.Chat(),
-		formatted,
+		util.RawTgText(formatted),
 		&tb.SendOptions{
 			ParseMode: parseMode,
 			ReplyTo:   tbCtx.Message(),

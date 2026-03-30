@@ -154,7 +154,7 @@ func HandleMessageReaction(ctx tb.Context) error {
 	if botMsgContent == "" {
 		botMsgContent = botMsg.Caption
 	}
-	_, editErr := util.EditMessageWithError(botMsg, processingPrefix+botMsgContent, parseMode)
+	_, editErr := util.EditMessageWithError(botMsg, util.RawTgText(processingPrefix+botMsgContent), parseMode)
 	if editErr != nil {
 		log.Warn("Failed to add processing indicator to message", zap.Error(editErr))
 	}
@@ -191,7 +191,7 @@ func HandleMessageReaction(ctx tb.Context) error {
 			zap.Int("botMsg", reaction.MessageID),
 			zap.Error(err))
 		// Restore original message content by removing the processing indicator
-		_, restoreErr := util.EditMessageWithError(botMsg, botMsgContent, parseMode)
+		_, restoreErr := util.EditMessageWithError(botMsg, util.RawTgText(botMsgContent), parseMode)
 		if restoreErr != nil {
 			log.Warn("Failed to restore original message after regeneration failure", zap.Error(restoreErr))
 		}

@@ -68,7 +68,7 @@ func runTimerTask(task *store.Task) {
 		hint = fmt.Sprintf("@%s, %s", user.Username, hint)
 	}
 
-	_, err = bot.Send(chat, hint, ModeHTML)
+	_, err = util.SendMessageWithError(chat, util.RawTgText(hint), ModeHTML)
 	if err != nil {
 		log.Error("Run Task send msg failed", zap.Any("task", task), zap.Error(err))
 	}
@@ -101,5 +101,6 @@ func RunTask(ctx Context) error {
 	})
 
 	text = fmt.Sprintf("好的, 在 %v 后我会来叫你…… <code>%s</code> , 嗯, 不愧是我。", delay, html.EscapeString(info))
-	return ctx.Reply(text, ModeHTML)
+	_, err = util.ReplyWithError(ctx, util.RawTgText(text), ModeHTML)
+	return err
 }

@@ -138,7 +138,7 @@ func registerDebugHandler(bot *Bot) {
 			if err != nil {
 				return err
 			}
-			_, err = util.SendReplyWithError(ctx.Chat(), fmt.Sprintf("```%s```", obj), ctx.Message(), ModeMarkdownV2)
+			_, err = util.SendReplyWithError(ctx.Chat(), util.RawTgText(fmt.Sprintf("```%s```", obj)), ctx.Message(), ModeMarkdownV2)
 			return err
 		})
 	}
