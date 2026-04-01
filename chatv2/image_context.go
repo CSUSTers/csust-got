@@ -65,6 +65,9 @@ func buildUserMessage(text string, tc *TurnContext, history *RichHistory) *schem
 	})
 	for _, entry := range entries {
 		urlStr := entry.DataURL
+		if imageBase64RawEnabled(tc) {
+			urlStr = stripDataURIPrefix(urlStr)
+		}
 		parts = append(parts, schema.MessageInputPart{
 			Type: schema.ChatMessagePartTypeImageURL,
 			Image: &schema.MessageInputImage{
@@ -95,6 +98,24 @@ func multimodalImageContextEnabled(tc *TurnContext) bool {
 		tc.Config.Model != nil &&
 		tc.Config.Model.Features.Image &&
 		tc.Config.Features.Image
+}
+
+func imageBase64RawEnabled(tc *TurnContext) bool {
+	return tc != nil &&
+		tc.Config != nil &&
+		tc.Config.Model != nil &&
+		tc.Config.Model.Features.ImageBase64Raw
+}
+
+const dataURIPrefix = "data:image/jpeg;base64,"
+
+func stripDataURIPrefix(s string) string {
+	if strings.HasPrefix(s, "data:") {
+		if idx := strings.Index(s, ","); idx >= 0 {
+			return s[idx+1:]
+		}
+	}
+	return s
 }
 
 func collectImageContextEntries(tc *TurnContext, history *RichHistory) []imageContextEntry {

@@ -83,15 +83,24 @@ func BuildMessages(cc *CompiledChat, tc *TurnContext, history *RichHistory) ([]*
 	pd := buildPromptData(tc, history.ContextMessages)
 	var messages []*schema.Message
 
-	// 1. System message from rendered template
+	// 1. System message from rendered template + skill addons
+	var sysText string
 	if cc.SystemTemplate != nil {
 		var buf bytes.Buffer
 		if err := cc.SystemTemplate.Execute(&buf, pd); err != nil {
 			return nil, fmt.Errorf("failed to render system prompt: %w", err)
 		}
-		if sysText := strings.TrimSpace(buf.String()); sysText != "" {
-			messages = append(messages, schema.SystemMessage(sysText))
+		sysText = strings.TrimSpace(buf.String())
+	}
+	if cc.SkillPromptAddons != "" {
+		if sysText != "" {
+			sysText = sysText + "\n\n" + cc.SkillPromptAddons
+		} else {
+			sysText = cc.SkillPromptAddons
 		}
+	}
+	if sysText != "" {
+		messages = append(messages, schema.SystemMessage(sysText))
 	}
 
 	// 2. History messages (from Redis context)
@@ -150,7 +159,7 @@ func contextToSchemaMessages(msgs []*chat.ContextMessage, tc *TurnContext) []*sc
 
 // BuildMessagesForSubAgent creates a minimal message set for a subagent invocation.
 // Used when the subagent needs to process specific content (e.g., image analysis).
-func BuildMessagesForSubAgent(systemPrompt, userInput string, imageData string) []*schema.Message {
+func BuildMessagesForSubAgent(systemPrompt, userInput string, imageData string, base64Raw bool) []*schema.Message {
 	var messages []*schema.Message
 
 	if systemPrompt != "" {
@@ -158,8 +167,10 @@ func BuildMessagesForSubAgent(systemPrompt, userInput string, imageData string) 
 	}
 
 	if imageData != "" {
-		// Multimodal message with image
 		urlStr := imageData
+		if base64Raw {
+			urlStr = stripDataURIPrefix(urlStr)
+		}
 		messages = append(messages, &schema.Message{
 			Role: schema.User,
 			UserInputMultiContent: []schema.MessageInputPart{

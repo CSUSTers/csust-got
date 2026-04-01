@@ -17,37 +17,42 @@ import (
 	"go.uber.org/zap"
 )
 
-// McpManager manages MCP client connections and tool discovery.
 type McpManager struct {
-	mu sync.Mutex
-	// clients maps server URL to MCP client
+	mu      sync.Mutex
 	clients map[string]*mcpclient.Client
 }
 
-// NewMcpManager creates a new MCP manager.
 func NewMcpManager() *McpManager {
 	return &McpManager{
 		clients: make(map[string]*mcpclient.Client),
 	}
 }
 
-// GetToolsFromConfig discovers and returns eino tools from MCP server configurations.
-// It filters tools based on the allowed tool names in each McpoConfig.
-func (m *McpManager) GetToolsFromConfig(ctx context.Context, mcpConfigs []*config.McpoConfig) ([]tool.BaseTool, error) {
+func (m *McpManager) GetToolsFromConfig(ctx context.Context, cfgs []*config.ToolServerConfig) ([]tool.BaseTool, error) {
 	var allTools []tool.BaseTool
 
-	for _, cfg := range mcpConfigs {
+	for _, cfg := range cfgs {
 		if cfg == nil || !cfg.Enable || cfg.Url == "" {
 			continue
 		}
 
-		tools, err := m.getToolsFromServer(ctx, cfg)
+		var tools []tool.BaseTool
+		var err error
+
+		switch cfg.GetType() {
+		case config.ToolServerTypeMCPO:
+			tools, err = m.getToolsFromMcpo(ctx, cfg)
+		default:
+			tools, err = m.getToolsFromMCP(ctx, cfg)
+		}
+
 		if err != nil {
 			zap.L().Error("chatv2/mcp: failed to get tools from server",
 				zap.String("url", cfg.Url),
+				zap.String("type", cfg.GetType()),
 				zap.Error(err),
 			)
-			continue // graceful degradation: skip failed servers
+			continue
 		}
 
 		allTools = append(allTools, tools...)
@@ -56,59 +61,129 @@ func (m *McpManager) GetToolsFromConfig(ctx context.Context, mcpConfigs []*confi
 	return allTools, nil
 }
 
-// getToolsFromServer connects to an MCP server and retrieves filtered tools.
-func (m *McpManager) getToolsFromServer(ctx context.Context, cfg *config.McpoConfig) ([]tool.BaseTool, error) {
-	cli, err := m.getOrCreateClient(ctx, cfg.Url)
+func (m *McpManager) getToolsFromMCP(ctx context.Context, cfg *config.ToolServerConfig) ([]tool.BaseTool, error) {
+	cli, err := m.getOrCreateClient(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build tool name filter
-	var toolNames []string
-	for _, t := range cfg.Tools {
-		toolNames = append(toolNames, strings.TrimSpace(t))
+	toolNames := cfg.Tools.Names()
+	var trimmedNames []string
+	for _, t := range toolNames {
+		trimmedNames = append(trimmedNames, strings.TrimSpace(t))
 	}
 
-	// Get tools via eino MCP integration
 	mcpTools, err := einomcp.GetTools(ctx, &einomcp.Config{
 		Cli:          cli,
-		ToolNameList: toolNames,
+		ToolNameList: trimmedNames,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tools from MCP server %s: %w", cfg.Url, err)
 	}
 
-	// Convert to BaseTool slice
+	discoveredNames := make([]string, 0, len(mcpTools))
+	for _, t := range mcpTools {
+		info, infoErr := t.Info(ctx)
+		if infoErr == nil && info != nil {
+			discoveredNames = append(discoveredNames, info.Name)
+		}
+	}
+
+	if len(trimmedNames) > 0 {
+		discoveredSet := make(map[string]struct{}, len(discoveredNames))
+		for _, n := range discoveredNames {
+			discoveredSet[n] = struct{}{}
+		}
+		var missing []string
+		for _, n := range trimmedNames {
+			if _, ok := discoveredSet[n]; !ok {
+				missing = append(missing, n)
+			}
+		}
+		if len(missing) > 0 {
+			zap.L().Warn("chatv2/mcp: configured tool names not found on server",
+				zap.String("url", cfg.Url),
+				zap.Strings("missing", missing),
+				zap.Strings("available", discoveredNames),
+			)
+		}
+	}
+
 	baseTools := make([]tool.BaseTool, 0, len(mcpTools))
 	baseTools = append(baseTools, mcpTools...)
 
-	zap.L().Info("chatv2/mcp: discovered tools",
+	zap.L().Info("chatv2/mcp: discovered MCP tools",
 		zap.String("url", cfg.Url),
+		zap.String("transport", cfg.GetType()),
 		zap.Int("count", len(baseTools)),
+		zap.Strings("names", discoveredNames),
 	)
 
 	return baseTools, nil
 }
 
-func (m *McpManager) getOrCreateClient(ctx context.Context, serverURL string) (*mcpclient.Client, error) {
+func (m *McpManager) getToolsFromMcpo(ctx context.Context, cfg *config.ToolServerConfig) ([]tool.BaseTool, error) {
+	var allTools []tool.BaseTool
+
+	for _, entry := range cfg.Tools {
+		tools, err := discoverMcpoToolset(ctx, cfg.Url, cfg.ApiKey, entry)
+		if err != nil {
+			zap.L().Error("chatv2/mcp: failed to discover MCPO toolset",
+				zap.String("url", cfg.Url),
+				zap.String("toolset", entry.Name),
+				zap.Error(err),
+			)
+			continue
+		}
+		allTools = append(allTools, tools...)
+	}
+
+	if len(allTools) > 0 {
+		names := make([]string, 0, len(allTools))
+		for _, t := range allTools {
+			if info, err := t.Info(ctx); err == nil && info != nil {
+				names = append(names, info.Name)
+			}
+		}
+		zap.L().Info("chatv2/mcp: discovered MCPO tools",
+			zap.String("url", cfg.Url),
+			zap.Int("count", len(allTools)),
+			zap.Strings("names", names),
+		)
+	}
+
+	return allTools, nil
+}
+
+func (m *McpManager) getOrCreateClient(ctx context.Context, cfg *config.ToolServerConfig) (*mcpclient.Client, error) {
+	cacheKey := cfg.GetType() + "|" + cfg.Url
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if cli, ok := m.clients[serverURL]; ok {
+	if cli, ok := m.clients[cacheKey]; ok {
 		return cli, nil
 	}
 
-	cli, err := mcpclient.NewSSEMCPClient(serverURL)
+	var cli *mcpclient.Client
+	var err error
+
+	switch cfg.GetType() {
+	case config.ToolServerTypeStreamableHTTP:
+		cli, err = mcpclient.NewStreamableHttpClient(cfg.Url)
+	default:
+		cli, err = mcpclient.NewSSEMCPClient(cfg.Url)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MCP client for %s: %w", serverURL, err)
+		return nil, fmt.Errorf("failed to create MCP client (%s) for %s: %w", cfg.GetType(), cfg.Url, err)
 	}
 
 	if err := initializeMCPClient(ctx, cli); err != nil {
 		_ = cli.Close()
-		return nil, fmt.Errorf("failed to initialize MCP client for %s: %w", serverURL, err)
+		return nil, fmt.Errorf("failed to initialize MCP client for %s: %w", cfg.Url, err)
 	}
 
-	m.clients[serverURL] = cli
+	m.clients[cacheKey] = cli
 	return cli, nil
 }
 
@@ -137,7 +212,6 @@ func initializeMCPClient(ctx context.Context, cli mcpLifecycleClient) error {
 	return nil
 }
 
-// Close shuts down all MCP client connections.
 func (m *McpManager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

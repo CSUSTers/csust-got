@@ -80,7 +80,10 @@ type getContextArgs struct {
 func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "get_context",
-		Desc: "Retrieve recent conversation history from the current chat. " +
+		Desc: "Retrieve conversation history from the current chat. " +
+			"PROACTIVELY call this tool when you need more context to understand a user's question, " +
+			"especially for follow-up questions, references to earlier messages, or when the user says " +
+			"\"above\", \"earlier\", \"just now\", etc. " +
 			"Returns formatted message history with sender info and timestamps.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"limit": {
@@ -240,7 +243,8 @@ func (t *analyzeImageTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 	}
 
 	// Build multimodal messages and call vision model
-	messages := BuildMessagesForSubAgent("", query, imageData)
+	base64Raw := modelCfg.Features.ImageBase64Raw
+	messages := BuildMessagesForSubAgent("", query, imageData, base64Raw)
 	result, err := visionModel.Generate(ctx, messages)
 	if err != nil {
 		return "", fmt.Errorf("analyze_image: vision model call failed: %w", err)

@@ -7,11 +7,13 @@ import (
 	"csust-got/config"
 	"errors"
 	"fmt"
+	"strings"
 	"text/template"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
+	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
@@ -125,7 +127,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 }
 
 // buildMainAgent creates the main react.Agent from a ChatConfigSingle with agent config.
-// It assembles all tools: built-in + MCP + subagent tools.
+// It assembles all tools: built-in + MCP + subagent tools + skill tools.
 func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*react.Agent, error) {
 	agentCfg := chatCfg.Agent
 	if agentCfg == nil {
@@ -138,21 +140,24 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, fmt.Errorf("failed to build model for chat %q: %w", chatCfg.Name, err)
 	}
 
+	// Merge skill configurations into effective tools/mcpServers/toolModels
+	effectiveTools, effectiveMcpServers, effectiveToolModels := mergeSkillConfigs(agentCfg)
+
 	// Collect all tools
 	var allTools []tool.BaseTool
 
-	// 1. Built-in tools
-	if len(agentCfg.Tools) > 0 {
-		builtins, err := BuildBuiltinTools(agentCfg.Tools, agentCfg.ToolModels)
+	// 1. Built-in tools (agent's own + from skills)
+	if len(effectiveTools) > 0 {
+		builtins, err := BuildBuiltinTools(effectiveTools, effectiveToolModels)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build tools for chat %q: %w", chatCfg.Name, err)
 		}
 		allTools = append(allTools, builtins...)
 	}
 
-	// 2. MCP tools
-	if len(agentCfg.McpServers) > 0 && mcpMgr != nil {
-		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, agentCfg.McpServers)
+	// 2. MCP tools (agent's own + from skills)
+	if len(effectiveMcpServers) > 0 && mcpMgr != nil {
+		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, effectiveMcpServers)
 		if err != nil {
 			zap.L().Warn("chatv2/agent: failed to get MCP tools, continuing without them",
 				zap.String("chat", chatCfg.Name),
@@ -175,6 +180,10 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		}
 		allTools = append(allTools, subTool)
 	}
+
+	// 4. Wrap all tools with error handler so errors become model-readable messages
+	allTools = wrapToolsWithErrorHandler(allTools)
+
 	maxSteps := agentCfg.GetMaxSteps()
 	if agentCfg.MaxSteps > 0 && agentHasTools(agentCfg) && maxSteps != agentCfg.MaxSteps {
 		zap.L().Warn("chatv2/agent: main agent max_steps too low for tool-enabled workflow, clamped",
@@ -202,6 +211,7 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		zap.String("chat", chatCfg.Name),
 		zap.Int("total_tools", len(allTools)),
 		zap.Int("subagents", len(agentCfg.SubAgents)),
+		zap.Int("skills", len(agentCfg.Skills)),
 		zap.Int("max_steps", maxSteps),
 	)
 
@@ -244,7 +254,84 @@ func subAgentHasTools(cfg *config.SubAgentConfig) bool {
 }
 
 func agentHasTools(cfg *config.AgentConfig) bool {
-	return cfg != nil && (len(cfg.Tools) > 0 || len(cfg.McpServers) > 0 || len(cfg.SubAgents) > 0)
+	if cfg == nil {
+		return false
+	}
+	if len(cfg.Tools) > 0 || len(cfg.McpServers) > 0 || len(cfg.SubAgents) > 0 {
+		return true
+	}
+	for _, skill := range cfg.Skills {
+		if skill != nil && (len(skill.Tools) > 0 || len(skill.McpServers) > 0) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeSkillConfigs(agentCfg *config.AgentConfig) (
+	tools []string,
+	mcpServers []*config.ToolServerConfig,
+	toolModels map[string]*config.Model,
+) {
+	tools = append(tools, agentCfg.Tools...)
+	mcpServers = append(mcpServers, agentCfg.McpServers...)
+
+	toolModels = make(map[string]*config.Model)
+	for k, v := range agentCfg.ToolModels {
+		toolModels[k] = v
+	}
+
+	toolSeen := make(map[string]struct{})
+	for _, t := range agentCfg.Tools {
+		toolSeen[t] = struct{}{}
+	}
+
+	for _, skill := range agentCfg.Skills {
+		if skill == nil {
+			continue
+		}
+		for _, t := range skill.Tools {
+			if _, exists := toolSeen[t]; !exists {
+				tools = append(tools, t)
+				toolSeen[t] = struct{}{}
+			}
+		}
+		mcpServers = append(mcpServers, skill.McpServers...)
+		for k, v := range skill.ToolModels {
+			if _, exists := toolModels[k]; !exists {
+				toolModels[k] = v
+			}
+		}
+	}
+	return
+}
+
+func wrapToolsWithErrorHandler(tools []tool.BaseTool) []tool.BaseTool {
+	wrapped := make([]tool.BaseTool, len(tools))
+	for i, t := range tools {
+		wrapped[i] = toolutils.WrapToolWithErrorHandler(t, toolErrorHandler)
+	}
+	return wrapped
+}
+
+func toolErrorHandler(_ context.Context, err error) string {
+	return fmt.Sprintf("[Tool Error] %s\nPlease try a different approach or adjust parameters.", err.Error())
+}
+
+func GetSkillPromptAddons(agentCfg *config.AgentConfig) string {
+	if agentCfg == nil {
+		return ""
+	}
+	var addons []string
+	for _, skill := range agentCfg.Skills {
+		if skill == nil {
+			continue
+		}
+		if addon := skill.SystemPromptAddon.String(); addon != "" {
+			addons = append(addons, addon)
+		}
+	}
+	return strings.Join(addons, "\n\n")
 }
 
 // CompileChat pre-compiles templates and builds the main agent for a chat configuration.
@@ -277,10 +364,11 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 	}
 
 	return &CompiledChat{
-		Name:           chatCfg.Name,
-		Config:         chatCfg,
-		Agent:          agent,
-		SystemTemplate: systemTpl,
-		PromptTemplate: promptTpl,
+		Name:              chatCfg.Name,
+		Config:            chatCfg,
+		Agent:             agent,
+		SystemTemplate:    systemTpl,
+		PromptTemplate:    promptTpl,
+		SkillPromptAddons: GetSkillPromptAddons(chatCfg.Agent),
 	}, nil
 }

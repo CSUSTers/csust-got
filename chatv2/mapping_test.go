@@ -240,7 +240,7 @@ func TestBuildMessagesForSubAgent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildMessagesForSubAgent(tt.systemPrompt, tt.userInput, tt.imageData)
+			result := BuildMessagesForSubAgent(tt.systemPrompt, tt.userInput, tt.imageData, false)
 			assert.Len(t, result, tt.wantLen)
 			assert.Equal(t, tt.wantFirstRole, result[0].Role)
 

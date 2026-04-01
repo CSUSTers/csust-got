@@ -80,11 +80,12 @@ func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ToolC
 // CompiledChat is a pre-compiled chat configuration ready for concurrent reuse.
 // Created once at init time, used for every incoming request matching this chat config.
 type CompiledChat struct {
-	Name           string
-	Config         *config.ChatConfigSingle
-	Agent          *react.Agent
-	SystemTemplate *template.Template
-	PromptTemplate *template.Template
+	Name              string
+	Config            *config.ChatConfigSingle
+	Agent             *react.Agent
+	SystemTemplate    *template.Template
+	PromptTemplate    *template.Template
+	SkillPromptAddons string
 }
 
 // RichHistory keeps both the rendered text context and the underlying Telegram
