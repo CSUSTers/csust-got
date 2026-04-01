@@ -63,6 +63,10 @@
 # CMake
 cmake-build-*/
 
+.gocache/
+.golangci-lint-cache/
+.gomodcache/
+
 # Mongo Explorer plugin
 .idea/**/mongoSettings.xml
 

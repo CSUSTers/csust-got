@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"csust-got/config"
+	"csust-got/util"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFindLastSentenceDelimiter(t *testing.T) {
@@ -231,6 +234,51 @@ func TestFormatOutputWithReason(t *testing.T) {
 					t.Errorf("formatOutputWithReason() = %q, want it to contain %q", result, want)
 				}
 			}
+		})
+	}
+}
+
+func TestFormatOutputWithReason_EscapesFinalTelegramTextOnce(t *testing.T) {
+	boolTrue := true
+
+	tests := []struct {
+		name     string
+		text     string
+		format   *config.ChatOutputFormatConfig
+		expected string
+	}{
+		{
+			name:     "markdown plain text is escaped once",
+			text:     "a.b _x_ [y](z) !",
+			format:   &config.ChatOutputFormatConfig{Format: "markdown", Payload: "plain", UseNativeReasoning: &boolTrue},
+			expected: util.EscapeTgMDv2ReservedChars("a.b _x_ [y](z) !"),
+		},
+		{
+			name:     "markdown block keeps wrapper raw and escapes inner text once",
+			text:     "line.1\n<tag>",
+			format:   &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block", UseNativeReasoning: &boolTrue},
+			expected: "```markdown\n" + util.EscapeTgMDv2ReservedChars("line.1\n<tag>") + "\n```\n",
+		},
+		{
+			name:     "html plain text is escaped once",
+			text:     "a<b>&c",
+			format:   &config.ChatOutputFormatConfig{Format: "html", Payload: "plain", UseNativeReasoning: &boolTrue},
+			expected: util.EscapeTgHTMLReservedChars("a<b>&c"),
+		},
+		{
+			name:     "html block keeps wrapper raw and escapes inner text once",
+			text:     "line.1\n<tag>&value",
+			format:   &config.ChatOutputFormatConfig{Format: "html", Payload: "block", UseNativeReasoning: &boolTrue},
+			expected: "<pre>" + util.EscapeTgHTMLReservedChars("line.1\n<tag>&value") + "</pre>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatOutputWithReason(tt.text, "", tt.format)
+			assert.Equal(t, tt.expected, got)
+			assert.NotContains(t, got, "&amp;amp;")
+			assert.NotContains(t, got, "\\\\.")
 		})
 	}
 }

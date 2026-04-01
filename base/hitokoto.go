@@ -13,6 +13,7 @@ import (
 	"csust-got/entities"
 	"csust-got/log"
 	"csust-got/orm"
+	"csust-got/util"
 
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
@@ -100,17 +101,20 @@ func parseAPI(ctx Context) HitokotoArg {
 
 // Hitokoto is command `hitokoto`.
 func Hitokoto(ctx Context) error {
-	return ctx.Reply(GetHitokoto(parseAPI(ctx), true), ModeHTML)
+	_, err := util.ReplyWithError(ctx, util.RawTgText(GetHitokoto(parseAPI(ctx), true)), ModeHTML)
+	return err
 }
 
 // HitDawu is command alias `hitokoto -i`.
 func HitDawu(ctx Context) error {
-	return ctx.Reply(GetHitokoto("i", true), ModeHTML)
+	_, err := util.ReplyWithError(ctx, util.RawTgText(GetHitokoto("i", true)), ModeHTML)
+	return err
 }
 
 // HitoNetease is command alias `hitokoto -j`.
 func HitoNetease(ctx Context) error {
-	return ctx.Reply(GetHitokoto("j", true), ModeHTML)
+	_, err := util.ReplyWithError(ctx, util.RawTgText(GetHitokoto("j", true)), ModeHTML)
+	return err
 }
 
 // GetHitokoto can get a hitokoto.

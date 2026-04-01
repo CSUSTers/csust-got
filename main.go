@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"csust-got/chat"
+	"csust-got/chatv2"
 	"csust-got/inline"
 	"csust-got/meili"
 	"csust-got/sd"
@@ -36,8 +38,12 @@ func main() {
 	orm.LoadBlockList()
 
 	chat.InitMcpoClient()
-	chat.InitAiClients(*config.BotConfig.ChatConfigV2)
-	initChatRegexHandlers(*config.BotConfig.ChatConfigV2)
+	chat.InitAiClients(config.BotConfig.ActiveChatConfig())
+	if err := chatv2.Init(context.Background()); err != nil {
+		zap.L().Error("chatv2: init failed", zap.Error(err))
+	}
+	defer chatv2.Close()
+	initChatRegexHandlers(config.BotConfig.ActiveChatConfig())
 
 	chat.InitGachaConfigs()
 
@@ -132,7 +138,7 @@ func registerDebugHandler(bot *Bot) {
 			if err != nil {
 				return err
 			}
-			_, err = util.SendReplyWithError(ctx.Chat(), fmt.Sprintf("```%s```", obj), ctx.Message(), ModeMarkdownV2)
+			_, err = util.SendReplyWithError(ctx.Chat(), util.RawTgText(fmt.Sprintf("```%s```", obj)), ctx.Message(), ModeMarkdownV2)
 			return err
 		})
 	}
@@ -229,8 +235,11 @@ func customHandler(ctx Context) error {
 	if text != "" && ctx.Message().ReplyTo != nil {
 		reply := ctx.Message().ReplyTo
 		if reply.Sender.Username == ctx.Bot().Me.Username {
-			for _, v2 := range *config.BotConfig.ChatConfigV2 {
+			for _, v2 := range config.BotConfig.ActiveChatConfig() {
 				if trigger, ok := v2.TriggerOnReply(); ok {
+					if v2.IsAgentEnabled() && chatv2.HasCompiledChat(v2.Name) {
+						return chatv2.Chat(ctx, v2, trigger)
+					}
 					return chat.Chat(ctx, v2, trigger)
 				}
 			}
@@ -270,13 +279,16 @@ func registerEventHandler(bot *Bot) {
 }
 
 func registerChatConfigHandler(bot *Bot) {
-	for _, v := range *config.BotConfig.ChatConfigV2 {
+	for _, v := range config.BotConfig.ActiveChatConfig() {
 		for _, tr := range v.Trigger {
 			if tr.Command != "" {
 				// 创建局部副本以避免闭包捕获循环变量
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
+						return chatv2.Chat(ctx, vCopy, trCopy)
+					}
 					return chat.Chat(ctx, vCopy, trCopy)
 				})
 			}
@@ -299,6 +311,9 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
+					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
+						return chatv2.Chat(context, vCopy, trCopy)
+					}
 					return chat.Chat(context, vCopy, trCopy)
 				}})
 			}

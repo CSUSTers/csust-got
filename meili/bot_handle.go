@@ -84,7 +84,7 @@ func generatePaginationCommand(page int64, searchQuery string, usedChatIdParam b
 func SearchHandle(ctx Context) error {
 	if config.BotConfig.MeiliConfig.Enabled {
 		rplMsg := executeSearch(ctx)
-		err := ctx.Reply(rplMsg, ModeMarkdownV2)
+		_, err := util.ReplyWithError(ctx, util.RawTgText(rplMsg), ModeMarkdownV2)
 		return err
 	}
 	err := ctx.Reply("MeiliSearch is not enabled")
@@ -212,9 +212,9 @@ func executeSearch(ctx Context) string {
 	chatUrl := "https://t.me/c/" + strconv.FormatInt(chatId, 10)[4:] + "/"
 	var sb strings.Builder
 	for item := range respMap {
-		sb.WriteString(fmt.Sprintf("消息[%s](%s%s): `%s` \n\n",
+		fmt.Fprintf(&sb, "消息[%s](%s%s): `%s` \n\n",
 			respMap[item]["id"], chatUrl, respMap[item]["id"],
-			util.EscapeTgMDv2ReservedChars(respMap[item]["text"])))
+			util.EscapeTgMDv2ReservedChars(respMap[item]["text"]))
 	}
 	rplMsg += sb.String()
 

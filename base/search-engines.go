@@ -8,6 +8,7 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
+	"csust-got/util"
 
 	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
@@ -17,7 +18,8 @@ type htmlMapper func(m *Message) string
 
 func mapToHTML(mapper htmlMapper) func(Context) error {
 	return func(ctx Context) error {
-		return ctx.Reply(mapper(ctx.Message()), ModeHTML, NoPreview)
+		_, err := util.ReplyWithError(ctx, util.RawTgText(mapper(ctx.Message())), ModeHTML, NoPreview)
+		return err
 	}
 }
 

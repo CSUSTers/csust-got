@@ -38,19 +38,19 @@ func (m *mockContext) BoostUpdated() *tb.BoostUpdated         { return nil }
 func (m *mockContext) BoostRemoved() *tb.BoostRemoved         { return nil }
 func (m *mockContext) Bot() *tb.Bot                           { return nil }
 func (m *mockContext) Update() tb.Update                      { return tb.Update{} }
-func (m *mockContext) Get(key string) interface{}             { return nil }
-func (m *mockContext) Set(key string, val interface{})        {}
-func (m *mockContext) Reply(what interface{}, opts ...interface{}) error {
+func (m *mockContext) Get(key string) any                     { return nil }
+func (m *mockContext) Set(key string, val any)                {}
+func (m *mockContext) Reply(what any, opts ...any) error {
 	return nil
 }
 func (m *mockContext) Accept(opts ...string) error                { return nil }
 func (m *mockContext) Answer(resp *tb.QueryResponse) error        { return nil }
 func (m *mockContext) Respond(resp ...*tb.CallbackResponse) error { return nil }
 func (m *mockContext) Notify(action tb.ChatAction) error          { return nil }
-func (m *mockContext) Ship(opts ...interface{}) error {
+func (m *mockContext) Ship(opts ...any) error {
 	return nil
 }
-func (m *mockContext) Checkout(ok bool, opts ...interface{}) error {
+func (m *mockContext) Checkout(ok bool, opts ...any) error {
 	return nil
 }
 func (m *mockContext) Acknowledge() error {
@@ -59,13 +59,13 @@ func (m *mockContext) Acknowledge() error {
 func (m *mockContext) Delete() error {
 	return nil
 }
-func (m *mockContext) Send(what interface{}, opts ...interface{}) error {
+func (m *mockContext) Send(what any, opts ...any) error {
 	return nil
 }
-func (m *mockContext) Edit(what interface{}, opts ...interface{}) error {
+func (m *mockContext) Edit(what any, opts ...any) error {
 	return nil
 }
-func (m *mockContext) Forward(msg tb.Editable, opts ...interface{}) error {
+func (m *mockContext) Forward(msg tb.Editable, opts ...any) error {
 	return nil
 }
 func (m *mockContext) Pin() error {
@@ -89,7 +89,7 @@ func (m *mockContext) SetMenuButton(button *tb.MenuButton) error {
 func (m *mockContext) GetMenuButton() (*tb.MenuButton, error) {
 	return nil, nil
 }
-func (m *mockContext) Ban(user *tb.User, opts ...interface{}) error {
+func (m *mockContext) Ban(user *tb.User, opts ...any) error {
 	return nil
 }
 func (m *mockContext) Unban(user *tb.User) error {
@@ -113,10 +113,10 @@ func (m *mockContext) SetStickerSet(name string) error {
 func (m *mockContext) DeleteStickerSet() error {
 	return nil
 }
-func (m *mockContext) CreateInviteLink(opts ...interface{}) (*tb.ChatInviteLink, error) {
+func (m *mockContext) CreateInviteLink(opts ...any) (*tb.ChatInviteLink, error) {
 	return nil, nil
 }
-func (m *mockContext) EditInviteLink(link string, opts ...interface{}) (*tb.ChatInviteLink, error) {
+func (m *mockContext) EditInviteLink(link string, opts ...any) (*tb.ChatInviteLink, error) {
 	return nil, nil
 }
 func (m *mockContext) RevokeInviteLink2(link string) (*tb.ChatInviteLink, error) {
@@ -165,15 +165,15 @@ func (m *mockContext) Data() string {
 	return ""
 }
 
-func (m *mockContext) SendAlbum(a tb.Album, opts ...interface{}) error {
+func (m *mockContext) SendAlbum(a tb.Album, opts ...any) error {
 	return nil
 }
 
-func (m *mockContext) EditOrSend(what interface{}, opts ...interface{}) error {
+func (m *mockContext) EditOrSend(what any, opts ...any) error {
 	return nil
 }
 
-func (m *mockContext) EditOrReply(what interface{}, opts ...interface{}) error {
+func (m *mockContext) EditOrReply(what any, opts ...any) error {
 	return nil
 }
 
@@ -189,11 +189,11 @@ func (m *mockContext) RespondAlert(text string) error {
 	return nil
 }
 
-func (m *mockContext) EditCaption(caption string, opts ...interface{}) error {
+func (m *mockContext) EditCaption(caption string, opts ...any) error {
 	return nil
 }
 
-func (m *mockContext) ForwardTo(to tb.Recipient, opts ...interface{}) error {
+func (m *mockContext) ForwardTo(to tb.Recipient, opts ...any) error {
 	return nil
 }
 

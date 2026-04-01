@@ -6,6 +6,7 @@ import (
 	"csust-got/config"
 	"csust-got/entities"
 	"csust-got/log"
+	"csust-got/util"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -553,7 +554,7 @@ func handleVoiceError(ctx tb.Context, err error, indexName string) error {
 			log.Error("failed to send error audio", zap.Error(sendErr))
 		}
 	} else {
-		if sendErr := ctx.Send(errorCaption, &tb.SendOptions{ParseMode: tb.ModeHTML}); sendErr != nil {
+		if _, sendErr := util.SendWithError(ctx, util.RawTgText(errorCaption), &tb.SendOptions{ParseMode: tb.ModeHTML}); sendErr != nil {
 			log.Error("failed to send error message", zap.Error(sendErr))
 		}
 	}

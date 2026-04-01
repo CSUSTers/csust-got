@@ -428,5 +428,6 @@ func LastPromptHandler(ctx Context) error {
 		return ctx.Reply("You haven't used stable diffusion yet.")
 	}
 
-	return ctx.Reply("Your last prompt is:\n`"+prompt+"`", ModeMarkdownV2)
+	_, err = util.ReplyWithError(ctx, util.RawTgText("Your last prompt is:\n`"+util.EscapeTgMDv2ReservedChars(prompt)+"`"), ModeMarkdownV2)
+	return err
 }
