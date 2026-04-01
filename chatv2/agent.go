@@ -106,7 +106,8 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 		MaxIterations: maxSteps,
 		ToolsConfig: adk.ToolsConfig{
 			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: subTools,
+				Tools:               subTools,
+				UnknownToolsHandler: newUnknownToolsHandler(subTools),
 			},
 		},
 	})
@@ -200,7 +201,8 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		MaxStep:          maxSteps,
 		MessageModifier:  newFinalTurnMessageModifier(maxSteps),
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: allTools,
+			Tools:               allTools,
+			UnknownToolsHandler: newUnknownToolsHandler(allTools),
 		},
 	})
 	if err != nil {
@@ -371,4 +373,26 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 		PromptTemplate:    promptTpl,
 		SkillPromptAddons: GetSkillPromptAddons(chatCfg.Agent),
 	}, nil
+}
+
+// newUnknownToolsHandler returns a handler that reports available tool names when the model
+// calls a tool that doesn't exist. This prevents eino from returning a hard error on tool name
+// hallucination — instead the model gets an informative message and can self-correct.
+func newUnknownToolsHandler(tools []tool.BaseTool) func(ctx context.Context, name, input string) (string, error) {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if info, err := t.Info(context.Background()); err == nil {
+			names = append(names, info.Name)
+		}
+	}
+	return func(ctx context.Context, name, input string) (string, error) {
+		zap.L().Warn("chatv2/agent: model called unknown tool",
+			zap.String("tool", name),
+			zap.Strings("available", names),
+		)
+		return fmt.Sprintf(
+			"[Tool Error] Tool %q does not exist. Available tools: %s. Please use one of the available tool names exactly.",
+			name, strings.Join(names, ", "),
+		), nil
+	}
 }
