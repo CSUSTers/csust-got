@@ -28,6 +28,12 @@ var (
 
 const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
+const loopDetectedGuidance = "检测到你正在重复调用相同的工具。请立即停止循环，不要再调用任何工具。请基于你已经获取到的信息，直接输出最终回答。如果信息不足，也请直接说明，不要继续重复搜索或调用工具。"
+
+// minToolRoundsForLoopDetection is the minimum number of times the same tool
+// must be called before we consider it a repetitive loop.
+const minToolRoundsForLoopDetection = 3
+
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
 	if modelCfg == nil {
@@ -222,15 +228,37 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 
 func newFinalTurnMessageModifier(maxSteps int) react.MessageModifier {
 	return func(_ context.Context, input []*schema.Message) []*schema.Message {
-		if !shouldInjectFinalTurnGuidance(input, maxSteps) {
+		guidance := selectGuidance(input, maxSteps)
+		if guidance == "" {
 			return input
 		}
 
+		// Append guidance at the end so it is close to the model's generation
+		// point — models attend more strongly to recent messages.
 		out := make([]*schema.Message, 0, len(input)+1)
-		out = append(out, schema.SystemMessage(finalTurnGuidance))
 		out = append(out, input...)
+		out = append(out, schema.SystemMessage(guidance))
 		return out
 	}
+}
+
+// selectGuidance picks the appropriate guidance message (if any) to inject.
+// It returns loopDetectedGuidance when repetitive tool calls are detected,
+// finalTurnGuidance when the step budget is nearly exhausted, or "" otherwise.
+func selectGuidance(messages []*schema.Message, maxSteps int) string {
+	if maxSteps <= 0 {
+		return ""
+	}
+
+	if detectToolCallLoop(messages) {
+		return loopDetectedGuidance
+	}
+
+	if shouldInjectFinalTurnGuidance(messages, maxSteps) {
+		return finalTurnGuidance
+	}
+
+	return ""
 }
 
 func shouldInjectFinalTurnGuidance(messages []*schema.Message, maxSteps int) bool {
@@ -249,6 +277,51 @@ func shouldInjectFinalTurnGuidance(messages []*schema.Message, maxSteps int) boo
 	// Current model step is 2*toolRounds+1. If another tool call is made now,
 	// the agent would need two more graph steps (tools + final model answer).
 	return toolRounds*2+3 > maxSteps
+}
+
+// detectToolCallLoop checks whether the agent is stuck in a repetitive
+// tool-calling loop. It looks at only the tool-calling assistant messages
+// (ignoring update_progress which is a status-reporting utility) and returns
+// true when the same tool name has been called minToolRoundsForLoopDetection
+// or more times consecutively.
+func detectToolCallLoop(messages []*schema.Message) bool {
+	// Collect the primary tool name from each assistant tool-call turn,
+	// skipping update_progress since it is a side-channel, not a work tool.
+	var toolSeq []string
+	for _, msg := range messages {
+		if msg == nil || msg.Role != schema.Assistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		name := primaryToolCallName(msg)
+		if name == "" || name == "update_progress" {
+			continue
+		}
+		toolSeq = append(toolSeq, name)
+	}
+
+	if len(toolSeq) < minToolRoundsForLoopDetection {
+		return false
+	}
+
+	// Check if the last N calls are all the same tool.
+	last := toolSeq[len(toolSeq)-1]
+	streak := 0
+	for i := len(toolSeq) - 1; i >= 0; i-- {
+		if toolSeq[i] != last {
+			break
+		}
+		streak++
+	}
+
+	return streak >= minToolRoundsForLoopDetection
+}
+
+// primaryToolCallName returns the function name of the first tool call in msg.
+func primaryToolCallName(msg *schema.Message) string {
+	if len(msg.ToolCalls) == 0 {
+		return ""
+	}
+	return msg.ToolCalls[0].Function.Name
 }
 
 func subAgentHasTools(cfg *config.SubAgentConfig) bool {

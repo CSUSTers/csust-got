@@ -327,6 +327,10 @@ func isTelegramImageUnavailableError(err error) bool {
 
 // ---- update_progress Tool ----
 
+const updateProgressOKResponse = "Progress update sent. Now proceed with your task: " +
+	"if you have enough information, output the final answer directly without calling more tools. " +
+	"Do not repeat tools you have already called."
+
 type updateProgressTool struct{}
 
 type updateProgressArgs struct {
@@ -405,7 +409,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 			return "ok (send failed)", nil
 		}
 		tc.progressMsg = msg
-		return "ok", nil
+		return updateProgressOKResponse, nil
 	}
 
 	// Edit existing placeholder
@@ -414,7 +418,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 		// "message is not modified" is not a real error
 		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))
 	}
-	return "ok", nil
+	return updateProgressOKResponse, nil
 }
 
 // ---- get_message Tool ----
