@@ -305,7 +305,9 @@ func mergeSkillConfigs(agentCfg *config.AgentConfig) (
 			}
 		}
 	}
-	return
+	return tools,
+		mcpServers,
+		toolModels
 }
 
 func wrapToolsWithErrorHandler(tools []tool.BaseTool) []tool.BaseTool {
