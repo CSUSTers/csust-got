@@ -13,7 +13,7 @@ import (
 
 var errToolNodeBadFileID = fmt.Errorf("[NodeRunError] %w\n------------------------\nnode path: [tools]", errTestBadTelegramFile)
 
-func TestShouldInjectFinalTurnGuidance(t *testing.T) {
+func TestCalcGuidanceLevel(t *testing.T) {
 	toolCallMsg := &schema.Message{
 		Role: schema.Assistant,
 		ToolCalls: []schema.ToolCall{
@@ -28,40 +28,68 @@ func TestShouldInjectFinalTurnGuidance(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		maxSteps int
-		messages []*schema.Message
-		want     bool
+		name       string
+		maxSteps   int
+		messages   []*schema.Message
+		wantLevel  guidanceLevel
+		wantRounds int
 	}{
 		{
-			name:     "no tools no final guidance",
-			maxSteps: 4,
-			messages: []*schema.Message{schema.UserMessage("hello")},
-			want:     false,
+			name:       "no tools no guidance",
+			maxSteps:   4,
+			messages:   []*schema.Message{schema.UserMessage("hello")},
+			wantLevel:  guidanceNone,
+			wantRounds: 0,
 		},
 		{
-			name:     "step budget 4 warns after one tool round",
-			maxSteps: 4,
-			messages: []*schema.Message{schema.UserMessage("search"), toolCallMsg},
-			want:     true,
+			name:       "step budget 4 hard stop after one tool round",
+			maxSteps:   4,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg},
+			wantLevel:  guidanceHard,
+			wantRounds: 1,
 		},
 		{
-			name:     "step budget 5 still has room after one tool round",
-			maxSteps: 5,
-			messages: []*schema.Message{schema.UserMessage("search"), toolCallMsg},
-			want:     false,
+			name:       "step budget 12 no guidance after one tool round",
+			maxSteps:   12,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg},
+			wantLevel:  guidanceNone,
+			wantRounds: 1,
 		},
 		{
-			name:     "step budget 5 warns after two tool rounds",
-			maxSteps: 5,
-			messages: []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg},
-			want:     true,
+			name:       "step budget 12 soft nudge after two tool rounds",
+			maxSteps:   12,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg},
+			wantLevel:  guidanceSoft,
+			wantRounds: 2,
+		},
+		{
+			name:       "step budget 12 soft nudge after three tool rounds",
+			maxSteps:   12,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg},
+			wantLevel:  guidanceSoft,
+			wantRounds: 3,
+		},
+		{
+			name:       "step budget 12 hard stop after four tool rounds",
+			maxSteps:   12,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg},
+			wantLevel:  guidanceHard,
+			wantRounds: 4,
+		},
+		{
+			name:       "maxSteps 0 always returns none",
+			maxSteps:   0,
+			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg},
+			wantLevel:  guidanceNone,
+			wantRounds: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, shouldInjectFinalTurnGuidance(tt.messages, tt.maxSteps))
+			level, rounds := calcGuidanceLevel(tt.messages, tt.maxSteps)
+			assert.Equal(t, tt.wantLevel, level)
+			assert.Equal(t, tt.wantRounds, rounds)
 		})
 	}
 }

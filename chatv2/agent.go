@@ -26,6 +26,16 @@ var (
 	errAgentConfigNil    = errors.New("agent config is nil")
 )
 
+type guidanceLevel int
+
+const (
+	guidanceNone guidanceLevel = iota
+	guidanceSoft
+	guidanceHard
+)
+
+const softTurnGuidance = "你已经进行了 %d 轮工具调用。如果你认为已经收集到足够的信息来回答用户的问题，请直接整理已有信息并输出最终回答，不需要继续调用工具。"
+
 const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
 // buildModel creates an eino ChatModel from a config.Model definition.
@@ -222,20 +232,39 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 
 func newFinalTurnMessageModifier(maxSteps int) react.MessageModifier {
 	return func(_ context.Context, input []*schema.Message) []*schema.Message {
-		if !shouldInjectFinalTurnGuidance(input, maxSteps) {
+		level, toolRounds := calcGuidanceLevel(input, maxSteps)
+		if level == guidanceNone {
 			return input
 		}
 
+		var guidance string
+		switch level {
+		case guidanceSoft:
+			guidance = fmt.Sprintf(softTurnGuidance, toolRounds)
+		default: // guidanceHard
+			guidance = finalTurnGuidance
+		}
+
 		out := make([]*schema.Message, 0, len(input)+1)
-		out = append(out, schema.SystemMessage(finalTurnGuidance))
 		out = append(out, input...)
+		out = append(out, schema.SystemMessage(guidance))
 		return out
 	}
 }
 
-func shouldInjectFinalTurnGuidance(messages []*schema.Message, maxSteps int) bool {
+// calcGuidanceLevel determines what kind of guidance (if any) to inject based
+// on how many tool rounds have been used relative to the step budget.
+//
+// Each tool round consumes 2 steps (model call + tool execution). The current
+// model call is step toolRounds*2+1, so remaining = maxSteps - (toolRounds*2+1).
+//
+// Returns:
+//   - guidanceNone: plenty of budget left, let the model work freely
+//   - guidanceSoft: budget getting tight, nudge the model to wrap up if it has enough info
+//   - guidanceHard: near the limit, forbid further tool calls (fallback)
+func calcGuidanceLevel(messages []*schema.Message, maxSteps int) (guidanceLevel, int) {
 	if maxSteps <= 0 {
-		return false
+		return guidanceNone, 0
 	}
 
 	toolRounds := 0
@@ -246,9 +275,23 @@ func shouldInjectFinalTurnGuidance(messages []*schema.Message, maxSteps int) boo
 		toolRounds++
 	}
 
-	// Current model step is 2*toolRounds+1. If another tool call is made now,
-	// the agent would need two more graph steps (tools + final model answer).
-	return toolRounds*2+3 > maxSteps
+	if toolRounds == 0 {
+		return guidanceNone, 0
+	}
+
+	remaining := maxSteps - (toolRounds*2 + 1)
+
+	switch {
+	case remaining <= 3:
+		// Near the limit — forbid further tool calls.
+		return guidanceHard, toolRounds
+	case toolRounds >= 2 && remaining*3 < maxSteps*2:
+		// Less than 2/3 of budget remains and model has done ≥2 rounds —
+		// softly suggest wrapping up if it has enough info.
+		return guidanceSoft, toolRounds
+	default:
+		return guidanceNone, toolRounds
+	}
 }
 
 func subAgentHasTools(cfg *config.SubAgentConfig) bool {
