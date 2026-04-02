@@ -245,10 +245,24 @@ func newFinalTurnMessageModifier(maxSteps int) react.MessageModifier {
 			guidance = finalTurnGuidance
 		}
 
-		out := make([]*schema.Message, 0, len(input)+1)
-		out = append(out, input...)
-		out = append(out, schema.SystemMessage(guidance))
-		return out
+		// Append guidance to the existing system message to avoid "system message
+		// must be at the beginning" errors from providers that enforce message ordering.
+		out := make([]*schema.Message, len(input))
+		copy(out, input)
+		for i, msg := range out {
+			if msg != nil && msg.Role == schema.System {
+				merged := *msg
+				merged.Content = msg.Content + "\n\n" + guidance
+				out[i] = &merged
+				return out
+			}
+		}
+
+		// No system message found — prepend one.
+		result := make([]*schema.Message, 0, len(input)+1)
+		result = append(result, schema.SystemMessage(guidance))
+		result = append(result, input...)
+		return result
 	}
 }
 
