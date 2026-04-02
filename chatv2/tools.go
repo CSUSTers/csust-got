@@ -27,6 +27,8 @@ var (
 	errInvalidMsgID  = errors.New("invalid message_id")
 	errNoImageSource = errors.New("either file_id or url must be provided")
 	errBadHTTPStatus = errors.New("unexpected HTTP status")
+
+	progressResult = "ok. If your task is done, output the final answer now — do not make additional tool calls."
 )
 
 // modelConfigurable is implemented by tools that support a model override.
@@ -336,9 +338,11 @@ type updateProgressArgs struct {
 func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "update_progress",
-		Desc: "Send a progress update to the user. Use this to report intermediate status " +
-			"during multi-step tasks (e.g. 'Searching web...', 'Analyzing results 3/5...'). " +
-			"The update will be displayed by editing the bot's placeholder message.",
+		Desc: "Send an INTERMEDIATE progress update to the user during multi-step tasks " +
+			"(e.g. 'Searching web...', 'Analyzing results 2/5...'). " +
+			"Do NOT use this to report completion or final results. " +
+			"When your work is done, directly output your final answer as plain text — " +
+			"that will be sent to the user automatically.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"content": {
 				Type:     "string",
@@ -405,7 +409,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 			return "ok (send failed)", nil
 		}
 		tc.progressMsg = msg
-		return "ok", nil
+		return progressResult, nil
 	}
 
 	// Edit existing placeholder
@@ -414,7 +418,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 		// "message is not modified" is not a real error
 		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))
 	}
-	return "ok", nil
+	return progressResult, nil
 }
 
 // ---- get_message Tool ----
