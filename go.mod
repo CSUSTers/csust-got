@@ -16,7 +16,7 @@ require (
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
-	github.com/swaggest/openapi-go v0.2.60
+	github.com/swaggest/openapi-go v0.2.61
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/image v0.39.0
@@ -51,8 +51,8 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
-	github.com/swaggest/jsonschema-go v0.3.74 // indirect
-	github.com/swaggest/refl v1.3.1 // indirect
+	github.com/swaggest/jsonschema-go v0.3.78 // indirect
+	github.com/swaggest/refl v1.4.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
