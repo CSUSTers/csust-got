@@ -17,17 +17,20 @@ import (
 	"go.uber.org/zap"
 )
 
+// McpManager manages MCP client connections and tool discovery.
 type McpManager struct {
 	mu      sync.Mutex
 	clients map[string]*mcpclient.Client
 }
 
+// NewMcpManager creates a new McpManager.
 func NewMcpManager() *McpManager {
 	return &McpManager{
 		clients: make(map[string]*mcpclient.Client),
 	}
 }
 
+// GetToolsFromConfig retrieves all enabled tools from the provided tool server configurations.
 func (m *McpManager) GetToolsFromConfig(ctx context.Context, cfgs []*config.ToolServerConfig) ([]tool.BaseTool, error) {
 	var allTools []tool.BaseTool
 
@@ -212,6 +215,7 @@ func initializeMCPClient(ctx context.Context, cli mcpLifecycleClient) error {
 	return nil
 }
 
+// Close closes all open MCP client connections.
 func (m *McpManager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

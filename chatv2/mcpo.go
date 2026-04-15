@@ -5,6 +5,7 @@ package chatv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -27,6 +28,8 @@ type mcpoTool struct {
 	apiKey     string
 	httpClient *http.Client
 }
+
+var errMcpoHTTPStatus = errors.New("MCPO HTTP error")
 
 func (t *mcpoTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return t.info, nil
@@ -51,7 +54,7 @@ func (t *mcpoTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ .
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("MCPO HTTP status %d", resp.StatusCode)
+		return "", fmt.Errorf("MCPO HTTP status %d: %w", resp.StatusCode, errMcpoHTTPStatus)
 	}
 
 	var buf strings.Builder

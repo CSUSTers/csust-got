@@ -379,6 +379,7 @@ func toolErrorHandler(_ context.Context, err error) string {
 	return fmt.Sprintf("[Tool Error] %s\nPlease try a different approach or adjust parameters.", err.Error())
 }
 
+// GetSkillPromptAddons returns the concatenated system prompt addons for all skills in the agent config.
 func GetSkillPromptAddons(agentCfg *config.AgentConfig) string {
 	if agentCfg == nil {
 		return ""

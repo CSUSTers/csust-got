@@ -107,8 +107,6 @@ func imageBase64RawEnabled(tc *TurnContext) bool {
 		tc.Config.Model.Features.ImageBase64Raw
 }
 
-const dataURIPrefix = "data:image/jpeg;base64,"
-
 func stripDataURIPrefix(s string) string {
 	if strings.HasPrefix(s, "data:") {
 		if idx := strings.Index(s, ","); idx >= 0 {
