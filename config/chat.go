@@ -342,6 +342,7 @@ func (c *McpoConfig) readConfig() {
 	}
 }
 
+// Tool server type constants define the supported connection protocol for tool servers.
 const (
 	ToolServerTypeSSE            = "sse"
 	ToolServerTypeStreamableHTTP = "streamable-http"
@@ -428,6 +429,7 @@ func parseToolEntriesSlice(src reflect.Value) (ToolEntries, error) {
 				tools := extractStringSlice(val)
 				entries = append(entries, ToolEntry{Name: name, Tools: tools})
 			}
+		default:
 		}
 	}
 	return entries, nil
