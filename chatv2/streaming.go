@@ -4,6 +4,7 @@ package chatv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -142,8 +143,23 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 		sp.fullResponse.WriteString(msg.Content)
 	}
 	if msg.ReasoningContent != "" {
-		sp.reasoningContent.WriteString(msg.ReasoningContent)
+		sp.reasoningContent.WriteString(unquoteJSONString(msg.ReasoningContent))
 	}
+}
+
+// unquoteJSONString attempts to decode a JSON-encoded string value.
+// The eino library's populateRCFromExtra converts json.RawMessage to string
+// via string(), which preserves JSON string delimiters (quotes) and escape
+// sequences. This function reverses that by JSON-unmarshalling if the value
+// looks like a JSON string.
+func unquoteJSONString(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		var unquoted string
+		if err := json.Unmarshal([]byte(s), &unquoted); err == nil {
+			return unquoted
+		}
+	}
+	return s
 }
 
 // updateMessage edits the placeholder message with current content.
