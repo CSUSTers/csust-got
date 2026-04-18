@@ -31,7 +31,7 @@ A modern Telegram bot for CSUST, developed in Go.
 
 ## System Requirements
 
-- Go 1.25+
+- Go 1.26+
 - Redis
 - Docker & Docker Compose (recommended)
 
@@ -180,7 +180,7 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 
 ## Tech Stack
 
-- **Language**: Go 1.25+
+- **Language**: Go 1.26+
 - **Framework**: [telebot.v3](https://github.com/tucnak/telebot)
 - **Database**: Redis
 - **Search**: MeiliSearch

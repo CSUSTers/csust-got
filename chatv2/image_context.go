@@ -109,8 +109,8 @@ func imageBase64RawEnabled(tc *TurnContext) bool {
 
 func stripDataURIPrefix(s string) string {
 	if strings.HasPrefix(s, "data:") {
-		if idx := strings.Index(s, ","); idx >= 0 {
-			return s[idx+1:]
+		if _, after, ok := strings.Cut(s, ","); ok {
+			return after
 		}
 	}
 	return s
@@ -206,10 +206,7 @@ func loadCurrentAlbumMessages(msg *tb.Message) []*tb.Message {
 }
 
 func loadAlbumSiblingMessages(chatID int64, messageID int, albumID string, messages map[int]*tb.Message) {
-	startID := messageID - currentAlbumSiblingWindow
-	if startID < 1 {
-		startID = 1
-	}
+	startID := max(messageID-currentAlbumSiblingWindow, 1)
 	endID := messageID + currentAlbumSiblingWindow
 
 	for id := startID; id <= endID; id++ {

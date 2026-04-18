@@ -110,13 +110,13 @@ func TestAIResponseMetadata_AllowRegenerate(t *testing.T) {
 	}{
 		{
 			name:            "AllowRegenerate enabled",
-			allowRegenerate: boolPtr(true),
-			expected:        boolPtr(true),
+			allowRegenerate: new(true),
+			expected:        new(true),
 		},
 		{
 			name:            "AllowRegenerate disabled",
-			allowRegenerate: boolPtr(false),
-			expected:        boolPtr(false),
+			allowRegenerate: new(false),
+			expected:        new(false),
 		},
 		{
 			name:            "AllowRegenerate nil (legacy/not set)",
@@ -141,11 +141,6 @@ func TestAIResponseMetadata_AllowRegenerate(t *testing.T) {
 			assert.Equal(t, tt.expected, metadata.AllowRegenerate)
 		})
 	}
-}
-
-// boolPtr is a helper function to get a pointer to a bool value
-func boolPtr(b bool) *bool {
-	return &b
 }
 
 func TestMessageContentExtraction(t *testing.T) {

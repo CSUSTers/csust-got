@@ -7,6 +7,7 @@ import (
 	"csust-got/config"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"text/template"
 
@@ -296,9 +297,7 @@ func mergeSkillConfigs(agentCfg *config.AgentConfig) (
 	mcpServers = append(mcpServers, agentCfg.McpServers...)
 
 	toolModels = make(map[string]*config.Model)
-	for k, v := range agentCfg.ToolModels {
-		toolModels[k] = v
-	}
+	maps.Copy(toolModels, agentCfg.ToolModels)
 
 	toolSeen := make(map[string]struct{})
 	for _, t := range agentCfg.Tools {
