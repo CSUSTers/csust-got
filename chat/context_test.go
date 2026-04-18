@@ -696,7 +696,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      2,
 					Text:    "Reply to original",
 					User:    "user2",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
@@ -729,7 +729,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      2,
 					Text:    "Reply to root",
 					User:    "user2",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
@@ -739,7 +739,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      3,
 					Text:    "Reply to reply",
 					User:    "user3",
-					ReplyTo: intPtr(2),
+					ReplyTo: new(2),
 					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
@@ -775,7 +775,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      2,
 					Text:    "First reply",
 					User:    "user2",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
@@ -785,7 +785,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      3,
 					Text:    "Second reply",
 					User:    "user3",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
@@ -830,7 +830,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      3,
 					Text:    "Reply to first root",
 					User:    "user3",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Bob",
 						Last:  "Johnson",
@@ -866,7 +866,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 					ID:      2,
 					Text:    "Reply with & more <tags>",
 					User:    "user2",
-					ReplyTo: intPtr(1),
+					ReplyTo: new(1),
 					UserNames: userNames{
 						First: "Jane",
 						Last:  "Smith",
@@ -911,9 +911,4 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-// Helper function to create int pointer
-func intPtr(i int) *int {
-	return &i
 }
