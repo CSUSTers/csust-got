@@ -48,7 +48,7 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 		return nil, errModelConfigNil
 	}
 	if cfg.MaxSteps <= 0 {
-		return nil, fmt.Errorf("custom agent %q: max_steps must be > 0", cfg.Name)
+		return nil, fmt.Errorf("custom agent %q: %w", cfg.Name, errMaxStepsInvalid)
 	}
 
 	infos := make([]*schema.ToolInfo, 0, len(cfg.Tools))
@@ -139,7 +139,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 	dupCounts := map[string]int{}
 	dupWarnInjected := false
 
-	for round := 0; round < a.maxSteps; round++ {
+	for round := range a.maxSteps {
 		if err := ctx.Err(); err != nil {
 			sw.Send(nil, err)
 			return
@@ -234,7 +234,7 @@ func (a *CustomAgent) streamOneTurn(
 				Content: chunk.Content,
 			}
 			if closed := sw.Send(forward, nil); closed {
-				return nil, nil, errors.New("downstream consumer closed")
+				return nil, nil, errDownstreamClosed
 			}
 		}
 
@@ -325,6 +325,7 @@ func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, du
 	} else {
 		level, toolRounds := calcGuidanceLevel(history, a.maxSteps)
 		switch level {
+		case guidanceNone:
 		case guidanceSoft:
 			parts = append(parts, fmt.Sprintf(softTurnGuidance, toolRounds))
 		case guidanceHard:
@@ -435,7 +436,7 @@ func marshalSorted(v any) (string, error) {
 func sanitizeHistory(in []*schema.Message) []*schema.Message {
 	out := make([]*schema.Message, 0, len(in))
 
-	for i := 0; i < len(in); i++ {
+	for i := range in {
 		msg := in[i]
 		if msg == nil {
 			continue

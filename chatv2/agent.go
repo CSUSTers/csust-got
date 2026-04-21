@@ -23,6 +23,8 @@ var (
 	errModelConfigNil    = errors.New("model config is nil")
 	errSubAgentConfigNil = errors.New("subagent config is nil")
 	errAgentConfigNil    = errors.New("agent config is nil")
+	errMaxStepsInvalid   = errors.New("max_steps must be > 0")
+	errDownstreamClosed  = errors.New("downstream consumer closed")
 )
 
 type guidanceLevel int
