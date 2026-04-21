@@ -15,7 +15,6 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
@@ -139,7 +138,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 
 // buildMainAgent creates the main react.Agent from a ChatConfigSingle with agent config.
 // It assembles all tools: built-in + MCP + subagent tools + skill tools.
-func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*react.Agent, error) {
+func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*CustomAgent, error) {
 	agentCfg := chatCfg.Agent
 	if agentCfg == nil {
 		return nil, fmt.Errorf("%w for chat %q", errAgentConfigNil, chatCfg.Name)
@@ -204,16 +203,11 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		)
 	}
 
-	// Create the react agent
-	// System prompt is included via BuildMessages(), not MessageModifier
-	agent, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: mainModel,
-		MaxStep:          maxSteps,
-		MessageModifier:  newFinalTurnMessageModifier(maxSteps),
-		ToolsConfig: compose.ToolsNodeConfig{
-			Tools:               allTools,
-			UnknownToolsHandler: newUnknownToolsHandler(allTools),
-		},
+	agent, err := NewCustomAgent(ctx, &CustomAgentConfig{
+		Name:     chatCfg.Name,
+		Model:    mainModel,
+		Tools:    allTools,
+		MaxSteps: maxSteps,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create main agent for chat %q: %w", chatCfg.Name, err)
@@ -228,42 +222,6 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 	)
 
 	return agent, nil
-}
-
-func newFinalTurnMessageModifier(maxSteps int) react.MessageModifier {
-	return func(_ context.Context, input []*schema.Message) []*schema.Message {
-		level, toolRounds := calcGuidanceLevel(input, maxSteps)
-		if level == guidanceNone {
-			return input
-		}
-
-		var guidance string
-		switch level {
-		case guidanceSoft:
-			guidance = fmt.Sprintf(softTurnGuidance, toolRounds)
-		default: // guidanceHard
-			guidance = finalTurnGuidance
-		}
-
-		// Append guidance to the existing system message to avoid "system message
-		// must be at the beginning" errors from providers that enforce message ordering.
-		out := make([]*schema.Message, len(input))
-		copy(out, input)
-		for i, msg := range out {
-			if msg != nil && msg.Role == schema.System {
-				merged := *msg
-				merged.Content = msg.Content + "\n\n" + guidance
-				out[i] = &merged
-				return out
-			}
-		}
-
-		// No system message found — prepend one.
-		result := make([]*schema.Message, 0, len(input)+1)
-		result = append(result, schema.SystemMessage(guidance))
-		result = append(result, input...)
-		return result
-	}
 }
 
 // calcGuidanceLevel determines what kind of guidance (if any) to inject based

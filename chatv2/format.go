@@ -96,7 +96,7 @@ const (
 )
 
 func formatText(buf *strings.Builder, text string, format string, t wholeTextType) {
-	if len(text) == 0 {
+	if strings.TrimSpace(text) == "" {
 		return
 	}
 	switch format {

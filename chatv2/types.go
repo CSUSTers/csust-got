@@ -7,11 +7,11 @@ import (
 	"csust-got/chat"
 	"csust-got/config"
 	model "github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/flow/agent/react"
 	tb "gopkg.in/telebot.v3"
 	"sync"
 	"sync/atomic"
 	"text/template"
+	"time"
 )
 
 // turnContextKey is the Go context key for per-request runtime data.
@@ -35,6 +35,28 @@ type TurnContext struct {
 	progressModelErr error                      // Error from building progressModel
 	streamingStarted atomic.Bool                // Set true when streaming/final output begins
 	finalized        atomic.Bool                // Set true after final response sent
+	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
+}
+
+// ShouldAllowEdit returns true if at least min has elapsed since the last edit.
+// Pass a zero or negative duration to always allow.
+func (tc *TurnContext) ShouldAllowEdit(min time.Duration) bool {
+	if tc == nil || min <= 0 {
+		return true
+	}
+	last := tc.lastEditAt.Load()
+	if last == 0 {
+		return true
+	}
+	return time.Since(time.Unix(0, last)) >= min
+}
+
+// MarkEdited records now as the most recent edit time.
+func (tc *TurnContext) MarkEdited() {
+	if tc == nil {
+		return
+	}
+	tc.lastEditAt.Store(time.Now().UnixNano())
 }
 
 // WithTurnContext stores TurnContext in a Go context.
@@ -82,7 +104,7 @@ func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ToolC
 type CompiledChat struct {
 	Name              string
 	Config            *config.ChatConfigSingle
-	Agent             *react.Agent
+	Agent             *CustomAgent
 	SystemTemplate    *template.Template
 	PromptTemplate    *template.Template
 	SkillPromptAddons string

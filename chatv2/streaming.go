@@ -65,10 +65,12 @@ type streamProcessor struct {
 	wg   sync.WaitGroup
 }
 
+const defaultEditInterval = 3 * time.Second
+
 func getEditInterval(format *config.ChatOutputFormatConfig) time.Duration {
 	d := format.GetEditInterval()
 	if d <= 0 {
-		d = time.Second
+		d = defaultEditInterval
 	}
 	return d
 }
@@ -186,7 +188,7 @@ func (sp *streamProcessor) updateMessage() {
 		return
 	}
 
-	sp.editPlaceholder(formatted)
+	sp.editPlaceholder(formatted, false)
 }
 
 // finalize sends the final complete message and sets the finalized lifecycle flag.
@@ -200,7 +202,7 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		return "", "", sp.placeholderMsg, nil
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
-	sp.editPlaceholder(formatted)
+	sp.editPlaceholder(formatted, true)
 	if sp.tc != nil {
 		sp.tc.finalized.Store(true)
 	}
@@ -209,15 +211,17 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 
 // editPlaceholder edits the placeholder message with new content.
 // If a TurnContext is available, uses editMu to prevent races with update_progress.
-func (sp *streamProcessor) editPlaceholder(formatted string) {
+func (sp *streamProcessor) editPlaceholder(formatted string, force bool) {
 	if sp.placeholderMsg == nil || formatted == "" {
 		return
 	}
 
-	// Lock editMu if available (prevents race with update_progress)
 	if sp.tc != nil {
 		sp.tc.editMu.Lock()
 		defer sp.tc.editMu.Unlock()
+		if !force && !sp.tc.ShouldAllowEdit(sp.editInterval) {
+			return
+		}
 	}
 	parseMode := GetParseMode(sp.format)
 	_, err := util.EditMessageWithError(
@@ -226,13 +230,16 @@ func (sp *streamProcessor) editPlaceholder(formatted string) {
 		&tb.SendOptions{ParseMode: parseMode},
 	)
 	if err != nil {
-		// Fallback: try without parse mode
 		_, err = sp.tbCtx.Bot().Edit(sp.placeholderMsg, formatted)
 		if err != nil {
 			zap.L().Debug("chatv2: failed to edit streaming message",
 				zap.Error(err),
 			)
+			return
 		}
+	}
+	if sp.tc != nil {
+		sp.tc.MarkEdited()
 	}
 }
 

@@ -400,6 +400,11 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	tc.editMu.Lock()
 	defer tc.editMu.Unlock()
 
+	floor := getEditInterval(&tc.Config.Format)
+	if !tc.ShouldAllowEdit(floor) {
+		return "rate_limited: progress message not shown this time. Continue your work; do not call update_progress again until you have substantive new progress.", nil
+	}
+
 	progressMsg := tc.progressMsg
 	if progressMsg == nil {
 		// No placeholder yet — send a new message and store it
@@ -409,6 +414,7 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 			return "ok (send failed)", nil
 		}
 		tc.progressMsg = msg
+		tc.MarkEdited()
 		return progressResult, nil
 	}
 
@@ -417,6 +423,8 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	if err != nil {
 		// "message is not modified" is not a real error
 		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))
+	} else {
+		tc.MarkEdited()
 	}
 	return progressResult, nil
 }
