@@ -178,9 +178,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" {
-			if closed := sw.Send(schema.AssistantMessage(marker, nil), nil); closed {
-				return
-			}
+			updateProgressMessage(ctx, marker, wholeTextTypeCollapse)
 		}
 
 		history = append(history, assistantMsg)
@@ -273,7 +271,7 @@ func buildStageMarker(calls []schema.ToolCall) string {
 	if len(names) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("\n\n▸ 调用工具: %s\n\n", strings.Join(names, ", "))
+	return "▸ 调用工具: " + strings.Join(names, ", ")
 }
 
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {

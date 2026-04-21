@@ -127,7 +127,6 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	// Send typing indicator
 	_ = tbCtx.Bot().Notify(tbCtx.Chat(), tb.Typing)
 
-	// Send progress placeholder if progress summary is enabled
 	if ps := chatCfg.Format.ProgressSummary; ps != nil && ps.Enable {
 		ph := chatCfg.PlaceHolder
 		if ph == "" {
@@ -158,20 +157,14 @@ func handleStreaming(
 	chatCfg *config.ChatConfigSingle,
 ) error {
 	tc := GetTurnContext(ctx)
-	// Stream from agent
 	reader, err := compiled.Agent.Stream(ctx, messages)
 	if err != nil {
 		zap.L().Error("chatv2: agent stream failed", zap.Error(err))
 		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
 
-	// Reuse progress placeholder if it exists
-	existingMsg := tc.GetProgressMsg()
-
-	// Mark streaming started — gates future update_progress calls
 	tc.streamingStarted.Store(true)
-	// Stream to Telegram
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, existingMsg)
+	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, nil)
 	if streamErr != nil {
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
 		if response == "" {
@@ -203,13 +196,10 @@ func handleNonStreaming(
 	}
 	response := result.Content
 	reasoning := result.ReasoningContent
-	// Reuse progress placeholder if it exists
-	existingMsg := tc.GetProgressMsg()
 
-	// Mark streaming started + finalized
 	tc.streamingStarted.Store(true)
 
-	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, existingMsg)
+	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, nil)
 	if sendErr != nil {
 		zap.L().Error("chatv2: failed to send response", zap.Error(sendErr))
 		return sendErr

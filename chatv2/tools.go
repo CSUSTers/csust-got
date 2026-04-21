@@ -31,6 +31,74 @@ var (
 	progressResult = "ok. If your task is done, output the final answer now — do not make additional tool calls."
 )
 
+func parseProgressStyle(s string) wholeTextType {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case string(wholeTextTypePlain):
+		return wholeTextTypePlain
+	case string(wholeTextTypeQuote):
+		return wholeTextTypeQuote
+	case "", string(wholeTextTypeCollapse):
+		return wholeTextTypeCollapse
+	default:
+		return wholeTextTypeCollapse
+	}
+}
+
+func updateProgressMessage(ctx context.Context, content string, style wholeTextType) string {
+	tc := GetTurnContext(ctx)
+	if tc == nil || content == "" {
+		return "skipped"
+	}
+	if tc.finalized.Load() {
+		return "skipped (finalized)"
+	}
+	ps := tc.Config.Format.ProgressSummary
+	if ps == nil || !ps.Enable {
+		return "skipped (progress disabled)"
+	}
+
+	tc.editMu.Lock()
+	defer tc.editMu.Unlock()
+
+	floor := getEditInterval(&tc.Config.Format)
+	if !tc.ShouldAllowEdit(floor) {
+		return "rate_limited"
+	}
+
+	outputFormat := tc.Config.Format.GetFormat()
+	if outputFormat == "" {
+		outputFormat = defaultOutputFormat
+	}
+	var buf strings.Builder
+	formatText(&buf, content, outputFormat, style)
+	formatted := buf.String()
+	if formatted == "" {
+		return "skipped"
+	}
+
+	parseMode := GetParseMode(&tc.Config.Format)
+	opts := &tb.SendOptions{ParseMode: parseMode}
+
+	if tc.progressMsg == nil {
+		msg, err := util.SendMessageWithError(&tb.Chat{ID: tc.ChatID}, util.RawTgText(formatted), opts)
+		if err != nil {
+			zap.L().Debug("chatv2: failed to send progress message", zap.Error(err))
+			return "send_failed"
+		}
+		tc.progressMsg = msg
+		tc.MarkEdited()
+		return "ok"
+	}
+
+	_, err := util.EditMessageWithError(tc.progressMsg, util.RawTgText(formatted), opts)
+	if err != nil {
+		zap.L().Debug("chatv2: failed to edit progress message", zap.Error(err))
+	} else {
+		tc.MarkEdited()
+	}
+	return "ok"
+}
+
 // modelConfigurable is implemented by tools that support a model override.
 // If a tool implements this interface and a matching entry exists in ToolModels,
 // BuildBuiltinTools will inject the model config at creation time.
@@ -332,22 +400,27 @@ func isTelegramImageUnavailableError(err error) bool {
 type updateProgressTool struct{}
 
 type updateProgressArgs struct {
-	Content string `json:"content"` // Progress description to display
+	Content string `json:"content"`
+	Style   string `json:"style,omitempty"`
 }
 
 func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "update_progress",
-		Desc: "Send an INTERMEDIATE progress update to the user during multi-step tasks " +
+		Desc: "Send or update an INTERMEDIATE progress/status note to the user during multi-step tasks " +
 			"(e.g. 'Searching web...', 'Analyzing results 2/5...'). " +
-			"Do NOT use this to report completion or final results. " +
-			"When your work is done, directly output your final answer as plain text — " +
-			"that will be sent to the user automatically.",
+			"The note appears in a dedicated collapsed quote message, separate from your final answer. " +
+			"Do NOT use this to deliver final results — just output your final answer as plain text when done. " +
+			"Each call replaces the current progress note.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"content": {
 				Type:     "string",
-				Desc:     "Progress description to show the user",
+				Desc:     "Progress description to show the user (one or a few short lines).",
 				Required: true,
+			},
+			"style": {
+				Type: "string",
+				Desc: "Display style. One of: 'collapse' (expandable quote, default), 'quote' (plain quote), 'plain' (no wrapping).",
 			},
 		}),
 	}, nil
@@ -359,9 +432,8 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 		return "", fmt.Errorf("update_progress: %w", errNoTurnContext)
 	}
 
-	// Lifecycle gate: no-op once streaming/final output has started
-	if tc.streamingStarted.Load() || tc.finalized.Load() {
-		return "ok (output already started)", nil
+	if tc.finalized.Load() {
+		return "skipped (finalized)", nil
 	}
 
 	var args updateProgressArgs
@@ -369,10 +441,9 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 		return "", fmt.Errorf("update_progress: invalid arguments: %w", err)
 	}
 	if args.Content == "" {
-		return "ok (empty content)", nil
+		return "skipped (empty)", nil
 	}
 
-	// Optionally summarize via the configured small model
 	displayText := args.Content
 	if psCfg := tc.Config.Format.ProgressSummary; psCfg != nil && psCfg.Model != nil {
 		summaryModel, err := tc.GetOrBuildProgressModel(ctx)
@@ -396,37 +467,16 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 		}
 	}
 
-	// Edit the progress placeholder message under lock
-	tc.editMu.Lock()
-	defer tc.editMu.Unlock()
-
-	floor := getEditInterval(&tc.Config.Format)
-	if !tc.ShouldAllowEdit(floor) {
+	style := parseProgressStyle(args.Style)
+	status := updateProgressMessage(ctx, displayText, style)
+	switch status {
+	case "rate_limited":
 		return "rate_limited: progress message not shown this time. Continue your work; do not call update_progress again until you have substantive new progress.", nil
-	}
-
-	progressMsg := tc.progressMsg
-	if progressMsg == nil {
-		// No placeholder yet — send a new message and store it
-		msg, err := util.SendMessageWithError(&tb.Chat{ID: tc.ChatID}, displayText)
-		if err != nil {
-			zap.L().Warn("update_progress: failed to send progress message", zap.Error(err))
-			return "ok (send failed)", nil
-		}
-		tc.progressMsg = msg
-		tc.MarkEdited()
+	case "ok":
 		return progressResult, nil
+	default:
+		return status, nil
 	}
-
-	// Edit existing placeholder
-	_, err := util.EditMessageWithError(progressMsg, displayText)
-	if err != nil {
-		// "message is not modified" is not a real error
-		zap.L().Debug("update_progress: edit failed (may be unchanged)", zap.Error(err))
-	} else {
-		tc.MarkEdited()
-	}
-	return progressResult, nil
 }
 
 // ---- get_message Tool ----
