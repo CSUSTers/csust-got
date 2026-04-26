@@ -66,6 +66,19 @@ type streamProcessor struct {
 }
 
 const defaultEditInterval = 3 * time.Second
+const streamControlClearOutputKey = "csust-got:clear-stream-output"
+
+func newClearStreamOutputMessage() *schema.Message {
+	return &schema.Message{Extra: map[string]any{streamControlClearOutputKey: true}}
+}
+
+func isClearStreamOutputMessage(msg *schema.Message) bool {
+	if msg == nil || msg.Extra == nil {
+		return false
+	}
+	clear, _ := msg.Extra[streamControlClearOutputKey].(bool)
+	return clear
+}
 
 func getEditInterval(format *config.ChatOutputFormatConfig) time.Duration {
 	d := format.GetEditInterval()
@@ -140,6 +153,12 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
+
+	if isClearStreamOutputMessage(msg) {
+		sp.fullResponse.Reset()
+		sp.reasoningContent.Reset()
+		return
+	}
 
 	if msg.Content != "" {
 		sp.fullResponse.WriteString(msg.Content)

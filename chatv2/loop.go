@@ -169,6 +169,10 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
+		if closed := sw.Send(newClearStreamOutputMessage(), nil); closed {
+			return
+		}
+
 		if isFinal {
 			sw.Send(schema.AssistantMessage(
 				"\n\n（已达到本轮工具调用上限，剩余请求未执行。可换种问法或拆分任务再试。）",

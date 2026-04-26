@@ -8,6 +8,7 @@ import (
 
 	"csust-got/config"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -98,4 +99,17 @@ func TestUnquoteJSONString(t *testing.T) {
 			assert.Equal(t, tt.want, unquoteJSONString(tt.input))
 		})
 	}
+}
+
+func TestProcessChunkClearsAccumulatedOutputOnToolBoundary(t *testing.T) {
+	sp := &streamProcessor{}
+
+	sp.processChunk(&schema.Message{Role: schema.Assistant, Content: "搜索今日金价。\n\n"})
+	assert.Equal(t, "搜索今日金价。\n\n", sp.getResponse())
+
+	sp.processChunk(&schema.Message{Extra: map[string]any{"csust-got:clear-stream-output": true}})
+	assert.Empty(t, sp.getResponse())
+
+	sp.processChunk(&schema.Message{Role: schema.Assistant, Content: "已获取到今日金价。"})
+	assert.Equal(t, "已获取到今日金价。", sp.getResponse())
 }
