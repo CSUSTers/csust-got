@@ -164,7 +164,7 @@ func handleStreaming(
 	}
 
 	tc.streamingStarted.Store(true)
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, nil)
+	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg())
 	if streamErr != nil {
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
 		if response == "" {
@@ -199,7 +199,7 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, nil)
+	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg())
 	if sendErr != nil {
 		zap.L().Error("chatv2: failed to send response", zap.Error(sendErr))
 		return sendErr
