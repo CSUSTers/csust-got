@@ -448,12 +448,8 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 		if !isChatMessageHasSender(ctx) {
 			return next(ctx)
 		}
-		m := ctx.Message()
-		if m.Text != "" {
-			cmd := entities.FromMessage(ctx.Message())
-			if cmd != nil && cmd.Name() == "boot" {
-				return next(ctx)
-			}
+		if isAllowedMessageCommand(ctx.Message(), "boot", "info") {
+			return next(ctx)
 		}
 		if orm.IsShutdown(ctx.Chat().ID) {
 			log.Info("message ignore by shutdown", zap.String("chat", ctx.Chat().Title),
@@ -571,11 +567,38 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 			return next(ctx)
 		}
 
-		if cmd.Name() != "reburn" {
+		if !isAllowedMcDeadCommand(cmd.Name(), orm.IsShutdown(chat.ID)) {
 			return nil
 		}
 		return next(ctx)
 	}
+}
+
+func isAllowedMcDeadCommand(commandName string, isShutdown bool) bool {
+	if isAllowedCommandName(commandName, "reburn", "info") {
+		return true
+	}
+	return commandName == "boot" && isShutdown
+}
+
+func isAllowedMessageCommand(m *Message, allowed ...string) bool {
+	if m == nil || m.Text == "" {
+		return false
+	}
+	cmd := entities.FromMessage(m)
+	if cmd == nil {
+		return false
+	}
+	return isAllowedCommandName(cmd.Name(), allowed...)
+}
+
+func isAllowedCommandName(commandName string, allowed ...string) bool {
+	for _, name := range allowed {
+		if commandName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {

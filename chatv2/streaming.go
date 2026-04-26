@@ -76,8 +76,8 @@ func isClearStreamOutputMessage(msg *schema.Message) bool {
 	if msg == nil || msg.Extra == nil {
 		return false
 	}
-	clear, _ := msg.Extra[streamControlClearOutputKey].(bool)
-	return clear
+	shouldClear, _ := msg.Extra[streamControlClearOutputKey].(bool)
+	return shouldClear
 }
 
 func getEditInterval(format *config.ChatOutputFormatConfig) time.Duration {
