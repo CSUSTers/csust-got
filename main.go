@@ -119,7 +119,7 @@ func initBot() (*Bot, error) {
 		return nil, err
 	}
 
-	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, reactionMiddleware, fakeBanMiddleware,
+	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
 		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
@@ -346,17 +346,6 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 			}
 		}
 
-		return next(ctx)
-	}
-}
-
-func reactionMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		// Check if this is a message reaction update
-		if ctx.Update().MessageReaction != nil {
-			// Handle the reaction
-			return chat.HandleMessageReaction(ctx)
-		}
 		return next(ctx)
 	}
 }

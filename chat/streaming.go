@@ -322,29 +322,6 @@ func (sp *streamProcessor) finalizeResponse() (*tb.Message, error) {
 		log.Warn("Store bot's reply message to Redis failed", zap.Error(storeErr))
 	}
 
-	// Store AI response metadata for potential regeneration
-	if sp.ctx.Message() != nil {
-		originalPrompt := sp.ctx.Message().Text
-		if originalPrompt == "" {
-			originalPrompt = sp.ctx.Message().Caption
-		}
-
-		allowRegenerate := sp.config.Features.AllowRegenerate
-		metadata := &orm.AIResponseMetadata{
-			BotMessageID:    replyMsg.ID,
-			UserMessageID:   sp.ctx.Message().ID,
-			ChatID:          replyMsg.Chat.ID,
-			ConfigName:      sp.config.Name,
-			OriginalPrompt:  originalPrompt,
-			Messages:        *sp.messages,
-			RegenerateCount: 0,
-			AllowRegenerate: &allowRegenerate,
-		}
-		if storeErr := orm.SetAIResponseMetadata(metadata); storeErr != nil {
-			log.Warn("Failed to store AI response metadata", zap.Error(storeErr))
-		}
-	}
-
 	return replyMsg, nil
 }
 
