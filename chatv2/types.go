@@ -30,12 +30,19 @@ type TurnContext struct {
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex
 	progressMsg      *tb.Message                // Placeholder message for progress/streaming
+	progressSteps    []progressStep             // Structured step/detail progress shown by update_progress
 	progressModel    model.ToolCallingChatModel // Lazily-built small model for summarization
 	progressOnce     sync.Once                  // Ensures progressModel is built once
 	progressModelErr error                      // Error from building progressModel
 	streamingStarted atomic.Bool                // Set true when streaming/final output begins
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
+}
+
+type progressStep struct {
+	Title     string
+	Details   []string
+	Completed bool
 }
 
 // ShouldAllowEdit returns true if at least min has elapsed since the last edit.

@@ -44,9 +44,9 @@ func parseProgressStyle(s string) wholeTextType {
 	}
 }
 
-func updateProgressMessage(ctx context.Context, content string, style wholeTextType) string {
+func updateProgressMessage(ctx context.Context, args updateProgressArgs, content string, style wholeTextType) string {
 	tc := GetTurnContext(ctx)
-	if tc == nil || content == "" {
+	if tc == nil || (content == "" && !args.hasStructuredProgress()) {
 		return "skipped"
 	}
 	if tc.finalized.Load() {
@@ -59,6 +59,11 @@ func updateProgressMessage(ctx context.Context, content string, style wholeTextT
 
 	tc.editMu.Lock()
 	defer tc.editMu.Unlock()
+
+	content = tc.applyProgressUpdateLocked(args, content)
+	if content == "" {
+		return "skipped"
+	}
 
 	floor := getEditInterval(&tc.Config.Format)
 	if !tc.ShouldAllowEdit(floor) {
@@ -400,23 +405,133 @@ func isTelegramImageUnavailableError(err error) bool {
 type updateProgressTool struct{}
 
 type updateProgressArgs struct {
-	Content string `json:"content"`
-	Style   string `json:"style,omitempty"`
+	Content string   `json:"content,omitempty"`
+	Step    string   `json:"step,omitempty"`
+	Detail  string   `json:"detail,omitempty"`
+	Details []string `json:"details,omitempty"`
+	Mode    string   `json:"mode,omitempty"`
+	Style   string   `json:"style,omitempty"`
+}
+
+func (a updateProgressArgs) hasStructuredProgress() bool {
+	return strings.TrimSpace(a.Step) != "" || strings.TrimSpace(a.Detail) != "" ||
+		len(a.Details) > 0 || strings.TrimSpace(a.Mode) != ""
+}
+
+func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, content string) string {
+	if !args.hasStructuredProgress() {
+		tc.progressSteps = nil
+		return content
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(args.Mode))
+	stepTitle := cleanProgressLine(args.Step)
+	details := normalizeProgressDetails(args.Detail, args.Details)
+	if mode == "replace" && stepTitle == "" {
+		tc.progressSteps = nil
+		return content
+	}
+	if stepTitle == "" {
+		if len(tc.progressSteps) == 0 || len(details) == 0 {
+			return content
+		}
+		current := &tc.progressSteps[len(tc.progressSteps)-1]
+		current.Details = details
+		return renderProgressSteps(tc.progressSteps)
+	}
+
+	switch {
+	case mode == "replace" || len(tc.progressSteps) == 0:
+		tc.progressSteps = []progressStep{{Title: stepTitle, Details: details}}
+	case mode == "append_step" || mode == "next" || mode == "increment":
+		tc.progressSteps[len(tc.progressSteps)-1].Completed = true
+		tc.progressSteps = append(tc.progressSteps, progressStep{Title: stepTitle, Details: details})
+	default:
+		current := &tc.progressSteps[len(tc.progressSteps)-1]
+		if current.Title == stepTitle {
+			if len(details) > 0 {
+				current.Details = details
+			}
+			current.Completed = false
+		} else {
+			current.Completed = true
+			tc.progressSteps = append(tc.progressSteps, progressStep{Title: stepTitle, Details: details})
+		}
+	}
+
+	return renderProgressSteps(tc.progressSteps)
+}
+
+func normalizeProgressDetails(detail string, details []string) []string {
+	out := make([]string, 0, len(details)+1)
+	if line := cleanProgressLine(detail); line != "" {
+		out = append(out, line)
+	}
+	for _, d := range details {
+		if line := cleanProgressLine(d); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func cleanProgressLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func renderProgressSteps(steps []progressStep) string {
+	var buf strings.Builder
+	for _, step := range steps {
+		if step.Title == "" {
+			continue
+		}
+		if buf.Len() > 0 {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString("- ")
+		buf.WriteString(step.Title)
+		if step.Completed {
+			buf.WriteString("（已完成）")
+			continue
+		}
+		for _, detail := range step.Details {
+			buf.WriteString("\n  - ")
+			buf.WriteString(detail)
+		}
+	}
+	return buf.String()
 }
 
 func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "update_progress",
 		Desc: "Send or update an INTERMEDIATE progress/status note to the user during multi-step tasks " +
-			"(e.g. 'Searching web...', 'Analyzing results 2/5...'). " +
+			"using a step -> details structure. Keep the big step stable and update only detail lines while working; " +
+			"start a new step when moving to the next phase, or use mode='replace' to overwrite all displayed progress. " +
 			"The note appears in a dedicated collapsed quote message, separate from your final answer. " +
 			"Do NOT use this to deliver final results — just output your final answer as plain text when done. " +
-			"Each call replaces the current progress note.",
+			"Legacy content-only calls still replace the current progress note.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"content": {
-				Type:     "string",
-				Desc:     "Progress description to show the user (one or a few short lines).",
-				Required: true,
+				Type: "string",
+				Desc: "Legacy full progress text. If used without step/detail fields, it replaces the whole progress note.",
+			},
+			"step": {
+				Type: "string",
+				Desc: "Current big step title, e.g. '搜索信息第二轮'. Same step updates details; a different step appends a new step and marks the previous one completed.",
+			},
+			"detail": {
+				Type: "string",
+				Desc: "Current detail under the step, e.g. '调用 xxx 工具查看 xxx 网站'. Replaces the current step detail by default.",
+			},
+			"details": {
+				Type:     "array",
+				ElemInfo: &schema.ParameterInfo{Type: "string"},
+				Desc:     "Multiple detail lines under the current step. Replaces current details by default.",
+			},
+			"mode": {
+				Type: "string",
+				Desc: "Progress update mode: 'replace' resets all steps; 'append_step'/'next'/'increment' always adds a new step; default updates same step details or appends when step changes.",
 			},
 			"style": {
 				Type: "string",
@@ -440,35 +555,37 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("update_progress: invalid arguments: %w", err)
 	}
-	if args.Content == "" {
+	if args.Content == "" && !args.hasStructuredProgress() {
 		return "skipped (empty)", nil
 	}
 
 	displayText := args.Content
-	if psCfg := tc.Config.Format.ProgressSummary; psCfg != nil && psCfg.Model != nil {
-		summaryModel, err := tc.GetOrBuildProgressModel(ctx)
-		if err != nil {
-			zap.L().Warn("update_progress: failed to build progress model, using raw content", zap.Error(err))
-		} else if summaryModel != nil {
-			sysPrompt := string(psCfg.Prompt)
-			if sysPrompt == "" {
-				sysPrompt = "你是一个进度总结助手。根据以下内容，生成简洁的进度摘要。"
-			}
-			messages := []*schema.Message{
-				{Role: schema.System, Content: sysPrompt},
-				{Role: schema.User, Content: args.Content},
-			}
-			result, err := summaryModel.Generate(ctx, messages)
+	if displayText != "" && !args.hasStructuredProgress() {
+		if psCfg := tc.Config.Format.ProgressSummary; psCfg != nil && psCfg.Model != nil {
+			summaryModel, err := tc.GetOrBuildProgressModel(ctx)
 			if err != nil {
-				zap.L().Warn("update_progress: summary model call failed, using raw content", zap.Error(err))
-			} else {
-				displayText = result.Content
+				zap.L().Warn("update_progress: failed to build progress model, using raw content", zap.Error(err))
+			} else if summaryModel != nil {
+				sysPrompt := string(psCfg.Prompt)
+				if sysPrompt == "" {
+					sysPrompt = "你是一个进度总结助手。根据以下内容，生成简洁的进度摘要。"
+				}
+				messages := []*schema.Message{
+					{Role: schema.System, Content: sysPrompt},
+					{Role: schema.User, Content: args.Content},
+				}
+				result, err := summaryModel.Generate(ctx, messages)
+				if err != nil {
+					zap.L().Warn("update_progress: summary model call failed, using raw content", zap.Error(err))
+				} else {
+					displayText = result.Content
+				}
 			}
 		}
 	}
 
 	style := parseProgressStyle(args.Style)
-	status := updateProgressMessage(ctx, displayText, style)
+	status := updateProgressMessage(ctx, args, displayText, style)
 	switch status {
 	case "rate_limited":
 		return "rate_limited: progress message not shown this time. Continue your work; do not call update_progress again until you have substantive new progress.", nil

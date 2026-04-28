@@ -186,7 +186,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" {
-			updateProgressMessage(ctx, marker, wholeTextTypeCollapse)
+			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
 		history = append(history, assistantMsg)
@@ -507,7 +507,7 @@ const loopDirectiveText = "工具调用纪律：\n" +
 	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
 	"5. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
 	"6. 若工具已经直接给出了用户想要的内容（例如 update_progress 已写入了最终答复），不要再发起新一轮工具调用，直接结束本次回答。\n" +
-	"7. 阶段性报告应简短（一句话），不要长篇大论描述内部步骤；真正的细节放在最终答案里。"
+	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时再新增 step，必要时用 replace 覆盖全部进度显示。"
 
 func injectLoopDirectives(history []*schema.Message) []*schema.Message {
 	directive := schema.SystemMessage(loopDirectiveText)
