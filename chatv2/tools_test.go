@@ -62,34 +62,63 @@ func TestProgressStepDetailsUpdate(t *testing.T) {
 		Step:   "搜索信息第一轮",
 		Detail: "调用 A 工具查看 A 网站",
 	}, "")
-	assert.Equal(t, "- 搜索信息第一轮\n  - 调用 A 工具查看 A 网站", got)
+	assert.Equal(t, "○ 搜索信息第一轮\n  调用 A 工具查看 A 网站", got)
 
 	got = tc.applyProgressUpdateLocked(updateProgressArgs{
 		Step:   "搜索信息第一轮",
 		Detail: "调用 B 工具查看 B 网站",
 	}, "")
-	assert.Equal(t, "- 搜索信息第一轮\n  - 调用 B 工具查看 B 网站", got)
+	assert.Equal(t, "○ 搜索信息第一轮\n  调用 B 工具查看 B 网站", got)
 
 	got = tc.applyProgressUpdateLocked(updateProgressArgs{
 		Step:   "搜索信息第二轮",
 		Detail: "调用 xxx 工具查看 xxx 网站",
 	}, "")
-	assert.Equal(t, "- 搜索信息第一轮（已完成）\n- 搜索信息第二轮\n  - 调用 xxx 工具查看 xxx 网站", got)
+	assert.Equal(t, "• 搜索信息第一轮\n○ 搜索信息第二轮\n  调用 xxx 工具查看 xxx 网站", got)
 }
 
-func TestProgressReplaceAndIncrementModes(t *testing.T) {
+func TestProgressReplaceAndFrameworkManagedStepModes(t *testing.T) {
 	tc := &TurnContext{}
 
 	_ = tc.applyProgressUpdateLocked(updateProgressArgs{Step: "搜索信息", Detail: "第一轮"}, "")
 	got := tc.applyProgressUpdateLocked(updateProgressArgs{Step: "搜索信息", Detail: "第二轮", Mode: "increment"}, "")
-	assert.Equal(t, "- 搜索信息（已完成）\n- 搜索信息\n  - 第二轮", got)
+	assert.Equal(t, "○ 搜索信息\n  第二轮", got)
+
+	got = tc.applyProgressUpdateLocked(updateProgressArgs{Step: "读取详情", Detail: "打开引用消息"}, "")
+	assert.Equal(t, "• 搜索信息\n○ 读取详情\n  打开引用消息", got)
 
 	got = tc.applyProgressUpdateLocked(updateProgressArgs{Step: "重新规划", Details: []string{"确认范围", "准备执行"}, Mode: "replace"}, "")
-	assert.Equal(t, "- 重新规划\n  - 确认范围\n  - 准备执行", got)
+	assert.Equal(t, "○ 重新规划\n  确认范围\n  准备执行", got)
 
 	got = tc.applyProgressUpdateLocked(updateProgressArgs{Content: "整段覆盖"}, "整段覆盖")
 	assert.Equal(t, "整段覆盖", got)
 	assert.Empty(t, tc.progressSteps)
+}
+
+func TestFormatProgressStepsStyles(t *testing.T) {
+	steps := []progressStep{
+		{Title: "搜索信息第一轮", Completed: true},
+		{Title: "搜索信息第二轮", Details: []string{"调用 xxx 工具查看 xxx 网站"}},
+	}
+
+	md := formatProgressSteps(steps, "markdown", wholeTextTypePlain)
+	assert.Equal(t, "• 搜索信息第一轮\n○ *搜索信息第二轮*\n  `调用 xxx 工具查看 xxx 网站`", md)
+
+	html := formatProgressSteps(steps, "html", wholeTextTypePlain)
+	assert.Equal(t, "• 搜索信息第一轮\n○ <b>搜索信息第二轮</b>\n  <code>调用 xxx 工具查看 xxx 网站</code>", html)
+}
+
+func TestFormatProgressStepsMarkdownWrappersEscapeContent(t *testing.T) {
+	steps := []progressStep{
+		{Title: "搜索_信息(第一轮)", Completed: true},
+		{Title: "读取*详情*", Details: []string{"调用 `tool` 路径 C:\\tmp\\x"}},
+	}
+
+	quote := formatProgressSteps(steps, "markdown", wholeTextTypeQuote)
+	assert.Equal(t, ">• 搜索\\_信息\\(第一轮\\)\n>○ *读取\\*详情\\**\n>  `调用 \\`tool\\` 路径 C:\\\\tmp\\\\x`\n", quote)
+
+	collapse := formatProgressSteps(steps, "markdown", wholeTextTypeCollapse)
+	assert.Equal(t, "**>• 搜索\\_信息\\(第一轮\\)\n>○ *读取\\*详情\\**\n>  `调用 \\`tool\\` 路径 C:\\\\tmp\\\\x`\n>||\n", collapse)
 }
 
 func TestProgressContentReplaceClearsStructuredState(t *testing.T) {

@@ -185,7 +185,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
-		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" {
+		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
 			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
@@ -280,6 +280,16 @@ func buildStageMarker(calls []schema.ToolCall) string {
 		return ""
 	}
 	return "▸ 调用工具: " + strings.Join(names, ", ")
+}
+
+func shouldEmitStageMarker(ctx context.Context) bool {
+	tc := GetTurnContext(ctx)
+	if tc == nil {
+		return true
+	}
+	tc.editMu.Lock()
+	defer tc.editMu.Unlock()
+	return len(tc.progressSteps) == 0
 }
 
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {
@@ -502,12 +512,13 @@ func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) 
 
 const loopDirectiveText = "工具调用纪律：\n" +
 	"1. 每一轮回复要么调用工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
-	"2. 在决定调用工具之前，用一句话简要说明你接下来要做什么（例如“我先搜索X”“接下来读取Y”），让用户看到进度；这句说明作为正文输出，不要放在思维链里。\n" +
+	"2. 最终答案之前不要输出正文说明；需要展示中间进度时调用 update_progress，不要把进度写成普通 assistant 文本。\n" +
 	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
 	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
 	"5. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
-	"6. 若工具已经直接给出了用户想要的内容（例如 update_progress 已写入了最终答复），不要再发起新一轮工具调用，直接结束本次回答。\n" +
-	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时再新增 step，必要时用 replace 覆盖全部进度显示。"
+	"6. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
+	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
+	"8. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
 
 func injectLoopDirectives(history []*schema.Message) []*schema.Message {
 	directive := schema.SystemMessage(loopDirectiveText)

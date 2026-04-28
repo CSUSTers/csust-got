@@ -28,7 +28,7 @@ var (
 	errNoImageSource = errors.New("either file_id or url must be provided")
 	errBadHTTPStatus = errors.New("unexpected HTTP status")
 
-	progressResult = "ok. If your task is done, output the final answer now — do not make additional tool calls."
+	progressResult = "ok. If your task is done, output a concise final answer now — do not make additional tool calls."
 )
 
 func parseProgressStyle(s string) wholeTextType {
@@ -74,9 +74,14 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 	if outputFormat == "" {
 		outputFormat = defaultOutputFormat
 	}
-	var buf strings.Builder
-	formatText(&buf, content, outputFormat, style)
-	formatted := buf.String()
+	var formatted string
+	if args.hasStructuredProgress() && len(tc.progressSteps) > 0 {
+		formatted = formatProgressSteps(tc.progressSteps, outputFormat, style)
+	} else {
+		var buf strings.Builder
+		formatText(&buf, content, outputFormat, style)
+		formatted = buf.String()
+	}
 	if formatted == "" {
 		return "skipped"
 	}
@@ -414,8 +419,9 @@ type updateProgressArgs struct {
 }
 
 func (a updateProgressArgs) hasStructuredProgress() bool {
+	mode := strings.ToLower(strings.TrimSpace(a.Mode))
 	return strings.TrimSpace(a.Step) != "" || strings.TrimSpace(a.Detail) != "" ||
-		len(a.Details) > 0 || strings.TrimSpace(a.Mode) != ""
+		len(a.Details) > 0 || mode == "replace"
 }
 
 func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, content string) string {
@@ -443,9 +449,6 @@ func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, conten
 	switch {
 	case mode == "replace" || len(tc.progressSteps) == 0:
 		tc.progressSteps = []progressStep{{Title: stepTitle, Details: details}}
-	case mode == "append_step" || mode == "next" || mode == "increment":
-		tc.progressSteps[len(tc.progressSteps)-1].Completed = true
-		tc.progressSteps = append(tc.progressSteps, progressStep{Title: stepTitle, Details: details})
 	default:
 		current := &tc.progressSteps[len(tc.progressSteps)-1]
 		if current.Title == stepTitle {
@@ -488,18 +491,95 @@ func renderProgressSteps(steps []progressStep) string {
 		if buf.Len() > 0 {
 			buf.WriteByte('\n')
 		}
-		buf.WriteString("- ")
-		buf.WriteString(step.Title)
 		if step.Completed {
-			buf.WriteString("（已完成）")
+			buf.WriteString("• ")
+			buf.WriteString(step.Title)
 			continue
 		}
+		buf.WriteString("○ ")
+		buf.WriteString(step.Title)
 		for _, detail := range step.Details {
-			buf.WriteString("\n  - ")
+			buf.WriteString("\n  ")
 			buf.WriteString(detail)
 		}
 	}
 	return buf.String()
+}
+
+func formatProgressSteps(steps []progressStep, format string, style wholeTextType) string {
+	switch format {
+	case "html":
+		return formatHTMLProgressSteps(steps, style)
+	default:
+		return formatMarkdownProgressSteps(steps, style)
+	}
+}
+
+func formatMarkdownProgressSteps(steps []progressStep, style wholeTextType) string {
+	lines := make([]string, 0, len(steps)*2)
+	for _, step := range steps {
+		if step.Title == "" {
+			continue
+		}
+		if step.Completed {
+			lines = append(lines, "• "+util.EscapeTgMDv2ReservedChars(step.Title))
+			continue
+		}
+		lines = append(lines, "○ *"+util.EscapeTgMDv2ReservedChars(step.Title)+"*")
+		for _, detail := range step.Details {
+			lines = append(lines, "  `"+escapeMarkdownCode(detail)+"`")
+		}
+	}
+	return wrapFormattedProgressLines(lines, style, "markdown")
+}
+
+func formatHTMLProgressSteps(steps []progressStep, style wholeTextType) string {
+	lines := make([]string, 0, len(steps)*2)
+	for _, step := range steps {
+		if step.Title == "" {
+			continue
+		}
+		if step.Completed {
+			lines = append(lines, "• "+util.EscapeTgHTMLReservedChars(step.Title))
+			continue
+		}
+		lines = append(lines, "○ <b>"+util.EscapeTgHTMLReservedChars(step.Title)+"</b>")
+		for _, detail := range step.Details {
+			lines = append(lines, "  <code>"+util.EscapeTgHTMLReservedChars(detail)+"</code>")
+		}
+	}
+	return wrapFormattedProgressLines(lines, style, "html")
+}
+
+func wrapFormattedProgressLines(lines []string, style wholeTextType, format string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	body := strings.Join(lines, "\n")
+	switch format {
+	case "html":
+		switch style {
+		case wholeTextTypeCollapse:
+			return "<blockquote expandable>" + body + "</blockquote>"
+		case wholeTextTypeQuote:
+			return "<blockquote>" + body + "</blockquote>"
+		default:
+			return body
+		}
+	default:
+		switch style {
+		case wholeTextTypeCollapse:
+			return "**>" + strings.Join(lines, "\n>") + "\n>||\n"
+		case wholeTextTypeQuote:
+			return ">" + strings.Join(lines, "\n>") + "\n"
+		default:
+			return body
+		}
+	}
+}
+
+func escapeMarkdownCode(s string) string {
+	return strings.NewReplacer("\\", "\\\\", "`", "\\`").Replace(s)
 }
 
 func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
@@ -507,7 +587,8 @@ func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 		Name: "update_progress",
 		Desc: "Send or update an INTERMEDIATE progress/status note to the user during multi-step tasks " +
 			"using a step -> details structure. Keep the big step stable and update only detail lines while working; " +
-			"start a new step when moving to the next phase, or use mode='replace' to overwrite all displayed progress. " +
+			"start a new step by changing the step title when moving to the next phase. " +
+			"Only use mode='replace' when you must overwrite all displayed progress. " +
 			"The note appears in a dedicated collapsed quote message, separate from your final answer. " +
 			"Do NOT use this to deliver final results — just output your final answer as plain text when done. " +
 			"Legacy content-only calls still replace the current progress note.",
@@ -531,7 +612,7 @@ func (t *updateProgressTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 			},
 			"mode": {
 				Type: "string",
-				Desc: "Progress update mode: 'replace' resets all steps; 'append_step'/'next'/'increment' always adds a new step; default updates same step details or appends when step changes.",
+				Desc: "Optional. Only 'replace' is supported for model use and resets all steps; omit otherwise. The framework decides same-step updates vs new-step appends from the step title.",
 			},
 			"style": {
 				Type: "string",
