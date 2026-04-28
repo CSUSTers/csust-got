@@ -116,6 +116,10 @@ func (a *CustomAgent) Generate(ctx context.Context, input []*schema.Message) (*s
 		if recvErr != nil {
 			return nil, recvErr
 		}
+		if isClearStreamOutputMessage(chunk) {
+			chunks = nil
+			continue
+		}
 		if chunk.Role != schema.Assistant {
 			continue
 		}

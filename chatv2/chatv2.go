@@ -170,6 +170,7 @@ func handleStreaming(
 		if response == "" {
 			return sendAgentErrorMessage(tbCtx, chatCfg, streamErr)
 		}
+		return streamErr
 	}
 	// Save response to Redis for future context
 	if response != "" && sentMsg != nil {
@@ -206,6 +207,7 @@ func handleNonStreaming(
 	}
 
 	if sent != nil {
+		sent.Text = response
 		SaveResponse(sent, tbCtx.Message())
 	}
 

@@ -207,7 +207,7 @@ func (sp *streamProcessor) updateMessage() {
 		return
 	}
 
-	sp.editPlaceholder(formatted, false)
+	_ = sp.editPlaceholder(formatted, false)
 }
 
 // finalize sends the final complete message and sets the finalized lifecycle flag.
@@ -221,7 +221,9 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		return "", "", sp.placeholderMsg, nil
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
-	sp.editPlaceholder(formatted, true)
+	if err := sp.editPlaceholder(formatted, true); err != nil {
+		return text, reason, sp.placeholderMsg, err
+	}
 	if sp.tc != nil {
 		sp.tc.finalized.Store(true)
 	}
@@ -230,16 +232,16 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 
 // editPlaceholder edits the placeholder message with new content.
 // If a TurnContext is available, uses editMu to prevent races with update_progress.
-func (sp *streamProcessor) editPlaceholder(formatted string, force bool) {
+func (sp *streamProcessor) editPlaceholder(formatted string, force bool) error {
 	if sp.placeholderMsg == nil || formatted == "" {
-		return
+		return nil
 	}
 
 	if sp.tc != nil {
 		sp.tc.editMu.Lock()
 		defer sp.tc.editMu.Unlock()
 		if !force && !sp.tc.ShouldAllowEdit(sp.editInterval) {
-			return
+			return nil
 		}
 	}
 	parseMode := GetParseMode(sp.format)
@@ -254,12 +256,13 @@ func (sp *streamProcessor) editPlaceholder(formatted string, force bool) {
 			zap.L().Debug("chatv2: failed to edit streaming message",
 				zap.Error(err),
 			)
-			return
+			return err
 		}
 	}
 	if sp.tc != nil {
 		sp.tc.MarkEdited()
 	}
+	return nil
 }
 
 // getResponse returns the accumulated response text.
@@ -299,6 +302,7 @@ func NonStreamResponse(
 			_, err = tbCtx.Bot().Edit(existingMsg, text)
 			if err != nil {
 				zap.L().Debug("chatv2: failed to edit non-stream message", zap.Error(err))
+				return existingMsg, err
 			}
 		}
 		return existingMsg, nil
