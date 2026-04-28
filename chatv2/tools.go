@@ -31,6 +31,11 @@ var (
 	progressResult = "ok. If your task is done, output a concise final answer now — do not make additional tool calls."
 )
 
+const (
+	progressStatusSkipped = "skipped"
+	progressModeReplace   = "replace"
+)
+
 func parseProgressStyle(s string) wholeTextType {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case string(wholeTextTypePlain):
@@ -47,7 +52,7 @@ func parseProgressStyle(s string) wholeTextType {
 func updateProgressMessage(ctx context.Context, args updateProgressArgs, content string, style wholeTextType) string {
 	tc := GetTurnContext(ctx)
 	if tc == nil || (content == "" && !args.hasStructuredProgress()) {
-		return "skipped"
+		return progressStatusSkipped
 	}
 	if tc.finalized.Load() {
 		return "skipped (finalized)"
@@ -62,7 +67,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 
 	content = tc.applyProgressUpdateLocked(args, content)
 	if content == "" {
-		return "skipped"
+		return progressStatusSkipped
 	}
 
 	floor := getEditInterval(&tc.Config.Format)
@@ -83,7 +88,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 		formatted = buf.String()
 	}
 	if formatted == "" {
-		return "skipped"
+		return progressStatusSkipped
 	}
 
 	parseMode := GetParseMode(&tc.Config.Format)
@@ -421,7 +426,7 @@ type updateProgressArgs struct {
 func (a updateProgressArgs) hasStructuredProgress() bool {
 	mode := strings.ToLower(strings.TrimSpace(a.Mode))
 	return strings.TrimSpace(a.Step) != "" || strings.TrimSpace(a.Detail) != "" ||
-		len(a.Details) > 0 || mode == "replace"
+		len(a.Details) > 0 || mode == progressModeReplace
 }
 
 func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, content string) string {
@@ -433,7 +438,7 @@ func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, conten
 	mode := strings.ToLower(strings.TrimSpace(args.Mode))
 	stepTitle := cleanProgressLine(args.Step)
 	details := normalizeProgressDetails(args.Detail, args.Details)
-	if mode == "replace" && stepTitle == "" {
+	if mode == progressModeReplace && stepTitle == "" {
 		tc.progressSteps = nil
 		return content
 	}
@@ -447,7 +452,7 @@ func (tc *TurnContext) applyProgressUpdateLocked(args updateProgressArgs, conten
 	}
 
 	switch {
-	case mode == "replace" || len(tc.progressSteps) == 0:
+	case mode == progressModeReplace || len(tc.progressSteps) == 0:
 		tc.progressSteps = []progressStep{{Title: stepTitle, Details: details}}
 	default:
 		current := &tc.progressSteps[len(tc.progressSteps)-1]
@@ -508,7 +513,7 @@ func renderProgressSteps(steps []progressStep) string {
 
 func formatProgressSteps(steps []progressStep, format string, style wholeTextType) string {
 	switch format {
-	case "html":
+	case outputFormatHTML:
 		return formatHTMLProgressSteps(steps, style)
 	default:
 		return formatMarkdownProgressSteps(steps, style)
@@ -557,7 +562,7 @@ func wrapFormattedProgressLines(lines []string, style wholeTextType, format stri
 	}
 	body := strings.Join(lines, "\n")
 	switch format {
-	case "html":
+	case outputFormatHTML:
 		switch style {
 		case wholeTextTypeCollapse:
 			return "<blockquote expandable>" + body + "</blockquote>"

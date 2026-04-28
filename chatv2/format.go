@@ -12,7 +12,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultOutputFormat = "markdown"
+const (
+	defaultOutputFormat = "markdown"
+	outputFormatHTML    = "html"
+)
 
 // extractReasonPatt matches <think>...</think> blocks at the start of output.
 var extractReasonPatt = regexp.MustCompile(`(?si)^\s*<think>\s*(?P<reason>.*?)(?:\s*</think>|$)\s*`)
@@ -129,7 +132,7 @@ func formatText(buf *strings.Builder, text string, format string, t wholeTextTyp
 			buf.WriteString(util.EscapeTgMDv2ReservedChars(text))
 			buf.WriteString("\n```\n")
 		}
-	case "html":
+	case outputFormatHTML:
 		switch t {
 		case wholeTextTypePlain:
 			buf.WriteString(util.EscapeTgHTMLReservedChars(text))
