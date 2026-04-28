@@ -3,13 +3,17 @@
 package chatv2
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"csust-got/config"
+	"csust-got/log"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	tb "gopkg.in/telebot.v3"
 )
 
 func TestGetEditInterval(t *testing.T) {
@@ -112,4 +116,43 @@ func TestProcessChunkClearsAccumulatedOutputOnToolBoundary(t *testing.T) {
 
 	sp.processChunk(&schema.Message{Role: schema.Assistant, Content: "已获取到今日金价。"})
 	assert.Equal(t, "已获取到今日金价。", sp.getResponse())
+}
+
+func TestFinalizeReturnsErrorWhenFinalEditFails(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	oldConfig := config.BotConfig
+	config.BotConfig = config.NewBotConfig()
+	config.BotConfig.Bot = bot
+	log.InitLogger()
+	t.Cleanup(func() { config.BotConfig = oldConfig })
+
+	tc := &TurnContext{}
+	sp := &streamProcessor{
+		ctx: context.Background(),
+		tbCtx: &mockStreamingContext{
+			bot: bot,
+		},
+		format:         &config.ChatOutputFormatConfig{},
+		placeholderMsg: &tb.Message{ID: 1, Chat: &tb.Chat{ID: 100}},
+		tc:             tc,
+	}
+	sp.processChunk(schema.AssistantMessage("最终答案", nil))
+
+	response, reasoning, sentMsg, err := sp.finalize()
+
+	require.Error(t, err)
+	assert.Equal(t, "最终答案", response)
+	assert.Empty(t, reasoning)
+	assert.Equal(t, sp.placeholderMsg, sentMsg)
+	assert.False(t, tc.finalized.Load())
+}
+
+type mockStreamingContext struct {
+	tb.Context
+	bot *tb.Bot
+}
+
+func (m *mockStreamingContext) Bot() *tb.Bot {
+	return m.bot
 }
