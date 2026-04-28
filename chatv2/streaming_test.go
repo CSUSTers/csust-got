@@ -3,7 +3,6 @@
 package chatv2
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -129,7 +128,7 @@ func TestFinalizeReturnsErrorWhenFinalEditFails(t *testing.T) {
 
 	tc := &TurnContext{}
 	sp := &streamProcessor{
-		ctx: context.Background(),
+		ctx: t.Context(),
 		tbCtx: &mockStreamingContext{
 			bot: bot,
 		},

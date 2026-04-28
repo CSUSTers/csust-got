@@ -113,7 +113,7 @@ func TestFriendlyAgentErrorMessage(t *testing.T) {
 }
 
 func TestGenerateDropsIntermediateToolTurnOutput(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	mdl := &scriptedToolModel{
 		turns: [][]*schema.Message{
 			{
