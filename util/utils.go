@@ -18,6 +18,9 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+// RawTgText marks a Telegram message string as already formatted and safe to send as-is.
+type RawTgText string
+
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
 func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {
 	// message id is an int-type number
@@ -47,7 +50,7 @@ func SendReply(to tb.Recipient, what any, replyMsg *tb.Message, ops ...any) *tb.
 
 // SendMessageWithError is same as SendMessage but return error.
 func SendMessageWithError(to tb.Recipient, what any, ops ...any) (*tb.Message, error) {
-	msg, err := config.BotConfig.Bot.Send(to, what, ops...)
+	msg, err := config.BotConfig.Bot.Send(to, normalizeTgMessage(what, ops...), ops...)
 	if err != nil {
 		log.Error("Can't send message", zap.Error(err))
 	}
@@ -62,7 +65,7 @@ func EditMessage(m *tb.Message, what any, ops ...any) *tb.Message {
 
 // EditMessageWithError is same as EditMessage but return error.
 func EditMessageWithError(m *tb.Message, what any, ops ...any) (*tb.Message, error) {
-	msg, err := config.GetBot().Edit(m, what, ops...)
+	msg, err := config.GetBot().Edit(m, normalizeTgMessage(what, ops...), ops...)
 	if err != nil {
 		log.Error("Can't edit message", zap.Error(err))
 	}
@@ -73,6 +76,16 @@ func EditMessageWithError(m *tb.Message, what any, ops ...any) (*tb.Message, err
 func SendReplyWithError(to tb.Recipient, what any, replyMsg *tb.Message, ops ...any) (*tb.Message, error) {
 	ops = append([]any{&tb.SendOptions{ReplyTo: replyMsg}}, ops...)
 	return SendMessageWithError(to, what, ops...)
+}
+
+// SendWithError sends a message to the current context recipient.
+func SendWithError(ctx tb.Context, what any, ops ...any) (*tb.Message, error) {
+	return SendMessageWithError(ctx.Recipient(), what, ops...)
+}
+
+// ReplyWithError replies to the current context message.
+func ReplyWithError(ctx tb.Context, what any, ops ...any) (*tb.Message, error) {
+	return SendReplyWithError(ctx.Chat(), what, ctx.Message(), ops...)
 }
 
 // DeleteMessage delete a message.
@@ -260,6 +273,18 @@ func EscapeTgMDv2ReservedChars(s string) string {
 	return s
 }
 
+// EscapeTgTextByParseMode escapes Telegram-reserved characters according to the parse mode.
+func EscapeTgTextByParseMode(s string, parseMode tb.ParseMode) string {
+	switch parseMode {
+	case tb.ModeMarkdownV2:
+		return EscapeTgMDv2ReservedChars(s)
+	case tb.ModeHTML:
+		return EscapeTgHTMLReservedChars(s)
+	default:
+		return s
+	}
+}
+
 var htmlReservedChars = []string{"<", ">", "&"}
 var htmlReservedCharsPairs = lo.FlatMap(htmlReservedChars, func(char string, _ int) []string { return []string{char, html.EscapeString(char)} })
 var htmlEscapeReplacer = strings.NewReplacer(htmlReservedCharsPairs...)
@@ -270,12 +295,44 @@ func EscapeTgHTMLReservedChars(s string) string {
 	return s
 }
 
+func normalizeTgMessage(what any, ops ...any) any {
+	switch v := what.(type) {
+	case RawTgText:
+		return string(v)
+	case string:
+		return EscapeTgTextByParseMode(v, extractParseMode(ops...))
+	default:
+		return what
+	}
+}
+
+func extractParseMode(ops ...any) tb.ParseMode {
+	var parseMode tb.ParseMode
+	for _, op := range ops {
+		switch v := op.(type) {
+		case tb.ParseMode:
+			if v != "" {
+				parseMode = v
+			}
+		case *tb.SendOptions:
+			if v != nil && v.ParseMode != "" {
+				parseMode = v.ParseMode
+			}
+		case tb.SendOptions:
+			if v.ParseMode != "" {
+				parseMode = v.ParseMode
+			}
+		}
+	}
+	return parseMode
+}
+
 // ParseKeyValueMapStr parse string format like `key=value` or `key`
 func ParseKeyValueMapStr(s string) (key, value string) {
-	idx := strings.Index(s, "=")
-	if idx >= 0 {
-		key = s[:idx]
-		value = s[idx+1:]
+	before, after, ok := strings.Cut(s, "=")
+	if ok {
+		key = before
+		value = after
 		return key, value
 	}
 	return s, ""

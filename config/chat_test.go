@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestChatConfigV2_ReadConfig(t *testing.T) {
+func TestChatConfigV1_ReadConfig(t *testing.T) {
 	const config = `
 models:
   - &gpt
@@ -46,10 +46,10 @@ chats:
 	viper.SetConfigType("yaml")
 	assert.NoError(t, viper.ReadConfig(strings.NewReader(config)))
 
-	var c ChatConfigV2
+	var c ChatConfigV1
 	c.readConfig()
 	assert.Len(t, c, 2)
-	assert.Equal(t, ChatConfigV2{
+	assert.Equal(t, ChatConfigV1{
 		&ChatConfigSingle{
 			Name:           "test",
 			MessageContext: 5,
@@ -63,4 +63,32 @@ chats:
 			Model:          &Model{Name: "gpt-3.5", BaseUrl: "http://test.com", ApiKey: "test-key"},
 		},
 	}, c)
+}
+
+func TestAgentGetMaxSteps(t *testing.T) {
+	t.Run("tool-enabled main agent clamps too-low max steps", func(t *testing.T) {
+		cfg := &AgentConfig{
+			MaxSteps: 1,
+			Tools:    []string{"update_progress"},
+		}
+		assert.Equal(t, minToolAgentMaxSteps, cfg.GetMaxSteps())
+	})
+
+	t.Run("tool-enabled subagent clamps too-low max steps", func(t *testing.T) {
+		cfg := &SubAgentConfig{
+			MaxSteps: 2,
+			Tools:    []string{"get_context"},
+		}
+		assert.Equal(t, minToolAgentMaxSteps, cfg.GetMaxSteps())
+	})
+
+	t.Run("tool-free agent preserves explicit low max steps", func(t *testing.T) {
+		cfg := &AgentConfig{MaxSteps: 1}
+		assert.Equal(t, 1, cfg.GetMaxSteps())
+	})
+
+	t.Run("default values stay unchanged when max steps unset", func(t *testing.T) {
+		assert.Equal(t, defaultAgentMaxSteps, (&AgentConfig{}).GetMaxSteps())
+		assert.Equal(t, defaultSubAgentMaxSteps, (&SubAgentConfig{}).GetMaxSteps())
+	})
 }

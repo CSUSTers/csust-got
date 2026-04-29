@@ -185,7 +185,7 @@ func Decode(ctx tb.Context) error {
 
 	result = fmt.Sprintf("```%s```", escapeMdReservedChars(result))
 
-	util.SendReply(ctx.Chat(), result, ctx.Message(), tb.ModeMarkdownV2)
+	util.SendReply(ctx.Chat(), util.RawTgText(result), ctx.Message(), tb.ModeMarkdownV2)
 
 	return nil
 }

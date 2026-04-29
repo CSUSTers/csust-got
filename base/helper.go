@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"csust-got/config"
+	"csust-got/orm"
 	"csust-got/util"
 
 	. "gopkg.in/telebot.v3"
@@ -37,9 +38,59 @@ func Info(ctx Context) error {
 	if config.BotConfig.DebugMode {
 		msg += "Debug Mode:  YES\n"
 	}
+	msg += "\n"
+	msg += currentBotStatus(ctx)
 	msg += "```"
 
-	return ctx.Send(msg, ModeMarkdownV2)
+	_, err := util.SendWithError(ctx, util.RawTgText(msg), ModeMarkdownV2)
+	return err
+}
+
+func currentBotStatus(ctx Context) string {
+	chat := ctx.Chat()
+	if chat == nil {
+		return formatBotStatus(false, false, false, false)
+	}
+
+	isShutdown := orm.IsShutdown(chat.ID)
+	isMcDead := false
+	isNoSticker := false
+	if chat.Type == ChatGroup || chat.Type == ChatSuperGroup {
+		isMcDead, _ = orm.IsMcDead(chat.ID)
+		isNoSticker = orm.IsNoStickerMode(chat.ID)
+	}
+	isByeWorld := false
+	if sender := ctx.Sender(); sender != nil {
+		_, isByeWorld, _ = orm.IsByeWorld(chat.ID, sender.ID)
+	}
+
+	return formatBotStatus(isShutdown, isMcDead, isNoSticker, isByeWorld)
+}
+
+func formatBotStatus(isShutdown bool, isMcDead bool, isNoSticker bool, isByeWorld bool) string {
+	msg := "----- Bot Status -----\n"
+	if isShutdown {
+		msg += "Health:      因shutdown命令关机\n"
+		msg += "Recover:     使用/boot命令开机\n"
+		return msg
+	}
+	if isMcDead {
+		msg += "Health:      因mc命令死亡\n"
+		msg += "Recover:     使用/reburn命令复活\n"
+		return msg
+	}
+	if isNoSticker {
+		msg += "Health:      因no_sticker命令禁用贴纸\n"
+		msg += "Recover:     使用/no_sticker命令关闭禁贴纸\n"
+		return msg
+	}
+	if isByeWorld {
+		msg += "Health:      因bye_world命令自动删除你的消息\n"
+		msg += "Recover:     使用/hello_world命令关闭自动删除\n"
+		return msg
+	}
+	msg += "Health:      OK\n"
+	return msg
 }
 
 // GetUserID is handle for command `/id`.

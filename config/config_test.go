@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	testConfigFile = "../config.yaml"
+	repoConfigFile = "../config.yaml"
 	testEnvPrefix  = "BOT_TEST"
 )
 
@@ -21,12 +21,26 @@ func testInit(t *testing.T) *require.Assertions {
 	return require.New(t)
 }
 
+func isolatedConfigFile(t *testing.T) string {
+	t.Helper()
+
+	data, err := os.ReadFile(repoConfigFile)
+	require.NoError(t, err)
+
+	configFile := filepath.Join(t.TempDir(), "config.yaml")
+	err = os.WriteFile(configFile, data, 0o644)
+	require.NoError(t, err)
+
+	return configFile
+}
+
 func TestReadConfigFile(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// init config
 	BotConfig = NewBotConfig()
-	InitViper(testConfigFile, "")
+	InitViper(configFile, "")
 	readConfig()
 	viper.Reset()
 
@@ -75,6 +89,7 @@ func TestReadEnv(t *testing.T) {
 
 func TestEnvOverrideFile(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// set some env
 	t.Setenv(testEnvPrefix+"_"+"DEBUG", "true")
@@ -83,7 +98,7 @@ func TestEnvOverrideFile(t *testing.T) {
 
 	// init config
 	BotConfig = NewBotConfig()
-	InitViper(testConfigFile, testEnvPrefix)
+	InitViper(configFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -122,10 +137,11 @@ func TestMustConfig(t *testing.T) {
 
 func TestRateLimitConfig(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// init config
 	BotConfig = NewBotConfig()
-	InitViper(testConfigFile, testEnvPrefix)
+	InitViper(configFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -165,13 +181,14 @@ func TestRateLimitConfig(t *testing.T) {
 
 func TestMessageConfig(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// set some env
 	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
 	t.Setenv(testEnvPrefix+"_"+"REDIS_ADDR", "some-env-address")
 	// init config
 	BotConfig = NewBotConfig()
-	InitViper(testConfigFile, testEnvPrefix)
+	InitViper(configFile, testEnvPrefix)
 	readConfig()
 	defer viper.Reset()
 
@@ -188,6 +205,7 @@ func TestMessageConfig(t *testing.T) {
 
 func TestSpecialListConfig(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// set some env
 	t.Setenv(testEnvPrefix+"_"+"TOKEN", "some-bot-token")
@@ -196,7 +214,7 @@ func TestSpecialListConfig(t *testing.T) {
 	// init config
 	BotConfig = NewBotConfig()
 
-	InitViper(testConfigFile, testEnvPrefix)
+	InitViper(configFile, testEnvPrefix)
 	readConfig()
 
 	defer viper.Reset()
@@ -205,21 +223,22 @@ func TestSpecialListConfig(t *testing.T) {
 	req.True(BotConfig.WhiteListConfig.Enabled)
 }
 
-func TestChatConfigV2(t *testing.T) {
+func TestChatConfigV1(t *testing.T) {
 	req := testInit(t)
+	configFile := isolatedConfigFile(t)
 
 	// init config
 	BotConfig = NewBotConfig()
 
-	InitViper(testConfigFile, testEnvPrefix)
+	InitViper(configFile, testEnvPrefix)
 	readConfig()
 
 	defer viper.Reset()
 
-	t.Logf("%+v", BotConfig.ChatConfigV2)
-	req.Greater(len(*BotConfig.ChatConfigV2), 0)
-	req.NotNil((*BotConfig.ChatConfigV2)[0].Model)
-	req.NotEmpty((*BotConfig.ChatConfigV2)[0].Model.Model)
+	t.Logf("%+v", BotConfig.Chats)
+	req.Greater(len(*BotConfig.Chats), 0)
+	req.NotNil((*BotConfig.Chats)[0].Model)
+	req.NotEmpty((*BotConfig.Chats)[0].Model.Model)
 }
 
 func TestCustomConfig(t *testing.T) {

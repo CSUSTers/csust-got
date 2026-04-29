@@ -102,7 +102,7 @@ func handleAddData(data meiliData) {
 	getFilterOnce(indexName).Do(func() {
 		// Configure filterable attributes
 		filterableAttributes := []string{"text", "caption"}
-		filterableAttrsIface := make([]interface{}, len(filterableAttributes))
+		filterableAttrsIface := make([]any, len(filterableAttributes))
 		for i, v := range filterableAttributes {
 			filterableAttrsIface[i] = v
 		}

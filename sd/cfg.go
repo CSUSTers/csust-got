@@ -3,6 +3,7 @@ package sd
 import (
 	"csust-got/entities"
 	"csust-got/orm"
+	"csust-got/util"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -289,7 +290,8 @@ func ConfigHandler(ctx Context) error {
 	command := entities.FromMessage(ctx.Message())
 
 	if command.Argc() == 0 {
-		return ctx.Reply(helpInfo, ModeMarkdownV2)
+		_, err := util.ReplyWithError(ctx, util.RawTgText(helpInfo), ModeMarkdownV2)
+		return err
 	}
 
 	userID := ctx.Sender().ID
@@ -302,14 +304,16 @@ func ConfigHandler(ctx Context) error {
 	switch command.Arg(0) {
 	case sdSubCmdSet:
 		if command.Argc() < 3 {
-			return ctx.Reply(helpInfo, ModeMarkdownV2)
+			_, err := util.ReplyWithError(ctx, util.RawTgText(helpInfo), ModeMarkdownV2)
+			return err
 		}
 		mode = sdSubCmdSet
 		key = command.Arg(1)
 		value = command.ArgAllInOneFrom(2)
 	case sdSubCmdGet:
 		if command.Argc() < 2 {
-			return ctx.Reply(helpInfo, ModeMarkdownV2)
+			_, err := util.ReplyWithError(ctx, util.RawTgText(helpInfo), ModeMarkdownV2)
+			return err
 		}
 		mode = sdSubCmdGet
 		key = command.Arg(1)
@@ -340,10 +344,12 @@ func ConfigHandler(ctx Context) error {
 		}
 		return ctx.Reply("配置保存成功")
 	case sdSubCmdGet:
-		return ctx.Reply(fmt.Sprintf("`%v`", config.GetValueByKey(key)), ModeMarkdownV2)
+		_, err := util.ReplyWithError(ctx, util.RawTgText(fmt.Sprintf("`%s`", util.EscapeTgMDv2ReservedChars(fmt.Sprint(config.GetValueByKey(key))))), ModeMarkdownV2)
+		return err
 	}
 
-	return ctx.Reply(helpInfo, ModeMarkdownV2)
+	_, err = util.ReplyWithError(ctx, util.RawTgText(helpInfo), ModeMarkdownV2)
+	return err
 }
 
 func getConfigByUserID(userID int64) (*StableDiffusionConfig, error) {

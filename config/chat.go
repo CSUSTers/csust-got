@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"math"
+	"reflect"
 	"strings"
 	"time"
 
@@ -27,9 +28,10 @@ type Model struct {
 
 // ModelFeatures is the model features switch
 type ModelFeatures struct {
-	Image     bool `mapstructure:"image"`
-	Mcp       bool `mapstructure:"mcp"`
-	WhiteList bool `mapstructure:"white_list"`
+	Image          bool `mapstructure:"image"`
+	ImageBase64Raw bool `mapstructure:"image_base64_raw"` // send raw base64 instead of data URI
+	Mcp            bool `mapstructure:"mcp"`
+	WhiteList      bool `mapstructure:"white_list"`
 }
 
 // ChatTrigger is the configuration for chat
@@ -55,6 +57,22 @@ type ChatOutputFormatConfig struct {
 	// use_native_reasoning: use native OpenAI protocol ReasoningContent field (true by default)
 	// When false, falls back to parsing <think>...</think> tags from response text
 	UseNativeReasoning *bool `mapstructure:"use_native_reasoning"`
+	// ProgressSummary configures progress summarization during agent execution.
+	// When enabled, the agent can call update_progress to send status updates
+	// to the user via a small/cheap model.
+	ProgressSummary *ProgressSummaryConfig `mapstructure:"progress_summary"`
+}
+
+// ProgressSummaryConfig configures the progress summarization feature.
+// A small model processes the agent's progress updates before displaying to the user.
+type ProgressSummaryConfig struct {
+	// Enable turns on progress summarization
+	Enable bool `mapstructure:"enable"`
+	// Model is the small/cheap model used for summarizing progress (optional).
+	// If nil, the agent's raw update_progress content is displayed directly.
+	Model *Model `mapstructure:"model"`
+	// Prompt is the system prompt for the summarizer model.
+	Prompt JoinableString `mapstructure:"prompt"`
 }
 
 const (
@@ -62,6 +80,10 @@ const (
 	OutputFormatMarkdown = "markdown"
 	// OutputFormatHTML is the HTML format type
 	OutputFormatHTML = "html"
+
+	defaultSubAgentMaxSteps = 5
+	defaultAgentMaxSteps    = 12
+	minToolAgentMaxSteps    = 4
 )
 
 // GetFormat get message format
@@ -147,7 +169,10 @@ type ChatFilterSetting struct {
 	Filters []ChatFilterConfig `mapstructure:"filters"`
 }
 
-// ChatConfigV2 is the configuration for chat
+// ChatConfigV1 is the configuration for chat
+type ChatConfigV1 []*ChatConfigSingle
+
+// ChatConfigV2 is the configuration for agent
 type ChatConfigV2 []*ChatConfigSingle
 
 // ChatConfigSingle is the configuration for a single chat
@@ -165,9 +190,99 @@ type ChatConfigSingle struct {
 	Format          ChatOutputFormatConfig `mapstructure:"format"`
 	ReasoningEffort string                 `mapstructure:"reasoning_effort"`
 
+	Agent    *AgentConfig      `mapstructure:"agent"`
 	Features FeatureSetting    `mapstructure:"features"`
 	UseMcpo  bool              `mapstructure:"use_mcpo"`
 	Filters  ChatFilterSetting `mapstructure:"filters"`
+}
+
+// SubAgentConfig defines a subagent that can be invoked by the main agent as a tool
+type SubAgentConfig struct {
+	Name         string              `mapstructure:"name"`
+	Description  string              `mapstructure:"description"`
+	Model        *Model              `mapstructure:"model"`
+	SystemPrompt JoinableString      `mapstructure:"system_prompt"`
+	Tools        []string            `mapstructure:"tools"`
+	MaxSteps     int                 `mapstructure:"max_steps"`
+	McpServers   []*ToolServerConfig `mapstructure:"mcp_servers"`
+	ToolModels   map[string]*Model   `mapstructure:"tool_models"`
+}
+
+// GetMaxSteps returns the max tool call steps for the subagent
+func (c *SubAgentConfig) GetMaxSteps() int {
+	if c == nil {
+		return defaultSubAgentMaxSteps
+	}
+
+	maxSteps := c.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = defaultSubAgentMaxSteps
+	}
+	if c.usesTools() && maxSteps < minToolAgentMaxSteps {
+		return minToolAgentMaxSteps
+	}
+	return maxSteps
+}
+
+// SkillConfig defines a reusable skill bundle that can be referenced by agents.
+// A skill bundles together tools, MCP servers, system prompt additions, and tool model overrides.
+type SkillConfig struct {
+	Name              string              `mapstructure:"name"`
+	Tools             []string            `mapstructure:"tools"`
+	McpServers        []*ToolServerConfig `mapstructure:"mcp_servers"`
+	SystemPromptAddon JoinableString      `mapstructure:"system_prompt_addon"`
+	ToolModels        map[string]*Model   `mapstructure:"tool_models"`
+}
+
+// AgentConfig defines the agent mode configuration for chatv2
+type AgentConfig struct {
+	Enable     bool                `mapstructure:"enable"`
+	Tools      []string            `mapstructure:"tools"`
+	MaxSteps   int                 `mapstructure:"max_steps"`
+	SubAgents  []*SubAgentConfig   `mapstructure:"subagents"`
+	McpServers []*ToolServerConfig `mapstructure:"mcp_servers"`
+	ToolModels map[string]*Model   `mapstructure:"tool_models"`
+	Skills     []*SkillConfig      `mapstructure:"skills"`
+}
+
+// GetMaxSteps returns the max tool call steps for the main agent
+func (c *AgentConfig) GetMaxSteps() int {
+	if c == nil {
+		return defaultAgentMaxSteps
+	}
+
+	maxSteps := c.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = defaultAgentMaxSteps
+	}
+	if c.usesTools() && maxSteps < minToolAgentMaxSteps {
+		return minToolAgentMaxSteps
+	}
+	return maxSteps
+}
+
+func (c *SubAgentConfig) usesTools() bool {
+	return c != nil && (len(c.Tools) > 0 || len(c.McpServers) > 0)
+}
+
+func (c *AgentConfig) usesTools() bool {
+	if c == nil {
+		return false
+	}
+	if len(c.Tools) > 0 || len(c.McpServers) > 0 || len(c.SubAgents) > 0 {
+		return true
+	}
+	for _, skill := range c.Skills {
+		if skill != nil && (len(skill.Tools) > 0 || len(skill.McpServers) > 0) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAgentEnabled returns true if chatv2 agent mode is enabled for this chat config
+func (ccs *ChatConfigSingle) IsAgentEnabled() bool {
+	return ccs.Agent != nil && ccs.Agent.Enable
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -207,9 +322,6 @@ type FeatureSetting struct {
 		MaxHeight    int  `mapstructure:"max_height"`
 		NotKeepRatio bool `mapstructure:"not_keep_ratio"`
 	} `mapstructure:"image_resize"`
-	AllowRegenerate      bool   `mapstructure:"allow_regenerate"`       // Allow regeneration on 👎 reaction
-	MaxRegenerateCount   int    `mapstructure:"max_regenerate_count"`   // Maximum number of regenerations allowed
-	RegenerateFeedback   string `mapstructure:"regenerate_feedback"`    // User feedback message for regeneration
 }
 
 // McpoConfig is the configuration for mcpo server
@@ -225,6 +337,140 @@ func (c *McpoConfig) readConfig() {
 	if err != nil {
 		log.Fatal("cannot parse mcpo config", zap.Error(err))
 	}
+}
+
+// Tool server type constants define the supported connection protocol for tool servers.
+const (
+	ToolServerTypeSSE            = "sse"
+	ToolServerTypeStreamableHTTP = "streamable-http"
+	ToolServerTypeMCPO           = "mcpo"
+)
+
+// ToolServerConfig configures a tool server connection (MCP direct or MCPO proxy).
+type ToolServerConfig struct {
+	Enable bool        `mapstructure:"enable"`
+	Type   string      `mapstructure:"type"`
+	Url    string      `mapstructure:"url"`
+	ApiKey string      `mapstructure:"api_key"`
+	Tools  ToolEntries `mapstructure:"tools"`
+}
+
+// GetType returns the effective server type, defaulting to "sse".
+func (c *ToolServerConfig) GetType() string {
+	if c == nil || c.Type == "" {
+		return ToolServerTypeSSE
+	}
+	t := strings.ToLower(strings.TrimSpace(c.Type))
+	switch t {
+	case ToolServerTypeSSE, ToolServerTypeStreamableHTTP, ToolServerTypeMCPO:
+		return t
+	default:
+		return ToolServerTypeSSE
+	}
+}
+
+// ToolEntry represents a tool name (MCP mode) or a toolset with optional sub-tool filter (MCPO mode).
+type ToolEntry struct {
+	Name  string
+	Tools []string // nil = all tools in toolset
+}
+
+// ToolEntries supports union[string, map[toolset]([]string)] config format.
+type ToolEntries []ToolEntry
+
+var _ DispatchableType = ToolEntries(nil)
+
+// From implements DispatchableType.
+func (t ToolEntries) From(src reflect.Value) (any, error) {
+	kind := src.Kind()
+	for kind == reflect.Pointer || kind == reflect.Interface {
+		if src.IsNil() {
+			return nil, nil
+		}
+		src = src.Elem()
+		kind = src.Kind()
+	}
+
+	switch kind {
+	case reflect.Slice, reflect.Array:
+		return parseToolEntriesSlice(src)
+	default:
+		return nil, ErrUnsupportedType
+	}
+}
+
+func parseToolEntriesSlice(src reflect.Value) (ToolEntries, error) {
+	var entries ToolEntries
+	for i := range src.Len() {
+		elem := src.Index(i)
+		for elem.Kind() == reflect.Interface || elem.Kind() == reflect.Pointer {
+			if elem.IsNil() {
+				break
+			}
+			elem = elem.Elem()
+		}
+
+		switch elem.Kind() {
+		case reflect.String:
+			name := strings.TrimSpace(elem.String())
+			if name != "" {
+				entries = append(entries, ToolEntry{Name: name})
+			}
+		case reflect.Map:
+			for _, key := range elem.MapKeys() {
+				name := strings.TrimSpace(key.String())
+				if name == "" {
+					continue
+				}
+				val := elem.MapIndex(key)
+				tools := extractStringSlice(val)
+				entries = append(entries, ToolEntry{Name: name, Tools: tools})
+			}
+		default:
+		}
+	}
+	return entries, nil
+}
+
+func extractStringSlice(v reflect.Value) []string {
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+		return nil
+	}
+	var result []string
+	for i := range v.Len() {
+		item := v.Index(i)
+		for item.Kind() == reflect.Interface || item.Kind() == reflect.Pointer {
+			if item.IsNil() {
+				break
+			}
+			item = item.Elem()
+		}
+		if item.Kind() == reflect.String {
+			s := strings.TrimSpace(item.String())
+			if s != "" {
+				result = append(result, s)
+			}
+		}
+	}
+	return result
+}
+
+// Names returns a flat list of all entry names (ignoring sub-tool filters).
+func (t ToolEntries) Names() []string {
+	if len(t) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(t))
+	for _, e := range t {
+		names = append(names, e.Name)
+	}
+	return names
 }
 
 // ImageResize return the resized width and height for image
@@ -278,27 +524,26 @@ func (ccs *ChatConfigSingle) GetErrorMessage() string {
 	return "😔很抱歉，我无法处理您的请求"
 }
 
-// GetMaxRegenerateCount returns the maximum regeneration count for the chat model
-func (f *FeatureSetting) GetMaxRegenerateCount() int {
-	if f.MaxRegenerateCount > 0 {
-		return f.MaxRegenerateCount
-	}
-	return 3 // default value
-}
-
-// GetRegenerateFeedback returns the user feedback message for regeneration
-func (f *FeatureSetting) GetRegenerateFeedback() string {
-	if f.RegenerateFeedback != "" {
-		return f.RegenerateFeedback
-	}
-	return "用户认为上次的回答👎" // default message
-}
-
-func (c *ChatConfigV2) readConfig() {
+func (c *ChatConfigV1) readConfig() {
 	v := viper.GetViper()
 	err := v.UnmarshalKey("chats", c, viper.DecodeHook(DispatchFor()))
 	if err != nil {
 		panic(err)
 	}
 
+}
+
+func (c *ChatConfigV2) readConfig() {
+	v := viper.GetViper()
+	err := v.UnmarshalKey("agents", c, viper.DecodeHook(DispatchFor()))
+	if err != nil {
+		zap.L().Warn("cannot parse agents config", zap.Error(err))
+		return
+	}
+	// Auto-enable agent mode for each entry in agents[]
+	for _, cfg := range *c {
+		if cfg.Agent == nil {
+			cfg.Agent = &AgentConfig{Enable: true}
+		}
+	}
 }
