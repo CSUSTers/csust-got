@@ -534,60 +534,6 @@ func GetTargetState(target string) bool {
 	return r == "1"
 }
 
-// SetSDConfig set stable diffusion config.
-func SetSDConfig(userID int64, cfg string) error {
-	err := rc.Set(context.TODO(), wrapKeyWithUser("stable_diffusion_config", userID), cfg, 0).Err()
-	if err != nil {
-		log.Error("set stable diffusion config to redis failed", zap.Int64("user", userID), zap.String("config", cfg), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-// GetSDConfig get stable diffusion config.
-func GetSDConfig(userID int64) (string, error) {
-	cfg, err := rc.Get(context.TODO(), wrapKeyWithUser("stable_diffusion_config", userID)).Result()
-	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			log.Error("get stable diffusion config from redis failed", zap.Int64("user", userID), zap.Error(err))
-		}
-		return "", err
-	}
-	return cfg, nil
-}
-
-// SetSDLastPrompt save user's last stable diffusion prompt.
-func SetSDLastPrompt(userID int64, lastPrompt string) error {
-	err := rc.Set(context.TODO(), wrapKeyWithUser("stable_diffusion_last_prompt", userID), lastPrompt, 0).Err()
-	if err != nil {
-		log.Error("set stable diffusion last prompt to redis failed", zap.Int64("user", userID), zap.String("lastPrompt", lastPrompt), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-// GetSDLastPrompt get user's last stable diffusion prompt.
-func GetSDLastPrompt(userID int64) (string, error) {
-	lastPrompt, err := rc.Get(context.TODO(), wrapKeyWithUser("stable_diffusion_last_prompt", userID)).Result()
-	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			log.Error("get stable diffusion last prompt from redis failed", zap.Int64("user", userID), zap.Error(err))
-			return "", err
-		}
-		return "", err
-	}
-	return lastPrompt, nil
-}
-
-// GetSDDefaultServer get stable diffusion default server from redis.
-func GetSDDefaultServer() string {
-	defaultServer, err := rc.Get(context.TODO(), wrapKey("stable_diffusion::default_server")).Result()
-	if err != nil {
-		return ""
-	}
-	return defaultServer
-}
-
 // SetChatContext save user's chat context with GPT to redis.
 func SetChatContext(chatID int64, msgID int, chatContext []openai.ChatCompletionMessage) error {
 	if len(chatContext) == 0 {
