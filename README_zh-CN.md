@@ -21,7 +21,6 @@
 
 - 🤖 AI 聊天对话（支持多种模型）
 - 🔍 消息搜索（基于 MeiliSearch）
-- 🎨 Stable Diffusion 图像生成
 - 🎲 抽卡系统
 - 🎭 各种娱乐功能
 - 🔧 灵活的配置系统
@@ -153,16 +152,6 @@ gacha - 抽卡，按照你的配置
 getvoice - 角色=<character> 性别=<sex> 主题=<topic> 类型=<type> <text> 
 ```
 
-### Stable Diffusion
-
-``` text
-sd - <prompt> 生成图片
-sdcfg - 配置SD服务器
-sdcfg - set <key> <value> 设置配置
-sdcfg - get <key> 获取配置
-sdlast - 获取上次使用的prompt
-```
-
 ### 工具功能
 
 ``` text
@@ -185,7 +174,6 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 - **数据库**: Redis
 - **搜索**: MeiliSearch
 - **AI**: OpenAI API 兼容接口
-- **图像生成**: Stable Diffusion WebUI
 - **容器化**: Docker & Docker Compose
 
 ## 开发

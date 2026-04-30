@@ -21,7 +21,6 @@ A modern Telegram bot for CSUST, developed in Go.
 
 - 🤖 AI Chat Conversations (supports multiple models)
 - 🔍 Message Search (powered by MeiliSearch)
-- 🎨 Stable Diffusion Image Generation
 - 🎲 Gacha System
 - 🎭 Entertainment Features
 - 🔧 Flexible Configuration System
@@ -153,16 +152,6 @@ gacha - Draw cards according to your configuration
 getvoice - character=<character> gender=<sex> theme=<topic> type=<type> <text> 
 ```
 
-### Stable Diffusion
-
-``` text
-sd - <prompt> Generate images
-sdcfg - Configure SD server
-sdcfg - set <key> <value> Set configuration
-sdcfg - get <key> Get configuration
-sdlast - Get last used prompt
-```
-
 ### Utility Functions
 
 ``` text
@@ -185,7 +174,6 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 - **Database**: Redis
 - **Search**: MeiliSearch
 - **AI**: OpenAI API Compatible Interface
-- **Image Generation**: Stable Diffusion WebUI
 - **Containerization**: Docker & Docker Compose
 
 ## Development

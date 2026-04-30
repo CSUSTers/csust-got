@@ -6,7 +6,6 @@ import (
 	"csust-got/chatv2"
 	"csust-got/inline"
 	"csust-got/meili"
-	"csust-got/sd"
 	"csust-got/store"
 	"csust-got/util/gacha"
 	"encoding/json"
@@ -67,16 +66,11 @@ func main() {
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
-	bot.Handle("/sd", sd.Handler, whiteMiddleware)
-	bot.Handle("/sdcfg", sd.ConfigHandler)
-	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	// inline mode
 	inline.RegisterInlineHandler(bot, config.BotConfig)
 
 	meili.InitMeili()
-
-	go sd.Process()
 
 	base.Init()
 
@@ -400,26 +394,6 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 		if !restrict.CheckLimit(ctx.Message()) {
 			log.Info("message deleted by rate limit", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
-			return nil
-		}
-		return next(ctx)
-	}
-}
-
-func whiteMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		if !config.BotConfig.WhiteListConfig.Enabled {
-			return next(ctx)
-		}
-
-		m := ctx.Message()
-		// continue with inline query
-		if m == nil && ctx.Query() != nil {
-			return next(ctx)
-		}
-
-		if ctx.Chat() != nil && !config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
-			log.Info("chat ignore by white list", zap.String("chat", ctx.Chat().Title))
 			return nil
 		}
 		return next(ctx)
