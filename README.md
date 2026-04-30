@@ -20,7 +20,6 @@ A modern Telegram bot for CSUST, developed in Go.
 ## Features
 
 - 🤖 AI Chat Conversations (supports multiple models)
-- 🔍 Message Search (powered by MeiliSearch)
 - 🎲 Gacha System
 - 🎭 Entertainment Features
 - 🔧 Flexible Configuration System
@@ -107,9 +106,6 @@ google - <Key Words> Google search
 bing - <Key Words> Bing search
 bilibili - <Key Words> Search on Bilibili
 github - <Key Words> Search on GitHub
-search - <keyword> Search message history
-search - -id <chat_id> <keyword> Search messages in specific group
-search - -p <page> <keyword> Search with pagination
 ```
 
 ### AI Chat
@@ -172,7 +168,6 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 - **Language**: Go 1.26+
 - **Framework**: [telebot.v3](https://github.com/tucnak/telebot)
 - **Database**: Redis
-- **Search**: MeiliSearch
 - **AI**: OpenAI API Compatible Interface
 - **Containerization**: Docker & Docker Compose
 
