@@ -20,7 +20,6 @@
 ## 特性
 
 - 🤖 AI 聊天对话（支持多种模型）
-- 🔍 消息搜索（基于 MeiliSearch）
 - 🎲 抽卡系统
 - 🎭 各种娱乐功能
 - 🔧 灵活的配置系统
@@ -107,9 +106,6 @@ google - <Key Words> 咕果搜索...
 bing - <Key Words> 巨硬搜索...
 bilibili - <Key Words> 在B站搜索...
 github - <Key Words> 在github搜索...
-search - <keyword> 搜索历史消息
-search - -id <chat_id> <keyword> 搜索指定群组消息
-search - -p <page> <keyword> 搜索指定页码
 ```
 
 ### AI 聊天
@@ -172,7 +168,6 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 - **语言**: Go 1.26+
 - **框架**: [telebot.v3](https://github.com/tucnak/telebot)
 - **数据库**: Redis
-- **搜索**: MeiliSearch
 - **AI**: OpenAI API 兼容接口
 - **容器化**: Docker & Docker Compose
 

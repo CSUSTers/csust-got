@@ -1,4 +1,4 @@
-This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI chat, message search (MeiliSearch), gacha systems, and comprehensive permission controls.
+This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI chat, gacha systems, and comprehensive permission controls.
 
 ## Architecture Overview
 
@@ -8,15 +8,14 @@ This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI c
 - **Configuration**: `config.yaml` → structs in `config/` → global `config.BotConfig`
 - **Data Layer**: `orm/` - Redis-based persistence (NOT a SQL ORM); stores chat state, user lists, caches
 - **Queue System**: `store/` - Background task processing (message deletion)
-- **Feature Packages**: `chat/`, `meili/`, `restrict/`, `base/`, `inline/`
+- **Feature Packages**: `chat/`, `restrict/`, `base/`, `inline/`
 
 ### Middleware Pipeline
 All requests flow through this ordered chain (see `main.go:116-119`):
 ```go
 loggerMiddleware → skipMiddleware → blockMiddleware → fakeBanMiddleware →
 rateMiddleware → noStickerMiddleware → shutdownMiddleware →
-messagesCollectionMiddleware → messageStoreMiddleware → contentFilterMiddleware →
-byeWorldMiddleware → mcMiddleware
+messageStoreMiddleware → contentFilterMiddleware → byeWorldMiddleware → mcMiddleware
 ```
 **Key Insight**: Middleware order matters! `blockMiddleware` must run before permission checks.
 
@@ -167,11 +166,6 @@ The chat module is the core AI conversation system with MCP (Model Context Proto
 2. **New Template Variable**: Add field to `promptData` struct, populate in `Chat()` function
 3. **New Output Format**: Add case in `formatText()` with markdown/html escaping logic
 4. **New MCP Tool**: Deploy OpenAPI-compliant HTTP server, add to `mcpo_server.tools` list
-
-### MeiliSearch Indexing (meili/)
-1. Middleware: `messageStoreMiddleware` enqueues messages
-2. Background: Queue processor pushes to MeiliSearch
-3. Search: `/search [-id chatID] [-p page] keyword` with pagination
 
 ## Pull Request Guidelines
 1. **Base branch**: Always create PRs against `dev` (not `master`)
