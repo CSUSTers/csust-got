@@ -8,7 +8,7 @@ require (
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/mark3labs/mcp-go v0.49.0
+	github.com/mark3labs/mcp-go v0.54.0
 	github.com/meilisearch/meilisearch-go v0.36.2
 	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/redis/go-redis/v9 v9.19.0
@@ -48,7 +48,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/rogpeppe/go-internal v1.10.0 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/slongfield/pyfmt v0.0.0-20220222012616-ea85ff4c361f // indirect
 	github.com/swaggest/jsonschema-go v0.3.78 // indirect
@@ -62,7 +62,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20230713183714-613f0c0eb8a1 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
