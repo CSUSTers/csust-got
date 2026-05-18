@@ -8,6 +8,25 @@ This migration must not change bot behavior. Command semantics, message formatti
 
 The migration will not add features, redesign commands, restructure unrelated packages, change config shape, change Redis key formats, change AI prompt behavior, or introduce new retry, timeout, panic recovery, or shutdown semantics unless Telego requires a specific replacement. Any required behavioral difference must be documented and confirmed before implementation.
 
+## Framework Version Background
+
+As of 2026-05-18, this repository uses `gopkg.in/telebot.v3`. The latest stable version for that module path is `v3.3.8`, published by the Go module proxy with timestamp `2024-08-06T09:46:17Z`. That is about 650 days, or roughly 1 year and 9 months, before this migration design date.
+
+Telebot's latest V3.3 GitHub release notes list support for Telegram Bot API 6.6 through 7.1. The `v3.3.8` source contains 7.1-era objects such as boosts, reactions, and giveaways, but it does not represent the Bot API 7.2+ surface as a maintained baseline. Therefore, for this repository's current dependency, the migration should treat Telebot v3 as a Bot API 7.1-era framework.
+
+Telegram's official changelog lists Bot API 10.0 on 2026-05-08 as the current latest Bot API. Compared with Bot API 7.1, the current dependency is behind every official Bot API release from 7.2 through 10.0: 22 changelog entries in total. Important missing areas for implementation context include business account updates and `business_connection_id`, Stars and paid media, private chat topics and message drafts, checklists, managed bots, guest mode, live photos, newer poll media, newer chat administration permissions, and multiple message/reaction management APIs.
+
+`gopkg.in/telebot.v4` currently has beta tags, including `v4.0.0-beta.8` from 2026-05-08, but that is a beta major version and is not the dependency used by this repository. It should not be treated as the current stable baseline for this migration unless the project explicitly decides to evaluate beta Telebot instead of migrating to Telego.
+
+Telego `github.com/mymmrac/telego` latest is `v1.9.0`, published with timestamp `2026-05-13T22:12:22Z`. Its README declares supported Telegram Bot API `v10.0`, and the downloaded source contains Bot API 10.0-era types and methods such as guest-mode fields and `answerGuestQuery`. This makes Telego a suitable target for a current Bot API baseline.
+
+Sources used for this background:
+
+- Telegram official Bot API changelog: `https://core.telegram.org/bots/api-changelog`
+- Telebot releases: `https://github.com/tucnak/telebot/releases`
+- Telego releases: `https://github.com/mymmrac/telego/releases`
+- Module metadata verified with `go list -m -json gopkg.in/telebot.v3@latest`, `go list -m -json gopkg.in/telebot.v4@latest`, and `go list -m -json github.com/mymmrac/telego@latest`
+
 ## Current Telebot Coupling
 
 The current codebase depends on telebot beyond `main.go`. Telebot types and methods are used across command handlers, middleware, utility helpers, Redis message storage, inline mode, sticker download and conversion, voice sending, chat context reconstruction, AI streaming edits, and tests.
@@ -152,7 +171,8 @@ The final `rg` check must have no runtime or test dependency references. Histori
 Confirmed:
 
 - The final state must fully remove telebot.
-- The migration should use Telego `v1.9.0` unless a newer compatible version is selected during implementation.
+- The migration should use Telego `v1.9.0`, which corresponds to Telegram Bot API 10.0, unless a newer compatible version is selected during implementation.
+- The current `gopkg.in/telebot.v3` stable baseline is `v3.3.8`, published on 2024-08-06 and corresponding to a Bot API 7.1-era surface.
 - A project-owned `telegram/` boundary layer is acceptable.
 - The migration must not change bot behavior.
 - Any ambiguous Telego-vs-telebot API behavior must be checked before implementation and confirmed if unclear.
