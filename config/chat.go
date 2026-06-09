@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +86,8 @@ const (
 	defaultAgentMaxSteps    = 12
 	minToolAgentMaxSteps    = 4
 )
+
+var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
 
 // GetFormat get message format
 func (c *ChatOutputFormatConfig) GetFormat() string {
@@ -237,12 +240,70 @@ type SkillConfig struct {
 // AgentConfig defines the agent mode configuration for chatv2
 type AgentConfig struct {
 	Enable     bool                `mapstructure:"enable"`
+	V3         bool                `mapstructure:"v3"`
 	Tools      []string            `mapstructure:"tools"`
 	MaxSteps   int                 `mapstructure:"max_steps"`
 	SubAgents  []*SubAgentConfig   `mapstructure:"subagents"`
 	McpServers []*ToolServerConfig `mapstructure:"mcp_servers"`
 	ToolModels map[string]*Model   `mapstructure:"tool_models"`
 	Skills     []*SkillConfig      `mapstructure:"skills"`
+}
+
+type AgentV3Config struct {
+	Enable        bool                       `mapstructure:"enable"`
+	Model         *Model                     `mapstructure:"model"`
+	SoulPath      string                     `mapstructure:"soul_path"`
+	ContextCache  AgentV3ContextCacheConfig  `mapstructure:"context_cache"`
+	Memory        AgentV3MemoryConfig        `mapstructure:"memory"`
+	Runtime       AgentV3RuntimeConfig       `mapstructure:"runtime"`
+	Tools         AgentV3ToolsConfig         `mapstructure:"tools"`
+	Skills        AgentV3SkillsConfig        `mapstructure:"skills"`
+	Observability AgentV3ObservabilityConfig `mapstructure:"observability"`
+}
+
+type AgentV3ContextCacheConfig struct {
+	Enable               bool   `mapstructure:"enable"`
+	RawTurns             int    `mapstructure:"raw_turns"`
+	SummaryTurns         int    `mapstructure:"summary_turns"`
+	MaxSummaryTokens     int    `mapstructure:"max_summary_tokens"`
+	MaxRawTokens         int    `mapstructure:"max_raw_tokens"`
+	PromptCacheRetention string `mapstructure:"prompt_cache_retention"`
+	RedisTTL             string `mapstructure:"redis_ttl"`
+}
+
+type AgentV3MemoryConfig struct {
+	Enable            bool   `mapstructure:"enable"`
+	Scope             string `mapstructure:"scope"`
+	AllowGlobal       bool   `mapstructure:"allow_global"`
+	SnapshotMaxTokens int    `mapstructure:"snapshot_max_tokens"`
+	WritePolicy       string `mapstructure:"write_policy"`
+}
+
+type AgentV3RuntimeConfig struct {
+	Enable         bool   `mapstructure:"enable"`
+	Mode           string `mapstructure:"mode"`
+	Endpoint       string `mapstructure:"endpoint"`
+	AuthTokenEnv   string `mapstructure:"auth_token_env"`
+	NamespaceScope string `mapstructure:"namespace_scope"`
+	CommandTimeout string `mapstructure:"command_timeout"`
+	MaxOutputChars int    `mapstructure:"max_output_chars"`
+	RequestTimeout string `mapstructure:"request_timeout"`
+}
+
+type AgentV3ToolsConfig struct {
+	ExposeOnly []string `mapstructure:"expose_only"`
+}
+
+type AgentV3SkillsConfig struct {
+	Mode string `mapstructure:"mode"`
+	Root string `mapstructure:"root"`
+}
+
+type AgentV3ObservabilityConfig struct {
+	Enable         bool   `mapstructure:"enable"`
+	JSONLPath      string `mapstructure:"jsonl_path"`
+	CaptureContent string `mapstructure:"capture_content"`
+	PreviewChars   int    `mapstructure:"preview_chars"`
 }
 
 // GetMaxSteps returns the max tool call steps for the main agent
@@ -283,6 +344,16 @@ func (c *AgentConfig) usesTools() bool {
 // IsAgentEnabled returns true if chatv2 agent mode is enabled for this chat config
 func (ccs *ChatConfigSingle) IsAgentEnabled() bool {
 	return ccs.Agent != nil && ccs.Agent.Enable
+}
+
+func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
+	if ccs == nil || !ccs.IsAgentEnabled() {
+		return false
+	}
+	if ccs.Agent != nil && ccs.Agent.V3 {
+		return true
+	}
+	return BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -337,6 +408,180 @@ func (c *McpoConfig) readConfig() {
 	if err != nil {
 		log.Fatal("cannot parse mcpo config", zap.Error(err))
 	}
+}
+
+func (c *AgentV3Config) readConfig() {
+	err := viper.UnmarshalKey("agent_v3", c, viper.DecodeHook(DispatchFor()))
+	if err != nil {
+		zap.L().Warn("cannot parse agent_v3 config", zap.Error(err))
+	}
+}
+
+func (c *AgentV3Config) checkConfig() {
+	if c == nil {
+		return
+	}
+	if c.ContextCache.RawTurns <= 0 {
+		c.ContextCache.RawTurns = 12
+	}
+	if c.ContextCache.SummaryTurns <= 0 {
+		c.ContextCache.SummaryTurns = 80
+	}
+	if c.ContextCache.MaxSummaryTokens <= 0 {
+		c.ContextCache.MaxSummaryTokens = 2000
+	}
+	if c.ContextCache.MaxRawTokens <= 0 {
+		c.ContextCache.MaxRawTokens = 6000
+	}
+	if c.ContextCache.RedisTTL == "" {
+		c.ContextCache.RedisTTL = "30d"
+	}
+	if c.Memory.Scope == "" {
+		c.Memory.Scope = "group"
+	}
+	if c.Memory.Scope != "group" {
+		zap.L().Warn("unsupported agent_v3 memory scope, reset to group", zap.String("scope", c.Memory.Scope))
+		c.Memory.Scope = "group"
+	}
+	if c.Memory.AllowGlobal {
+		zap.L().Warn("agent_v3 memory allow_global is not supported in v3 first release, reset to false")
+		c.Memory.AllowGlobal = false
+	}
+	if c.Memory.SnapshotMaxTokens <= 0 {
+		c.Memory.SnapshotMaxTokens = 2000
+	}
+	if c.Memory.WritePolicy == "" {
+		c.Memory.WritePolicy = "explicit_or_admin"
+	}
+	if c.Memory.WritePolicy != "explicit_or_admin" {
+		zap.L().Warn("unsupported agent_v3 memory write_policy, reset to explicit_or_admin", zap.String("write_policy", c.Memory.WritePolicy))
+		c.Memory.WritePolicy = "explicit_or_admin"
+	}
+	if c.Runtime.Mode == "" {
+		c.Runtime.Mode = "remote_http"
+	}
+	if c.Runtime.Mode != "remote_http" {
+		zap.L().Warn("unsupported agent_v3 runtime mode, reset to remote_http", zap.String("mode", c.Runtime.Mode))
+		c.Runtime.Mode = "remote_http"
+	}
+	if c.Runtime.Endpoint == "" {
+		c.Runtime.Endpoint = "http://agent-runtime:8080"
+	}
+	if c.Runtime.NamespaceScope == "" {
+		c.Runtime.NamespaceScope = "group"
+	}
+	if c.Runtime.NamespaceScope != "group" {
+		zap.L().Warn("unsupported agent_v3 runtime namespace_scope, reset to group", zap.String("namespace_scope", c.Runtime.NamespaceScope))
+		c.Runtime.NamespaceScope = "group"
+	}
+	if c.Runtime.CommandTimeout == "" {
+		c.Runtime.CommandTimeout = "120s"
+	}
+	if c.Runtime.RequestTimeout == "" {
+		c.Runtime.RequestTimeout = c.Runtime.CommandTimeout
+	}
+	if c.Runtime.MaxOutputChars <= 0 {
+		c.Runtime.MaxOutputChars = 12000
+	}
+	if !sameStringSet(c.Tools.ExposeOnly, agentV3FixedTools) {
+		if len(c.Tools.ExposeOnly) > 0 {
+			zap.L().Warn("agent_v3 tools.expose_only must stay fixed to runtime tools, reset to default",
+				zap.Strings("configured", c.Tools.ExposeOnly),
+				zap.Strings("expected", agentV3FixedTools),
+			)
+		}
+		c.Tools.ExposeOnly = append([]string(nil), agentV3FixedTools...)
+	}
+	if c.Skills.Mode == "" {
+		c.Skills.Mode = "runtime_filesystem"
+	}
+	if c.Skills.Mode != "runtime_filesystem" {
+		zap.L().Warn("unsupported agent_v3 skills mode, reset to runtime_filesystem", zap.String("mode", c.Skills.Mode))
+		c.Skills.Mode = "runtime_filesystem"
+	}
+	if c.Skills.Root == "" {
+		c.Skills.Root = "/skills"
+	}
+	if c.Skills.Root != "/skills" {
+		zap.L().Warn("agent_v3 skills.root is a runtime virtual path and must be /skills, reset to /skills", zap.String("root", c.Skills.Root))
+		c.Skills.Root = "/skills"
+	}
+	if c.Observability.JSONLPath == "" {
+		c.Observability.JSONLPath = "logs/agentv3-traces.jsonl"
+	}
+	if c.Observability.CaptureContent == "" {
+		c.Observability.CaptureContent = "preview"
+	}
+	if c.Observability.PreviewChars <= 0 {
+		c.Observability.PreviewChars = 512
+	}
+}
+
+func (c *AgentV3Config) ContextCacheTTL() time.Duration {
+	if c == nil {
+		return 30 * 24 * time.Hour
+	}
+	return parseFlexibleDuration(c.ContextCache.RedisTTL, 30*24*time.Hour)
+}
+
+func (c *AgentV3Config) RuntimeCommandTimeout() time.Duration {
+	if c == nil {
+		return 120 * time.Second
+	}
+	return parseFlexibleDuration(c.Runtime.CommandTimeout, 120*time.Second)
+}
+
+func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
+	if c == nil {
+		return 120 * time.Second
+	}
+	return parseFlexibleDuration(c.Runtime.RequestTimeout, c.RuntimeCommandTimeout())
+}
+
+func (c *AgentV3Config) EffectiveModel(fallback *Model) *Model {
+	if c != nil && c.Model != nil {
+		return c.Model
+	}
+	return fallback
+}
+
+func parseFlexibleDuration(raw string, fallback time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(raw); err == nil {
+		return d
+	}
+	if strings.HasSuffix(raw, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(raw, "d"))
+		if err == nil && n > 0 {
+			return time.Duration(n) * 24 * time.Hour
+		}
+	}
+	return fallback
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, item := range a {
+		seen[item]++
+	}
+	for _, item := range b {
+		seen[item]--
+		if seen[item] < 0 {
+			return false
+		}
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Tool server type constants define the supported connection protocol for tool servers.

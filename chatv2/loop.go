@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -137,7 +138,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 	history := append([]*schema.Message{}, input...)
 	history = sanitizeHistory(history)
 	if len(a.invokables) > 0 {
-		history = injectLoopDirectives(history)
+		history = injectLoopDirectives(ctx, history)
 	}
 
 	dupCounts := map[string]int{}
@@ -185,7 +186,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
-		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
+		if marker := buildStageMarker(ctx, assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
 			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
@@ -213,8 +214,23 @@ func (a *CustomAgent) streamOneTurn(
 	input []*schema.Message,
 	sw *schema.StreamWriter[*schema.Message],
 ) (*schema.Message, []*schema.Message, error) {
-	stream, err := mdl.Stream(ctx, input)
+	var opts []model.Option
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.PromptCacheKey != "" {
+		opts = append(opts, einoopenai.WithExtraFields(map[string]any{
+			"prompt_cache_key": tc.V3.PromptCacheKey,
+		}))
+	}
+	var finishSpan func(error, map[string]any)
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		finishSpan = tc.V3.Trace.StartSpan("model_stream", map[string]any{
+			"message_count": len(input),
+		})
+	}
+	stream, err := mdl.Stream(ctx, input, opts...)
 	if err != nil {
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return nil, nil, fmt.Errorf("model stream: %w", err)
 	}
 	defer stream.Close()
@@ -227,6 +243,9 @@ func (a *CustomAgent) streamOneTurn(
 			break
 		}
 		if recvErr != nil {
+			if finishSpan != nil {
+				finishSpan(recvErr, nil)
+			}
 			return nil, nil, fmt.Errorf("model stream recv: %w", recvErr)
 		}
 		if chunk == nil {
@@ -253,18 +272,43 @@ func (a *CustomAgent) streamOneTurn(
 	}
 
 	if len(chunks) == 0 {
+		if finishSpan != nil {
+			finishSpan(nil, map[string]any{"empty": true})
+		}
 		return nil, nil, nil
 	}
 	merged, err := schema.ConcatMessages(chunks)
 	if err != nil {
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return nil, nil, fmt.Errorf("concat turn chunks: %w", err)
+	}
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		tc.V3.Trace.RecordUsage(merged)
+		if finishSpan != nil {
+			attrs := map[string]any{}
+			if merged.ResponseMeta != nil && merged.ResponseMeta.Usage != nil {
+				attrs["prompt_tokens"] = merged.ResponseMeta.Usage.PromptTokens
+				attrs["cached_tokens"] = merged.ResponseMeta.Usage.PromptTokenDetails.CachedTokens
+			}
+			if preview, ok := agentV3TracePreview(merged.Content); ok {
+				attrs["output_preview"] = preview
+			}
+			finishSpan(nil, attrs)
+		}
+	} else if finishSpan != nil {
+		finishSpan(nil, nil)
 	}
 	return merged, reasoningChunks, nil
 }
 
-func buildStageMarker(calls []schema.ToolCall) string {
+func buildStageMarker(ctx context.Context, calls []schema.ToolCall) string {
 	if len(calls) == 0 {
 		return ""
+	}
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
+		return buildAgentV3StageMarker(calls)
 	}
 	names := make([]string, 0, len(calls))
 	seen := map[string]bool{}
@@ -282,6 +326,63 @@ func buildStageMarker(calls []schema.ToolCall) string {
 	return "▸ 调用工具: " + strings.Join(names, ", ")
 }
 
+func buildAgentV3StageMarker(calls []schema.ToolCall) string {
+	labels := make([]string, 0, len(calls))
+	seen := map[string]bool{}
+	for _, call := range calls {
+		label := agentV3ToolStageLabel(call)
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		labels = append(labels, label)
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	if len(labels) == 1 {
+		return labels[0]
+	}
+	return strings.Join(labels, "\n")
+}
+
+func agentV3ToolStageLabel(call schema.ToolCall) string {
+	path, command := agentV3ToolPathAndCommand(call)
+	switch call.Function.Name {
+	case "read":
+		if strings.HasPrefix(path, "/skills/") {
+			return "正在读取 skill 文档"
+		}
+		return "正在读取 runtime 文件"
+	case "grep":
+		if path == "" || path == "/skills" || strings.HasPrefix(path, "/skills/") {
+			return "正在搜索 skills"
+		}
+		return "正在搜索 runtime 文件"
+	case "write":
+		return "正在写入 runtime 文件"
+	case "edit":
+		return "正在编辑 runtime 文件"
+	case "bash":
+		if strings.Contains(command, "/skills/") {
+			return "正在执行 skill CLI"
+		}
+		return "正在执行 bash 命令"
+	default:
+		return ""
+	}
+}
+
+func agentV3ToolPathAndCommand(call schema.ToolCall) (string, string) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return "", ""
+	}
+	path, _ := args["path"].(string)
+	command, _ := args["command"].(string)
+	return strings.TrimSpace(path), strings.TrimSpace(command)
+}
+
 func shouldEmitStageMarker(ctx context.Context) bool {
 	tc := GetTurnContext(ctx)
 	if tc == nil {
@@ -295,6 +396,18 @@ func shouldEmitStageMarker(ctx context.Context) bool {
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {
 	name := tc.Function.Name
 	args := tc.Function.Arguments
+	var finishSpan func(error, map[string]any)
+	if turn := GetTurnContext(ctx); turn != nil && turn.V3 != nil && turn.V3.Trace != nil {
+		turn.V3.Trace.RecordToolCall()
+		attrs := map[string]any{
+			"tool":      name,
+			"args_hash": hashString(args),
+		}
+		if preview, ok := agentV3TracePreview(args); ok {
+			attrs["args_preview"] = preview
+		}
+		finishSpan = turn.V3.Trace.StartSpan("tool_call", attrs)
+	}
 
 	t, ok := a.invokables[name]
 	if !ok {
@@ -303,6 +416,10 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			zap.String("tool", name),
 			zap.Strings("available", a.toolNames),
 		)
+		err := fmt.Errorf("unknown tool %q", name)
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return schema.ToolMessage(
 			fmt.Sprintf(
 				"[Tool Error] Tool %q does not exist. Available tools: %s. Please use one of the available tool names exactly.",
@@ -324,6 +441,13 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"[Tool Error] %s\nPlease try a different approach or adjust parameters.",
 			err.Error(),
 		)
+	}
+	if finishSpan != nil {
+		attrs := map[string]any{"result_chars": len(result)}
+		if preview, ok := agentV3TracePreview(result); ok {
+			attrs["result_preview"] = preview
+		}
+		finishSpan(err, attrs)
 	}
 
 	return schema.ToolMessage(result, tc.ID, schema.WithToolName(name))
@@ -520,15 +644,29 @@ const loopDirectiveText = "工具调用纪律：\n" +
 	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
 	"8. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
 
-func injectLoopDirectives(history []*schema.Message) []*schema.Message {
-	directive := schema.SystemMessage(loopDirectiveText)
+func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*schema.Message {
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
+		return injectDirectiveText(history, agentV3LoopDirectiveText)
+	}
+	return injectDirectiveText(history, loopDirectiveText)
+}
+
+const agentV3LoopDirectiveText = "工具调用纪律：\n" +
+	"1. 每一轮回复要么调用 read/grep/write/edit/bash 推进任务，要么直接给出最终答案，二者必择其一。\n" +
+	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
+	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
+	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
+	"5. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。"
+
+func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
+	directive := schema.SystemMessage(text)
 	for i, msg := range history {
 		if msg != nil && msg.Role == schema.System {
 			merged := *msg
 			if merged.Content == "" {
-				merged.Content = loopDirectiveText
+				merged.Content = text
 			} else {
-				merged.Content = msg.Content + "\n\n" + loopDirectiveText
+				merged.Content = msg.Content + "\n\n" + text
 			}
 			out := make([]*schema.Message, len(history))
 			copy(out, history)

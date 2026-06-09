@@ -92,3 +92,34 @@ func TestAgentGetMaxSteps(t *testing.T) {
 		assert.Equal(t, defaultSubAgentMaxSteps, (&SubAgentConfig{}).GetMaxSteps())
 	})
 }
+
+func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
+	cfg := &AgentV3Config{
+		Memory: AgentV3MemoryConfig{
+			Scope:       "global",
+			AllowGlobal: true,
+			WritePolicy: "model_auto",
+		},
+		Runtime: AgentV3RuntimeConfig{
+			Mode:           "host",
+			NamespaceScope: "global",
+		},
+		Tools: AgentV3ToolsConfig{
+			ExposeOnly: []string{"read", "bash", "mcp_search"},
+		},
+		Skills: AgentV3SkillsConfig{
+			Mode: "inline",
+			Root: "/tmp/skills",
+		},
+	}
+	cfg.checkConfig()
+
+	assert.Equal(t, "group", cfg.Memory.Scope)
+	assert.False(t, cfg.Memory.AllowGlobal)
+	assert.Equal(t, "explicit_or_admin", cfg.Memory.WritePolicy)
+	assert.Equal(t, "remote_http", cfg.Runtime.Mode)
+	assert.Equal(t, "group", cfg.Runtime.NamespaceScope)
+	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, cfg.Tools.ExposeOnly)
+	assert.Equal(t, "runtime_filesystem", cfg.Skills.Mode)
+	assert.Equal(t, "/skills", cfg.Skills.Root)
+}

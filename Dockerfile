@@ -28,6 +28,7 @@ COPY --from=ghcr.io/hugefiver/static-ffmpeg:latest /ffmpeg /usr/local/bin/ffmpeg
 WORKDIR /app
 COPY --from=buildenv /go/src/app/got .
 COPY --from=buildenv /go/src/app/config.yaml .
+COPY --from=buildenv /go/src/app/docs ./docs
 COPY --from=buildenv /go/src/app/dict/dictionary.txt .
 COPY --from=buildenv /go/src/app/dict/stop_words.txt .
 

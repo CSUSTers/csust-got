@@ -168,6 +168,11 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/getvoice", base.GetVoice)
+	bot.Handle("/memory", chatv2.MemoryCommand)
+	bot.Handle("/trace_last", chatv2.TraceLastCommand)
+	bot.Handle("/context_cache", chatv2.ContextCacheCommand)
+	bot.Handle("/runtime_status", chatv2.RuntimeStatusCommand)
+	bot.Handle("/runtime_reset", chatv2.RuntimeResetCommand)
 
 	// gacha handler
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)

@@ -40,6 +40,8 @@ const softTurnGuidance = "你已经进行了 %d 轮工具调用。如果你认�
 
 const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
+const agentV3MinToolMaxSteps = 4
+
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
 	if modelCfg == nil {
@@ -147,10 +149,38 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, fmt.Errorf("%w for chat %q", errAgentConfigNil, chatCfg.Name)
 	}
 
+	modelCfg := chatCfg.Model
+	if chatCfg.IsAgentV3Enabled() && config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		modelCfg = config.BotConfig.AgentV3.EffectiveModel(chatCfg.Model)
+	}
+
 	// Build the main model
-	mainModel, err := buildModel(ctx, chatCfg.Model)
+	mainModel, err := buildModel(ctx, modelCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build model for chat %q: %w", chatCfg.Name, err)
+	}
+
+	if chatCfg.IsAgentV3Enabled() {
+		allTools := wrapToolsWithErrorHandler(buildAgentV3Tools())
+		maxSteps := agentCfg.GetMaxSteps()
+		if maxSteps < agentV3MinToolMaxSteps {
+			maxSteps = agentV3MinToolMaxSteps
+		}
+		agent, err := NewCustomAgent(ctx, &CustomAgentConfig{
+			Name:     chatCfg.Name,
+			Model:    mainModel,
+			Tools:    allTools,
+			MaxSteps: maxSteps,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to create agent v3 for chat %q: %w", chatCfg.Name, err)
+		}
+		zap.L().Info("chatv2/agent: built agent v3",
+			zap.String("chat", chatCfg.Name),
+			zap.Int("total_tools", len(allTools)),
+			zap.Int("max_steps", maxSteps),
+		)
+		return agent, nil
 	}
 
 	// Merge skill configurations into effective tools/mcpServers/toolModels
@@ -384,13 +414,18 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 		return nil, fmt.Errorf("failed to build main agent for %q: %w", chatCfg.Name, err)
 	}
 
+	skillAddons := GetSkillPromptAddons(chatCfg.Agent)
+	if chatCfg.IsAgentV3Enabled() {
+		skillAddons = ""
+	}
+
 	return &CompiledChat{
 		Name:              chatCfg.Name,
 		Config:            chatCfg,
 		Agent:             agent,
 		SystemTemplate:    systemTpl,
 		PromptTemplate:    promptTpl,
-		SkillPromptAddons: GetSkillPromptAddons(chatCfg.Agent),
+		SkillPromptAddons: skillAddons,
 	}, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -239,6 +240,27 @@ func TestChatConfigV1(t *testing.T) {
 	req.Greater(len(*BotConfig.Chats), 0)
 	req.NotNil((*BotConfig.Chats)[0].Model)
 	req.NotEmpty((*BotConfig.Chats)[0].Model.Model)
+}
+
+func TestAgentV3Config(t *testing.T) {
+	req := testInit(t)
+	configFile := isolatedConfigFile(t)
+
+	BotConfig = NewBotConfig()
+	InitViper(configFile, testEnvPrefix)
+	readConfig()
+	BotConfig.AgentV3.checkConfig()
+	defer viper.Reset()
+
+	req.NotNil(BotConfig.AgentV3)
+	req.False(BotConfig.AgentV3.Enable)
+	req.Equal("docs/agent_v3_soul.md", BotConfig.AgentV3.SoulPath)
+	req.True(BotConfig.AgentV3.ContextCache.Enable)
+	req.Equal(12, BotConfig.AgentV3.ContextCache.RawTurns)
+	req.Equal("http://agent-runtime:8080", BotConfig.AgentV3.Runtime.Endpoint)
+	req.Equal([]string{"read", "grep", "write", "edit", "bash"}, BotConfig.AgentV3.Tools.ExposeOnly)
+	req.Equal(30*24*time.Hour, BotConfig.AgentV3.ContextCacheTTL())
+	req.Equal(120*time.Second, BotConfig.AgentV3.RuntimeCommandTimeout())
 }
 
 func TestCustomConfig(t *testing.T) {

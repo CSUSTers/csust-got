@@ -110,18 +110,45 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	}
 	ctx = WithTurnContext(ctx, tc)
 
-	// Load conversation history
-	history, err := LoadHistory(tc.Bot, msg, chatCfg.MessageContext)
-	if err != nil {
-		zap.L().Warn("chatv2: failed to load history", zap.Error(err))
-		history = &RichHistory{}
-	}
+	var messages []*schema.Message
+	if chatCfg.IsAgentV3Enabled() {
+		var err error
+		messages, err = prepareAgentV3Turn(ctx, compiled, tc)
+		if err != nil {
+			if tc.V3 != nil && tc.V3.Trace != nil {
+				tc.V3.Trace.SetError(err)
+				tc.V3.Trace.Finish(ctx, tc.V3.Scope)
+			}
+			zap.L().Error("chatv2: failed to build agent v3 messages", zap.Error(err))
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
+		defer tc.V3.Trace.Finish(ctx, tc.V3.Scope)
+		if err := maybeRememberExplicitInput(ctx, tc, input); err != nil {
+			tc.V3.Trace.SetError(err)
+			zap.L().Warn("chatv2: failed to write agent v3 explicit memory",
+				zap.String("run_id", tc.RunID),
+				zap.Error(err),
+			)
+		}
+		zap.L().Info("chatv2: agent v3 turn started",
+			zap.String("run_id", tc.RunID),
+			zap.String("agent", chatCfg.Name),
+			zap.Int64("chat_id", tc.ChatID),
+		)
+	} else {
+		// Load conversation history
+		history, err := LoadHistory(tc.Bot, msg, chatCfg.MessageContext)
+		if err != nil {
+			zap.L().Warn("chatv2: failed to load history", zap.Error(err))
+			history = &RichHistory{}
+		}
 
-	// Build messages for the agent
-	messages, err := BuildMessages(compiled, tc, history)
-	if err != nil {
-		zap.L().Error("chatv2: failed to build messages", zap.Error(err))
-		return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		// Build messages for the agent
+		messages, err = BuildMessages(compiled, tc, history)
+		if err != nil {
+			zap.L().Error("chatv2: failed to build messages", zap.Error(err))
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
 	}
 
 	// Send typing indicator
@@ -159,6 +186,9 @@ func handleStreaming(
 	tc := GetTurnContext(ctx)
 	reader, err := compiled.Agent.Stream(ctx, messages)
 	if err != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(err)
+		}
 		zap.L().Error("chatv2: agent stream failed", zap.Error(err))
 		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
@@ -166,6 +196,9 @@ func handleStreaming(
 	tc.streamingStarted.Store(true)
 	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg())
 	if streamErr != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(streamErr)
+		}
 		zap.L().Error("chatv2: streaming failed", zap.Error(streamErr))
 		if response == "" {
 			return sendAgentErrorMessage(tbCtx, chatCfg, streamErr)
@@ -176,6 +209,12 @@ func handleStreaming(
 	if response != "" && sentMsg != nil {
 		sentMsg.Text = response
 		SaveResponse(sentMsg, tbCtx.Message())
+		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sentMsg.ID); err != nil {
+			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+				tc.V3.Trace.SetError(err)
+			}
+			zap.L().Warn("chatv2: failed to save agent v3 turn", zap.Error(err))
+		}
 	}
 
 	return streamErr
@@ -192,6 +231,9 @@ func handleNonStreaming(
 	tc := GetTurnContext(ctx)
 	result, err := compiled.Agent.Generate(ctx, messages)
 	if err != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(err)
+		}
 		zap.L().Error("chatv2: agent generate failed", zap.Error(err))
 		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
@@ -202,6 +244,9 @@ func handleNonStreaming(
 
 	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg())
 	if sendErr != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(sendErr)
+		}
 		zap.L().Error("chatv2: failed to send response", zap.Error(sendErr))
 		return sendErr
 	}
@@ -209,6 +254,12 @@ func handleNonStreaming(
 	if sent != nil {
 		sent.Text = response
 		SaveResponse(sent, tbCtx.Message())
+		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sent.ID); err != nil {
+			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+				tc.V3.Trace.SetError(err)
+			}
+			zap.L().Warn("chatv2: failed to save agent v3 turn", zap.Error(err))
+		}
 	}
 
 	return nil

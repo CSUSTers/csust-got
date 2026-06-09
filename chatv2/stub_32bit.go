@@ -21,3 +21,11 @@ func Chat(_ tb.Context, _ *config.ChatConfigSingle, _ *config.ChatTrigger) error
 
 // HasCompiledChat always returns false on 386.
 func HasCompiledChat(_ string) bool { return false }
+
+func MemoryCommand(_ tb.Context) error { return nil }
+
+func TraceLastCommand(_ tb.Context) error { return nil }
+
+func ContextCacheCommand(_ tb.Context) error { return nil }
+
+func RuntimeStatusCommand(_ tb.Context) error { return nil }
