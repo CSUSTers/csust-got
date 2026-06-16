@@ -8,7 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -25,6 +25,16 @@ import (
 
 const agentV3Platform = "tg"
 
+var (
+	errAgentV3DynamicSystemPrompt    = errors.New("agent v3 system_prompt references dynamic field")
+	errAgentV3ConfigNil              = errors.New("agent v3 config is nil")
+	errAgentV3RuntimeDisabled        = errors.New("agent v3 runtime is disabled")
+	errAgentV3RuntimeModeUnsupported = errors.New("agent v3 runtime mode is unsupported")
+	errAgentV3SkillsModeUnsupported  = errors.New("agent v3 skills mode is unsupported")
+	errAgentV3SkillsRootUnsupported  = errors.New("agent v3 skills root is unsupported")
+)
+
+// AgentV3TurnState stores per-turn agent-v3 context metadata.
 type AgentV3TurnState struct {
 	Scope                 orm.AgentV3Scope
 	RunID                 string
@@ -105,11 +115,13 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) 
 	toolDefs := agentV3ToolDefinitionsText()
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
-	prefixHash := hashString(strings.Join([]string{soulHash, memoryHash, toolDefsHash}, ":"))
+	richRules := agentV3RichMessageSkillContract(tc.Config.IsAgentV3RichEnabled())
+	richRulesHash := hashString(richRules)
+	prefixHash := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, richRulesHash)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
 	promptCacheKey := ""
-	prefixText := buildAgentV3StablePrefix(soul, memoryText, toolDefs)
+	prefixText := buildAgentV3StablePrefix(soul, memoryText, toolDefs, richRules)
 
 	cacheHit := false
 	finishCacheSpan := trace.StartSpan("context_cache", map[string]any{
@@ -271,7 +283,7 @@ func renderAgentV3Soul(cc *CompiledChat, tc *TurnContext) (string, error) {
 		templateText = cc.SystemTemplate.Tree.Root.String()
 	}
 	if field := agentV3DynamicSystemField(templateText); field != "" {
-		return "", fmt.Errorf("agent v3 system_prompt references dynamic field %s; move it to prompt_template or dynamic suffix", field)
+		return "", fmt.Errorf("%w %s; move it to prompt_template or dynamic suffix", errAgentV3DynamicSystemPrompt, field)
 	}
 	pd := PromptData{}
 	if tc.BotUser != nil {
@@ -284,7 +296,11 @@ func renderAgentV3Soul(cc *CompiledChat, tc *TurnContext) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-func buildAgentV3StablePrefix(soul, memory, toolDefs string) string {
+func buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, richRulesHash string) string {
+	return hashString(strings.Join([]string{soulHash, memoryHash, toolDefsHash, richRulesHash}, ":"))
+}
+
+func buildAgentV3StablePrefix(soul, memory, toolDefs, richRules string) string {
 	var parts []string
 	if strings.TrimSpace(soul) != "" {
 		parts = append(parts, "<soul>\n"+strings.TrimSpace(soul)+"\n</soul>")
@@ -295,12 +311,31 @@ func buildAgentV3StablePrefix(soul, memory, toolDefs string) string {
 		parts = append(parts, "<group_memory_snapshot>\n(empty)\n</group_memory_snapshot>")
 	}
 	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules()+"\n</runtime_and_skill_rules>")
+	if strings.TrimSpace(richRules) != "" {
+		parts = append(parts, "<rich_message_skill>\n"+strings.TrimSpace(richRules)+"\n</rich_message_skill>")
+	}
 	parts = append(parts, "<tool_definitions>\n"+toolDefs+"\n</tool_definitions>")
 	return strings.Join(parts, "\n\n")
 }
 
+func agentV3RichMessageSkillContract(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return strings.Join([]string{
+		"Telegram Rich Message output is available for this chat.",
+		"Use normal plain text when rich layout is unnecessary.",
+		"When rich output is useful, make your final answer exactly one <telegram_rich_message> envelope and no surrounding prose.",
+		"The envelope body must be raw Telegram Rich Markdown, not JSON, not HTML, and not an InputRichMessage object.",
+		"Do not emit mode fields, fallback fields, explicit block AST payloads, media uploads, or sendRichMessageDraft instructions.",
+		"Rich Markdown may use supported structural syntax such as headings, lists, task lists, quotes, code blocks, tables, and details.",
+		"The bot derives plain fallback text from your Rich Markdown, so keep the Markdown semantically complete without relying on hidden metadata.",
+		"Example: <telegram_rich_message># Title\n\n**Body**</telegram_rich_message>",
+	}, "\n")
+}
+
 func agentV3RuntimeSkillRules() string {
-	skillRoot := "/skills"
+	skillRoot := agentV3SkillsRootDefault
 	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil && config.BotConfig.AgentV3.Skills.Root != "" {
 		skillRoot = config.BotConfig.AgentV3.Skills.Root
 	}
@@ -470,7 +505,7 @@ func rebuildAgentV3MemorySnapshot(ctx context.Context, scope orm.AgentV3Scope, t
 }
 
 func agentV3ScopeFromContext(ctx tb.Context) orm.AgentV3Scope {
-	bot := "bot"
+	bot := agentV3DefaultBotName
 	if ctx != nil && ctx.Bot() != nil && ctx.Bot().Me != nil && ctx.Bot().Me.Username != "" {
 		bot = ctx.Bot().Me.Username
 	}
@@ -485,20 +520,13 @@ func agentV3BotName(tc *TurnContext) string {
 	if tc != nil && tc.BotUser != nil && tc.BotUser.Username != "" {
 		return tc.BotUser.Username
 	}
-	return "bot"
-}
-
-func agentV3Namespace(tc *TurnContext) string {
-	if tc == nil {
-		return agentV3NamespaceFromScope(orm.AgentV3Scope{Bot: "bot", Platform: agentV3Platform})
-	}
-	return agentV3NamespaceFromScope(orm.AgentV3Scope{Bot: agentV3BotName(tc), Platform: agentV3Platform, ChatID: tc.ChatID})
+	return agentV3DefaultBotName
 }
 
 func agentV3NamespaceFromScope(scope orm.AgentV3Scope) string {
 	bot := scope.Bot
 	if bot == "" {
-		bot = "bot"
+		bot = agentV3DefaultBotName
 	}
 	platform := scope.Platform
 	if platform == "" {
@@ -649,29 +677,21 @@ func hashString(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func hashJSON(v any) string {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return hashString(fmt.Sprint(v))
-	}
-	return hashString(string(data))
-}
-
 func validateAgentV3RuntimeConfig(cfg *config.AgentV3Config) error {
 	if cfg == nil {
-		return fmt.Errorf("agent v3 config is nil")
+		return errAgentV3ConfigNil
 	}
 	if !cfg.Runtime.Enable {
-		return fmt.Errorf("agent v3 runtime is disabled")
+		return errAgentV3RuntimeDisabled
 	}
-	if cfg.Runtime.Mode != "" && cfg.Runtime.Mode != "remote_http" {
-		return fmt.Errorf("agent v3 runtime mode %q is unsupported; expected remote_http", cfg.Runtime.Mode)
+	if cfg.Runtime.Mode != "" && cfg.Runtime.Mode != agentV3RuntimeModeRemoteHTTP {
+		return fmt.Errorf("%w: %q; expected %s", errAgentV3RuntimeModeUnsupported, cfg.Runtime.Mode, agentV3RuntimeModeRemoteHTTP)
 	}
-	if cfg.Skills.Mode != "" && cfg.Skills.Mode != "runtime_filesystem" {
-		return fmt.Errorf("agent v3 skills mode %q is unsupported; expected runtime_filesystem", cfg.Skills.Mode)
+	if cfg.Skills.Mode != "" && cfg.Skills.Mode != agentV3SkillsModeRuntimeFilesystem {
+		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsModeUnsupported, cfg.Skills.Mode, agentV3SkillsModeRuntimeFilesystem)
 	}
-	if cfg.Skills.Root != "" && cfg.Skills.Root != "/skills" {
-		return fmt.Errorf("agent v3 skills root %q is unsupported; expected /skills", cfg.Skills.Root)
+	if cfg.Skills.Root != "" && cfg.Skills.Root != agentV3SkillsRootDefault {
+		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsRootUnsupported, cfg.Skills.Root, agentV3SkillsRootDefault)
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	tools := buildAgentV3Tools()
 	require.Len(t, tools, 5)
 
-	var names []string
+	names := make([]string, 0, len(tools))
 	for _, item := range tools {
 		info, err := item.Info(t.Context())
 		require.NoError(t, err)
@@ -306,4 +306,37 @@ func TestAgentV3TraceUsageIsAccumulated(t *testing.T) {
 	}}})
 	assert.Equal(t, 17, trace.PromptTokens)
 	assert.Equal(t, 6, trace.CachedTokens)
+}
+
+func TestAgentV3RichMessageRulesAreGated(t *testing.T) {
+	assert.Empty(t, agentV3RichMessageSkillContract(false))
+
+	enabled := agentV3RichMessageSkillContract(true)
+	assert.Contains(t, enabled, "telegram_rich_message")
+	assert.Contains(t, enabled, "raw Telegram Rich Markdown")
+	assert.Contains(t, enabled, "not JSON")
+	assert.Contains(t, enabled, "Do not emit mode fields")
+	assert.Contains(t, enabled, "headings, lists, task lists")
+}
+
+func TestBuildAgentV3StablePrefixIncludesRichContractOnlyWhenProvided(t *testing.T) {
+	withoutRich := buildAgentV3StablePrefix("soul", "memory", "tools", "")
+	assert.NotContains(t, withoutRich, "<rich_message_skill>")
+	assert.Contains(t, withoutRich, "<tool_definitions>")
+
+	withRich := buildAgentV3StablePrefix("soul", "memory", "tools", "rich rules")
+	assert.Contains(t, withRich, "<rich_message_skill>\nrich rules\n</rich_message_skill>")
+	assert.Contains(t, withRich, "<tool_definitions>")
+	assert.Less(t, strings.Index(withRich, "<rich_message_skill>"), strings.Index(withRich, "<tool_definitions>"))
+}
+
+func TestBuildAgentV3PrefixHashSeparatesRichGate(t *testing.T) {
+	soulHash := hashString("soul")
+	memoryHash := hashString("memory")
+	toolDefsHash := hashString("tools")
+	withoutRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(""))
+	withRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(agentV3RichMessageSkillContract(true)))
+
+	assert.NotEqual(t, withoutRich, withRich)
+	assert.Equal(t, withoutRich, buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString("")))
 }
