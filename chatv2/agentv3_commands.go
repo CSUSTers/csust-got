@@ -15,6 +15,7 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
+// MemoryCommand handles agent-v3 memory management commands.
 func MemoryCommand(ctx tb.Context) error {
 	scope := agentV3ScopeFromContext(ctx)
 	payload := agentV3CommandPayload(ctx)
@@ -77,6 +78,7 @@ func MemoryCommand(ctx tb.Context) error {
 	}
 }
 
+// TraceLastCommand shows the latest agent-v3 trace summary.
 func TraceLastCommand(ctx tb.Context) error {
 	if !canManageAgentV3Memory(ctx) {
 		return ctx.Reply("只有管理员可以查看 agent-v3 trace。")
@@ -92,6 +94,7 @@ func TraceLastCommand(ctx tb.Context) error {
 	return replyAgentV3Pre(ctx, string(data))
 }
 
+// ContextCacheCommand shows the latest agent-v3 context cache summary.
 func ContextCacheCommand(ctx tb.Context) error {
 	if !canManageAgentV3Memory(ctx) {
 		return ctx.Reply("只有管理员可以查看 context cache。")
@@ -136,6 +139,7 @@ func agentV3TraceSpanAttr(summary *orm.AgentV3TraceSummary, spanName, attrName s
 	return nil, false
 }
 
+// RuntimeStatusCommand shows agent-v3 remote runtime status.
 func RuntimeStatusCommand(ctx tb.Context) error {
 	if !canManageAgentV3Memory(ctx) {
 		return ctx.Reply("只有管理员可以查看 runtime 状态。")
@@ -156,6 +160,7 @@ func RuntimeStatusCommand(ctx tb.Context) error {
 	return replyAgentV3Pre(ctx, string(data))
 }
 
+// RuntimeResetCommand resets this chat's agent-v3 runtime workspace.
 func RuntimeResetCommand(ctx tb.Context) error {
 	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil {
 		return ctx.Reply("agent_v3 未配置。")

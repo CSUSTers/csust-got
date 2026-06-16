@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// AgentV3Trace records one agent-v3 run.
 type AgentV3Trace struct {
 	mu                      sync.Mutex
 	RunID                   string             `json:"run_id"`
@@ -43,6 +44,7 @@ type AgentV3Trace struct {
 	Spans                   []AgentV3TraceSpan `json:"spans"`
 }
 
+// AgentV3TraceSpan records one timed agent-v3 operation.
 type AgentV3TraceSpan struct {
 	Name       string         `json:"name"`
 	StartedAt  time.Time      `json:"started_at"`
@@ -52,6 +54,7 @@ type AgentV3TraceSpan struct {
 	Attrs      map[string]any `json:"attrs,omitempty"`
 }
 
+// NewAgentV3Trace creates an agent-v3 trace for one Telegram message.
 func NewAgentV3Trace(runID string, chatID int64, messageID int) *AgentV3Trace {
 	return &AgentV3Trace{
 		RunID:      runID,
@@ -62,6 +65,7 @@ func NewAgentV3Trace(runID string, chatID int64, messageID int) *AgentV3Trace {
 	}
 }
 
+// StartSpan starts a trace span and returns its finish function.
 func (t *AgentV3Trace) StartSpan(name string, attrs map[string]any) func(error, map[string]any) {
 	if t == nil {
 		return func(error, map[string]any) {}
@@ -93,6 +97,7 @@ func (t *AgentV3Trace) StartSpan(name string, attrs map[string]any) func(error, 
 	}
 }
 
+// RecordUsage adds model token usage to the trace.
 func (t *AgentV3Trace) RecordUsage(msg *schema.Message) {
 	if t == nil || msg == nil || msg.ResponseMeta == nil || msg.ResponseMeta.Usage == nil {
 		return
@@ -104,6 +109,7 @@ func (t *AgentV3Trace) RecordUsage(msg *schema.Message) {
 	t.mu.Unlock()
 }
 
+// RecordToolCall increments the trace tool-call count.
 func (t *AgentV3Trace) RecordToolCall() {
 	if t == nil {
 		return
@@ -113,6 +119,7 @@ func (t *AgentV3Trace) RecordToolCall() {
 	t.mu.Unlock()
 }
 
+// RecordBash records the latest bash execution summary.
 func (t *AgentV3Trace) RecordBash(exitCode int, durationMS int64, truncated bool) {
 	if t == nil {
 		return
@@ -124,6 +131,7 @@ func (t *AgentV3Trace) RecordBash(exitCode int, durationMS int64, truncated bool
 	t.mu.Unlock()
 }
 
+// SetError stores the first trace error.
 func (t *AgentV3Trace) SetError(err error) {
 	if t == nil || err == nil {
 		return
@@ -135,6 +143,7 @@ func (t *AgentV3Trace) SetError(err error) {
 	t.mu.Unlock()
 }
 
+// Finish saves the agent-v3 trace summary and JSONL payload.
 func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
 	if t == nil || config.BotConfig == nil || config.BotConfig.AgentV3 == nil || !config.BotConfig.AgentV3.Observability.Enable {
 		return

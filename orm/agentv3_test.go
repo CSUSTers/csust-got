@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -30,7 +29,7 @@ func setupAgentV3Redis(t *testing.T) {
 
 func TestAgentV3PrefixTurnsMemoryAndTrace(t *testing.T) {
 	setupAgentV3Redis(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
 	ttl := time.Hour
 

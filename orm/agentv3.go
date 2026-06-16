@@ -11,12 +11,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// AgentV3Scope identifies one agent-v3 chat namespace.
 type AgentV3Scope struct {
 	Bot      string
 	Platform string
 	ChatID   int64
 }
 
+// AgentV3PrefixRecord stores current stable-prefix metadata.
 type AgentV3PrefixRecord struct {
 	Agent                 string    `json:"agent"`
 	Model                 string    `json:"model"`
@@ -30,6 +32,7 @@ type AgentV3PrefixRecord struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
+// AgentV3Turn stores one user or assistant turn.
 type AgentV3Turn struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
@@ -37,6 +40,7 @@ type AgentV3Turn struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// AgentV3MemoryItem stores one chat-scoped memory item.
 type AgentV3MemoryItem struct {
 	ID        string    `json:"id"`
 	Content   string    `json:"content"`
@@ -44,6 +48,7 @@ type AgentV3MemoryItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// AgentV3MemorySnapshot stores rendered memory content for prompts.
 type AgentV3MemorySnapshot struct {
 	Version   int64     `json:"version"`
 	Hash      string    `json:"hash"`
@@ -51,6 +56,7 @@ type AgentV3MemorySnapshot struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AgentV3Summary stores the rolling agent-v3 conversation summary.
 type AgentV3Summary struct {
 	Version   int64     `json:"version"`
 	Hash      string    `json:"hash,omitempty"`
@@ -58,6 +64,7 @@ type AgentV3Summary struct {
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
+// AgentV3TraceSummary stores compact trace metadata for the last run.
 type AgentV3TraceSummary struct {
 	RunID                   string                    `json:"run_id"`
 	ChatIDHash              string                    `json:"chat_id_hash"`
@@ -81,6 +88,7 @@ type AgentV3TraceSummary struct {
 	Spans                   []AgentV3TraceSpanSummary `json:"spans,omitempty"`
 }
 
+// AgentV3TraceSpanSummary stores compact trace span metadata.
 type AgentV3TraceSpanSummary struct {
 	Name       string         `json:"name"`
 	DurationMS int64          `json:"duration_ms"`
@@ -88,6 +96,7 @@ type AgentV3TraceSpanSummary struct {
 	Attrs      map[string]any `json:"attrs,omitempty"`
 }
 
+// AgentV3GetPrefixCurrent loads the current stable-prefix record.
 func AgentV3GetPrefixCurrent(ctx context.Context, scope AgentV3Scope, agent, model string) (*AgentV3PrefixRecord, error) {
 	data, err := rc.Get(ctx, agentV3PrefixCurrentKey(scope, agent, model)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -103,6 +112,7 @@ func AgentV3GetPrefixCurrent(ctx context.Context, scope AgentV3Scope, agent, mod
 	return &rec, nil
 }
 
+// AgentV3SetPrefix stores stable-prefix metadata and messages.
 func AgentV3SetPrefix(ctx context.Context, scope AgentV3Scope, rec AgentV3PrefixRecord, messages string, ttl time.Duration) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
@@ -117,6 +127,7 @@ func AgentV3SetPrefix(ctx context.Context, scope AgentV3Scope, rec AgentV3Prefix
 	return err
 }
 
+// AgentV3GetPrefixMessages loads stable-prefix messages by version.
 func AgentV3GetPrefixMessages(ctx context.Context, scope AgentV3Scope, version int64) (string, error) {
 	data, err := rc.Get(ctx, agentV3PrefixMessagesKey(scope, version)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -125,6 +136,7 @@ func AgentV3GetPrefixMessages(ctx context.Context, scope AgentV3Scope, version i
 	return data, err
 }
 
+// AgentV3AppendTurn appends a raw turn to agent-v3 history.
 func AgentV3AppendTurn(ctx context.Context, scope AgentV3Scope, turn AgentV3Turn, maxTurns int, ttl time.Duration) error {
 	if maxTurns <= 0 {
 		maxTurns = 12
@@ -147,6 +159,7 @@ func AgentV3AppendTurn(ctx context.Context, scope AgentV3Scope, turn AgentV3Turn
 	return err
 }
 
+// AgentV3LoadTurns loads recent raw turns for hot append.
 func AgentV3LoadTurns(ctx context.Context, scope AgentV3Scope, maxTurns int) ([]AgentV3Turn, error) {
 	if maxTurns <= 0 {
 		maxTurns = 12
@@ -169,6 +182,7 @@ func AgentV3LoadTurns(ctx context.Context, scope AgentV3Scope, maxTurns int) ([]
 	return turns, nil
 }
 
+// AgentV3LoadRecentTurns loads recent turns from the longer history list.
 func AgentV3LoadRecentTurns(ctx context.Context, scope AgentV3Scope, maxTurns int) ([]AgentV3Turn, error) {
 	if maxTurns <= 0 {
 		maxTurns = 80
@@ -183,6 +197,7 @@ func AgentV3LoadRecentTurns(ctx context.Context, scope AgentV3Scope, maxTurns in
 	return decodeAgentV3Turns(items), nil
 }
 
+// AgentV3GetSummary loads the current conversation summary.
 func AgentV3GetSummary(ctx context.Context, scope AgentV3Scope) (string, int64, error) {
 	data, err := rc.Get(ctx, agentV3SummaryCurrentKey(scope)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -198,6 +213,7 @@ func AgentV3GetSummary(ctx context.Context, scope AgentV3Scope) (string, int64, 
 	return payload.Content, payload.Version, nil
 }
 
+// AgentV3SetSummary stores the current conversation summary.
 func AgentV3SetSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3Summary, ttl time.Duration) error {
 	if summary.UpdatedAt.IsZero() {
 		summary.UpdatedAt = time.Now()
@@ -209,6 +225,7 @@ func AgentV3SetSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3S
 	return rc.Set(ctx, agentV3SummaryCurrentKey(scope), data, ttl).Err()
 }
 
+// AgentV3AddMemory stores one active memory item.
 func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration) error {
 	if item.ID == "" {
 		item.ID = strconv.FormatInt(time.Now().UnixNano(), 36)
@@ -228,6 +245,7 @@ func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3Memor
 	return err
 }
 
+// AgentV3ListMemory lists active memory items.
 func AgentV3ListMemory(ctx context.Context, scope AgentV3Scope) ([]AgentV3MemoryItem, error) {
 	ids, err := rc.SMembers(ctx, agentV3MemoryActiveKey(scope)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -254,6 +272,7 @@ func AgentV3ListMemory(ctx context.Context, scope AgentV3Scope) ([]AgentV3Memory
 	return items, nil
 }
 
+// AgentV3ForgetMemory removes one active memory item.
 func AgentV3ForgetMemory(ctx context.Context, scope AgentV3Scope, id string) error {
 	pipe := rc.Pipeline()
 	pipe.Del(ctx, agentV3MemoryItemKey(scope, id))
@@ -262,6 +281,7 @@ func AgentV3ForgetMemory(ctx context.Context, scope AgentV3Scope, id string) err
 	return err
 }
 
+// AgentV3SetMemorySnapshot stores rendered memory snapshot content.
 func AgentV3SetMemorySnapshot(ctx context.Context, scope AgentV3Scope, snapshot AgentV3MemorySnapshot, ttl time.Duration) error {
 	if snapshot.UpdatedAt.IsZero() {
 		snapshot.UpdatedAt = time.Now()
@@ -277,6 +297,7 @@ func AgentV3SetMemorySnapshot(ctx context.Context, scope AgentV3Scope, snapshot 
 	return err
 }
 
+// AgentV3GetMemorySnapshot loads the current memory snapshot.
 func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3MemorySnapshot, error) {
 	data, err := rc.Get(ctx, agentV3MemorySnapshotCurrentKey(scope)).Result()
 	if errors.Is(err, redis.Nil) {
@@ -292,6 +313,7 @@ func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3
 	return &snapshot, nil
 }
 
+// AgentV3SaveTraceSummary stores the latest trace summary.
 func AgentV3SaveTraceSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3TraceSummary, ttl time.Duration) error {
 	data, err := json.Marshal(summary)
 	if err != nil {
@@ -300,6 +322,7 @@ func AgentV3SaveTraceSummary(ctx context.Context, scope AgentV3Scope, summary Ag
 	return rc.Set(ctx, agentV3TraceLastKey(scope), data, ttl).Err()
 }
 
+// AgentV3GetTraceSummary loads the latest trace summary.
 func AgentV3GetTraceSummary(ctx context.Context, scope AgentV3Scope) (*AgentV3TraceSummary, error) {
 	data, err := rc.Get(ctx, agentV3TraceLastKey(scope)).Result()
 	if errors.Is(err, redis.Nil) {
