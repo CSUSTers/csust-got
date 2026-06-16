@@ -349,22 +349,22 @@ func buildAgentV3StageMarker(calls []schema.ToolCall) string {
 func agentV3ToolStageLabel(call schema.ToolCall) string {
 	path, command := agentV3ToolPathAndCommand(call)
 	switch call.Function.Name {
-	case "read":
-		if strings.HasPrefix(path, "/skills/") {
+	case agentV3ToolRead:
+		if strings.HasPrefix(path, agentV3ToolSkillPathPrefix) {
 			return "正在读取 skill 文档"
 		}
 		return "正在读取 runtime 文件"
-	case "grep":
-		if path == "" || path == "/skills" || strings.HasPrefix(path, "/skills/") {
+	case agentV3ToolGrep:
+		if path == "" || path == agentV3SkillsRootDefault || strings.HasPrefix(path, agentV3ToolSkillPathPrefix) {
 			return "正在搜索 skills"
 		}
 		return "正在搜索 runtime 文件"
-	case "write":
+	case agentV3ToolWrite:
 		return "正在写入 runtime 文件"
-	case "edit":
+	case agentV3ToolEdit:
 		return "正在编辑 runtime 文件"
-	case "bash":
-		if strings.Contains(command, "/skills/") {
+	case agentV3ToolBash:
+		if strings.Contains(command, agentV3ToolSkillPathPrefix) {
 			return "正在执行 skill CLI"
 		}
 		return "正在执行 bash 命令"
@@ -416,7 +416,7 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			zap.String("tool", name),
 			zap.Strings("available", a.toolNames),
 		)
-		err := fmt.Errorf("unknown tool %q", name)
+		err := fmt.Errorf("%w: %q", errUnknownTool, name)
 		if finishSpan != nil {
 			finishSpan(err, nil)
 		}
@@ -652,7 +652,7 @@ func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*sch
 }
 
 const agentV3LoopDirectiveText = "工具调用纪律：\n" +
-	"1. 每一轮回复要么调用 read/grep/write/edit/bash 推进任务，要么直接给出最终答案，二者必择其一。\n" +
+	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 推进任务，要么直接给出最终答案，二者必择其一。\n" +
 	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
 	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
 	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +

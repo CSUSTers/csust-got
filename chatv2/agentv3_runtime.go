@@ -22,8 +22,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-var errRuntimeEndpointEmpty = errors.New("agent v3 runtime endpoint is empty")
+var (
+	errRuntimeEndpointEmpty     = errors.New("agent v3 runtime endpoint is empty")
+	errRuntimeHTTPStatus        = errors.New("agent v3 runtime returned non-success status")
+	errRuntimeClientUnspecified = errors.New("runtime client is not configured")
+)
 
+// RemoteRuntimeClient calls the agent-v3 remote runtime service.
 type RemoteRuntimeClient struct {
 	Endpoint       string
 	AuthToken      string
@@ -105,6 +110,7 @@ type runtimeResetResponse struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// NewRemoteRuntimeClient builds an agent-v3 remote runtime client.
 func NewRemoteRuntimeClient(cfg *config.AgentV3RuntimeConfig, commandTimeout, requestTimeout time.Duration) *RemoteRuntimeClient {
 	endpoint := "http://agent-runtime:8080"
 	authEnv := ""
@@ -137,6 +143,7 @@ func NewRemoteRuntimeClient(cfg *config.AgentV3RuntimeConfig, commandTimeout, re
 	}
 }
 
+// Read reads a file through the remote runtime service.
 func (c *RemoteRuntimeClient) Read(ctx context.Context, req runtimeReadRequest) (runtimeTextResponse, error) {
 	var out runtimeTextResponse
 	err := c.post(ctx, "/v1/read", req, &out)
@@ -144,6 +151,7 @@ func (c *RemoteRuntimeClient) Read(ctx context.Context, req runtimeReadRequest) 
 	return out, err
 }
 
+// Grep searches the remote runtime workspace.
 func (c *RemoteRuntimeClient) Grep(ctx context.Context, req runtimeGrepRequest) (runtimeTextResponse, error) {
 	var out runtimeTextResponse
 	err := c.post(ctx, "/v1/grep", req, &out)
@@ -154,18 +162,21 @@ func (c *RemoteRuntimeClient) Grep(ctx context.Context, req runtimeGrepRequest) 
 	return out, err
 }
 
+// Write writes a file through the remote runtime service.
 func (c *RemoteRuntimeClient) Write(ctx context.Context, req runtimeWriteRequest) (runtimeTextResponse, error) {
 	var out runtimeTextResponse
 	err := c.post(ctx, "/v1/write", req, &out)
 	return out, err
 }
 
+// Edit applies a patch in the remote runtime workspace.
 func (c *RemoteRuntimeClient) Edit(ctx context.Context, req runtimeEditRequest) (runtimeTextResponse, error) {
 	var out runtimeTextResponse
 	err := c.post(ctx, "/v1/edit", req, &out)
 	return out, err
 }
 
+// Bash runs a command in the remote runtime workspace.
 func (c *RemoteRuntimeClient) Bash(ctx context.Context, req runtimeBashRequest) (runtimeBashResponse, error) {
 	var out runtimeBashResponse
 	err := c.post(ctx, "/v1/bash", req, &out)
@@ -174,12 +185,14 @@ func (c *RemoteRuntimeClient) Bash(ctx context.Context, req runtimeBashRequest) 
 	return out, err
 }
 
+// Status returns remote runtime health information.
 func (c *RemoteRuntimeClient) Status(ctx context.Context) (runtimeStatusResponse, error) {
 	var out runtimeStatusResponse
 	err := c.get(ctx, "/v1/status", &out)
 	return out, err
 }
 
+// Reset removes the runtime workspace for a namespace.
 func (c *RemoteRuntimeClient) Reset(ctx context.Context, req runtimeResetRequest) (runtimeResetResponse, error) {
 	var out runtimeResetResponse
 	err := c.post(ctx, "/v1/reset", req, &out)
@@ -216,7 +229,7 @@ func (c *RemoteRuntimeClient) post(ctx context.Context, path string, in any, out
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("runtime %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%w: runtime %s returned %d: %s", errRuntimeHTTPStatus, path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if len(body) == 0 {
 		return nil
@@ -249,7 +262,7 @@ func (c *RemoteRuntimeClient) get(ctx context.Context, path string, out any) err
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("runtime %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%w: runtime %s returned %d: %s", errRuntimeHTTPStatus, path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return json.Unmarshal(body, out)
 }
@@ -280,11 +293,11 @@ func buildAgentV3Tools() []tool.BaseTool {
 
 func agentV3ToolDefinitionsText() string {
 	infos := []map[string]any{
-		{"name": "read", "args": "path", "desc": "Read a file from /workspace or /skills."},
-		{"name": "grep", "args": "pattern,path?", "desc": "Search literal or regex text in /workspace or /skills."},
-		{"name": "write", "args": "path,content", "desc": "Write a file under /workspace."},
-		{"name": "edit", "args": "path,patch", "desc": "Apply a unified diff patch to a file under /workspace."},
-		{"name": "bash", "args": "command,cwd?,timeout?", "desc": "Run a shell command in the remote runtime namespace."},
+		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace or /skills."},
+		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace or /skills."},
+		{agentV3ToolNameField: agentV3ToolWrite, agentV3ToolArgsField: "path,content", agentV3ToolDescField: "Write a file under /workspace."},
+		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
+		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace."},
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)
@@ -299,17 +312,17 @@ type remoteReadArgs struct {
 
 func (t *remoteReadTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "read",
+		Name: agentV3ToolRead,
 		Desc: "Read a file from the remote runtime. Use this for /workspace files and /skills/*/SKILL.md.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path": {Type: "string", Desc: "File path, e.g. /skills/name/SKILL.md or /workspace/file.txt", Required: true},
-			"cwd":  {Type: "string", Desc: "Optional working directory, default /workspace"},
+			agentV3ToolPathField: {Type: "string", Desc: "File path, e.g. /skills/name/SKILL.md or /workspace/file.txt", Required: true},
+			agentV3ToolCWDField:  {Type: "string", Desc: agentV3ToolCWDDescription},
 		}),
 	}, nil
 }
 
 func (t *remoteReadTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	tc, err := requireAgentV3Runtime(ctx, "read")
+	tc, err := requireAgentV3Runtime(ctx, agentV3ToolRead)
 	if err != nil {
 		return "", err
 	}
@@ -337,18 +350,18 @@ type remoteGrepArgs struct {
 
 func (t *remoteGrepTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "grep",
+		Name: agentV3ToolGrep,
 		Desc: "Search text in the remote runtime. Use grep before reading skills when you need to discover capabilities.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"pattern": {Type: "string", Desc: "Search pattern", Required: true},
-			"path":    {Type: "string", Desc: "Optional path, default /workspace"},
-			"cwd":     {Type: "string", Desc: "Optional working directory, default /workspace"},
+			agentV3ToolPatternField: {Type: "string", Desc: "Search pattern", Required: true},
+			agentV3ToolPathField:    {Type: "string", Desc: "Optional path, default /workspace"},
+			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},
 		}),
 	}, nil
 }
 
 func (t *remoteGrepTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	tc, err := requireAgentV3Runtime(ctx, "grep")
+	tc, err := requireAgentV3Runtime(ctx, agentV3ToolGrep)
 	if err != nil {
 		return "", err
 	}
@@ -377,18 +390,18 @@ type remoteWriteArgs struct {
 
 func (t *remoteWriteTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "write",
+		Name: agentV3ToolWrite,
 		Desc: "Write a file in the remote runtime workspace. Do not write under /skills.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path":    {Type: "string", Desc: "Workspace file path", Required: true},
-			"content": {Type: "string", Desc: "Full file content", Required: true},
-			"cwd":     {Type: "string", Desc: "Optional working directory, default /workspace"},
+			agentV3ToolPathField:    {Type: "string", Desc: "Workspace file path", Required: true},
+			agentV3ToolContentField: {Type: "string", Desc: "Full file content", Required: true},
+			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},
 		}),
 	}, nil
 }
 
 func (t *remoteWriteTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	tc, err := requireAgentV3Runtime(ctx, "write")
+	tc, err := requireAgentV3Runtime(ctx, agentV3ToolWrite)
 	if err != nil {
 		return "", err
 	}
@@ -420,18 +433,18 @@ type remoteEditArgs struct {
 
 func (t *remoteEditTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "edit",
+		Name: agentV3ToolEdit,
 		Desc: "Apply a unified diff patch to a workspace file in the remote runtime.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path":  {Type: "string", Desc: "Workspace file path", Required: true},
-			"patch": {Type: "string", Desc: "Unified diff patch", Required: true},
-			"cwd":   {Type: "string", Desc: "Optional working directory, default /workspace"},
+			agentV3ToolPathField:  {Type: "string", Desc: "Workspace file path", Required: true},
+			agentV3ToolPatchField: {Type: "string", Desc: "Unified diff patch", Required: true},
+			agentV3ToolCWDField:   {Type: "string", Desc: agentV3ToolCWDDescription},
 		}),
 	}, nil
 }
 
 func (t *remoteEditTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	tc, err := requireAgentV3Runtime(ctx, "edit")
+	tc, err := requireAgentV3Runtime(ctx, agentV3ToolEdit)
 	if err != nil {
 		return "", err
 	}
@@ -463,18 +476,18 @@ type remoteBashArgs struct {
 
 func (t *remoteBashTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "bash",
+		Name: agentV3ToolBash,
 		Desc: "Run a shell command in the remote runtime workspace. Use documented skill CLIs from /skills when available.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"command": {Type: "string", Desc: "Shell command to execute", Required: true},
-			"cwd":     {Type: "string", Desc: "Optional working directory, default /workspace"},
-			"timeout": {Type: "string", Desc: "Optional timeout such as 30s, capped by bot config"},
+			agentV3ToolCommandField: {Type: "string", Desc: "Shell command to execute", Required: true},
+			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},
+			agentV3ToolTimeoutField: {Type: "string", Desc: "Optional timeout such as 30s, capped by bot config"},
 		}),
 	}, nil
 }
 
 func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
-	tc, err := requireAgentV3Runtime(ctx, "bash")
+	tc, err := requireAgentV3Runtime(ctx, agentV3ToolBash)
 	if err != nil {
 		return "", err
 	}
@@ -494,7 +507,7 @@ func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		return "", fmt.Errorf("bash: %w", err)
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("exit_code: %d\nduration_ms: %d\ntruncated: %t\n", resp.ExitCode, resp.DurationMS, resp.Truncated))
+	fmt.Fprintf(&b, "exit_code: %d\nduration_ms: %d\ntruncated: %t\n", resp.ExitCode, resp.DurationMS, resp.Truncated)
 	if resp.Stdout != "" {
 		b.WriteString("stdout:\n")
 		b.WriteString(resp.Stdout)
@@ -518,14 +531,14 @@ func requireAgentV3Runtime(ctx context.Context, name string) (*TurnContext, erro
 		return nil, fmt.Errorf("%s: %w", name, errNoTurnContext)
 	}
 	if tc.RuntimeClient == nil {
-		return nil, fmt.Errorf("%s: runtime client is not configured", name)
+		return nil, fmt.Errorf("%s: %w", name, errRuntimeClientUnspecified)
 	}
 	return tc, nil
 }
 
 func runtimeCommon(tc *TurnContext, cwd string) runtimeCommonRequest {
 	if cwd == "" {
-		cwd = "/workspace"
+		cwd = agentV3WorkspaceRootDefault
 	}
 	return runtimeCommonRequest{
 		Namespace: tc.Namespace,
@@ -539,7 +552,7 @@ func formatRuntimeText(op, content string, truncated bool, runtimeErr string) st
 		return "[Runtime Error] " + runtimeErr
 	}
 	if content == "" {
-		content = fmt.Sprintf("%s returned no content.", op)
+		content = op + " returned no content."
 	}
 	if truncated {
 		return content + "\n[truncated]"
