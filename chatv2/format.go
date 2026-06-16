@@ -24,21 +24,7 @@ var reasonGroup = extractReasonPatt.SubexpIndex("reason")
 // FormatOutputWithReason formats output text with reasoning content according to config.
 // Handles both native reasoning (from model protocol) and parsed <think> tags.
 func FormatOutputWithReason(text string, nativeReason string, format *config.ChatOutputFormatConfig) string {
-	var reason, payload string
-
-	if format.GetUseNativeReasoning() {
-		reason = nativeReason
-		payload = text
-	} else {
-		matches := extractReasonPatt.FindStringSubmatchIndex(text)
-		if len(matches) != 0 {
-			payload = text[matches[1]:]
-			rIdx1, rIdx2 := matches[reasonGroup*2], matches[reasonGroup*2+1]
-			reason = text[rIdx1:rIdx2]
-		} else {
-			payload = text
-		}
-	}
+	parts := splitOutputWithReason(text, nativeReason, format)
 
 	buf := strings.Builder{}
 
@@ -48,7 +34,7 @@ func FormatOutputWithReason(text string, nativeReason string, format *config.Cha
 		outputFormat = defaultOutputFormat
 	}
 
-	if reason != "" {
+	if parts.reason != "" {
 		reasonFormat := format.GetReasonFormat()
 		if reasonFormat == "" {
 			zap.L().Warn("chatv2: reason format empty, defaulting to none")
@@ -56,9 +42,9 @@ func FormatOutputWithReason(text string, nativeReason string, format *config.Cha
 		}
 		switch reasonFormat {
 		case "quote":
-			formatText(&buf, reason, outputFormat, wholeTextTypeQuote)
+			formatText(&buf, parts.reason, outputFormat, wholeTextTypeQuote)
 		case "collapse":
-			formatText(&buf, reason, outputFormat, wholeTextTypeCollapse)
+			formatText(&buf, parts.reason, outputFormat, wholeTextTypeCollapse)
 		default:
 		}
 		if buf.Len() > 0 {
@@ -84,8 +70,31 @@ func FormatOutputWithReason(text string, nativeReason string, format *config.Cha
 		payloadType = wholeTextTypeMdBlock
 	}
 
-	formatText(&buf, payload, outputFormat, payloadType)
+	formatText(&buf, parts.payload, outputFormat, payloadType)
 	return buf.String()
+}
+
+type outputParts struct {
+	reason  string
+	payload string
+}
+
+func splitOutputWithReason(text string, nativeReason string, format *config.ChatOutputFormatConfig) outputParts {
+	if format.GetUseNativeReasoning() {
+		return outputParts{reason: nativeReason, payload: text}
+	}
+
+	matches := extractReasonPatt.FindStringSubmatchIndex(text)
+	if len(matches) == 0 {
+		return outputParts{payload: text}
+	}
+
+	reasonStart := matches[reasonGroup*2]
+	reasonEnd := matches[reasonGroup*2+1]
+	return outputParts{
+		reason:  text[reasonStart:reasonEnd],
+		payload: text[matches[1]:],
+	}
 }
 
 type wholeTextType string
