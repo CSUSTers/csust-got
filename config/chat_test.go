@@ -93,6 +93,69 @@ func TestAgentGetMaxSteps(t *testing.T) {
 	})
 }
 
+func TestAgentRichConfigParsesFromChatV2(t *testing.T) {
+	const raw = `
+agents:
+  - name: rich-agent
+    agent:
+      enable: true
+      v3: true
+      rich: true
+`
+	v := viper.New()
+	v.SetConfigType("yaml")
+	assert.NoError(t, v.ReadConfig(strings.NewReader(raw)))
+
+	var cfg ChatConfigV2
+	assert.NoError(t, v.UnmarshalKey("agents", &cfg, viper.DecodeHook(DispatchFor())))
+
+	if assert.Len(t, cfg, 1) && assert.NotNil(t, cfg[0].Agent) {
+		assert.True(t, cfg[0].Agent.Rich)
+	}
+}
+
+func TestIsAgentV3RichEnabledRequiresAgentV3AndRichGate(t *testing.T) {
+	old := BotConfig
+	t.Cleanup(func() { BotConfig = old })
+	BotConfig = &Config{AgentV3: &AgentV3Config{Enable: true}}
+
+	tests := []struct {
+		name string
+		cfg  *ChatConfigSingle
+		want bool
+	}{
+		{name: "nil config is false"},
+		{
+			name: "missing agent is false",
+			cfg:  &ChatConfigSingle{},
+		},
+		{
+			name: "rich without agent enable is false",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Rich: true}},
+		},
+		{
+			name: "v3 without rich is false",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, V3: true}},
+		},
+		{
+			name: "global v3 plus rich is true",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, Rich: true}},
+			want: true,
+		},
+		{
+			name: "per chat v3 plus rich is true",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, V3: true, Rich: true}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cfg.IsAgentV3RichEnabled())
+		})
+	}
+}
+
 func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
 	cfg := &AgentV3Config{
 		Memory: AgentV3MemoryConfig{

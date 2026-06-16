@@ -82,9 +82,19 @@ const (
 	// OutputFormatHTML is the HTML format type
 	OutputFormatHTML = "html"
 
-	defaultSubAgentMaxSteps = 5
-	defaultAgentMaxSteps    = 12
-	minToolAgentMaxSteps    = 4
+	defaultSubAgentMaxSteps            = 5
+	defaultAgentMaxSteps               = 12
+	minToolAgentMaxSteps               = 4
+	agentV3DefaultScope                = "group"
+	agentV3DefaultMemoryWritePolicy    = "explicit_or_admin"
+	agentV3DefaultRuntimeMode          = "remote_http"
+	agentV3DefaultSkillsMode           = "runtime_filesystem"
+	agentV3DefaultSkillsRoot           = "/skills"
+	agentV3DefaultRuntimeEndpoint      = "http://agent-runtime:8080"
+	agentV3DefaultCommandTimeout       = "120s"
+	agentV3DefaultObservabilityJSONL   = "logs/agentv3-traces.jsonl"
+	agentV3DefaultCaptureContent       = "preview"
+	agentV3DefaultContextCacheRedisTTL = "30d"
 )
 
 var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
@@ -241,6 +251,7 @@ type SkillConfig struct {
 type AgentConfig struct {
 	Enable     bool                `mapstructure:"enable"`
 	V3         bool                `mapstructure:"v3"`
+	Rich       bool                `mapstructure:"rich"`
 	Tools      []string            `mapstructure:"tools"`
 	MaxSteps   int                 `mapstructure:"max_steps"`
 	SubAgents  []*SubAgentConfig   `mapstructure:"subagents"`
@@ -249,6 +260,7 @@ type AgentConfig struct {
 	Skills     []*SkillConfig      `mapstructure:"skills"`
 }
 
+// AgentV3Config defines global agent-v3 defaults and runtime settings.
 type AgentV3Config struct {
 	Enable        bool                       `mapstructure:"enable"`
 	Model         *Model                     `mapstructure:"model"`
@@ -261,6 +273,7 @@ type AgentV3Config struct {
 	Observability AgentV3ObservabilityConfig `mapstructure:"observability"`
 }
 
+// AgentV3ContextCacheConfig controls agent-v3 prompt cache and history windows.
 type AgentV3ContextCacheConfig struct {
 	Enable               bool   `mapstructure:"enable"`
 	RawTurns             int    `mapstructure:"raw_turns"`
@@ -271,6 +284,7 @@ type AgentV3ContextCacheConfig struct {
 	RedisTTL             string `mapstructure:"redis_ttl"`
 }
 
+// AgentV3MemoryConfig controls chat-scoped agent-v3 memory.
 type AgentV3MemoryConfig struct {
 	Enable            bool   `mapstructure:"enable"`
 	Scope             string `mapstructure:"scope"`
@@ -279,6 +293,7 @@ type AgentV3MemoryConfig struct {
 	WritePolicy       string `mapstructure:"write_policy"`
 }
 
+// AgentV3RuntimeConfig points agent-v3 tools at the remote runtime service.
 type AgentV3RuntimeConfig struct {
 	Enable         bool   `mapstructure:"enable"`
 	Mode           string `mapstructure:"mode"`
@@ -290,15 +305,18 @@ type AgentV3RuntimeConfig struct {
 	RequestTimeout string `mapstructure:"request_timeout"`
 }
 
+// AgentV3ToolsConfig constrains agent-v3 visible tools.
 type AgentV3ToolsConfig struct {
 	ExposeOnly []string `mapstructure:"expose_only"`
 }
 
+// AgentV3SkillsConfig configures agent-v3 runtime skill discovery.
 type AgentV3SkillsConfig struct {
 	Mode string `mapstructure:"mode"`
 	Root string `mapstructure:"root"`
 }
 
+// AgentV3ObservabilityConfig controls agent-v3 trace capture.
 type AgentV3ObservabilityConfig struct {
 	Enable         bool   `mapstructure:"enable"`
 	JSONLPath      string `mapstructure:"jsonl_path"`
@@ -346,6 +364,7 @@ func (ccs *ChatConfigSingle) IsAgentEnabled() bool {
 	return ccs.Agent != nil && ccs.Agent.Enable
 }
 
+// IsAgentV3Enabled reports whether this chat uses agent-v3 execution.
 func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
 	if ccs == nil || !ccs.IsAgentEnabled() {
 		return false
@@ -354,6 +373,11 @@ func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
 		return true
 	}
 	return BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
+}
+
+// IsAgentV3RichEnabled reports whether rich Telegram delivery is enabled for agent-v3.
+func (ccs *ChatConfigSingle) IsAgentV3RichEnabled() bool {
+	return ccs != nil && ccs.IsAgentV3Enabled() && ccs.Agent != nil && ccs.Agent.Rich
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -434,14 +458,14 @@ func (c *AgentV3Config) checkConfig() {
 		c.ContextCache.MaxRawTokens = 6000
 	}
 	if c.ContextCache.RedisTTL == "" {
-		c.ContextCache.RedisTTL = "30d"
+		c.ContextCache.RedisTTL = agentV3DefaultContextCacheRedisTTL
 	}
 	if c.Memory.Scope == "" {
-		c.Memory.Scope = "group"
+		c.Memory.Scope = agentV3DefaultScope
 	}
-	if c.Memory.Scope != "group" {
+	if c.Memory.Scope != agentV3DefaultScope {
 		zap.L().Warn("unsupported agent_v3 memory scope, reset to group", zap.String("scope", c.Memory.Scope))
-		c.Memory.Scope = "group"
+		c.Memory.Scope = agentV3DefaultScope
 	}
 	if c.Memory.AllowGlobal {
 		zap.L().Warn("agent_v3 memory allow_global is not supported in v3 first release, reset to false")
@@ -451,31 +475,31 @@ func (c *AgentV3Config) checkConfig() {
 		c.Memory.SnapshotMaxTokens = 2000
 	}
 	if c.Memory.WritePolicy == "" {
-		c.Memory.WritePolicy = "explicit_or_admin"
+		c.Memory.WritePolicy = agentV3DefaultMemoryWritePolicy
 	}
-	if c.Memory.WritePolicy != "explicit_or_admin" {
+	if c.Memory.WritePolicy != agentV3DefaultMemoryWritePolicy {
 		zap.L().Warn("unsupported agent_v3 memory write_policy, reset to explicit_or_admin", zap.String("write_policy", c.Memory.WritePolicy))
-		c.Memory.WritePolicy = "explicit_or_admin"
+		c.Memory.WritePolicy = agentV3DefaultMemoryWritePolicy
 	}
 	if c.Runtime.Mode == "" {
-		c.Runtime.Mode = "remote_http"
+		c.Runtime.Mode = agentV3DefaultRuntimeMode
 	}
-	if c.Runtime.Mode != "remote_http" {
+	if c.Runtime.Mode != agentV3DefaultRuntimeMode {
 		zap.L().Warn("unsupported agent_v3 runtime mode, reset to remote_http", zap.String("mode", c.Runtime.Mode))
-		c.Runtime.Mode = "remote_http"
+		c.Runtime.Mode = agentV3DefaultRuntimeMode
 	}
 	if c.Runtime.Endpoint == "" {
-		c.Runtime.Endpoint = "http://agent-runtime:8080"
+		c.Runtime.Endpoint = agentV3DefaultRuntimeEndpoint
 	}
 	if c.Runtime.NamespaceScope == "" {
-		c.Runtime.NamespaceScope = "group"
+		c.Runtime.NamespaceScope = agentV3DefaultScope
 	}
-	if c.Runtime.NamespaceScope != "group" {
+	if c.Runtime.NamespaceScope != agentV3DefaultScope {
 		zap.L().Warn("unsupported agent_v3 runtime namespace_scope, reset to group", zap.String("namespace_scope", c.Runtime.NamespaceScope))
-		c.Runtime.NamespaceScope = "group"
+		c.Runtime.NamespaceScope = agentV3DefaultScope
 	}
 	if c.Runtime.CommandTimeout == "" {
-		c.Runtime.CommandTimeout = "120s"
+		c.Runtime.CommandTimeout = agentV3DefaultCommandTimeout
 	}
 	if c.Runtime.RequestTimeout == "" {
 		c.Runtime.RequestTimeout = c.Runtime.CommandTimeout
@@ -493,30 +517,31 @@ func (c *AgentV3Config) checkConfig() {
 		c.Tools.ExposeOnly = append([]string(nil), agentV3FixedTools...)
 	}
 	if c.Skills.Mode == "" {
-		c.Skills.Mode = "runtime_filesystem"
+		c.Skills.Mode = agentV3DefaultSkillsMode
 	}
-	if c.Skills.Mode != "runtime_filesystem" {
+	if c.Skills.Mode != agentV3DefaultSkillsMode {
 		zap.L().Warn("unsupported agent_v3 skills mode, reset to runtime_filesystem", zap.String("mode", c.Skills.Mode))
-		c.Skills.Mode = "runtime_filesystem"
+		c.Skills.Mode = agentV3DefaultSkillsMode
 	}
 	if c.Skills.Root == "" {
-		c.Skills.Root = "/skills"
+		c.Skills.Root = agentV3DefaultSkillsRoot
 	}
-	if c.Skills.Root != "/skills" {
+	if c.Skills.Root != agentV3DefaultSkillsRoot {
 		zap.L().Warn("agent_v3 skills.root is a runtime virtual path and must be /skills, reset to /skills", zap.String("root", c.Skills.Root))
-		c.Skills.Root = "/skills"
+		c.Skills.Root = agentV3DefaultSkillsRoot
 	}
 	if c.Observability.JSONLPath == "" {
-		c.Observability.JSONLPath = "logs/agentv3-traces.jsonl"
+		c.Observability.JSONLPath = agentV3DefaultObservabilityJSONL
 	}
 	if c.Observability.CaptureContent == "" {
-		c.Observability.CaptureContent = "preview"
+		c.Observability.CaptureContent = agentV3DefaultCaptureContent
 	}
 	if c.Observability.PreviewChars <= 0 {
 		c.Observability.PreviewChars = 512
 	}
 }
 
+// ContextCacheTTL returns the parsed agent-v3 context cache TTL.
 func (c *AgentV3Config) ContextCacheTTL() time.Duration {
 	if c == nil {
 		return 30 * 24 * time.Hour
@@ -524,6 +549,7 @@ func (c *AgentV3Config) ContextCacheTTL() time.Duration {
 	return parseFlexibleDuration(c.ContextCache.RedisTTL, 30*24*time.Hour)
 }
 
+// RuntimeCommandTimeout returns the agent-v3 runtime command timeout.
 func (c *AgentV3Config) RuntimeCommandTimeout() time.Duration {
 	if c == nil {
 		return 120 * time.Second
@@ -531,6 +557,7 @@ func (c *AgentV3Config) RuntimeCommandTimeout() time.Duration {
 	return parseFlexibleDuration(c.Runtime.CommandTimeout, 120*time.Second)
 }
 
+// RuntimeRequestTimeout returns the agent-v3 runtime HTTP request timeout.
 func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
 	if c == nil {
 		return 120 * time.Second
@@ -538,6 +565,7 @@ func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
 	return parseFlexibleDuration(c.Runtime.RequestTimeout, c.RuntimeCommandTimeout())
 }
 
+// EffectiveModel returns the agent-v3 model override or the chat fallback.
 func (c *AgentV3Config) EffectiveModel(fallback *Model) *Model {
 	if c != nil && c.Model != nil {
 		return c.Model
