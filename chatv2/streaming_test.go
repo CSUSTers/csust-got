@@ -117,6 +117,42 @@ func TestProcessChunkClearsAccumulatedOutputOnToolBoundary(t *testing.T) {
 	assert.Equal(t, "已获取到今日金价。", sp.getResponse())
 }
 
+func TestUpdateMessageSuppressesPartialRichEnvelope(t *testing.T) {
+	sp := &streamProcessor{
+		format:      &config.ChatOutputFormatConfig{},
+		richEnabled: false,
+	}
+	sp.processChunk(schema.AssistantMessage("<telegram_rich_message>{", nil))
+
+	assert.True(t, shouldSuppressPartialRichEnvelope(sp.getResponse(), sp.richEnabled))
+}
+
+func TestUpdateMessageEditsCompleteRichEnvelopeAsRichMarkdown(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":7,"chat":{"id":100}}}`)}
+	tc := &TurnContext{}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot},
+		format:         &config.ChatOutputFormatConfig{},
+		richEnabled:    true,
+		rawCaller:      raw,
+		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
+		tc:             tc,
+	}
+	sp.processChunk(schema.AssistantMessage(telegramRichEnvelopeStart+"# Title"+telegramRichEnvelopeEnd, nil))
+
+	sp.updateMessage()
+
+	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
+	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, "# Title", payload.RichMessage.Markdown)
+	assert.Equal(t, "Title", deriveTelegramRichFallback(payload.RichMessage.Markdown))
+	assert.True(t, tc.lastEditAt.Load() > 0)
+}
+
 func TestFinalizeReturnsErrorWhenFinalEditFails(t *testing.T) {
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
 	require.NoError(t, err)

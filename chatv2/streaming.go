@@ -21,13 +21,14 @@ import (
 
 // StreamToTelegram reads from an eino StreamReader and streams the output to a Telegram message.
 // If existingMsg is provided (e.g. from progress placeholder), it reuses that message instead
-// of creating a new one. Returns the final response text, reasoning content, and any error.
+// of creating a new one. Returns the final visible response text, reasoning content, and any error.
 func StreamToTelegram(
 	ctx context.Context,
 	tbCtx tb.Context,
 	reader *schema.StreamReader[*schema.Message],
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
+	richEnabled bool,
 ) (response string, reasoning string, sentMsg *tb.Message, err error) {
 	tc := GetTurnContext(ctx) // may be nil outside chatv2
 	sp := &streamProcessor{
@@ -35,6 +36,8 @@ func StreamToTelegram(
 		tbCtx:          tbCtx,
 		reader:         reader,
 		format:         format,
+		richEnabled:    richEnabled,
+		rawCaller:      tbCtx.Bot(),
 		sentenceDelims: config.BotConfig.SentenceDelimiters,
 		editInterval:   getEditInterval(format),
 		done:           make(chan struct{}),
@@ -50,6 +53,8 @@ type streamProcessor struct {
 	tbCtx          tb.Context
 	reader         *schema.StreamReader[*schema.Message]
 	format         *config.ChatOutputFormatConfig
+	richEnabled    bool
+	rawCaller      telegramRawCaller
 	sentenceDelims []string
 	editInterval   time.Duration
 
@@ -193,6 +198,14 @@ func (sp *streamProcessor) updateMessage() {
 	if len(text) == 0 && len(reason) == 0 {
 		return
 	}
+	parts := splitOutputWithReason(text, reason, sp.format)
+	if shouldSuppressPartialRichEnvelope(parts.payload, sp.richEnabled) {
+		delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled)
+		if delivery.ShouldSendRich {
+			_ = sp.editRichPlaceholder(delivery.RichMessage, false)
+		}
+		return
+	}
 
 	// Find a sentence boundary for clean display
 	displayText := text
@@ -220,6 +233,37 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		}
 		return "", "", sp.placeholderMsg, nil
 	}
+	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled)
+	if delivery.ShouldSendRich {
+		var sent *tb.Message
+		var err error
+		if sp.placeholderMsg != nil {
+			err = sp.editRichPlaceholder(delivery.RichMessage, true)
+			sent = sp.placeholderMsg
+		} else {
+			replyToID := 0
+			if msg := sp.tbCtx.Message(); msg != nil {
+				replyToID = msg.ID
+			}
+			sent, err = sendTelegramRichMessage(sp.telegramRaw(), sp.tbCtx.Chat().ID, replyToID, delivery.RichMessage)
+		}
+		if err == nil {
+			if sp.tc != nil {
+				sp.tc.finalized.Store(true)
+			}
+			if sent != nil {
+				sp.placeholderMsg = sent
+			}
+			return delivery.VisibleText, reason, sp.placeholderMsg, nil
+		}
+		zap.L().Debug("chatv2: failed to send rich streaming message", zap.Error(err))
+		text = delivery.VisibleText
+		reason = ""
+	}
+	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		text = delivery.VisibleText
+		reason = ""
+	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
 	if err := sp.editPlaceholder(formatted, true); err != nil {
 		return text, reason, sp.placeholderMsg, err
@@ -228,6 +272,38 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		sp.tc.finalized.Store(true)
 	}
 	return text, reason, sp.placeholderMsg, nil
+}
+
+func (sp *streamProcessor) editRichPlaceholder(rich inputRichMessage, force bool) error {
+	if sp.placeholderMsg == nil || rich.Markdown == "" {
+		return nil
+	}
+	if sp.tc != nil {
+		sp.tc.editMu.Lock()
+		defer sp.tc.editMu.Unlock()
+		if !force && !sp.tc.ShouldAllowEdit(sp.editInterval) {
+			return nil
+		}
+	}
+	sent, err := editTelegramRichMessage(sp.telegramRaw(), sp.placeholderMsg.Chat.ID, sp.placeholderMsg.ID, rich)
+	if err != nil {
+		zap.L().Debug("chatv2: failed to edit streaming rich message", zap.Error(err))
+		return err
+	}
+	if sent != nil {
+		sp.placeholderMsg = sent
+	}
+	if sp.tc != nil {
+		sp.tc.MarkEdited()
+	}
+	return nil
+}
+
+func (sp *streamProcessor) telegramRaw() telegramRawCaller {
+	if sp.rawCaller != nil {
+		return sp.rawCaller
+	}
+	return sp.tbCtx.Bot()
 }
 
 // editPlaceholder edits the placeholder message with new content.
@@ -281,13 +357,41 @@ func (sp *streamProcessor) getReasoning() string {
 
 // NonStreamResponse sends a complete response without streaming.
 // If existingMsg is provided, edits it instead of sending a new message.
+// Returns the sent message, the visible text used for persistence, and any error.
 func NonStreamResponse(
 	tbCtx tb.Context,
 	text string,
 	reasoning string,
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
-) (*tb.Message, error) {
+	richEnabled bool,
+) (*tb.Message, string, error) {
+	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled)
+	if delivery.ShouldSendRich {
+		if existingMsg != nil {
+			msg, err := editTelegramRichMessage(tbCtx.Bot(), existingMsg.Chat.ID, existingMsg.ID, delivery.RichMessage)
+			if err == nil {
+				return msg, delivery.VisibleText, nil
+			}
+			zap.L().Debug("chatv2: failed to edit rich non-stream message", zap.Error(err))
+		} else {
+			replyToID := 0
+			if msg := tbCtx.Message(); msg != nil {
+				replyToID = msg.ID
+			}
+			msg, err := sendTelegramRichMessage(tbCtx.Bot(), tbCtx.Chat().ID, replyToID, delivery.RichMessage)
+			if err == nil {
+				return msg, delivery.VisibleText, nil
+			}
+			zap.L().Debug("chatv2: failed to send rich non-stream message", zap.Error(err))
+		}
+		text = delivery.VisibleText
+		reasoning = ""
+	}
+	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		text = delivery.VisibleText
+		reasoning = ""
+	}
 	formatted := FormatOutputWithReason(text, reasoning, format)
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
@@ -302,10 +406,10 @@ func NonStreamResponse(
 			_, err = tbCtx.Bot().Edit(existingMsg, text)
 			if err != nil {
 				zap.L().Debug("chatv2: failed to edit non-stream message", zap.Error(err))
-				return existingMsg, err
+				return existingMsg, text, err
 			}
 		}
-		return existingMsg, nil
+		return existingMsg, text, nil
 	}
 
 	// Send new message (original behavior)
@@ -323,5 +427,5 @@ func NonStreamResponse(
 			ReplyTo: tbCtx.Message(),
 		})
 	}
-	return sent, err
+	return sent, text, err
 }

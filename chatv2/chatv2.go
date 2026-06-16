@@ -194,7 +194,7 @@ func handleStreaming(
 	}
 
 	tc.streamingStarted.Store(true)
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg())
+	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
 	if streamErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(streamErr)
@@ -242,7 +242,7 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	sent, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg())
+	sent, visibleResponse, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(sendErr)
@@ -252,9 +252,9 @@ func handleNonStreaming(
 	}
 
 	if sent != nil {
-		sent.Text = response
+		sent.Text = visibleResponse
 		SaveResponse(sent, tbCtx.Message())
-		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sent.ID); err != nil {
+		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), visibleResponse, sent.ID); err != nil {
 			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 				tc.V3.Trace.SetError(err)
 			}
