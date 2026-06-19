@@ -3,6 +3,7 @@ module csust-got
 go 1.26.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/cloudwego/eino v0.9.2
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
@@ -18,7 +19,7 @@ require (
 	github.com/swaggest/openapi-go v0.2.61
 	github.com/u2takey/ffmpeg-go v0.5.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/image v0.42.0
+	golang.org/x/image v0.43.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/text v0.38.0
 	golang.org/x/time v0.15.0
@@ -26,7 +27,6 @@ require (
 )
 
 require (
-	github.com/alicebob/miniredis/v2 v2.38.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
