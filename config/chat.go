@@ -88,8 +88,7 @@ const (
 	agentV3DefaultScope                = "group"
 	agentV3DefaultMemoryWritePolicy    = "explicit_or_admin"
 	agentV3DefaultRuntimeMode          = "remote_http"
-	agentV3DefaultSkillsMode           = "runtime_filesystem"
-	agentV3DefaultSkillsRoot           = "/skills"
+	agentV3DefaultSkillsMode           = "system_prompt"
 	agentV3DefaultRuntimeEndpoint      = "http://agent-runtime:8080"
 	agentV3DefaultCommandTimeout       = "120s"
 	agentV3DefaultObservabilityJSONL   = "logs/agentv3-traces.jsonl"
@@ -310,10 +309,11 @@ type AgentV3ToolsConfig struct {
 	ExposeOnly []string `mapstructure:"expose_only"`
 }
 
-// AgentV3SkillsConfig configures agent-v3 runtime skill discovery.
+// AgentV3SkillsConfig configures agent-v3 system-prompt skill injection.
 type AgentV3SkillsConfig struct {
-	Mode string `mapstructure:"mode"`
-	Root string `mapstructure:"root"`
+	Mode          string `mapstructure:"mode"`
+	Root          string `mapstructure:"root"`
+	InjectBuiltin *bool  `mapstructure:"inject_builtin"`
 }
 
 // AgentV3ObservabilityConfig controls agent-v3 trace capture.
@@ -378,6 +378,11 @@ func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
 // IsAgentV3RichEnabled reports whether rich Telegram delivery is enabled for agent-v3.
 func (ccs *ChatConfigSingle) IsAgentV3RichEnabled() bool {
 	return ccs != nil && ccs.IsAgentV3Enabled() && ccs.Agent != nil && ccs.Agent.Rich
+}
+
+// BuiltinInjectionEnabled reports whether built-in agent-v3 skills should be injected.
+func (c *AgentV3SkillsConfig) BuiltinInjectionEnabled() bool {
+	return c == nil || c.InjectBuiltin == nil || *c.InjectBuiltin
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -520,15 +525,16 @@ func (c *AgentV3Config) checkConfig() {
 		c.Skills.Mode = agentV3DefaultSkillsMode
 	}
 	if c.Skills.Mode != agentV3DefaultSkillsMode {
-		zap.L().Warn("unsupported agent_v3 skills mode, reset to runtime_filesystem", zap.String("mode", c.Skills.Mode))
+		zap.L().Warn("unsupported agent_v3 skills mode, reset to system_prompt", zap.String("mode", c.Skills.Mode))
 		c.Skills.Mode = agentV3DefaultSkillsMode
 	}
-	if c.Skills.Root == "" {
-		c.Skills.Root = agentV3DefaultSkillsRoot
+	if c.Skills.Root != "" {
+		zap.L().Warn("agent_v3 skills.root is unused in system_prompt mode, reset to empty", zap.String("root", c.Skills.Root))
+		c.Skills.Root = ""
 	}
-	if c.Skills.Root != agentV3DefaultSkillsRoot {
-		zap.L().Warn("agent_v3 skills.root is a runtime virtual path and must be /skills, reset to /skills", zap.String("root", c.Skills.Root))
-		c.Skills.Root = agentV3DefaultSkillsRoot
+	if c.Skills.InjectBuiltin == nil {
+		injectBuiltin := true
+		c.Skills.InjectBuiltin = &injectBuiltin
 	}
 	if c.Observability.JSONLPath == "" {
 		c.Observability.JSONLPath = agentV3DefaultObservabilityJSONL

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatConfigV1_ReadConfig(t *testing.T) {
@@ -171,7 +172,7 @@ func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
 			ExposeOnly: []string{"read", "bash", "mcp_search"},
 		},
 		Skills: AgentV3SkillsConfig{
-			Mode: "inline",
+			Mode: "runtime_filesystem",
 			Root: "/tmp/skills",
 		},
 	}
@@ -183,6 +184,8 @@ func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
 	assert.Equal(t, "remote_http", cfg.Runtime.Mode)
 	assert.Equal(t, "group", cfg.Runtime.NamespaceScope)
 	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, cfg.Tools.ExposeOnly)
-	assert.Equal(t, "runtime_filesystem", cfg.Skills.Mode)
-	assert.Equal(t, "/skills", cfg.Skills.Root)
+	assert.Equal(t, "system_prompt", cfg.Skills.Mode)
+	assert.Empty(t, cfg.Skills.Root)
+	require.NotNil(t, cfg.Skills.InjectBuiltin)
+	assert.True(t, *cfg.Skills.InjectBuiltin)
 }

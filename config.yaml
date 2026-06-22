@@ -119,8 +119,8 @@ agent_v3:
       - edit
       - bash
   skills:
-    mode: "runtime_filesystem"
-    root: "/skills"
+    mode: "system_prompt"
+    inject_builtin: true
   observability:
     enable: true
     jsonl_path: "logs/agentv3-traces.jsonl"
