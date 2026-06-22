@@ -82,7 +82,8 @@ agentv3:{bot}:{platform}:{chat}:summary:current
 ## 2.4 构建规则
 
 ```text
-prefix_hash = hash(soul_hash + memory_snapshot_hash + tool_defs_hash)
+skill_prompt_block_hash = hash(<agent_v3_skills> block, or empty string)
+prefix_hash = hash(soul_hash + memory_snapshot_hash + tool_defs_hash + skill_prompt_block_hash)
 prompt_cache_key = csust:{bot}:{chat}:{agent}:{model}:v{prefix_version}
 ```
 
@@ -92,6 +93,7 @@ prompt_cache_key = csust:{bot}:{chat}:{agent}:{model}:v{prefix_version}
 soul.md 变化
 memory snapshot 变化
 5 个工具定义变化
+系统提示词注入 skill 集合或内容变化
 agent/model 变化
 ```
 
@@ -245,7 +247,7 @@ bot 侧二次限制超时和输出大小
 
 现有 `chatv2` 的 `SkillConfig`、工具、MCP、subagent 组合机制继续保留;agent-v3 的 skill 注入只是给 v3 增加一组可复用能力说明,不把既有工具体系迁移成 skill 包装层。
 
-当前版 skill 来源是 Go 侧按配置注册的内置/虚拟 skill,例如 rich-message。若某个 skill 需要调用 CLI,该 CLI 必须在注入内容里写清楚命令、参数和安全限制;模型不能假设存在 `/skills/<name>/scripts/...` 这类 runtime 文件。
+当前版 skill 来源是 Go 侧按配置注册的内置/虚拟 skill,例如 rich-message。`agent_v3.skills.inject_builtin` 是内置 skill 注入总开关,默认开启;关闭后即使 chat 开启 rich 也不注入内置 skill。`agent.rich: true` 仍是 rich-message 的 per-chat 门控。若某个 skill 需要调用 CLI,该 CLI 必须在注入内容里写清楚命令、参数和安全限制;模型不能假设存在 `/skills/<name>/scripts/...` 这类 runtime 文件。
 
 ## 5.2 Stable Prefix 中只写规则
 
@@ -553,7 +555,7 @@ agent-v3 第一版完成后，应满足：
 
 ```text
 每个群有独立 namespace。
-Stable Prefix = soul.md + group memory snapshot + read/grep/write/edit/bash 工具定义。
+Stable Prefix = soul.md + group memory snapshot + runtime/tool rules + <agent_v3_skills> 注入块 + read/grep/write/edit/bash 工具定义。
 Hot Append = 配置控制的对话总结 + 最近多轮原文。
 Dynamic Suffix = 当前输入 + 临时检索 + 本轮工具结果。
 模型只能调用 read/grep/write/edit/bash。
