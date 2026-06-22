@@ -23,7 +23,7 @@ edit
 bash
 ```
 
-其它能力全部通过 `/skills` 里的文档、脚本、CLI 完成。
+当前版本只在系统提示词中注入工具使用规则和可用 skill 说明,暂不实现从 agent runtime 文件系统读取 skill 的能力。Skill 是可复用的能力增强说明,不是现有工具体系的替代品;现有 `chatv2` agent tools、MCP tools、subagent tools、`SkillConfig` 工具/提示词扩展,以及 agent-v3 的 5 个固定 runtime 工具都继续按各自路径保留。
 
 ---
 
@@ -33,7 +33,7 @@ bash
 
 `TurnContext` 已经包含 bot、message、chat id、config、progress、streaming/finalized 等运行时信息，v3 可以在它基础上扩展 `RunID`、`Namespace`、`TraceID`、`RuntimeClient`。
 
-当前工具构造会合并 agent tools、skill tools、MCP tools、subagent tools。 v3 要单独走一条工具构造路径，不再复用这个“多来源工具合并”逻辑。
+当前工具构造会合并 agent tools、skill tools、MCP tools、subagent tools。v3 的 remote runtime 层要单独走一条固定工具构造路径,避免把 runtime 工具暴露面重新扩张;这不删除也不替代现有 `chatv2` 的多来源工具合并逻辑。
 
 ---
 
@@ -54,7 +54,7 @@ Stable Prefix:
   soul.md
   group memory snapshot
   5 个工具定义：read / grep / write / edit / bash
-  runtime 与 skill 使用规则
+  runtime 工具规则与系统提示词注入的 skill 说明
 
 Hot Append:
   过往对话总结，配置指定覆盖轮数
@@ -150,7 +150,7 @@ bot
   -> HTTP RPC
   -> remote runtime service
   -> docker container
-  -> workspace / skills / cli
+  -> workspace / cli
 ```
 
 bot 只负责：
@@ -170,7 +170,7 @@ bot 只负责：
 容器生命周期
 workspace 持久化
 namespace 隔离
-技能目录挂载
+skill 说明由 bot 注入系统提示词,当前版 runtime 不挂载 skill 文件系统
 命令执行
 文件读写
 资源限制
@@ -237,50 +237,29 @@ bot 侧二次限制超时和输出大小
 
 ---
 
-# 5. Skill 文件化
+# 5. Skill 系统提示词注入
 
 ## 5.1 核心变化
 
-Skill 不再注册成模型工具。
+当前版本暂不做 skill 文件系统化。Skill 不注册成额外模型工具,也不要求模型通过 `read`/`grep` 从 `/skills` 加载文档;bot 侧在 Stable Prefix/system prompt 中直接注入当前可用 skill 的名称、用途、使用规则和必要契约。
 
-Skill 是远端 runtime 文件系统中的文档和 CLI：
+现有 `chatv2` 的 `SkillConfig`、工具、MCP、subagent 组合机制继续保留;agent-v3 的 skill 注入只是给 v3 增加一组可复用能力说明,不把既有工具体系迁移成 skill 包装层。
 
-```text
-/skills/
-  web-research/
-    SKILL.md
-    scripts/
-      search.sh
-      fetch.py
-  repo-inspect/
-    SKILL.md
-    scripts/
-  campus-helper/
-    SKILL.md
-    bin/
-```
-
-模型通过固定工具使用 skill：
-
-```text
-grep "search" /skills
-read /skills/web-research/SKILL.md
-bash /skills/web-research/scripts/search.sh "query"
-```
+当前版 skill 来源是 Go 侧按配置注册的内置/虚拟 skill,例如 rich-message。若某个 skill 需要调用 CLI,该 CLI 必须在注入内容里写清楚命令、参数和安全限制;模型不能假设存在 `/skills/<name>/scripts/...` 这类 runtime 文件。
 
 ## 5.2 Stable Prefix 中只写规则
 
-Stable Prefix 不放完整 skill 内容，只写：
+Stable Prefix 直接写入当前可用的精简 skill 内容和工具使用规则：
 
 ```text
-skills 位于 /skills
-需要能力时先 grep/read SKILL.md
-执行业务能力优先调用 skill 提供的 CLI
-不要臆造命令，先读文档
-不要把 skill 文档全文写入长期记忆
+可用 skill 已在本系统提示词中列出
+不要尝试通过 read/grep 从 /skills 加载 skill
+需要可复用扩展能力时优先参考已注入 skill 说明
+需要执行命令时,只能使用 skill 明确写出的命令和参数
+skill 是能力增强说明,不是 chatv2 tools/MCP/subagent/SkillConfig 的替代品
 ```
 
-这样 skill 数量增长不会膨胀工具定义，也不会破坏 prompt cache。
+这样 skill 数量增长不会改变模型可见工具定义。skill 注入内容参与 Stable Prefix hash,内容变化时允许 prompt cache 失效并重建。
 
 ---
 
@@ -288,7 +267,7 @@ skills 位于 /skills
 
 ## 6.1 新增 v3 独立工具构造
 
-不要复用当前 `buildChatTools()` 的多来源合并逻辑。
+agent-v3 remote runtime 层不要复用当前 `buildChatTools()` 的多来源合并逻辑,因为模型可见 runtime 工具要固定为 5 个。`buildChatTools()` 及其 agent tools、skill tools、MCP tools、subagent tools 支持仍作为现有 `chatv2` 工具体系保留。
 
 新增：
 
@@ -308,7 +287,7 @@ RemoteBashTool
 
 ## 6.2 保留统一 tool execution
 
-`executeToolCall()` 现在已经是统一工具执行入口。 v3 可以继续复用它，但实际 tool 实现全部变成 HTTP RPC client。
+`executeToolCall()` 现在已经是统一工具执行入口。v3 可以继续复用它,但 v3 remote runtime 层的 5 个 tool 实现变成 HTTP RPC client。
 
 ## 6.3 取消模型可见 update_progress
 
@@ -322,7 +301,7 @@ RemoteBashTool
 例如：
 
 ```text
-正在读取 skill 文档
+正在根据 skill 规则准备输出
 正在执行 bash 命令
 正在整理结果
 ```
@@ -415,8 +394,8 @@ agent_v3:
       - bash
 
   skills:
-    mode: "runtime_filesystem"
-    root: "/skills"
+    mode: "system_prompt"
+    inject_builtin: true
 
   observability:
     enable: true
@@ -509,21 +488,22 @@ memory snapshot hash 可追踪
 
 ---
 
-## M4：Skill 文件化
+## M4：Skill 系统提示词注入
 
 ```text
-/skills 目录规范
-SKILL.md 规范
-示例 skills
-system rule 引导 grep/read/bash 使用 skill
-MCP 不再直接暴露给模型
+内置 skill 注册表
+system prompt 注入工具规则和 skill 说明
+rich-message 等内置 skill 按配置注入
+system rule 明确禁止从 runtime /skills 读取 skill
+agent-v3 remote runtime 层不额外直接暴露 MCP tools
 ```
 
 验收：
 
 ```text
 新增 skill 不增加模型工具数量
-模型能通过 read/grep/bash 使用 skill
+模型能根据系统提示词中注入的 skill 说明工作
+模型不会被引导通过 read/grep 从 agent runtime 文件系统读取 skill
 ```
 
 ---
@@ -558,7 +538,8 @@ v3 第一版不做：
 不做 host shell
 不把 memory 注册成模型工具
 不把 skill 注册成模型工具
-不直接暴露 MCP tools
+不从 agent runtime 文件系统读取 skill
+不在 agent-v3 remote runtime 固定工具层额外直接暴露 MCP tools
 不做 skill marketplace
 不做复杂 Web trace UI
 不做多 agent 编排
@@ -576,9 +557,8 @@ Stable Prefix = soul.md + group memory snapshot + read/grep/write/edit/bash 工�
 Hot Append = 配置控制的对话总结 + 最近多轮原文。
 Dynamic Suffix = 当前输入 + 临时检索 + 本轮工具结果。
 模型只能调用 read/grep/write/edit/bash。
-所有业务能力通过 /skills 下的 CLI 完成。
+可复用扩展能力通过系统提示词中注入的 skill 说明获得;既有 chatv2 tools、MCP、subagent、SkillConfig 能力不被移除。
 bash 在远端 Docker runtime 中执行，bot 只通过 HTTP RPC 通信。
 OpenAI 请求使用稳定 prompt 顺序和 prompt_cache_key。
 所有关键步骤都有 trace 和 cached_tokens 观测。
 ```
-
