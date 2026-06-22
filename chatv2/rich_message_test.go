@@ -227,6 +227,35 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		assert.Equal(t, "*hello*", delivery.RichMessage.Markdown)
 		assert.Equal(t, "hello", delivery.VisibleText)
 	})
+
+	t.Run("rich envelope bypasses payload formatting hooks", func(t *testing.T) {
+		const rawMarkdown = "# Title\n\n**Body**"
+		const wantFallback = "Title\n\nBody"
+
+		payloadFormats := []string{"markdown-block", "quote", "collapse", "block"}
+
+		for _, payloadFmt := range payloadFormats {
+			t.Run(payloadFmt, func(t *testing.T) {
+				formatCfg := &config.ChatOutputFormatConfig{
+					Format:  "markdown",
+					Payload: payloadFmt,
+				}
+				setConfigField(t, formatCfg, "UseNativeReasoning", false)
+
+				text := mustTelegramRichEnvelope(rawMarkdown)
+				delivery := resolveTelegramRichDelivery(text, "", formatCfg, true)
+
+				assert.True(t, delivery.ShouldSendRich,
+					"ShouldSendRich must be true for payload format %q", payloadFmt)
+				assert.Equal(t, rawMarkdown, delivery.RichMessage.Markdown,
+					"RichMessage.Markdown must equal the exact original markdown for payload format %q — no fences, prefixes, escaping, or collapse markers", payloadFmt)
+				assert.Equal(t, wantFallback, delivery.VisibleText,
+					"VisibleText must be the derived plain-text fallback for payload format %q", payloadFmt)
+				assert.NoError(t, delivery.Err,
+					"no error expected for valid envelope with payload format %q", payloadFmt)
+			})
+		}
+	})
 }
 
 type stubTelegramRawCaller struct {

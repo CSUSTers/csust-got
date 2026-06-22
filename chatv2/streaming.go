@@ -366,10 +366,22 @@ func NonStreamResponse(
 	existingMsg *tb.Message,
 	richEnabled bool,
 ) (*tb.Message, string, error) {
+	return nonStreamResponseWithCaller(tbCtx.Bot(), tbCtx, text, reasoning, format, existingMsg, richEnabled)
+}
+
+func nonStreamResponseWithCaller(
+	raw telegramRawCaller,
+	tbCtx tb.Context,
+	text string,
+	reasoning string,
+	format *config.ChatOutputFormatConfig,
+	existingMsg *tb.Message,
+	richEnabled bool,
+) (*tb.Message, string, error) {
 	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled)
 	if delivery.ShouldSendRich {
 		if existingMsg != nil {
-			msg, err := editTelegramRichMessage(tbCtx.Bot(), existingMsg.Chat.ID, existingMsg.ID, delivery.RichMessage)
+			msg, err := editTelegramRichMessage(raw, existingMsg.Chat.ID, existingMsg.ID, delivery.RichMessage)
 			if err == nil {
 				return msg, delivery.VisibleText, nil
 			}
@@ -379,7 +391,7 @@ func NonStreamResponse(
 			if msg := tbCtx.Message(); msg != nil {
 				replyToID = msg.ID
 			}
-			msg, err := sendTelegramRichMessage(tbCtx.Bot(), tbCtx.Chat().ID, replyToID, delivery.RichMessage)
+			msg, err := sendTelegramRichMessage(raw, tbCtx.Chat().ID, replyToID, delivery.RichMessage)
 			if err == nil {
 				return msg, delivery.VisibleText, nil
 			}
