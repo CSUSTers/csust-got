@@ -34,6 +34,11 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 		names = append(names, info.Name)
 	}
 	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, names)
+	assert.NotContains(t, names, "load_skill")
+
+	toolDefsText := agentV3ToolDefinitionsText()
+	assert.NotContains(t, toolDefsText, "load_skill")
+	assert.NotContains(t, toolDefsText, "/skills")
 }
 
 func TestRemoteRuntimeClientAndBashTool(t *testing.T) {
@@ -148,6 +153,7 @@ func TestCompileAgentV3DoesNotExposeLegacyTools(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash"}, agent.toolNames)
 	assert.NotContains(t, agent.toolNames, "update_progress")
+	assert.NotContains(t, agent.toolNames, "load_skill")
 }
 
 func TestAgentV3StageMarkersDescribeRuntimeIntent(t *testing.T) {
@@ -155,13 +161,13 @@ func TestAgentV3StageMarkersDescribeRuntimeIntent(t *testing.T) {
 		{
 			Function: schema.FunctionCall{
 				Name:      "read",
-				Arguments: `{"path":"/skills/web-research/SKILL.md"}`,
+				Arguments: `{"path":"/workspace/notes.md"}`,
 			},
 		},
 		{
 			Function: schema.FunctionCall{
 				Name:      "bash",
-				Arguments: `{"command":"bash /skills/web-research/scripts/search.sh \"cache\""}`,
+				Arguments: `{"command":"go test ./chatv2"}`,
 			},
 		},
 		{
@@ -173,9 +179,11 @@ func TestAgentV3StageMarkersDescribeRuntimeIntent(t *testing.T) {
 	}
 
 	got := buildAgentV3StageMarker(calls)
-	assert.Contains(t, got, "正在读取 skill 文档")
-	assert.Contains(t, got, "正在执行 skill CLI")
+	assert.Contains(t, got, "正在读取 runtime 文件")
+	assert.Contains(t, got, "正在执行 bash 命令")
 	assert.Contains(t, got, "正在编辑 runtime 文件")
+	assert.NotContains(t, got, "skill 文档")
+	assert.NotContains(t, got, "skill CLI")
 }
 
 func TestAgentV3RuntimeTruncateKeepsUTF8(t *testing.T) {
@@ -219,7 +227,7 @@ func TestPrepareAgentV3TurnLeavesTraceOnContextBuildError(t *testing.T) {
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{
 		SoulPath: filepath.Join(t.TempDir(), "missing-soul.md"),
 		Runtime:  config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
-		Skills:   config.AgentV3SkillsConfig{Mode: "runtime_filesystem", Root: "/skills"},
+		Skills:   config.AgentV3SkillsConfig{Mode: "system_prompt"},
 	}}
 	tc := &TurnContext{
 		Message: &tb.Message{ID: 42},
@@ -245,8 +253,16 @@ func TestValidateAgentV3RuntimeConfig(t *testing.T) {
 	}), "unsupported")
 	assert.NoError(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
 		Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
-		Skills:  config.AgentV3SkillsConfig{Mode: "runtime_filesystem", Root: "/skills"},
+		Skills:  config.AgentV3SkillsConfig{Mode: "system_prompt"},
 	}))
+	assert.ErrorContains(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
+		Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
+		Skills:  config.AgentV3SkillsConfig{Mode: "runtime_filesystem"},
+	}), "expected system_prompt")
+	assert.ErrorContains(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
+		Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
+		Skills:  config.AgentV3SkillsConfig{Mode: "system_prompt", Root: "/skills"},
+	}), "expected empty")
 }
 
 func TestAgentV3TracePreviewRespectsConfig(t *testing.T) {
@@ -319,23 +335,49 @@ func TestAgentV3RichMessageRulesAreGated(t *testing.T) {
 	assert.Contains(t, enabled, "headings, lists, task lists")
 }
 
-func TestBuildAgentV3StablePrefixIncludesRichContractOnlyWhenProvided(t *testing.T) {
-	withoutRich := buildAgentV3StablePrefix("soul", "memory", "tools", "")
-	assert.NotContains(t, withoutRich, "<rich_message_skill>")
-	assert.Contains(t, withoutRich, "<tool_definitions>")
+func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
+	tc := &TurnContext{Config: &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}}}
+	cfg := &config.AgentV3Config{}
+	require.Len(t, buildAgentV3BuiltinSkills(tc, cfg), 1)
 
-	withRich := buildAgentV3StablePrefix("soul", "memory", "tools", "rich rules")
-	assert.Contains(t, withRich, "<rich_message_skill>\nrich rules\n</rich_message_skill>")
-	assert.Contains(t, withRich, "<tool_definitions>")
-	assert.Less(t, strings.Index(withRich, "<rich_message_skill>"), strings.Index(withRich, "<tool_definitions>"))
+	disabled := false
+	cfg.Skills.InjectBuiltin = &disabled
+	assert.Empty(t, buildAgentV3BuiltinSkills(tc, cfg))
 }
 
-func TestBuildAgentV3PrefixHashSeparatesRichGate(t *testing.T) {
+func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *testing.T) {
+	withoutRich := buildAgentV3StablePrefix("soul", "memory", "tools", "")
+	assert.NotContains(t, withoutRich, "<rich_message_skill>")
+	assert.NotContains(t, withoutRich, "\n<agent_v3_skills>\n")
+	assert.Contains(t, withoutRich, "<tool_definitions>")
+
+	skillBlock := buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{
+		Name:        "rich-message",
+		Description: "Rich output",
+		Content:     "rich rules",
+	}})
+	withRich := buildAgentV3StablePrefix("soul", "memory", "tools", skillBlock)
+	assert.NotContains(t, withRich, "<rich_message_skill>")
+	assert.Contains(t, withRich, "<agent_v3_skills>")
+	assert.Contains(t, withRich, "Do not use read/grep to load skills from /skills")
+	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\">")
+	assert.Contains(t, withRich, "rich rules")
+	assert.Contains(t, withRich, "<tool_definitions>")
+
+	idxRuntimeRules := strings.Index(withRich, "<runtime_and_skill_rules>")
+	idxSkills := strings.Index(withRich, "<agent_v3_skills>")
+	idxToolDefs := strings.Index(withRich, "<tool_definitions>")
+	assert.Greater(t, idxRuntimeRules, -1, "<runtime_and_skill_rules> must be present")
+	assert.Less(t, idxRuntimeRules, idxSkills, "<runtime_and_skill_rules> must appear before <agent_v3_skills>")
+	assert.Less(t, idxSkills, idxToolDefs, "<agent_v3_skills> must appear before <tool_definitions>")
+}
+
+func TestBuildAgentV3PrefixHashSeparatesSkillPromptBlock(t *testing.T) {
 	soulHash := hashString("soul")
 	memoryHash := hashString("memory")
 	toolDefsHash := hashString("tools")
 	withoutRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(""))
-	withRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(agentV3RichMessageSkillContract(true)))
+	withRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
 
 	assert.NotEqual(t, withoutRich, withRich)
 	assert.Equal(t, withoutRich, buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString("")))

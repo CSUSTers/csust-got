@@ -293,8 +293,8 @@ func buildAgentV3Tools() []tool.BaseTool {
 
 func agentV3ToolDefinitionsText() string {
 	infos := []map[string]any{
-		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace or /skills."},
-		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace or /skills."},
+		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
+		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
 		{agentV3ToolNameField: agentV3ToolWrite, agentV3ToolArgsField: "path,content", agentV3ToolDescField: "Write a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace."},
@@ -313,9 +313,9 @@ type remoteReadArgs struct {
 func (t *remoteReadTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolRead,
-		Desc: "Read a file from the remote runtime. Use this for /workspace files and /skills/*/SKILL.md.",
+		Desc: "Read a file from the remote runtime workspace.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			agentV3ToolPathField: {Type: "string", Desc: "File path, e.g. /skills/name/SKILL.md or /workspace/file.txt", Required: true},
+			agentV3ToolPathField: {Type: "string", Desc: "Workspace file path, e.g. /workspace/file.txt", Required: true},
 			agentV3ToolCWDField:  {Type: "string", Desc: agentV3ToolCWDDescription},
 		}),
 	}, nil
@@ -351,7 +351,7 @@ type remoteGrepArgs struct {
 func (t *remoteGrepTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolGrep,
-		Desc: "Search text in the remote runtime. Use grep before reading skills when you need to discover capabilities.",
+		Desc: "Search text in the remote runtime workspace.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			agentV3ToolPatternField: {Type: "string", Desc: "Search pattern", Required: true},
 			agentV3ToolPathField:    {Type: "string", Desc: "Optional path, default /workspace"},
@@ -391,7 +391,7 @@ type remoteWriteArgs struct {
 func (t *remoteWriteTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolWrite,
-		Desc: "Write a file in the remote runtime workspace. Do not write under /skills.",
+		Desc: "Write a file in the remote runtime workspace.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			agentV3ToolPathField:    {Type: "string", Desc: "Workspace file path", Required: true},
 			agentV3ToolContentField: {Type: "string", Desc: "Full file content", Required: true},
@@ -477,7 +477,7 @@ type remoteBashArgs struct {
 func (t *remoteBashTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolBash,
-		Desc: "Run a shell command in the remote runtime workspace. Use documented skill CLIs from /skills when available.",
+		Desc: "Run a shell command in the remote runtime workspace.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			agentV3ToolCommandField: {Type: "string", Desc: "Shell command to execute", Required: true},
 			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},

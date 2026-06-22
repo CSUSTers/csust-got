@@ -115,13 +115,13 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) 
 	toolDefs := agentV3ToolDefinitionsText()
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
-	richRules := agentV3RichMessageSkillContract(tc.Config.IsAgentV3RichEnabled())
-	richRulesHash := hashString(richRules)
-	prefixHash := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, richRulesHash)
+	skillPromptBlock := buildAgentV3SkillPromptBlock(buildAgentV3BuiltinSkills(tc, cfg))
+	skillPromptBlockHash := hashString(skillPromptBlock)
+	prefixHash := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, skillPromptBlockHash)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
 	promptCacheKey := ""
-	prefixText := buildAgentV3StablePrefix(soul, memoryText, toolDefs, richRules)
+	prefixText := buildAgentV3StablePrefix(soul, memoryText, toolDefs, skillPromptBlock)
 
 	cacheHit := false
 	finishCacheSpan := trace.StartSpan("context_cache", map[string]any{
@@ -296,11 +296,11 @@ func renderAgentV3Soul(cc *CompiledChat, tc *TurnContext) (string, error) {
 	return strings.TrimSpace(buf.String()), nil
 }
 
-func buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, richRulesHash string) string {
-	return hashString(strings.Join([]string{soulHash, memoryHash, toolDefsHash, richRulesHash}, ":"))
+func buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, skillPromptBlockHash string) string {
+	return hashString(strings.Join([]string{soulHash, memoryHash, toolDefsHash, skillPromptBlockHash}, ":"))
 }
 
-func buildAgentV3StablePrefix(soul, memory, toolDefs, richRules string) string {
+func buildAgentV3StablePrefix(soul, memory, toolDefs, skillPromptBlock string) string {
 	var parts []string
 	if strings.TrimSpace(soul) != "" {
 		parts = append(parts, "<soul>\n"+strings.TrimSpace(soul)+"\n</soul>")
@@ -311,8 +311,8 @@ func buildAgentV3StablePrefix(soul, memory, toolDefs, richRules string) string {
 		parts = append(parts, "<group_memory_snapshot>\n(empty)\n</group_memory_snapshot>")
 	}
 	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules()+"\n</runtime_and_skill_rules>")
-	if strings.TrimSpace(richRules) != "" {
-		parts = append(parts, "<rich_message_skill>\n"+strings.TrimSpace(richRules)+"\n</rich_message_skill>")
+	if strings.TrimSpace(skillPromptBlock) != "" {
+		parts = append(parts, strings.TrimSpace(skillPromptBlock))
 	}
 	parts = append(parts, "<tool_definitions>\n"+toolDefs+"\n</tool_definitions>")
 	return strings.Join(parts, "\n\n")
@@ -335,16 +335,14 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 }
 
 func agentV3RuntimeSkillRules() string {
-	skillRoot := agentV3SkillsRootDefault
-	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil && config.BotConfig.AgentV3.Skills.Root != "" {
-		skillRoot = config.BotConfig.AgentV3.Skills.Root
-	}
 	return "You are running in agent-v3 mode.\n" +
 		"Visible tools are fixed to read, grep, write, edit, bash.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
-		"Skills live under " + skillRoot + ". When you need a capability, grep/read SKILL.md first, then run documented CLIs with bash.\n" +
-		"Do not invent skill commands before reading their documentation.\n" +
-		"Do not write skill documentation into long-term memory.\n" +
+		"Available skills, if any, are already injected into <agent_v3_skills> in this system prompt.\n" +
+		"Do not use read, grep, or runtime filesystem paths to load skills from /skills.\n" +
+		"If an injected skill documents bash commands, run only those explicitly documented commands and arguments.\n" +
+		"Do not invent skill commands or /skills scripts.\n" +
+		"Do not write skill instructions into long-term memory.\n" +
 		"Use bash for command execution only through the remote runtime."
 }
 
@@ -687,11 +685,11 @@ func validateAgentV3RuntimeConfig(cfg *config.AgentV3Config) error {
 	if cfg.Runtime.Mode != "" && cfg.Runtime.Mode != agentV3RuntimeModeRemoteHTTP {
 		return fmt.Errorf("%w: %q; expected %s", errAgentV3RuntimeModeUnsupported, cfg.Runtime.Mode, agentV3RuntimeModeRemoteHTTP)
 	}
-	if cfg.Skills.Mode != "" && cfg.Skills.Mode != agentV3SkillsModeRuntimeFilesystem {
-		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsModeUnsupported, cfg.Skills.Mode, agentV3SkillsModeRuntimeFilesystem)
+	if cfg.Skills.Mode != "" && cfg.Skills.Mode != agentV3SkillsModeSystemPrompt {
+		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsModeUnsupported, cfg.Skills.Mode, agentV3SkillsModeSystemPrompt)
 	}
-	if cfg.Skills.Root != "" && cfg.Skills.Root != agentV3SkillsRootDefault {
-		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsRootUnsupported, cfg.Skills.Root, agentV3SkillsRootDefault)
+	if cfg.Skills.Root != "" {
+		return fmt.Errorf("%w: %q; expected empty", errAgentV3SkillsRootUnsupported, cfg.Skills.Root)
 	}
 	return nil
 }

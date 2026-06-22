@@ -347,40 +347,20 @@ func buildAgentV3StageMarker(calls []schema.ToolCall) string {
 }
 
 func agentV3ToolStageLabel(call schema.ToolCall) string {
-	path, command := agentV3ToolPathAndCommand(call)
 	switch call.Function.Name {
 	case agentV3ToolRead:
-		if strings.HasPrefix(path, agentV3ToolSkillPathPrefix) {
-			return "正在读取 skill 文档"
-		}
 		return "正在读取 runtime 文件"
 	case agentV3ToolGrep:
-		if path == "" || path == agentV3SkillsRootDefault || strings.HasPrefix(path, agentV3ToolSkillPathPrefix) {
-			return "正在搜索 skills"
-		}
 		return "正在搜索 runtime 文件"
 	case agentV3ToolWrite:
 		return "正在写入 runtime 文件"
 	case agentV3ToolEdit:
 		return "正在编辑 runtime 文件"
 	case agentV3ToolBash:
-		if strings.Contains(command, agentV3ToolSkillPathPrefix) {
-			return "正在执行 skill CLI"
-		}
 		return "正在执行 bash 命令"
 	default:
 		return ""
 	}
-}
-
-func agentV3ToolPathAndCommand(call schema.ToolCall) (string, string) {
-	var args map[string]any
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return "", ""
-	}
-	path, _ := args["path"].(string)
-	command, _ := args["command"].(string)
-	return strings.TrimSpace(path), strings.TrimSpace(command)
 }
 
 func shouldEmitStageMarker(ctx context.Context) bool {
