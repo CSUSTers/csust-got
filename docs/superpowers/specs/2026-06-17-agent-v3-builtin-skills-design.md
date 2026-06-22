@@ -43,7 +43,7 @@
 2. **不读 runtime skill 文件系统**: 不实现 `/skills` root、`read /skills/<name>/SKILL.md`、`grep /skills`、runtime skill mount、bot 侧 overlay 或未命中透传。
 3. **保持 5 个固定工具**: skill 变化不能改变模型可见工具表,不能新增第 6 个默认工具。
 4. **保留既有工具体系**: chatv2 tools、MCP tools、subagent tools、`SkillConfig` 和 agent-v3 固定 runtime tools 继续按各自路径存在。
-5. **程序化动态注册**: 根据 config 在 Go 侧注册可注入 skill。当前 rich skill 由 `tc.Config.IsAgentV3RichEnabled()` 门控。
+5. **程序化动态注册**: 根据 config 在 Go 侧注册可注入 skill。内置 skill 先受 `agent_v3.skills.inject_builtin` 总开关控制,当前 rich skill 再由 `tc.Config.IsAgentV3RichEnabled()` 门控。
 6. **内容要可缓存**: 注入块进入 Stable Prefix,参与 prefix hash;skill 内容变化时允许 cache key 变化。
 
 ## 3. 架构设计
@@ -60,7 +60,7 @@ CompileChat(tc)
        │    ├─ remoteEditTool   (不变)
        │    └─ remoteBashTool   (不变)
        └─ buildAgentV3StablePrefix(tc)
-            ├─ buildAgentV3BuiltinSkills(tc)
+            ├─ buildAgentV3BuiltinSkills(tc, cfg)
             └─ <agent_v3_skills>...</agent_v3_skills>
 ```
 
@@ -68,11 +68,11 @@ CompileChat(tc)
 
 | 组件 | 职责 | 输入 | 输出 |
 |---|---|---|---|
-| `AgentV3BuiltinSkill` | 描述一个可注入 skill | name/description/content | skill 数据 |
-| `buildAgentV3BuiltinSkills(tc)` | 按 config 动态注册当前 chat 可用 skill | `*TalkContext` | `[]AgentV3BuiltinSkill` |
+| `agentV3BuiltinSkill` | 描述一个可注入 skill | name/description/content | skill 数据 |
+| `buildAgentV3BuiltinSkills(tc, cfg)` | 按 config 动态注册当前 chat 可用 skill | `*TurnContext`, `*config.AgentV3Config` | `[]agentV3BuiltinSkill` |
 | `buildAgentV3SkillPromptBlock(skills)` | 生成系统提示词注入块 | skill 列表 | prompt 文本 |
-| `buildAgentV3StablePrefix`(改) | 注入工具规则和 skill 块 | `*TalkContext` | prompt 文本 |
-| `buildAgentV3Tools` | 继续只构造固定 5 工具 | `*TalkContext` | read/grep/write/edit/bash |
+| `buildAgentV3StablePrefix`(改) | 注入工具规则和 skill 块 | soul/memory/tool defs/skill block | prompt 文本 |
+| `buildAgentV3Tools` | 继续只构造固定 5 工具 | 无 skill 输入 | read/grep/write/edit/bash |
 
 ## 4. 详细设计
 
@@ -83,20 +83,23 @@ CompileChat(tc)
 ```go
 package chatv2
 
-// AgentV3BuiltinSkill 描述一个会注入到 agent-v3 system prompt 的 skill。
-type AgentV3BuiltinSkill struct {
+// agentV3BuiltinSkill 描述一个会注入到 agent-v3 system prompt 的 skill。
+type agentV3BuiltinSkill struct {
     Name        string
     Description string
     Content     string
 }
 
-func buildAgentV3BuiltinSkills(tc *TalkContext) []AgentV3BuiltinSkill {
-    skills := make([]AgentV3BuiltinSkill, 0, 1)
+func buildAgentV3BuiltinSkills(tc *TurnContext, cfg *config.AgentV3Config) []agentV3BuiltinSkill {
+    if tc == nil || tc.Config == nil || cfg == nil || !cfg.Skills.BuiltinInjectionEnabled() {
+        return nil
+    }
+    skills := make([]agentV3BuiltinSkill, 0, 1)
     if tc.Config.IsAgentV3RichEnabled() {
-        skills = append(skills, AgentV3BuiltinSkill{
+        skills = append(skills, agentV3BuiltinSkill{
             Name:        "rich-message",
             Description: "Output Telegram rich messages (Rich Markdown). Use when rich formatting is needed.",
-            Content:     agentV3RichMessageSkillContract,
+            Content:     agentV3RichMessageSkillContract(true),
         })
     }
     sort.Slice(skills, func(i, j int) bool { return skills[i].Name < skills[j].Name })
@@ -104,14 +107,14 @@ func buildAgentV3BuiltinSkills(tc *TalkContext) []AgentV3BuiltinSkill {
 }
 ```
 
-**作用域选择理由:** per-agent-compile 而非全局,因为 rich skill 是 per-chat gated(`agent.rich: true`),不同 chat 的 skill 集可能不同;agent v3 构建时已经携带 `TalkContext`,无需全局状态。
+**作用域选择理由:** per-agent-compile 而非全局,因为 rich skill 是 per-chat gated(`agent.rich: true`),不同 chat 的 skill 集可能不同;agent v3 构建时已经携带 `TurnContext`,无需全局状态。
 
 ### 4.2 系统提示词注入块
 
 新增 prompt builder:
 
 ```go
-func buildAgentV3SkillPromptBlock(skills []AgentV3BuiltinSkill) string {
+func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
     if len(skills) == 0 {
         return ""
     }
@@ -142,7 +145,7 @@ func buildAgentV3SkillPromptBlock(skills []AgentV3BuiltinSkill) string {
 
 - 保留 soul、memory snapshot、固定工具规则等现有 Stable Prefix 组成;
 - 移除单独的 `<rich_message_skill>` 拼接路径;
-- 调用 `buildAgentV3BuiltinSkills(tc)`;
+- 调用 `buildAgentV3BuiltinSkills(tc, cfg)`;
 - 将 `buildAgentV3SkillPromptBlock(skills)` 的返回值追加到 Stable Prefix;
 - 无 skill 时不输出 `<agent_v3_skills>` 标签。
 
@@ -236,7 +239,7 @@ bash
 
 - **模型侧**: rich-message 等内置 skill 直接在 system prompt 中可见,不需要也不应该通过 runtime `/skills` 文件读取。
 - **运维侧**: 当前 agent-v3 版本不消费 runtime `skills_root` 磁盘目录。若已有磁盘 skill,暂不属于本版本 agent-v3 能力面;可以继续作为未来 runtime filesystem skill 模式的候选输入。
-- **配置侧**: 无新增配置项。rich skill 仍由 `agent.rich: true` 门控,只是注入方式整理为统一 `<agent_v3_skills>` 块。
+- **配置侧**: 新增 `agent_v3.skills.inject_builtin` 作为内置 skill 注入总开关,默认 `true`。rich skill 仍由 `agent.rich: true` 进行 per-chat 门控,只是注入方式整理为统一 `<agent_v3_skills>` 块。
 
 ### 7.2 兼容性
 
@@ -253,6 +256,6 @@ bash
 
 - **runtime filesystem skill 模式**: 未来若要支持 `/skills/<name>/SKILL.md`,应作为明确新版本能力实现,并继续保持 skill additive,不得替代 chatv2/MCP/subagent/SkillConfig。
 - **可选 `load_skill` helper**: 若未来确实需要语义化加载工具,可新增为可配置 helper,但不得成为默认第 6 个工具。
-- **动态内容生成**: `AgentV3BuiltinSkill.Content` 可改为 `ContentProvider func(tc *TalkContext) string`,支持按运行时状态生成 prompt 内容。
+- **动态内容生成**: `agentV3BuiltinSkill.Content` 可改为 `ContentProvider func(tc *TurnContext) string`,支持按运行时状态生成 prompt 内容。
 - **更多内置 skill**: 在 `buildAgentV3BuiltinSkills` 加注册分支即可。
-- **skill 版本化**: `AgentV3BuiltinSkill` 可增加 `Version` 字段,由 prompt 注入块声明版本。
+- **skill 版本化**: `agentV3BuiltinSkill` 可增加 `Version` 字段,由 prompt 注入块声明版本。
