@@ -54,6 +54,7 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 
 	infos := make([]*schema.ToolInfo, 0, len(cfg.Tools))
 	invokables := make(map[string]tool.InvokableTool, len(cfg.Tools))
+	seenNames := make(map[string]struct{}, len(cfg.Tools))
 	names := make([]string, 0, len(cfg.Tools))
 
 	for _, t := range cfg.Tools {
@@ -63,6 +64,14 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 				zap.String("agent", cfg.Name), zap.Error(err))
 			continue
 		}
+		if _, exists := seenNames[info.Name]; exists {
+			zap.L().Warn("chatv2/loop: duplicate tool name, keeping first",
+				zap.String("agent", cfg.Name),
+				zap.String("tool", info.Name),
+			)
+			continue
+		}
+		seenNames[info.Name] = struct{}{}
 		infos = append(infos, info)
 		names = append(names, info.Name)
 

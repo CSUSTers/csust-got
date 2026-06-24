@@ -139,9 +139,8 @@ func TestIsAgentV3RichEnabledRequiresAgentV3AndRichGate(t *testing.T) {
 			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, V3: true}},
 		},
 		{
-			name: "global v3 plus rich is true",
+			name: "global v3 alone does not migrate chat",
 			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, Rich: true}},
-			want: true,
 		},
 		{
 			name: "per chat v3 plus rich is true",

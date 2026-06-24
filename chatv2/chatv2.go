@@ -110,10 +110,15 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 	}
 	ctx = WithTurnContext(ctx, tc)
 
+	history, err := LoadHistory(tc.Bot, msg, chatCfg.MessageContext)
+	if err != nil {
+		zap.L().Warn("chatv2: failed to load history", zap.Error(err))
+		history = &RichHistory{}
+	}
+
 	var messages []*schema.Message
 	if chatCfg.IsAgentV3Enabled() {
-		var err error
-		messages, err = prepareAgentV3Turn(ctx, compiled, tc)
+		messages, err = prepareAgentV3Turn(ctx, compiled, tc, history)
 		if err != nil {
 			if tc.V3 != nil && tc.V3.Trace != nil {
 				tc.V3.Trace.SetError(err)
@@ -136,13 +141,6 @@ func Chat(tbCtx tb.Context, chatCfg *config.ChatConfigSingle, trigger *config.Ch
 			zap.Int64("chat_id", tc.ChatID),
 		)
 	} else {
-		// Load conversation history
-		history, err := LoadHistory(tc.Bot, msg, chatCfg.MessageContext)
-		if err != nil {
-			zap.L().Warn("chatv2: failed to load history", zap.Error(err))
-			history = &RichHistory{}
-		}
-
 		// Build messages for the agent
 		messages, err = BuildMessages(compiled, tc, history)
 		if err != nil {

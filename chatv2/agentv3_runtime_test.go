@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"csust-got/chat"
 	"csust-got/config"
 	"csust-got/orm"
 
@@ -147,6 +148,7 @@ func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 	messages := buildAgentV3TurnMessages(
 		"stable prefix",
 		"- user: old question\n- assistant: old answer",
+		nil,
 		[]orm.AgentV3Turn{
 			{Role: string(schema.User), Content: "recent user"},
 			{Role: string(schema.Assistant), Content: "recent assistant"},
@@ -193,7 +195,7 @@ func countRoleMessages(messages []*schema.Message, role schema.RoleType) int {
 	return count
 }
 
-func TestCompileAgentV3DoesNotExposeLegacyTools(t *testing.T) {
+func TestBuildAgentV3ToolsExposeRuntimeTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
@@ -203,6 +205,32 @@ func TestCompileAgentV3DoesNotExposeLegacyTools(t *testing.T) {
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash"}, agent.toolNames)
 	assert.NotContains(t, agent.toolNames, "update_progress")
+	assert.NotContains(t, agent.toolNames, "load_skill")
+}
+
+func TestAgentV3ToolSurfacePreservesConfiguredTools(t *testing.T) {
+	configuredTools, err := buildConfiguredAgentTools(t.Context(), "v3", &config.AgentConfig{
+		Tools: []string{"update_progress"},
+		Skills: []*config.SkillConfig{
+			{
+				Name:  "context",
+				Tools: []string{"get_context"},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+
+	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
+		Name:     "v3",
+		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
+		Tools:    append(buildAgentV3Tools(), configuredTools...),
+		MaxSteps: 4,
+	})
+	require.NoError(t, err)
+
+	for _, name := range []string{"read", "grep", "write", "edit", "bash", "update_progress", "get_context"} {
+		assert.Contains(t, agent.toolNames, name)
+	}
 	assert.NotContains(t, agent.toolNames, "load_skill")
 }
 
@@ -256,6 +284,20 @@ func TestRenderAgentV3SoulRejectsDynamicSystemPrompt(t *testing.T) {
 	assert.Contains(t, err.Error(), "dynamic field")
 }
 
+func TestRenderAgentV3SoulIncludesSkillPromptAddons(t *testing.T) {
+	old := config.BotConfig
+	defer func() { config.BotConfig = old }()
+	config.BotConfig = nil
+
+	cc := &CompiledChat{
+		SystemTemplate:    template.Must(template.New("system").Parse("static soul for {{ .BotUsername }}")),
+		SkillPromptAddons: "skill addon",
+	}
+	got, err := renderAgentV3Soul(cc, &TurnContext{BotUser: &tb.User{Username: "bot"}})
+	require.NoError(t, err)
+	assert.Equal(t, "static soul for bot\n\nskill addon", got)
+}
+
 func TestRenderAgentV3SoulPathOverridesDynamicSystemPrompt(t *testing.T) {
 	old := config.BotConfig
 	defer func() { config.BotConfig = old }()
@@ -264,11 +306,52 @@ func TestRenderAgentV3SoulPathOverridesDynamicSystemPrompt(t *testing.T) {
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{SoulPath: soulPath}}
 
 	cc := &CompiledChat{
-		SystemTemplate: template.Must(template.New("system").Parse("now {{ .CurrentDateCN }} {{ .Input }}")),
+		SystemTemplate:    template.Must(template.New("system").Parse("now {{ .CurrentDateCN }} {{ .Input }}")),
+		SkillPromptAddons: "skill addon",
 	}
 	got, err := renderAgentV3Soul(cc, &TurnContext{})
 	require.NoError(t, err)
-	assert.Equal(t, "static soul", got)
+	assert.Equal(t, "static soul\n\nskill addon", got)
+}
+
+func TestAgentV3UserMessageRendersPromptWithHistoryContext(t *testing.T) {
+	replyTo := 10
+	history := &RichHistory{ContextMessages: []*chat.ContextMessage{
+		{ID: 10, User: "alice", Text: "earlier context"},
+		{ID: 11, ReplyTo: &replyTo, User: "bob", Text: "reply context"},
+	}}
+	cc := &CompiledChat{
+		PromptTemplate: template.Must(template.New("prompt").Parse("ctx={{ .ContextXml }}\ninput={{ .Input }}")),
+	}
+	tc := &TurnContext{
+		Message: &tb.Message{Text: "current input"},
+		BotUser: &tb.User{Username: "bot"},
+	}
+
+	msg, err := buildAgentV3UserMessage(cc, tc, history)
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.Equal(t, schema.User, msg.Role)
+	assert.Contains(t, msg.Content, "<dynamic_suffix>")
+	assert.Contains(t, msg.Content, "<messages>")
+	assert.Contains(t, msg.Content, "earlier context")
+	assert.Contains(t, msg.Content, `replyTo="10"`)
+	assert.Contains(t, msg.Content, "input=current input")
+}
+
+func TestAgentV3FallbackHistoryMessagesOnlyBeforeRawTurns(t *testing.T) {
+	history := &RichHistory{ContextMessages: []*chat.ContextMessage{
+		{ID: 1, User: "alice", Text: "hello"},
+	}}
+	tc := &TurnContext{BotUser: &tb.User{Username: "bot"}}
+
+	fallback := agentV3FallbackHistoryMessages(nil, history, tc)
+	require.Len(t, fallback, 1)
+	assert.Equal(t, schema.User, fallback[0].Role)
+	assert.Contains(t, fallback[0].Content, "[alice]: hello")
+
+	assert.Empty(t, agentV3FallbackHistoryMessages([]orm.AgentV3Turn{{Role: string(schema.User), Content: "raw"}}, history, tc))
+	assert.Empty(t, agentV3FallbackHistoryMessages(nil, &RichHistory{}, tc))
 }
 
 func TestPrepareAgentV3TurnLeavesTraceOnContextBuildError(t *testing.T) {
@@ -286,7 +369,7 @@ func TestPrepareAgentV3TurnLeavesTraceOnContextBuildError(t *testing.T) {
 		BotUser: &tb.User{Username: "bot"},
 	}
 
-	_, err := prepareAgentV3Turn(t.Context(), &CompiledChat{Name: "agent"}, tc)
+	_, err := prepareAgentV3Turn(t.Context(), &CompiledChat{Name: "agent"}, tc, nil)
 	require.Error(t, err)
 	require.NotNil(t, tc.V3)
 	require.NotNil(t, tc.V3.Trace)
@@ -386,6 +469,10 @@ func TestAgentV3RichMessageRulesAreGated(t *testing.T) {
 }
 
 func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
+	old := config.BotConfig
+	defer func() { config.BotConfig = old }()
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+
 	tc := &TurnContext{Config: &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}}}
 	cfg := &config.AgentV3Config{}
 	require.Len(t, buildAgentV3BuiltinSkills(tc, cfg), 1)

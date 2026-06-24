@@ -369,10 +369,7 @@ func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
 	if ccs == nil || !ccs.IsAgentEnabled() {
 		return false
 	}
-	if ccs.Agent != nil && ccs.Agent.V3 {
-		return true
-	}
-	return BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
+	return ccs.Agent != nil && ccs.Agent.V3 && BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
 }
 
 // IsAgentV3RichEnabled reports whether rich Telegram delivery is enabled for agent-v3.

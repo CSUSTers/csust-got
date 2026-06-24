@@ -11,6 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const agentV3MaxStoredTurns = 1000
+
 // AgentV3Scope identifies one agent-v3 chat namespace.
 type AgentV3Scope struct {
 	Bot      string
@@ -151,6 +153,7 @@ func AgentV3AppendTurn(ctx context.Context, scope AgentV3Scope, turn AgentV3Turn
 	key := agentV3HotRawTurnsKey(scope)
 	pipe := rc.Pipeline()
 	pipe.RPush(ctx, agentV3TurnsKey(scope), data)
+	pipe.LTrim(ctx, agentV3TurnsKey(scope), -agentV3MaxStoredTurns, -1)
 	pipe.Expire(ctx, agentV3TurnsKey(scope), ttl)
 	pipe.RPush(ctx, key, data)
 	pipe.LTrim(ctx, key, int64(-maxTurns), -1)

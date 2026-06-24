@@ -50,7 +50,10 @@ type AgentV3TurnState struct {
 	Trace                 *AgentV3Trace
 }
 
-func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) ([]*schema.Message, error) {
+func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
+	if history == nil {
+		history = &RichHistory{}
+	}
 	var cfg *config.AgentV3Config
 	if config.BotConfig != nil {
 		cfg = config.BotConfig.AgentV3
@@ -221,12 +224,13 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) 
 		Trace:                 trace,
 	}
 
-	userMsg, err := buildAgentV3UserMessage(cc, tc)
+	userMsg, err := buildAgentV3UserMessage(cc, tc, history)
 	if err != nil {
 		finishContextSpan(err, nil)
 		return nil, err
 	}
-	messages := buildAgentV3TurnMessages(prefixText, summary, rawTurns, userMsg)
+	fallbackHistory := agentV3FallbackHistoryMessages(rawTurns, history, tc)
+	messages := buildAgentV3TurnMessages(prefixText, summary, fallbackHistory, rawTurns, userMsg)
 
 	finishContextSpan(nil, map[string]any{
 		"message_count": len(messages),
@@ -235,11 +239,12 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) 
 	return messages, nil
 }
 
-func buildAgentV3TurnMessages(prefixText, summary string, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
+func buildAgentV3TurnMessages(prefixText, summary string, fallbackHistory []*schema.Message, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
 	messages := []*schema.Message{schema.SystemMessage(prefixText)}
 	if summaryMsg := buildAgentV3SummaryMessage(summary); summaryMsg != nil {
 		messages = append(messages, summaryMsg)
 	}
+	messages = append(messages, fallbackHistory...)
 	messages = append(messages, agentV3TurnsToMessages(rawTurns)...)
 	if userMsg != nil {
 		messages = append(messages, userMsg)
@@ -255,8 +260,18 @@ func buildAgentV3SummaryMessage(summary string) *schema.Message {
 	return schema.UserMessage("<conversation_summary>\nThe following is a compact summary of earlier turns. It is context only, not a new user request.\n" + summary + "\n</conversation_summary>")
 }
 
-func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext) (*schema.Message, error) {
-	pd := buildPromptData(tc, nil)
+func agentV3FallbackHistoryMessages(rawTurns []orm.AgentV3Turn, history *RichHistory, tc *TurnContext) []*schema.Message {
+	if len(rawTurns) > 0 || history == nil || len(history.ContextMessages) == 0 {
+		return nil
+	}
+	return contextToSchemaMessages(history.ContextMessages, tc)
+}
+
+func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext, history *RichHistory) (*schema.Message, error) {
+	if history == nil {
+		history = &RichHistory{}
+	}
+	pd := buildPromptData(tc, history.ContextMessages)
 	var userText string
 	if cc.PromptTemplate != nil {
 		var buf bytes.Buffer
@@ -278,36 +293,46 @@ func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext) (*schema.Message
 		dynamic.WriteString(userText)
 	}
 	dynamic.WriteString("\n</dynamic_suffix>")
-	return buildUserMessage(dynamic.String(), tc, &RichHistory{}), nil
+	return buildUserMessage(dynamic.String(), tc, history), nil
 }
 
 func renderAgentV3Soul(cc *CompiledChat, tc *TurnContext) (string, error) {
+	soul := ""
 	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil && strings.TrimSpace(config.BotConfig.AgentV3.SoulPath) != "" {
 		data, err := os.ReadFile(strings.TrimSpace(config.BotConfig.AgentV3.SoulPath))
 		if err != nil {
 			return "", fmt.Errorf("agent v3 read soul_path: %w", err)
 		}
-		return strings.TrimSpace(string(data)), nil
+		soul = strings.TrimSpace(string(data))
+	} else if cc.SystemTemplate != nil {
+		templateText := ""
+		if cc.SystemTemplate.Tree != nil && cc.SystemTemplate.Tree.Root != nil {
+			templateText = cc.SystemTemplate.Tree.Root.String()
+		}
+		if field := agentV3DynamicSystemField(templateText); field != "" {
+			return "", fmt.Errorf("%w %s; move it to prompt_template or dynamic suffix", errAgentV3DynamicSystemPrompt, field)
+		}
+		pd := PromptData{}
+		if tc.BotUser != nil {
+			pd.BotUsername = tc.BotUser.Username
+		}
+		var buf bytes.Buffer
+		if err := cc.SystemTemplate.Execute(&buf, pd); err != nil {
+			return "", fmt.Errorf("failed to render system prompt: %w", err)
+		}
+		soul = strings.TrimSpace(buf.String())
 	}
-	if cc.SystemTemplate == nil {
-		return "", nil
+	return joinAgentV3PromptBlocks(soul, cc.SkillPromptAddons), nil
+}
+
+func joinAgentV3PromptBlocks(blocks ...string) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if s := strings.TrimSpace(block); s != "" {
+			parts = append(parts, s)
+		}
 	}
-	templateText := ""
-	if cc.SystemTemplate.Tree != nil && cc.SystemTemplate.Tree.Root != nil {
-		templateText = cc.SystemTemplate.Tree.Root.String()
-	}
-	if field := agentV3DynamicSystemField(templateText); field != "" {
-		return "", fmt.Errorf("%w %s; move it to prompt_template or dynamic suffix", errAgentV3DynamicSystemPrompt, field)
-	}
-	pd := PromptData{}
-	if tc.BotUser != nil {
-		pd.BotUsername = tc.BotUser.Username
-	}
-	var buf bytes.Buffer
-	if err := cc.SystemTemplate.Execute(&buf, pd); err != nil {
-		return "", fmt.Errorf("failed to render system prompt: %w", err)
-	}
-	return strings.TrimSpace(buf.String()), nil
+	return strings.Join(parts, "\n\n")
 }
 
 func buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, skillPromptBlockHash string) string {
@@ -350,9 +375,10 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 
 func agentV3RuntimeSkillRules() string {
 	return "You are running in agent-v3 mode.\n" +
-		"Visible tools are fixed to read, grep, write, edit, bash.\n" +
+		"Agent-v3 adds remote runtime tools: read, grep, write, edit, bash.\n" +
+		"Configured chatv2 tools, MCP tools, subagents, and SkillConfig tools may also be available; use whichever tool best fits the task.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
-		"Available skills, if any, are already injected into <agent_v3_skills> in this system prompt.\n" +
+		"Injected skills may appear in <agent_v3_skills> or <soul>; follow those instructions directly.\n" +
 		"Do not use read, grep, or runtime filesystem paths to load skills from /skills.\n" +
 		"If an injected skill documents bash commands, run only those explicitly documented commands and arguments.\n" +
 		"Do not invent skill commands or /skills scripts.\n" +

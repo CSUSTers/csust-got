@@ -33,6 +33,10 @@ func defaultAgentV3Config() *config.AgentV3Config {
 }
 
 func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
+	old := config.BotConfig
+	t.Cleanup(func() { config.BotConfig = old })
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+
 	t.Run("rich enabled returns exactly one builtin named rich-message", func(t *testing.T) {
 		tc := richEnabledTurnContext()
 		cfg := defaultAgentV3Config()
