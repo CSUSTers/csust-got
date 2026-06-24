@@ -143,6 +143,56 @@ func TestAgentV3Helpers(t *testing.T) {
 	assert.Equal(t, "middle", trimmed[0].Content)
 }
 
+func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
+	messages := buildAgentV3TurnMessages(
+		"stable prefix",
+		"- user: old question\n- assistant: old answer",
+		[]orm.AgentV3Turn{
+			{Role: string(schema.User), Content: "recent user"},
+			{Role: string(schema.Assistant), Content: "recent assistant"},
+		},
+		schema.UserMessage("current user"),
+	)
+
+	require.Len(t, messages, 5)
+	assert.Equal(t, 1, countRoleMessages(messages, schema.System))
+	assert.Equal(t, schema.System, messages[0].Role)
+	assert.Equal(t, schema.User, messages[1].Role)
+	assert.Contains(t, messages[1].Content, "<conversation_summary>")
+	assert.Contains(t, messages[1].Content, "context only")
+
+	ctx := WithTurnContext(t.Context(), &TurnContext{V3: &AgentV3TurnState{}})
+	withDirective := injectLoopDirectives(ctx, messages)
+	assert.Equal(t, 1, countRoleMessages(withDirective, schema.System))
+	assert.Contains(t, withDirective[0].Content, "stable prefix")
+	assert.Contains(t, withDirective[0].Content, "工具调用纪律")
+}
+
+func TestSanitizeHistoryMergesMultipleSystemMessages(t *testing.T) {
+	messages := sanitizeHistory([]*schema.Message{
+		schema.SystemMessage("stable prefix"),
+		schema.SystemMessage("<conversation_summary>summary</conversation_summary>"),
+		schema.UserMessage("hello"),
+	})
+
+	require.Len(t, messages, 2)
+	assert.Equal(t, schema.System, messages[0].Role)
+	assert.Equal(t, 1, countRoleMessages(messages, schema.System))
+	assert.Contains(t, messages[0].Content, "stable prefix")
+	assert.Contains(t, messages[0].Content, "conversation_summary")
+	assert.Equal(t, schema.User, messages[1].Role)
+}
+
+func countRoleMessages(messages []*schema.Message, role schema.RoleType) int {
+	count := 0
+	for _, msg := range messages {
+		if msg != nil && msg.Role == role {
+			count++
+		}
+	}
+	return count
+}
+
 func TestCompileAgentV3DoesNotExposeLegacyTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",

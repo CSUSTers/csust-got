@@ -555,10 +555,21 @@ func marshalSorted(v any) (string, error) {
 
 func sanitizeHistory(in []*schema.Message) []*schema.Message {
 	out := make([]*schema.Message, 0, len(in))
+	systemIdx := -1
 
 	for i := range in {
 		msg := in[i]
 		if msg == nil {
+			continue
+		}
+
+		if msg.Role == schema.System {
+			if systemIdx < 0 {
+				out = append(out, msg)
+				systemIdx = len(out) - 1
+				continue
+			}
+			out[systemIdx] = mergeSystemMessages(out[systemIdx], msg)
 			continue
 		}
 
@@ -590,6 +601,22 @@ func sanitizeHistory(in []*schema.Message) []*schema.Message {
 		out = append(out, msg)
 	}
 	return out
+}
+
+func mergeSystemMessages(base, extra *schema.Message) *schema.Message {
+	if base == nil {
+		return extra
+	}
+	if extra == nil || strings.TrimSpace(extra.Content) == "" {
+		return base
+	}
+	merged := *base
+	if strings.TrimSpace(merged.Content) == "" {
+		merged.Content = extra.Content
+	} else {
+		merged.Content = merged.Content + "\n\n" + extra.Content
+	}
+	return &merged
 }
 
 func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) bool {

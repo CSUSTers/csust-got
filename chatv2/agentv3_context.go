@@ -221,24 +221,38 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext) 
 		Trace:                 trace,
 	}
 
-	messages := []*schema.Message{schema.SystemMessage(prefixText)}
-	if strings.TrimSpace(summary) != "" {
-		messages = append(messages, schema.SystemMessage("<conversation_summary>\n"+summary+"\n</conversation_summary>"))
-	}
-	messages = append(messages, agentV3TurnsToMessages(rawTurns)...)
-
 	userMsg, err := buildAgentV3UserMessage(cc, tc)
 	if err != nil {
 		finishContextSpan(err, nil)
 		return nil, err
 	}
-	messages = append(messages, userMsg)
+	messages := buildAgentV3TurnMessages(prefixText, summary, rawTurns, userMsg)
 
 	finishContextSpan(nil, map[string]any{
 		"message_count": len(messages),
 		"prefix_chars":  len(prefixText),
 	})
 	return messages, nil
+}
+
+func buildAgentV3TurnMessages(prefixText, summary string, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
+	messages := []*schema.Message{schema.SystemMessage(prefixText)}
+	if summaryMsg := buildAgentV3SummaryMessage(summary); summaryMsg != nil {
+		messages = append(messages, summaryMsg)
+	}
+	messages = append(messages, agentV3TurnsToMessages(rawTurns)...)
+	if userMsg != nil {
+		messages = append(messages, userMsg)
+	}
+	return messages
+}
+
+func buildAgentV3SummaryMessage(summary string) *schema.Message {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil
+	}
+	return schema.UserMessage("<conversation_summary>\nThe following is a compact summary of earlier turns. It is context only, not a new user request.\n" + summary + "\n</conversation_summary>")
 }
 
 func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext) (*schema.Message, error) {
