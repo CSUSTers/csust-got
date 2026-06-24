@@ -190,6 +190,39 @@ func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	assert.True(t, tc.finalized.Load())
 }
 
+func TestFinalizeRichPlainMarkdownBypassesMarkdownBlockFormatting(t *testing.T) {
+	const rawMarkdown = "# Title\n\n**Body**"
+	const wantFallback = "Title\n\nBody"
+
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":8,"chat":{"id":100}}}`)}
+	tc := &TurnContext{}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot},
+		format:         &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
+		richEnabled:    true,
+		rawCaller:      raw,
+		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
+		tc:             tc,
+	}
+	sp.processChunk(schema.AssistantMessage(rawMarkdown, nil))
+
+	response, reasoning, sentMsg, err := sp.finalize()
+
+	require.NoError(t, err)
+	assert.Equal(t, wantFallback, response)
+	assert.Empty(t, reasoning)
+	require.NotNil(t, sentMsg)
+	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
+	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
+	assert.NotContains(t, payload.RichMessage.Markdown, "```")
+	assert.True(t, tc.finalized.Load())
+}
+
 func TestFinalizeReturnsErrorWhenFinalEditFails(t *testing.T) {
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
 	require.NoError(t, err)
@@ -252,6 +285,35 @@ func TestNonStreamResponseRichBypassesMarkdownBlockFormatting(t *testing.T) {
 		"markdown-block fencing must not be applied to rich messages")
 	assert.Equal(t, wantFallback, visibleText,
 		"visible text must be the derived plain-text fallback, not fenced markdown")
+	assert.Equal(t, 42, msg.ID)
+}
+
+func TestNonStreamResponseRichPlainMarkdownBypassesMarkdownBlockFormatting(t *testing.T) {
+	const rawMarkdown = "# Title\n\n**Body**"
+	const wantFallback = "Title\n\nBody"
+
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+
+	raw := &stubTelegramRawCaller{
+		body: []byte(`{"result":{"message_id":42,"chat":{"id":100}}}`),
+	}
+	tbCtx := &mockStreamingContext{bot: bot}
+	existingMsg := &tb.Message{ID: 42, Chat: &tb.Chat{ID: 100}}
+	format := &config.ChatOutputFormatConfig{
+		Format:  "markdown",
+		Payload: "markdown-block",
+	}
+
+	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, rawMarkdown, "", format, existingMsg, true)
+
+	require.NoError(t, err)
+	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
+	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
+	assert.NotContains(t, payload.RichMessage.Markdown, "```")
+	assert.Equal(t, wantFallback, visibleText)
 	assert.Equal(t, 42, msg.ID)
 }
 

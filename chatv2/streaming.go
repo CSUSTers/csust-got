@@ -265,6 +265,9 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		reason = ""
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
+	if delivery.RichCandidate {
+		formatted = formatTelegramRichFallbackText(text, sp.format)
+	}
 	if err := sp.editPlaceholder(formatted, true); err != nil {
 		return text, reason, sp.placeholderMsg, err
 	}
@@ -405,6 +408,9 @@ func nonStreamResponseWithCaller(
 		reasoning = ""
 	}
 	formatted := FormatOutputWithReason(text, reasoning, format)
+	if delivery.RichCandidate {
+		formatted = formatTelegramRichFallbackText(text, format)
+	}
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
 		// Edit existing progress placeholder

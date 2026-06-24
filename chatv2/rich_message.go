@@ -144,18 +144,33 @@ type telegramRichDelivery struct {
 	RichMessage    inputRichMessage
 	VisibleText    string
 	Err            error
+	RichCandidate  bool
 }
 
 func resolveTelegramRichDelivery(text string, nativeReason string, format *config.ChatOutputFormatConfig, richEnabled bool) telegramRichDelivery {
 	parts := splitOutputWithReason(text, nativeReason, format)
 	parsed, ok := parseTelegramRichMessageEnvelope(parts.payload)
 	if !ok {
-		return telegramRichDelivery{VisibleText: text}
+		markdown := strings.TrimSpace(parts.payload)
+		if !richEnabled || markdown == "" {
+			return telegramRichDelivery{VisibleText: text}
+		}
+		fallback := deriveTelegramRichFallback(markdown)
+		if fallback == "" {
+			fallback = markdown
+		}
+		return telegramRichDelivery{
+			ShouldSendRich: true,
+			RichMessage:    inputRichMessage{Markdown: markdown},
+			VisibleText:    fallback,
+			RichCandidate:  true,
+		}
 	}
 
 	delivery := telegramRichDelivery{
-		VisibleText: parsed.FallbackText,
-		Err:         parsed.Err,
+		VisibleText:   parsed.FallbackText,
+		Err:           parsed.Err,
+		RichCandidate: true,
 	}
 	if parsed.Err != nil {
 		if delivery.VisibleText == "" {
@@ -170,6 +185,19 @@ func resolveTelegramRichDelivery(text string, nativeReason string, format *confi
 	delivery.ShouldSendRich = true
 	delivery.RichMessage = parsed.RichMessage
 	return delivery
+}
+
+func formatTelegramRichFallbackText(text string, format *config.ChatOutputFormatConfig) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	outputFormat := format.GetFormat()
+	if outputFormat == "" {
+		outputFormat = defaultOutputFormat
+	}
+	buf := strings.Builder{}
+	formatText(&buf, text, outputFormat, wholeTextTypePlain)
+	return buf.String()
 }
 
 func extractTelegramRichEnvelopeBody(text string) (string, bool) {

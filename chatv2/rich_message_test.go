@@ -164,8 +164,19 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 	t.Run("plain text stays visible for legacy formatting", func(t *testing.T) {
 		text := "<think>reason</think>plain text"
 		delivery := resolveTelegramRichDelivery(text, "", cfg, true)
+		assert.Equal(t, "plain text", delivery.VisibleText)
+		assert.True(t, delivery.ShouldSendRich)
+		assert.True(t, delivery.RichCandidate)
+		assert.Equal(t, "plain text", delivery.RichMessage.Markdown)
+		assert.NoError(t, delivery.Err)
+	})
+
+	t.Run("gate disabled keeps legacy formatting for plain text", func(t *testing.T) {
+		text := "<think>reason</think>plain text"
+		delivery := resolveTelegramRichDelivery(text, "", cfg, false)
 		assert.Equal(t, text, delivery.VisibleText)
 		assert.False(t, delivery.ShouldSendRich)
+		assert.False(t, delivery.RichCandidate)
 		assert.Empty(t, delivery.RichMessage)
 		assert.NoError(t, delivery.Err)
 	})
@@ -177,6 +188,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 
 		assert.Equal(t, "hello", delivery.VisibleText)
 		assert.False(t, delivery.ShouldSendRich)
+		assert.True(t, delivery.RichCandidate)
 		assert.NoError(t, delivery.Err)
 	})
 
@@ -256,6 +268,39 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("rich enabled plain markdown bypasses payload formatting hooks without envelope", func(t *testing.T) {
+		const rawMarkdown = "# Title\n\n**Body**"
+		const wantFallback = "Title\n\nBody"
+
+		formatCfg := &config.ChatOutputFormatConfig{
+			Format:  "markdown",
+			Payload: "markdown-block",
+		}
+		setConfigField(t, formatCfg, "UseNativeReasoning", false)
+
+		delivery := resolveTelegramRichDelivery(rawMarkdown, "", formatCfg, true)
+
+		assert.True(t, delivery.ShouldSendRich)
+		assert.True(t, delivery.RichCandidate)
+		assert.Equal(t, rawMarkdown, delivery.RichMessage.Markdown)
+		assert.NotContains(t, delivery.RichMessage.Markdown, "```")
+		assert.Equal(t, wantFallback, delivery.VisibleText)
+		assert.NoError(t, delivery.Err)
+	})
+}
+
+func TestFormatTelegramRichFallbackTextBypassesMarkdownBlock(t *testing.T) {
+	formatCfg := &config.ChatOutputFormatConfig{
+		Format:  "markdown",
+		Payload: "markdown-block",
+	}
+
+	got := formatTelegramRichFallbackText("Title\n\nBody", formatCfg)
+
+	assert.NotContains(t, got, "```")
+	assert.Contains(t, got, "Title")
+	assert.Contains(t, got, "Body")
 }
 
 type stubTelegramRawCaller struct {
