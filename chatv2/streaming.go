@@ -203,8 +203,8 @@ func (sp *streamProcessor) updateMessage() {
 		return
 	}
 	if sp.richEnabled {
-		delivery := resolveTelegramRichDelivery(text, reason, sp.format, true)
-		if delivery.ShouldSendRich || delivery.RichCandidate {
+		delivery := resolveTelegramRichDelivery(text, reason, sp.format, true, sp.richAuthorized())
+		if delivery.ShouldSendRich {
 			return
 		}
 	}
@@ -235,7 +235,7 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		}
 		return "", "", sp.placeholderMsg, nil
 	}
-	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled)
+	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled, sp.richAuthorized())
 	if delivery.ShouldSendRich {
 		replyToID := 0
 		if msg := sp.tbCtx.Message(); msg != nil {
@@ -260,9 +260,6 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		reason = ""
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
-	if delivery.RichCandidate {
-		formatted = formatTelegramRichFallbackText(text, sp.format)
-	}
 	if err := sp.editPlaceholder(formatted, true); err != nil {
 		return text, reason, sp.placeholderMsg, err
 	}
@@ -277,6 +274,10 @@ func (sp *streamProcessor) telegramRaw() telegramRawCaller {
 		return sp.rawCaller
 	}
 	return sp.tbCtx.Bot()
+}
+
+func (sp *streamProcessor) richAuthorized() bool {
+	return sp.richEnabled && sp.tc != nil && sp.tc.richMessageSkillLoadedForFinal()
 }
 
 func (sp *streamProcessor) targetChatID() int64 {
@@ -362,8 +363,9 @@ func NonStreamResponse(
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
 	richEnabled bool,
+	richAuthorized bool,
 ) (*tb.Message, string, error) {
-	return nonStreamResponseWithCaller(tbCtx.Bot(), tbCtx, text, reasoning, format, existingMsg, richEnabled)
+	return nonStreamResponseWithCaller(tbCtx.Bot(), tbCtx, text, reasoning, format, existingMsg, richEnabled, richAuthorized)
 }
 
 func nonStreamResponseWithCaller(
@@ -374,8 +376,9 @@ func nonStreamResponseWithCaller(
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
 	richEnabled bool,
+	richAuthorized bool,
 ) (*tb.Message, string, error) {
-	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled)
+	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled, richAuthorized)
 	if delivery.ShouldSendRich {
 		replyToID := 0
 		if msg := tbCtx.Message(); msg != nil {
@@ -400,9 +403,6 @@ func nonStreamResponseWithCaller(
 		reasoning = ""
 	}
 	formatted := FormatOutputWithReason(text, reasoning, format)
-	if delivery.RichCandidate {
-		formatted = formatTelegramRichFallbackText(text, format)
-	}
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
 		// Edit existing progress placeholder

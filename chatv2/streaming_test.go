@@ -135,13 +135,12 @@ func TestUpdateMessageSuppressesCompleteRichEnvelopeUntilFinalize(t *testing.T) 
 	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":7,"chat":{"id":100}}}`)}
 	tc := &TurnContext{}
 	sp := &streamProcessor{
-		ctx:            t.Context(),
-		tbCtx:          &mockStreamingContext{bot: bot},
-		format:         &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
-		richEnabled:    true,
-		rawCaller:      raw,
-		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
-		tc:             tc,
+		ctx:         t.Context(),
+		tbCtx:       &mockStreamingContext{bot: bot},
+		format:      &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
+		richEnabled: true,
+		rawCaller:   raw,
+		tc:          tc,
 	}
 	sp.processChunk(schema.AssistantMessage(mustTelegramRichEnvelope(rawMarkdown), nil))
 
@@ -152,19 +151,18 @@ func TestUpdateMessageSuppressesCompleteRichEnvelopeUntilFinalize(t *testing.T) 
 	assert.Equal(t, int64(0), tc.lastEditAt.Load())
 }
 
-func TestUpdateMessageSuppressesRichPlainMarkdownUntilFinalize(t *testing.T) {
+func TestUpdateMessageDoesNotSendRichForPlainMarkdown(t *testing.T) {
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
 	require.NoError(t, err)
 	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":7,"chat":{"id":100}}}`)}
 	tc := &TurnContext{}
 	sp := &streamProcessor{
-		ctx:            t.Context(),
-		tbCtx:          &mockStreamingContext{bot: bot},
-		format:         &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
-		richEnabled:    true,
-		rawCaller:      raw,
-		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
-		tc:             tc,
+		ctx:         t.Context(),
+		tbCtx:       &mockStreamingContext{bot: bot},
+		format:      &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
+		richEnabled: true,
+		rawCaller:   raw,
+		tc:          tc,
 	}
 	sp.processChunk(schema.AssistantMessage("# Title\n\n**Body**", nil))
 
@@ -172,7 +170,6 @@ func TestUpdateMessageSuppressesRichPlainMarkdownUntilFinalize(t *testing.T) {
 
 	assert.Empty(t, raw.method)
 	assert.Nil(t, raw.payload)
-	assert.Equal(t, int64(0), tc.lastEditAt.Load())
 }
 
 func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
@@ -183,6 +180,7 @@ func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	require.NoError(t, err)
 	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":8,"chat":{"id":100}}}`)}
 	tc := &TurnContext{}
+	authorizeRichMessageForFinal(t, tc)
 	sp := &streamProcessor{
 		ctx:            t.Context(),
 		tbCtx:          &mockStreamingContext{bot: bot},
@@ -209,36 +207,32 @@ func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	assert.True(t, tc.finalized.Load())
 }
 
-func TestFinalizeRichPlainMarkdownBypassesMarkdownBlockFormatting(t *testing.T) {
+func TestFinalizePlainMarkdownDoesNotUseRichAPI(t *testing.T) {
 	const rawMarkdown = "# Title\n\n**Body**"
-	const wantFallback = "Title\n\nBody"
 
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
 	require.NoError(t, err)
 	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":8,"chat":{"id":100}}}`)}
 	tc := &TurnContext{}
+	authorizeRichMessageForFinal(t, tc)
 	sp := &streamProcessor{
-		ctx:            t.Context(),
-		tbCtx:          &mockStreamingContext{bot: bot},
-		format:         &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
-		richEnabled:    true,
-		rawCaller:      raw,
-		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
-		tc:             tc,
+		ctx:         t.Context(),
+		tbCtx:       &mockStreamingContext{bot: bot},
+		format:      &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
+		richEnabled: true,
+		rawCaller:   raw,
+		tc:          tc,
 	}
 	sp.processChunk(schema.AssistantMessage(rawMarkdown, nil))
 
 	response, reasoning, sentMsg, err := sp.finalize()
 
 	require.NoError(t, err)
-	assert.Equal(t, wantFallback, response)
+	assert.Equal(t, rawMarkdown, response)
 	assert.Empty(t, reasoning)
-	require.NotNil(t, sentMsg)
-	assert.Equal(t, telegramSendRichMessageMethod, raw.method)
-	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramSendRichMessagePayload)
-	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
-	assert.NotContains(t, payload.RichMessage.Markdown, "```")
+	assert.Nil(t, sentMsg)
+	assert.Empty(t, raw.method)
+	assert.Nil(t, raw.payload)
 	assert.True(t, tc.finalized.Load())
 }
 
@@ -250,6 +244,7 @@ func TestFinalizeRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
 	require.NoError(t, err)
 	raw := &stubTelegramRawCaller{err: errTelegramRichRawTestFailure}
 	tc := &TurnContext{}
+	authorizeRichMessageForFinal(t, tc)
 	placeholder := &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}}
 	sp := &streamProcessor{
 		ctx:            t.Context(),
@@ -325,7 +320,7 @@ func TestNonStreamResponseRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	}
 	text := mustTelegramRichEnvelope(rawMarkdown)
 
-	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, text, "", format, existingMsg, true)
+	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, text, "", format, existingMsg, true, true)
 
 	require.NoError(t, err)
 	assert.Equal(t, telegramSendRichMessageMethod, raw.method,
@@ -342,12 +337,15 @@ func TestNonStreamResponseRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	assert.Equal(t, 42, msg.ID)
 }
 
-func TestNonStreamResponseRichPlainMarkdownBypassesMarkdownBlockFormatting(t *testing.T) {
+func TestNonStreamResponsePlainMarkdownDoesNotUseRichAPI(t *testing.T) {
 	const rawMarkdown = "# Title\n\n**Body**"
-	const wantFallback = "Title\n\nBody"
 
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
 	require.NoError(t, err)
+	oldConfig := config.BotConfig
+	config.BotConfig = config.NewBotConfig()
+	config.BotConfig.Bot = bot
+	t.Cleanup(func() { config.BotConfig = oldConfig })
 
 	raw := &stubTelegramRawCaller{
 		body: []byte(`{"result":{"message_id":42,"chat":{"id":100}}}`),
@@ -359,16 +357,11 @@ func TestNonStreamResponseRichPlainMarkdownBypassesMarkdownBlockFormatting(t *te
 		Payload: "markdown-block",
 	}
 
-	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, rawMarkdown, "", format, existingMsg, true)
+	_, visibleText, _ := nonStreamResponseWithCaller(raw, tbCtx, rawMarkdown, "", format, existingMsg, true, true)
 
-	require.NoError(t, err)
-	assert.Equal(t, telegramSendRichMessageMethod, raw.method)
-	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramSendRichMessagePayload)
-	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
-	assert.NotContains(t, payload.RichMessage.Markdown, "```")
-	assert.Equal(t, wantFallback, visibleText)
-	assert.Equal(t, 42, msg.ID)
+	assert.Empty(t, raw.method)
+	assert.Nil(t, raw.payload)
+	assert.Equal(t, rawMarkdown, visibleText)
 }
 
 func TestNonStreamResponseRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
@@ -386,7 +379,7 @@ func TestNonStreamResponseRichSendFailureDoesNotEditPlaceholderFallback(t *testi
 		Payload: "markdown-block",
 	}
 
-	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, mustTelegramRichEnvelope(rawMarkdown), "", format, existingMsg, true)
+	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, mustTelegramRichEnvelope(rawMarkdown), "", format, existingMsg, true, true)
 
 	require.ErrorIs(t, err, errTelegramRichRawTestFailure)
 	assert.Equal(t, existingMsg, msg)
@@ -409,4 +402,14 @@ func (m *mockStreamingContext) Bot() *tb.Bot {
 
 func (m *mockStreamingContext) Message() *tb.Message {
 	return nil
+}
+
+func authorizeRichMessageForFinal(t *testing.T, tc *TurnContext) {
+	t.Helper()
+	old := config.BotConfig
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+	t.Cleanup(func() { config.BotConfig = old })
+	tc.Config = richAgentV3ChatConfig()
+	seq := tc.recordToolCall(agentV3ToolLoadSkill)
+	tc.markRichMessageSkillLoaded(seq)
 }

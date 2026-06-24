@@ -128,44 +128,41 @@ type telegramRichDelivery struct {
 	RichCandidate  bool
 }
 
-func resolveTelegramRichDelivery(text string, nativeReason string, format *config.ChatOutputFormatConfig, richEnabled bool) telegramRichDelivery {
+func resolveTelegramRichDelivery(text string, nativeReason string, format *config.ChatOutputFormatConfig, richEnabled bool, richAuthorized bool) telegramRichDelivery {
 	parts := splitOutputWithReason(text, nativeReason, format)
 	parsed, ok := parseTelegramRichMessageEnvelope(parts.payload)
 	if !ok {
-		markdown := strings.TrimSpace(parts.payload)
-		if !richEnabled || markdown == "" {
-			return telegramRichDelivery{VisibleText: text}
-		}
-		fallback := deriveTelegramRichFallback(markdown)
-		if fallback == "" {
-			fallback = markdown
-		}
-		return telegramRichDelivery{
-			ShouldSendRich: true,
-			RichMessage:    inputRichMessage{Markdown: markdown},
-			VisibleText:    fallback,
-			RichCandidate:  true,
-		}
+		return telegramRichDelivery{VisibleText: text}
 	}
 
 	delivery := telegramRichDelivery{
-		VisibleText:   parsed.FallbackText,
+		VisibleText:   text,
 		Err:           parsed.Err,
 		RichCandidate: true,
 	}
+	if !richEnabled || !richAuthorized {
+		return delivery
+	}
 	if parsed.Err != nil {
+		delivery.VisibleText = parsed.FallbackText
 		if delivery.VisibleText == "" {
 			delivery.VisibleText = telegramRichInvalidFallbackText
 		}
 		return delivery
 	}
-	if !richEnabled {
-		return delivery
-	}
 
+	delivery.VisibleText = parsed.FallbackText
 	delivery.ShouldSendRich = true
 	delivery.RichMessage = parsed.RichMessage
 	return delivery
+}
+
+func isRichMessageLoadSkillArgs(argsJSON string) bool {
+	var args loadSkillArgs
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return false
+	}
+	return normalizeAgentV3SkillName(args.Name) == "rich-message"
 }
 
 func formatTelegramRichFallbackText(text string, format *config.ChatOutputFormatConfig) string {

@@ -21,7 +21,7 @@ func buildAgentV3BuiltinSkills(tc *TurnContext, cfg *config.AgentV3Config) []age
 	}
 
 	var skills []agentV3BuiltinSkill
-	if tc.Config.IsAgentV3RichEnabled() {
+	if agentV3RichSkillAvailable(tc.Config, cfg) {
 		skills = append(skills, agentV3BuiltinSkill{
 			Name:        "rich-message",
 			Description: "Render Telegram rich Markdown responses when useful.",
@@ -34,18 +34,47 @@ func buildAgentV3BuiltinSkills(tc *TurnContext, cfg *config.AgentV3Config) []age
 	return skills
 }
 
+func agentV3RichSkillAvailable(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config) bool {
+	if chatCfg == nil || cfg == nil || !cfg.Skills.BuiltinInjectionEnabled() {
+		return false
+	}
+	return chatCfg.Agent != nil && chatCfg.Agent.Enable && chatCfg.Agent.V3 && chatCfg.Agent.Rich
+}
+
+func agentV3BuiltinSkillByName(name string, tc *TurnContext) (agentV3BuiltinSkill, bool) {
+	cfg := (*config.AgentV3Config)(nil)
+	if config.BotConfig != nil {
+		cfg = config.BotConfig.AgentV3
+	}
+	if cfg == nil {
+		cfg = &config.AgentV3Config{}
+	}
+	normalized := normalizeAgentV3SkillName(name)
+	for _, skill := range buildAgentV3BuiltinSkills(tc, cfg) {
+		if normalizeAgentV3SkillName(skill.Name) == normalized {
+			return skill, true
+		}
+	}
+	return agentV3BuiltinSkill{}, false
+}
+
+func normalizeAgentV3SkillName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.ReplaceAll(name, "_", "-")
+	return name
+}
+
 func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 	filtered := make([]agentV3BuiltinSkill, 0, len(skills))
 	for _, skill := range skills {
 		name := strings.TrimSpace(skill.Name)
-		content := strings.TrimSpace(skill.Content)
-		if name == "" || content == "" {
+		if name == "" || strings.TrimSpace(skill.Content) == "" {
 			continue
 		}
 		filtered = append(filtered, agentV3BuiltinSkill{
 			Name:        name,
 			Description: strings.TrimSpace(skill.Description),
-			Content:     content,
+			Content:     strings.TrimSpace(skill.Content),
 		})
 	}
 	if len(filtered) == 0 {
@@ -57,15 +86,14 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 	})
 	var b strings.Builder
 	b.WriteString("<agent_v3_skills>\n")
-	b.WriteString("The following skills are already loaded into this system prompt. Do not use read/grep to load skills from /skills.\n")
+	b.WriteString("The following built-in skills are available for this chat, but they are not active until loaded with load_skill. Do not use read/grep to load skills from /skills.\n")
+	b.WriteString("If you need Telegram rich output, call load_skill with name=\"rich-message\" immediately before the final answer. A <telegram_rich_message> envelope is honored only when that immediately previous tool call loaded rich-message; otherwise it is ordinary text.\n")
 	for _, skill := range filtered {
-		b.WriteString("\n<skill name=\"")
+		b.WriteString("<skill name=\"")
 		b.WriteString(escapeAgentV3SkillAttr(skill.Name))
 		b.WriteString("\" description=\"")
 		b.WriteString(escapeAgentV3SkillAttr(skill.Description))
-		b.WriteString("\">\n")
-		b.WriteString(skill.Content)
-		b.WriteString("\n</skill>\n")
+		b.WriteString("\" status=\"available\" />\n")
 	}
 	b.WriteString("</agent_v3_skills>")
 	return b.String()

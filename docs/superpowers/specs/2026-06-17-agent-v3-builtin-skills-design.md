@@ -19,9 +19,9 @@
 
 把程序内置(根据配置动态注册)的 skill 契约统一整理为 system prompt 中的结构化注入块:
 
-- 只在系统提示词中注入工具使用规则和可用 skill 内容/说明;
-- 模型可见工具表保持 agent-v3 固定 5 个工具:read、grep、write、edit、bash;
-- 不新增 `load_skill` 模型工具;
+- 只在系统提示词中注入工具使用规则和可加载 skill 名称/说明;
+- 非 rich 模型可见工具表保持 agent-v3 固定 5 个工具:read、grep、write、edit、bash;
+- 仅当当前 chat 启用 `agent.rich: true` 时新增 `load_skill` 模型工具,用于加载 rich-message 内置 skill;
 - 不引导模型通过 `read /skills/...` 或 `grep /skills` 加载 skill;
 - rich-message 等内置 skill 按配置动态注入;
 - skill 是能力增强说明,不是现有工具体系替代品。
@@ -33,7 +33,7 @@
 - 不移除现有 chatv2 tools、MCP tools、subagent tools、`SkillConfig` 支持;
 - 不把全部业务能力迁移到 skill 或要求所有工具都包装成 skill;
 - 不实现 runtime `/skills` 文件系统读取、搜索、overlay 或 passthrough;
-- 不新增默认模型可见工具;`load_skill` 只作为未来可选 helper 另行评估;
+- 非 rich 的 agent-v3 默认模型可见工具仍保持固定 5 个;rich chat 会额外暴露 `load_skill`,且只用于内置 skill 加载;
 - 不引入 go:embed 静态文件方案(采用程序化动态注册);
 - 不实现 `ContentProvider` 动态生成(当前 rich skill contract 是静态字符串;预留扩展点但不实现)。
 
@@ -41,7 +41,7 @@
 
 1. **当前版只做 prompt 注入**: bot 在 Stable Prefix/system prompt 中注入工具规则和 skill 内容/说明。
 2. **不读 runtime skill 文件系统**: 不实现 `/skills` root、`read /skills/<name>/SKILL.md`、`grep /skills`、runtime skill mount、bot 侧 overlay 或未命中透传。
-3. **保持 5 个固定工具**: skill 变化不能改变模型可见工具表,不能新增第 6 个默认工具。
+3. **默认保持 5 个固定工具**: 非 rich agent-v3 保持 read、grep、write、edit、bash。启用 `agent.rich: true` 时额外暴露 `load_skill`,用于在最终 rich 输出前加载 rich-message skill。
 4. **保留既有工具体系**: chatv2 tools、MCP tools、subagent tools、`SkillConfig` 和 agent-v3 固定 runtime tools 继续按各自路径存在。
 5. **程序化动态注册**: 根据 config 在 Go 侧注册可注入 skill。内置 skill 先受 `agent_v3.skills.inject_builtin` 总开关控制,当前 rich skill 再由 `tc.Config.IsAgentV3RichEnabled()` 门控。
 6. **内容要可缓存**: 注入块进入 Stable Prefix,参与 prefix hash;skill 内容变化时允许 cache key 变化。
@@ -58,7 +58,8 @@ CompileChat(tc)
        │    ├─ remoteGrepTool   (不处理 /skills 特例)
        │    ├─ remoteWriteTool  (不变)
        │    ├─ remoteEditTool   (不变)
-       │    └─ remoteBashTool   (不变)
+       │    ├─ remoteBashTool   (不变)
+       │    └─ loadSkillTool    (仅 rich chat)
        └─ buildAgentV3StablePrefix(tc)
             ├─ buildAgentV3BuiltinSkills(tc, cfg)
             └─ <agent_v3_skills>...</agent_v3_skills>
@@ -72,7 +73,7 @@ CompileChat(tc)
 | `buildAgentV3BuiltinSkills(tc, cfg)` | 按 config 动态注册当前 chat 可用 skill | `*TurnContext`, `*config.AgentV3Config` | `[]agentV3BuiltinSkill` |
 | `buildAgentV3SkillPromptBlock(skills)` | 生成系统提示词注入块 | skill 列表 | prompt 文本 |
 | `buildAgentV3StablePrefix`(改) | 注入工具规则和 skill 块 | soul/memory/tool defs/skill block | prompt 文本 |
-| `buildAgentV3Tools` | 继续只构造固定 5 工具 | 无 skill 输入 | read/grep/write/edit/bash |
+| `buildAgentV3Tools` | 构造 runtime 工具,并在 rich chat 加入 `load_skill` | chat config + agent_v3 config | read/grep/write/edit/bash(+load_skill) |
 
 ## 4. 详细设计
 
@@ -121,23 +122,22 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 
     var b strings.Builder
     b.WriteString("<agent_v3_skills>\n")
-    b.WriteString("The following skills are already loaded into this system prompt. ")
+    b.WriteString("The following built-in skills are available for this chat, but they are not active until loaded with load_skill. ")
     b.WriteString("Do not use read/grep to load skills from /skills.\n")
+    b.WriteString("If you need Telegram rich output, call load_skill with name=\"rich-message\" immediately before the final answer.\n")
     for _, skill := range skills {
         b.WriteString("<skill name=\"")
         b.WriteString(skill.Name)
         b.WriteString("\" description=\"")
         b.WriteString(skill.Description)
-        b.WriteString("\">\n")
-        b.WriteString(skill.Content)
-        b.WriteString("\n</skill>\n")
+        b.WriteString("\" status=\"available\" />\n")
     }
     b.WriteString("</agent_v3_skills>")
     return b.String()
 }
 ```
 
-实际实现应使用现有字符串构造风格,并确保输出顺序稳定。`Content` 当前直接复用 `agentV3RichMessageSkillContract`;后续若内容变长,优先压缩 skill 文案,而不是引入 runtime 文件系统读取。
+实际实现应使用现有字符串构造风格,并确保输出顺序稳定。`Content` 当前直接复用 `agentV3RichMessageSkillContract`,但不直接嵌入 Stable Prefix;由 `load_skill` 工具返回完整内容。
 
 ### 4.3 Stable Prefix 修改
 
@@ -153,10 +153,9 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 
 ```text
 <agent_v3_skills>
-The following skills are already loaded into this system prompt. Do not use read/grep to load skills from /skills.
-<skill name="rich-message" description="Output Telegram rich messages (Rich Markdown). Use when rich formatting is needed.">
-...
-</skill>
+The following built-in skills are available for this chat, but they are not active until loaded with load_skill. Do not use read/grep to load skills from /skills.
+If you need Telegram rich output, call load_skill with name="rich-message" immediately before the final answer.
+<skill name="rich-message" description="Output Telegram rich messages (Rich Markdown). Use when rich formatting is needed." status="available" />
 </agent_v3_skills>
 ```
 
@@ -178,9 +177,9 @@ The following skills are already loaded into this system prompt. Do not use read
 
 skill prompt block 内容必须参与 hash 计算,取代原 rich contract hash 的特殊路径。这样 rich skill 开关或 skill 内容变化会触发 Stable Prefix 重建。
 
-### 4.6 工具构造保持不变
+### 4.6 工具构造
 
-`buildAgentV3Tools(tc)` 继续只返回固定 5 个工具:
+`buildAgentV3Tools(tc)` 在普通 agent-v3 chat 中继续只返回固定 5 个工具:
 
 ```text
 read
@@ -190,11 +189,11 @@ edit
 bash
 ```
 
-不要新增 `load_skill`;不要在 `remoteReadTool` 或 `remoteGrepTool` 中添加 `/skills` 特例;不要为 skill discovery 调用 runtime。
+启用 `agent.rich: true` 时额外返回 `load_skill`。模型必须在最终 `<telegram_rich_message>` 输出前的最后一次工具调用中执行 `load_skill(name="rich-message")`;否则 rich envelope 会按普通文本处理。不要在 `remoteReadTool` 或 `remoteGrepTool` 中添加 `/skills` 特例;不要为 skill discovery 调用 runtime。
 
 ### 4.7 loop.go stage label
 
-`agentV3ToolStageLabel` 不需要新增 `load_skill` 分支。已有 read/grep/bash 的 stage label 保持工具语义即可,不要出现"正在读取 skill 文档"这类暗示 runtime skill 文件读取的文案。
+`agentV3ToolStageLabel` 为 `load_skill` 显示"正在加载 skill: <name>"即可。已有 read/grep/bash 的 stage label 保持工具语义,不要出现"正在读取 skill 文档"这类暗示 runtime skill 文件读取的文案。
 
 ### 4.8 runtime 侧
 
@@ -223,8 +222,8 @@ bash
    - rich disabled -> Stable Prefix 不含 `<agent_v3_skills>`;
    - prompt 文本包含"Do not use read/grep to load skills from /skills"一类约束。
 3. **工具表测试**:
-   - agent-v3 默认模型可见工具仍只有 read/grep/write/edit/bash;
-   - 不因为注册内置 skill 增加 `load_skill`;
+   - 非 rich agent-v3 默认模型可见工具仍只有 read/grep/write/edit/bash;
+   - rich agent-v3 额外暴露 `load_skill`;
    - read/grep 工具没有 `/skills` overlay 分支。
 4. **hash 测试**:
    - rich 开关变化会改变 prefix hash;
@@ -244,7 +243,7 @@ bash
 ### 7.2 兼容性
 
 - 现有 chatv2 tools、MCP tools、subagent tools、`SkillConfig` 不变。
-- Agent-v3 固定 runtime tools 不变,仍只有 read/grep/write/edit/bash。
+- Agent-v3 非 rich runtime tools 不变,仍只有 read/grep/write/edit/bash;rich chat 额外加入 `load_skill`。
 - Rust runtime 无改动,旧版本 runtime 仍兼容。
 - prompt cache key 因 hash 输入变化会失效一次,之后稳定。
 
@@ -255,7 +254,7 @@ bash
 ## 8. 未来扩展
 
 - **runtime filesystem skill 模式**: 未来若要支持 `/skills/<name>/SKILL.md`,应作为明确新版本能力实现,并继续保持 skill additive,不得替代 chatv2/MCP/subagent/SkillConfig。
-- **可选 `load_skill` helper**: 若未来确实需要语义化加载工具,可新增为可配置 helper,但不得成为默认第 6 个工具。
+- **更多 `load_skill` skill**: `load_skill` 当前只用于 rich-message 的显式加载。未来若扩展更多内置 skill,仍需按 chat 配置门控并保持 additive。
 - **动态内容生成**: `agentV3BuiltinSkill.Content` 可改为 `ContentProvider func(tc *TurnContext) string`,支持按运行时状态生成 prompt 内容。
 - **更多内置 skill**: 在 `buildAgentV3BuiltinSkills` 加注册分支即可。
 - **skill 版本化**: `agentV3BuiltinSkill` 可增加 `Version` 字段,由 prompt 注入块声明版本。

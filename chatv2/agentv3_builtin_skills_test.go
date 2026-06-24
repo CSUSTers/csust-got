@@ -138,16 +138,16 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 		assert.NotContains(t, got, `description="x&y`)
 	})
 
-	t.Run("content is trimmed but not XML-escaped", func(t *testing.T) {
+	t.Run("content is not embedded in availability block", func(t *testing.T) {
 		raw := "  <b>bold</b> & stuff  "
 		skills := []agentV3BuiltinSkill{
 			{Name: "test", Content: raw},
 		}
 		got := buildAgentV3SkillPromptBlock(skills)
 		require.NotEmpty(t, got)
-		assert.Contains(t, got, "<b>bold</b> & stuff")
-		assert.NotContains(t, got, "&amp;amp;")
-		assert.NotContains(t, got, "&lt;b&gt;")
+		assert.Contains(t, got, `name="test"`)
+		assert.NotContains(t, got, "<b>bold</b>")
+		assert.NotContains(t, got, "& stuff")
 	})
 
 	t.Run("block contains the skills prohibition line", func(t *testing.T) {
@@ -156,5 +156,6 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 		}
 		got := buildAgentV3SkillPromptBlock(skills)
 		assert.Contains(t, got, "Do not use read/grep to load skills from /skills")
+		assert.Contains(t, got, "load_skill")
 	})
 }

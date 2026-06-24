@@ -4,7 +4,7 @@
 
 **Goal:** Allow agent-v3 chat configs with `agent.rich: true` to send Telegram Bot API 10.1 Rich Messages while keeping the existing `format: md|html` text pipeline unchanged.
 
-**Architecture:** Rich Message is an agent-v3-only delivery capability gated by per-chat `config.AgentConfig.Rich`, not by `ChatOutputFormatConfig.Format`. When enabled, agent-v3 receives a built-in rich-message skill contract that allows the model to output a `<telegram_rich_message>` envelope whose inner content is raw Telegram Rich Markdown. Streaming and final delivery use `Bot.Raw` with `editMessageText.rich_message.markdown` or `sendRichMessage.rich_message.markdown`; history stores bot-derived visible text, never the XML control envelope.
+**Architecture:** Rich Message is an agent-v3-only delivery capability gated by per-chat `config.AgentConfig.Rich`, not by `ChatOutputFormatConfig.Format`. When enabled, agent-v3 exposes a built-in rich-message skill through `load_skill`; the model must call `load_skill(name="rich-message")` immediately before a final `<telegram_rich_message>` envelope. Streaming and final delivery use `Bot.Raw` with `sendRichMessage.rich_message.markdown`; after successful rich delivery the previous placeholder is deleted. Authorized rich output stores bot-derived visible text in history; unauthorized envelopes follow the ordinary text pipeline.
 
 **Tech Stack:** Go 1.26, `gopkg.in/telebot.v3` v3.3.8 `Bot.Raw`, Telegram Bot API 10.1 Rich Messages, `github.com/stretchr/testify`, existing `chatv2` agent-v3 runtime and streaming code.
 
@@ -42,20 +42,21 @@ The parser ignores text outside the first rich tag pair. If the closing tag has 
    - `sendTelegramRichMessage()` and `editTelegramRichMessage()` call `Bot.Raw` through `telegramRawCaller` and unmarshal `result` into `tb.Message`.
 
 4. Agent-v3 prefix contract
-   - `agentV3RichMessageSkillContract(true)` injects raw-markdown rich output rules only when `agent.rich` is enabled.
-   - `buildAgentV3PrefixHash()` includes the rich rules hash to prevent cache contamination.
+   - `agentV3RichMessageSkillContract(true)` is available only when `agent.rich` is enabled.
+   - The prefix advertises rich-message as loadable; the full contract is returned by `load_skill`.
+   - `buildAgentV3PrefixHash()` includes the loadable skill block hash to prevent cache contamination across rich gate changes.
 
 5. Delivery integration
-   - Non-streaming sends/edits raw rich when gated and valid; otherwise falls back to derived visible text.
-   - Streaming suppresses normal placeholder edits for rich envelopes and attempts raw rich edits with the currently accumulated markdown inner.
-   - Finalization performs final raw rich send/edit and returns visible text for persistence.
+   - Non-streaming sends raw rich only when gated, valid, and immediately authorized by `load_skill`; otherwise output uses the ordinary formatting pipeline.
+   - Streaming suppresses placeholder edits while a rich envelope is still being assembled.
+   - Finalization performs final raw rich send, deletes the previous placeholder, and returns visible text for persistence.
 
 ## Guardrails
 
 - `format: md|html` continues to control only normal Telegram text parse mode and fallback text formatting.
 - Rich markdown is not escaped as MarkdownV2 or HTML before raw rich API calls.
-- `agent.rich` gates raw rich sending. It does not permit XML tag leakage when false; complete rich envelopes fall back to derived visible text.
-- Redis and agent-v3 history never store `<telegram_rich_message>` tags or raw rich markdown control content.
+- `agent.rich` plus immediately preceding `load_skill(name="rich-message")` gates raw rich sending. Without that tool call, rich envelopes are ordinary output.
+- Redis and agent-v3 history store derived visible text for authorized rich output. Unauthorized rich envelopes are ordinary text and are persisted like any other ordinary response.
 - `sendRichMessageDraft` is intentionally out of scope for this slice.
 
 ## Verification

@@ -115,7 +115,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 		"chars":   len(memoryText),
 	})
 
-	toolDefs := agentV3ToolDefinitionsText()
+	includeLoadSkill := agentV3RichSkillAvailable(tc.Config, cfg)
+	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill)
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(buildAgentV3BuiltinSkills(tc, cfg))
@@ -364,7 +365,8 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 	return strings.Join([]string{
 		"Telegram Rich Message output is available for this chat.",
 		"Use normal plain text when rich layout is unnecessary.",
-		"When rich output is useful, make your final answer exactly one <telegram_rich_message> envelope and no surrounding prose.",
+		"When rich output is useful, this loaded skill must be the immediately previous tool call before your final answer.",
+		"After loading this skill, make your final answer exactly one <telegram_rich_message> envelope and no surrounding prose.",
 		"The envelope body must be raw Telegram Rich Markdown, not JSON, not HTML, and not an InputRichMessage object.",
 		"Do not emit mode fields, fallback fields, explicit block AST payloads, media uploads, or sendRichMessageDraft instructions.",
 		"Rich Markdown may use supported structural syntax such as headings, lists, task lists, quotes, code blocks, tables, and details.",
@@ -376,9 +378,10 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 func agentV3RuntimeSkillRules() string {
 	return "You are running in agent-v3 mode.\n" +
 		"Agent-v3 adds remote runtime tools: read, grep, write, edit, bash.\n" +
+		"When load_skill is available, it loads built-in skills for the next final answer only; do not treat skill instructions as permanently loaded.\n" +
 		"Configured chatv2 tools, MCP tools, subagents, and SkillConfig tools may also be available; use whichever tool best fits the task.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
-		"Injected skills may appear in <agent_v3_skills> or <soul>; follow those instructions directly.\n" +
+		"Available built-in skills may appear in <agent_v3_skills>; call load_skill to activate one before using its special output protocol.\n" +
 		"Do not use read, grep, or runtime filesystem paths to load skills from /skills.\n" +
 		"If an injected skill documents bash commands, run only those explicitly documented commands and arguments.\n" +
 		"Do not invent skill commands or /skills scripts.\n" +

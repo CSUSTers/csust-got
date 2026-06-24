@@ -281,23 +281,34 @@ func truncateForModel(s string, limit int, already bool) (string, bool) {
 	return s[:end] + "\n[truncated by bot]", true
 }
 
-func buildAgentV3Tools() []tool.BaseTool {
-	return []tool.BaseTool{
+func buildAgentV3Tools(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config) []tool.BaseTool {
+	tools := []tool.BaseTool{
 		&remoteReadTool{},
 		&remoteGrepTool{},
 		&remoteWriteTool{},
 		&remoteEditTool{},
 		&remoteBashTool{},
 	}
+	if agentV3RichSkillAvailable(chatCfg, cfg) {
+		tools = append(tools, &loadSkillTool{})
+	}
+	return tools
 }
 
-func agentV3ToolDefinitionsText() string {
+func agentV3ToolDefinitionsText(includeLoadSkill bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
 		{agentV3ToolNameField: agentV3ToolWrite, agentV3ToolArgsField: "path,content", agentV3ToolDescField: "Write a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace. Common utilities include curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils."},
+	}
+	if includeLoadSkill {
+		infos = append(infos, map[string]any{
+			agentV3ToolNameField: agentV3ToolLoadSkill,
+			agentV3ToolArgsField: "name",
+			agentV3ToolDescField: "Load an agent-v3 built-in skill for the next answer. The rich-message skill must be loaded immediately before a final <telegram_rich_message> answer.",
+		})
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)
@@ -523,6 +534,45 @@ func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		b.WriteString(resp.Error)
 	}
 	return strings.TrimSpace(b.String()), nil
+}
+
+type loadSkillTool struct{}
+
+type loadSkillArgs struct {
+	Name string `json:"name"`
+}
+
+func (t *loadSkillTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: agentV3ToolLoadSkill,
+		Desc: "Load one built-in agent-v3 skill by name. Use name=\"rich-message\" immediately before the final answer when you intend to output a Telegram rich message.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			agentV3ToolSkillNameField: {Type: "string", Desc: "Built-in skill name, e.g. rich-message", Required: true},
+		}),
+	}, nil
+}
+
+func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
+	tc := GetTurnContext(ctx)
+	if tc == nil {
+		return "", fmt.Errorf("load_skill: %w", errNoTurnContext)
+	}
+	var args loadSkillArgs
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("load_skill: invalid arguments: %w", err)
+	}
+	skill, ok := agentV3BuiltinSkillByName(args.Name, tc)
+	if !ok {
+		return fmt.Sprintf("[Skill Error] Skill %q is not available in this chat.", strings.TrimSpace(args.Name)), nil
+	}
+	var b strings.Builder
+	b.WriteString("<loaded_skill name=\"")
+	b.WriteString(escapeAgentV3SkillAttr(skill.Name))
+	b.WriteString("\">\n")
+	b.WriteString(skill.Content)
+	b.WriteString("\n</loaded_skill>\n")
+	b.WriteString("Use this skill only for the next final answer. If you need another tool after this, call load_skill again immediately before rich output.")
+	return b.String(), nil
 }
 
 func requireAgentV3Runtime(ctx context.Context, name string) (*TurnContext, error) {

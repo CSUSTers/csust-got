@@ -367,6 +367,11 @@ func agentV3ToolStageLabel(call schema.ToolCall) string {
 		return "正在编辑 runtime 文件"
 	case agentV3ToolBash:
 		return toolCallStageLabel(call)
+	case agentV3ToolLoadSkill:
+		if name := extractToolCallStringArg(call.Function.Arguments, agentV3ToolSkillNameField); name != "" {
+			return "正在加载 skill: " + truncateStageText(name, 80)
+		}
+		return "正在加载 skill"
 	default:
 		return toolCallStageLabel(call)
 	}
@@ -435,6 +440,7 @@ func shouldEmitStageMarker(ctx context.Context) bool {
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {
 	name := tc.Function.Name
 	args := tc.Function.Arguments
+	var toolSeq int64
 	var finishSpan func(error, map[string]any)
 	if turn := GetTurnContext(ctx); turn != nil && turn.V3 != nil && turn.V3.Trace != nil {
 		turn.V3.Trace.RecordToolCall()
@@ -446,6 +452,9 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			attrs["args_preview"] = preview
 		}
 		finishSpan = turn.V3.Trace.StartSpan("tool_call", attrs)
+	}
+	if turn := GetTurnContext(ctx); turn != nil {
+		toolSeq = turn.recordToolCall(name)
 	}
 
 	t, ok := a.invokables[name]
@@ -480,6 +489,11 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"[Tool Error] %s\nPlease try a different approach or adjust parameters.",
 			err.Error(),
 		)
+	}
+	if err == nil && name == agentV3ToolLoadSkill && isRichMessageLoadSkillArgs(args) && !strings.HasPrefix(result, "[Skill Error]") {
+		if turn := GetTurnContext(ctx); turn != nil {
+			turn.markRichMessageSkillLoaded(toolSeq)
+		}
 	}
 	if finishSpan != nil {
 		attrs := map[string]any{"result_chars": len(result)}
@@ -719,12 +733,13 @@ func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*sch
 }
 
 const agentV3LoopDirectiveText = "工具调用纪律：\n" +
-	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 推进任务，要么直接给出最终答案，二者必择其一。\n" +
+	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 或其他已提供工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
 	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
 	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
 	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
 	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。"
+	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。\n" +
+	"7. 如果要输出 Telegram rich message，最终答案前的最后一次工具调用必须是 load_skill(name=\"rich-message\")；否则 <telegram_rich_message> 会被当作普通文本。"
 
 func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
 	directive := schema.SystemMessage(text)

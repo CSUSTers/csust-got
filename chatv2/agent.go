@@ -166,7 +166,7 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, err
 	}
 	if chatCfg.IsAgentV3Enabled() {
-		allTools = append(buildAgentV3Tools(), allTools...)
+		allTools = append(buildAgentV3Tools(chatCfg, config.BotConfig.AgentV3), allTools...)
 	}
 	allTools = wrapToolsWithErrorHandler(allTools)
 

@@ -41,6 +41,10 @@ type TurnContext struct {
 	streamingStarted atomic.Bool                // Set true when streaming/final output begins
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
+	toolMu           sync.Mutex
+	toolSeq          int64
+	lastToolName     string
+	richSkillToolSeq int64
 }
 
 type progressStep struct {
@@ -68,6 +72,37 @@ func (tc *TurnContext) MarkEdited() {
 		return
 	}
 	tc.lastEditAt.Store(time.Now().UnixNano())
+}
+
+func (tc *TurnContext) recordToolCall(name string) int64 {
+	if tc == nil {
+		return 0
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	tc.toolSeq++
+	tc.lastToolName = name
+	return tc.toolSeq
+}
+
+func (tc *TurnContext) markRichMessageSkillLoaded(seq int64) {
+	if tc == nil || seq <= 0 {
+		return
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	tc.richSkillToolSeq = seq
+}
+
+func (tc *TurnContext) richMessageSkillLoadedForFinal() bool {
+	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() {
+		return false
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	return tc.toolSeq > 0 &&
+		tc.richSkillToolSeq == tc.toolSeq &&
+		tc.lastToolName == agentV3ToolLoadSkill
 }
 
 // WithTurnContext stores TurnContext in a Go context.

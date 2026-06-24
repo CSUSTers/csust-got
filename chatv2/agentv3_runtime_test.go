@@ -25,7 +25,7 @@ import (
 )
 
 func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
-	tools := buildAgentV3Tools()
+	tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{})
 	require.Len(t, tools, 5)
 
 	names := make([]string, 0, len(tools))
@@ -37,7 +37,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, names)
 	assert.NotContains(t, names, "load_skill")
 
-	toolDefsText := agentV3ToolDefinitionsText()
+	toolDefsText := agentV3ToolDefinitionsText(false)
 	assert.NotContains(t, toolDefsText, "load_skill")
 	assert.NotContains(t, toolDefsText, "/skills")
 	assert.Contains(t, toolDefsText, "curl")
@@ -46,12 +46,79 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	assert.Contains(t, agentV3RuntimeSkillRules(), "jq")
 }
 
+func nonRichAgentV3ChatConfig() *config.ChatConfigSingle {
+	return &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true}}
+}
+
+func richAgentV3ChatConfig() *config.ChatConfigSingle {
+	return &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}}
+}
+
+func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
+	richTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{})
+	richNames := make([]string, 0, len(richTools))
+	for _, item := range richTools {
+		info, err := item.Info(t.Context())
+		require.NoError(t, err)
+		richNames = append(richNames, info.Name)
+	}
+	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash", "load_skill"}, richNames)
+	assert.Contains(t, agentV3ToolDefinitionsText(true), "load_skill")
+
+	disabled := false
+	noBuiltinTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
+		Skills: config.AgentV3SkillsConfig{InjectBuiltin: &disabled},
+	})
+	noBuiltinNames := make([]string, 0, len(noBuiltinTools))
+	for _, item := range noBuiltinTools {
+		info, err := item.Info(t.Context())
+		require.NoError(t, err)
+		noBuiltinNames = append(noBuiltinNames, info.Name)
+	}
+	assert.NotContains(t, noBuiltinNames, "load_skill")
+}
+
 func TestRemoteBashToolDocumentsCommonUtilities(t *testing.T) {
 	info, err := (&remoteBashTool{}).Info(t.Context())
 	require.NoError(t, err)
 
 	assert.Contains(t, info.Desc, "curl")
 	assert.Contains(t, info.Desc, "jq")
+}
+
+func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
+	old := config.BotConfig
+	defer func() { config.BotConfig = old }()
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+
+	tc := &TurnContext{Config: richAgentV3ChatConfig()}
+	ctx := WithTurnContext(t.Context(), tc)
+
+	out, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
+	require.NoError(t, err)
+	assert.Contains(t, out, "<loaded_skill name=\"rich-message\">")
+	assert.Contains(t, out, "telegram_rich_message")
+
+	tc.Config = nonRichAgentV3ChatConfig()
+	out, err = (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
+	require.NoError(t, err)
+	assert.Contains(t, out, "[Skill Error]")
+}
+
+func TestRichMessageAuthorizationRequiresImmediatelyPreviousLoadSkill(t *testing.T) {
+	old := config.BotConfig
+	defer func() { config.BotConfig = old }()
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+
+	tc := &TurnContext{Config: richAgentV3ChatConfig()}
+	assert.False(t, tc.richMessageSkillLoadedForFinal())
+
+	seq := tc.recordToolCall(agentV3ToolLoadSkill)
+	tc.markRichMessageSkillLoaded(seq)
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
+
+	tc.recordToolCall(agentV3ToolRead)
+	assert.False(t, tc.richMessageSkillLoadedForFinal())
 }
 
 func TestRemoteRuntimeClientAndBashTool(t *testing.T) {
@@ -211,7 +278,7 @@ func TestBuildAgentV3ToolsExposeRuntimeTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    buildAgentV3Tools(),
+		Tools:    buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)
@@ -235,7 +302,7 @@ func TestAgentV3ToolSurfacePreservesConfiguredTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    append(buildAgentV3Tools(), configuredTools...),
+		Tools:    append(buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}), configuredTools...),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)
@@ -266,12 +333,19 @@ func TestAgentV3StageMarkersDescribeRuntimeIntent(t *testing.T) {
 				Arguments: `{"path":"/workspace/a.txt"}`,
 			},
 		},
+		{
+			Function: schema.FunctionCall{
+				Name:      "load_skill",
+				Arguments: `{"name":"rich-message"}`,
+			},
+		},
 	}
 
 	got := buildAgentV3StageMarker(calls)
 	assert.Contains(t, got, "正在读取 runtime 文件")
 	assert.Contains(t, got, "$ go test ./chatv2")
 	assert.Contains(t, got, "正在编辑 runtime 文件")
+	assert.Contains(t, got, "正在加载 skill: rich-message")
 	assert.NotContains(t, got, "skill 文档")
 	assert.NotContains(t, got, "skill CLI")
 }
@@ -509,8 +583,9 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 	assert.NotContains(t, withRich, "<rich_message_skill>")
 	assert.Contains(t, withRich, "<agent_v3_skills>")
 	assert.Contains(t, withRich, "Do not use read/grep to load skills from /skills")
-	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\">")
-	assert.Contains(t, withRich, "rich rules")
+	assert.Contains(t, withRich, "load_skill")
+	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" />")
+	assert.NotContains(t, withRich, "rich rules")
 	assert.Contains(t, withRich, "<tool_definitions>")
 
 	idxRuntimeRules := strings.Index(withRich, "<runtime_and_skill_rules>")

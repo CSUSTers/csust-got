@@ -240,7 +240,7 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	sent, visibleResponse, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
+	sent, visibleResponse, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(sendErr)

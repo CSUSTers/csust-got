@@ -148,17 +148,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 
 	t.Run("plain text stays visible for legacy formatting", func(t *testing.T) {
 		text := "<think>reason</think>plain text"
-		delivery := resolveTelegramRichDelivery(text, "", cfg, true)
-		assert.Equal(t, "plain text", delivery.VisibleText)
-		assert.True(t, delivery.ShouldSendRich)
-		assert.True(t, delivery.RichCandidate)
-		assert.Equal(t, "plain text", delivery.RichMessage.Markdown)
-		assert.NoError(t, delivery.Err)
-	})
-
-	t.Run("gate disabled keeps legacy formatting for plain text", func(t *testing.T) {
-		text := "<think>reason</think>plain text"
-		delivery := resolveTelegramRichDelivery(text, "", cfg, false)
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, true)
 		assert.Equal(t, text, delivery.VisibleText)
 		assert.False(t, delivery.ShouldSendRich)
 		assert.False(t, delivery.RichCandidate)
@@ -166,21 +156,42 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		assert.NoError(t, delivery.Err)
 	})
 
-	t.Run("gate disabled returns derived fallback", func(t *testing.T) {
+	t.Run("gate disabled keeps legacy formatting for plain text", func(t *testing.T) {
+		text := "<think>reason</think>plain text"
+		delivery := resolveTelegramRichDelivery(text, "", cfg, false, false)
+		assert.Equal(t, text, delivery.VisibleText)
+		assert.False(t, delivery.ShouldSendRich)
+		assert.False(t, delivery.RichCandidate)
+		assert.Empty(t, delivery.RichMessage)
+		assert.NoError(t, delivery.Err)
+	})
+
+	t.Run("gate disabled keeps envelope on ordinary output path", func(t *testing.T) {
 		text := mustTelegramRichEnvelope("*hello*")
 
-		delivery := resolveTelegramRichDelivery(text, "", cfg, false)
+		delivery := resolveTelegramRichDelivery(text, "", cfg, false, false)
 
-		assert.Equal(t, "hello", delivery.VisibleText)
+		assert.Equal(t, text, delivery.VisibleText)
 		assert.False(t, delivery.ShouldSendRich)
 		assert.True(t, delivery.RichCandidate)
 		assert.NoError(t, delivery.Err)
 	})
 
-	t.Run("gate enabled keeps raw markdown and derived fallback", func(t *testing.T) {
+	t.Run("gate enabled but not authorized keeps ordinary text", func(t *testing.T) {
 		text := mustTelegramRichEnvelope("# hello")
 
-		delivery := resolveTelegramRichDelivery(text, "", cfg, true)
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, false)
+
+		assert.Equal(t, text, delivery.VisibleText)
+		assert.False(t, delivery.ShouldSendRich)
+		assert.True(t, delivery.RichCandidate)
+		assert.Empty(t, delivery.RichMessage)
+	})
+
+	t.Run("gate enabled and authorized keeps raw markdown and derived fallback", func(t *testing.T) {
+		text := mustTelegramRichEnvelope("# hello")
+
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, true)
 
 		assert.Equal(t, "hello", delivery.VisibleText)
 		assert.True(t, delivery.ShouldSendRich)
@@ -190,7 +201,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 	t.Run("surrounding prose is ignored for valid envelope", func(t *testing.T) {
 		text := "Here is it:\n" + mustTelegramRichEnvelope("**hello**") + "\nthanks"
 
-		delivery := resolveTelegramRichDelivery(text, "", cfg, true)
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, true)
 
 		assert.NoError(t, delivery.Err)
 		assert.True(t, delivery.ShouldSendRich)
@@ -199,7 +210,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 	})
 
 	t.Run("unclosed envelope uses current inner markdown", func(t *testing.T) {
-		delivery := resolveTelegramRichDelivery("prefix "+telegramRichEnvelopeStart+"## heading", "", cfg, true)
+		delivery := resolveTelegramRichDelivery("prefix "+telegramRichEnvelopeStart+"## heading", "", cfg, true, true)
 
 		assert.NoError(t, delivery.Err)
 		assert.True(t, delivery.ShouldSendRich)
@@ -208,7 +219,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 	})
 
 	t.Run("empty envelope uses safe fallback", func(t *testing.T) {
-		delivery := resolveTelegramRichDelivery(mustTelegramRichEnvelope(""), "", cfg, true)
+		delivery := resolveTelegramRichDelivery(mustTelegramRichEnvelope(""), "", cfg, true, true)
 
 		assert.ErrorIs(t, delivery.Err, errTelegramRichMissingContent)
 		assert.False(t, delivery.ShouldSendRich)
@@ -218,7 +229,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 	t.Run("resolver parses payload after splitting reasoning", func(t *testing.T) {
 		text := "<think>reason</think>" + mustTelegramRichEnvelope("*hello*")
 
-		delivery := resolveTelegramRichDelivery(text, "", cfg, true)
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, true)
 
 		assert.True(t, delivery.ShouldSendRich)
 		assert.Equal(t, "*hello*", delivery.RichMessage.Markdown)
@@ -240,7 +251,7 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 				setConfigField(t, formatCfg, "UseNativeReasoning", false)
 
 				text := mustTelegramRichEnvelope(rawMarkdown)
-				delivery := resolveTelegramRichDelivery(text, "", formatCfg, true)
+				delivery := resolveTelegramRichDelivery(text, "", formatCfg, true, true)
 
 				assert.True(t, delivery.ShouldSendRich,
 					"ShouldSendRich must be true for payload format %q", payloadFmt)
@@ -254,9 +265,8 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		}
 	})
 
-	t.Run("rich enabled plain markdown bypasses payload formatting hooks without envelope", func(t *testing.T) {
+	t.Run("rich enabled plain markdown stays on ordinary output path without envelope", func(t *testing.T) {
 		const rawMarkdown = "# Title\n\n**Body**"
-		const wantFallback = "Title\n\nBody"
 
 		formatCfg := &config.ChatOutputFormatConfig{
 			Format:  "markdown",
@@ -264,13 +274,12 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		}
 		setConfigField(t, formatCfg, "UseNativeReasoning", false)
 
-		delivery := resolveTelegramRichDelivery(rawMarkdown, "", formatCfg, true)
+		delivery := resolveTelegramRichDelivery(rawMarkdown, "", formatCfg, true, true)
 
-		assert.True(t, delivery.ShouldSendRich)
-		assert.True(t, delivery.RichCandidate)
-		assert.Equal(t, rawMarkdown, delivery.RichMessage.Markdown)
-		assert.NotContains(t, delivery.RichMessage.Markdown, "```")
-		assert.Equal(t, wantFallback, delivery.VisibleText)
+		assert.False(t, delivery.ShouldSendRich)
+		assert.False(t, delivery.RichCandidate)
+		assert.Empty(t, delivery.RichMessage)
+		assert.Equal(t, rawMarkdown, delivery.VisibleText)
 		assert.NoError(t, delivery.Err)
 	})
 }
