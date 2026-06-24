@@ -64,6 +64,7 @@ func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash", "load_skill"}, richNames)
 	assert.Contains(t, agentV3ToolDefinitionsText(true), "load_skill")
+	assert.Contains(t, agentV3ToolDefinitionsText(true), "LAST tool call")
 
 	disabled := false
 	noBuiltinTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
@@ -91,6 +92,11 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 	defer func() { config.BotConfig = old }()
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
 
+	info, err := (&loadSkillTool{}).Info(t.Context())
+	require.NoError(t, err)
+	assert.Contains(t, info.Desc, "LAST tool call")
+	assert.Contains(t, info.Desc, "call load_skill again")
+
 	tc := &TurnContext{Config: richAgentV3ChatConfig()}
 	ctx := WithTurnContext(t.Context(), tc)
 
@@ -98,6 +104,8 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "<loaded_skill name=\"rich-message\">")
 	assert.Contains(t, out, "telegram_rich_message")
+	assert.Contains(t, out, "ACTIVATION RULE")
+	assert.Contains(t, out, "very next assistant response")
 
 	tc.Config = nonRichAgentV3ChatConfig()
 	out, err = (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
@@ -548,6 +556,9 @@ func TestAgentV3RichMessageRulesAreGated(t *testing.T) {
 
 	enabled := agentV3RichMessageSkillContract(true)
 	assert.Contains(t, enabled, "telegram_rich_message")
+	assert.Contains(t, enabled, "HARD REQUIREMENT")
+	assert.Contains(t, enabled, "immediately previous tool call")
+	assert.Contains(t, enabled, "call that tool now instead of answering")
 	assert.Contains(t, enabled, "raw Telegram Rich Markdown")
 	assert.Contains(t, enabled, "not JSON")
 	assert.Contains(t, enabled, "Do not emit mode fields")
@@ -583,8 +594,9 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 	assert.NotContains(t, withRich, "<rich_message_skill>")
 	assert.Contains(t, withRich, "<agent_v3_skills>")
 	assert.Contains(t, withRich, "Do not use read/grep to load skills from /skills")
+	assert.Contains(t, withRich, "STRICT RICH OUTPUT GATE")
 	assert.Contains(t, withRich, "load_skill")
-	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" />")
+	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" activation=\"must_call_load_skill_as_last_tool_call_before_final_output\" />")
 	assert.NotContains(t, withRich, "rich rules")
 	assert.Contains(t, withRich, "<tool_definitions>")
 

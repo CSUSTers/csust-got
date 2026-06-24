@@ -365,8 +365,11 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 	return strings.Join([]string{
 		"Telegram Rich Message output is available for this chat.",
 		"Use normal plain text when rich layout is unnecessary.",
-		"When rich output is useful, this loaded skill must be the immediately previous tool call before your final answer.",
-		"After loading this skill, make your final answer exactly one <telegram_rich_message> envelope and no surrounding prose.",
+		"HARD REQUIREMENT: this skill only authorizes rich output when load_skill(name=\"rich-message\") was the immediately previous tool call.",
+		"If you want to send a rich message and have not just called load_skill(name=\"rich-message\"), call that tool now instead of answering.",
+		"After the load_skill result, do not call any other tool, do not write explanatory prose, and do not stream a draft.",
+		"Your very next assistant message must be the final answer and must be exactly one <telegram_rich_message> envelope with no surrounding prose.",
+		"If you call any other tool after load_skill, the authorization expires and you must call load_skill(name=\"rich-message\") again before rich output.",
 		"The envelope body must be raw Telegram Rich Markdown, not JSON, not HTML, and not an InputRichMessage object.",
 		"Do not emit mode fields, fallback fields, explicit block AST payloads, media uploads, or sendRichMessageDraft instructions.",
 		"Rich Markdown may use supported structural syntax such as headings, lists, task lists, quotes, code blocks, tables, and details.",
@@ -379,6 +382,7 @@ func agentV3RuntimeSkillRules() string {
 	return "You are running in agent-v3 mode.\n" +
 		"Agent-v3 adds remote runtime tools: read, grep, write, edit, bash.\n" +
 		"When load_skill is available, it loads built-in skills for the next final answer only; do not treat skill instructions as permanently loaded.\n" +
+		"In rich mode, <telegram_rich_message> is accepted only if the immediately previous tool call was load_skill(name=\"rich-message\"); if any other tool is called after load_skill, call load_skill again before rich output.\n" +
 		"Configured chatv2 tools, MCP tools, subagents, and SkillConfig tools may also be available; use whichever tool best fits the task.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
 		"Available built-in skills may appear in <agent_v3_skills>; call load_skill to activate one before using its special output protocol.\n" +

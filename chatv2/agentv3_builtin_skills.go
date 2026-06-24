@@ -24,7 +24,7 @@ func buildAgentV3BuiltinSkills(tc *TurnContext, cfg *config.AgentV3Config) []age
 	if agentV3RichSkillAvailable(tc.Config, cfg) {
 		skills = append(skills, agentV3BuiltinSkill{
 			Name:        "rich-message",
-			Description: "Render Telegram rich Markdown responses when useful.",
+			Description: "Render Telegram rich Markdown. Must be loaded with load_skill as the LAST tool call immediately before the final rich envelope.",
 			Content:     agentV3RichMessageSkillContract(true),
 		})
 	}
@@ -87,13 +87,13 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 	var b strings.Builder
 	b.WriteString("<agent_v3_skills>\n")
 	b.WriteString("The following built-in skills are available for this chat, but they are not active until loaded with load_skill. Do not use read/grep to load skills from /skills.\n")
-	b.WriteString("If you need Telegram rich output, call load_skill with name=\"rich-message\" immediately before the final answer. A <telegram_rich_message> envelope is honored only when that immediately previous tool call loaded rich-message; otherwise it is ordinary text.\n")
+	b.WriteString("STRICT RICH OUTPUT GATE: If you intend to output <telegram_rich_message>, your immediately previous action must be a successful tool call load_skill with name=\"rich-message\". Do not call any other tool after that. Do not output any assistant text between load_skill and the final rich envelope. Otherwise the envelope is treated as ordinary text.\n")
 	for _, skill := range filtered {
 		b.WriteString("<skill name=\"")
 		b.WriteString(escapeAgentV3SkillAttr(skill.Name))
 		b.WriteString("\" description=\"")
 		b.WriteString(escapeAgentV3SkillAttr(skill.Description))
-		b.WriteString("\" status=\"available\" />\n")
+		b.WriteString("\" status=\"available\" activation=\"must_call_load_skill_as_last_tool_call_before_final_output\" />\n")
 	}
 	b.WriteString("</agent_v3_skills>")
 	return b.String()

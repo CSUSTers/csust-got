@@ -4,7 +4,7 @@
 
 **Goal:** Allow agent-v3 chat configs with `agent.rich: true` to send Telegram Bot API 10.1 Rich Messages while keeping the existing `format: md|html` text pipeline unchanged.
 
-**Architecture:** Rich Message is an agent-v3-only delivery capability gated by per-chat `config.AgentConfig.Rich`, not by `ChatOutputFormatConfig.Format`. When enabled, agent-v3 exposes a built-in rich-message skill through `load_skill`; the model must call `load_skill(name="rich-message")` immediately before a final `<telegram_rich_message>` envelope. Streaming and final delivery use `Bot.Raw` with `sendRichMessage.rich_message.markdown`; after successful rich delivery the previous placeholder is deleted. Authorized rich output stores bot-derived visible text in history; unauthorized envelopes follow the ordinary text pipeline.
+**Architecture:** Rich Message is an agent-v3-only delivery capability gated by per-chat `config.AgentConfig.Rich`, not by `ChatOutputFormatConfig.Format`. When enabled, agent-v3 exposes a built-in rich-message skill through `load_skill`; the model must call `load_skill(name="rich-message")` as the immediately previous tool call before a final `<telegram_rich_message>` envelope, with no other tool call or assistant prose between them. Streaming and final delivery use `Bot.Raw` with `sendRichMessage.rich_message.markdown`; after successful rich delivery the previous placeholder is deleted. Authorized rich output stores bot-derived visible text in history; unauthorized envelopes follow the ordinary text pipeline.
 
 **Tech Stack:** Go 1.26, `gopkg.in/telebot.v3` v3.3.8 `Bot.Raw`, Telegram Bot API 10.1 Rich Messages, `github.com/stretchr/testify`, existing `chatv2` agent-v3 runtime and streaming code.
 
@@ -55,7 +55,7 @@ The parser ignores text outside the first rich tag pair. If the closing tag has 
 
 - `format: md|html` continues to control only normal Telegram text parse mode and fallback text formatting.
 - Rich markdown is not escaped as MarkdownV2 or HTML before raw rich API calls.
-- `agent.rich` plus immediately preceding `load_skill(name="rich-message")` gates raw rich sending. Without that tool call, rich envelopes are ordinary output.
+- `agent.rich` plus immediately preceding `load_skill(name="rich-message")` gates raw rich sending. Without that exact last tool call, or if any tool/prose appears between loading and final output, rich envelopes are ordinary output.
 - Redis and agent-v3 history store derived visible text for authorized rich output. Unauthorized rich envelopes are ordinary text and are persisted like any other ordinary response.
 - `sendRichMessageDraft` is intentionally out of scope for this slice.
 

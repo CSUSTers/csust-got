@@ -124,13 +124,13 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
     b.WriteString("<agent_v3_skills>\n")
     b.WriteString("The following built-in skills are available for this chat, but they are not active until loaded with load_skill. ")
     b.WriteString("Do not use read/grep to load skills from /skills.\n")
-    b.WriteString("If you need Telegram rich output, call load_skill with name=\"rich-message\" immediately before the final answer.\n")
+    b.WriteString("STRICT RICH OUTPUT GATE: If you intend to output <telegram_rich_message>, your immediately previous action must be a successful tool call load_skill with name=\"rich-message\". Do not call any other tool after that. Do not output any assistant text between load_skill and the final rich envelope.\n")
     for _, skill := range skills {
         b.WriteString("<skill name=\"")
         b.WriteString(skill.Name)
         b.WriteString("\" description=\"")
         b.WriteString(skill.Description)
-        b.WriteString("\" status=\"available\" />\n")
+        b.WriteString("\" status=\"available\" activation=\"must_call_load_skill_as_last_tool_call_before_final_output\" />\n")
     }
     b.WriteString("</agent_v3_skills>")
     return b.String()
@@ -154,8 +154,8 @@ func buildAgentV3SkillPromptBlock(skills []agentV3BuiltinSkill) string {
 ```text
 <agent_v3_skills>
 The following built-in skills are available for this chat, but they are not active until loaded with load_skill. Do not use read/grep to load skills from /skills.
-If you need Telegram rich output, call load_skill with name="rich-message" immediately before the final answer.
-<skill name="rich-message" description="Output Telegram rich messages (Rich Markdown). Use when rich formatting is needed." status="available" />
+STRICT RICH OUTPUT GATE: If you intend to output <telegram_rich_message>, your immediately previous action must be a successful tool call load_skill with name="rich-message". Do not call any other tool after that. Do not output any assistant text between load_skill and the final rich envelope.
+<skill name="rich-message" description="Output Telegram rich messages (Rich Markdown). Use when rich formatting is needed." status="available" activation="must_call_load_skill_as_last_tool_call_before_final_output" />
 </agent_v3_skills>
 ```
 
@@ -207,7 +207,7 @@ bash
 | 无任何内置 skill | 不输出 `<agent_v3_skills>` 标签 |
 | 模型尝试 `read /skills/...` | 按普通 runtime read 处理;系统提示词不应引导这种行为,测试只验证 prompt 不包含该路径 |
 | 模型尝试 `grep /skills` | 按普通 runtime grep 处理;系统提示词不应引导这种行为 |
-| 需要 rich formatting | 模型使用已注入 rich-message contract,不另行加载文件 |
+| 需要 rich formatting | 模型先调用 `load_skill(name="rich-message")`;该调用必须紧贴最终 rich 输出 |
 
 ## 6. 测试策略
 
@@ -218,7 +218,7 @@ bash
    - `agent.rich: false` -> 返回空列表;
    - 多 skill 时顺序稳定(按 Name 排序)。
 2. **prompt 注入测试**:
-   - rich enabled -> Stable Prefix 含 `<agent_v3_skills>` 和 rich-message contract;
+   - rich enabled -> Stable Prefix 含 `<agent_v3_skills>` 和 rich-message 可加载 meta;
    - rich disabled -> Stable Prefix 不含 `<agent_v3_skills>`;
    - prompt 文本包含"Do not use read/grep to load skills from /skills"一类约束。
 3. **工具表测试**:
@@ -236,7 +236,7 @@ bash
 
 ### 7.1 行为变化
 
-- **模型侧**: rich-message 等内置 skill 直接在 system prompt 中可见,不需要也不应该通过 runtime `/skills` 文件读取。
+- **模型侧**: rich-message 等内置 skill 的可加载 meta 在 system prompt 中可见;完整 contract 由 `load_skill` 返回。模型不需要也不应该通过 runtime `/skills` 文件读取。
 - **运维侧**: 当前 agent-v3 版本不消费 runtime `skills_root` 磁盘目录。若已有磁盘 skill,暂不属于本版本 agent-v3 能力面;可以继续作为未来 runtime filesystem skill 模式的候选输入。
 - **配置侧**: 新增 `agent_v3.skills.inject_builtin` 作为内置 skill 注入总开关,默认 `true`。rich skill 仍由 `agent.rich: true` 进行 per-chat 门控,只是注入方式整理为统一 `<agent_v3_skills>` 块。
 
