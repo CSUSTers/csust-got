@@ -200,11 +200,13 @@ func (sp *streamProcessor) updateMessage() {
 	}
 	parts := splitOutputWithReason(text, reason, sp.format)
 	if shouldSuppressPartialRichEnvelope(parts.payload, sp.richEnabled) {
-		delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled)
-		if delivery.ShouldSendRich {
-			_ = sp.editRichPlaceholder(delivery.RichMessage, false)
-		}
 		return
+	}
+	if sp.richEnabled {
+		delivery := resolveTelegramRichDelivery(text, reason, sp.format, true)
+		if delivery.ShouldSendRich || delivery.RichCandidate {
+			return
+		}
 	}
 
 	// Find a sentence boundary for clean display
@@ -235,22 +237,16 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	}
 	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled)
 	if delivery.ShouldSendRich {
-		var sent *tb.Message
-		var err error
-		if sp.placeholderMsg != nil {
-			err = sp.editRichPlaceholder(delivery.RichMessage, true)
-			sent = sp.placeholderMsg
-		} else {
-			replyToID := 0
-			if msg := sp.tbCtx.Message(); msg != nil {
-				replyToID = msg.ID
-			}
-			sent, err = sendTelegramRichMessage(sp.telegramRaw(), sp.tbCtx.Chat().ID, replyToID, delivery.RichMessage)
+		replyToID := 0
+		if msg := sp.tbCtx.Message(); msg != nil {
+			replyToID = msg.ID
 		}
+		sent, err := sendTelegramRichMessage(sp.telegramRaw(), sp.targetChatID(), replyToID, delivery.RichMessage)
 		if err == nil {
 			if sp.tc != nil {
 				sp.tc.finalized.Store(true)
 			}
+			sp.deletePlaceholderAfterRichSend(sent)
 			if sent != nil {
 				sp.placeholderMsg = sent
 			}
@@ -277,36 +273,35 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	return text, reason, sp.placeholderMsg, nil
 }
 
-func (sp *streamProcessor) editRichPlaceholder(rich inputRichMessage, force bool) error {
-	if sp.placeholderMsg == nil || rich.Markdown == "" {
-		return nil
-	}
-	if sp.tc != nil {
-		sp.tc.editMu.Lock()
-		defer sp.tc.editMu.Unlock()
-		if !force && !sp.tc.ShouldAllowEdit(sp.editInterval) {
-			return nil
-		}
-	}
-	sent, err := editTelegramRichMessage(sp.telegramRaw(), sp.placeholderMsg.Chat.ID, sp.placeholderMsg.ID, rich)
-	if err != nil {
-		zap.L().Debug("chatv2: failed to edit streaming rich message", zap.Error(err))
-		return err
-	}
-	if sent != nil {
-		sp.placeholderMsg = sent
-	}
-	if sp.tc != nil {
-		sp.tc.MarkEdited()
-	}
-	return nil
-}
-
 func (sp *streamProcessor) telegramRaw() telegramRawCaller {
 	if sp.rawCaller != nil {
 		return sp.rawCaller
 	}
 	return sp.tbCtx.Bot()
+}
+
+func (sp *streamProcessor) targetChatID() int64 {
+	if sp.placeholderMsg != nil && sp.placeholderMsg.Chat != nil && sp.placeholderMsg.Chat.ID != 0 {
+		return sp.placeholderMsg.Chat.ID
+	}
+	if chat := sp.tbCtx.Chat(); chat != nil {
+		return chat.ID
+	}
+	return 0
+}
+
+func (sp *streamProcessor) deletePlaceholderAfterRichSend(sent *tb.Message) {
+	if sp.placeholderMsg == nil || sp.placeholderMsg.Chat == nil {
+		return
+	}
+	if sent != nil && sent.Chat != nil && sent.Chat.ID == sp.placeholderMsg.Chat.ID && sent.ID == sp.placeholderMsg.ID {
+		return
+	}
+	if bot := sp.tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(sp.placeholderMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete rich placeholder", zap.Error(err))
+		}
+	}
 }
 
 // editPlaceholder edits the placeholder message with new content.
@@ -383,23 +378,22 @@ func nonStreamResponseWithCaller(
 ) (*tb.Message, string, error) {
 	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled)
 	if delivery.ShouldSendRich {
-		if existingMsg != nil {
-			msg, err := editTelegramRichMessage(raw, existingMsg.Chat.ID, existingMsg.ID, delivery.RichMessage)
-			if err == nil {
-				return msg, delivery.VisibleText, nil
-			}
-			zap.L().Debug("chatv2: failed to edit rich non-stream message", zap.Error(err))
-		} else {
-			replyToID := 0
-			if msg := tbCtx.Message(); msg != nil {
-				replyToID = msg.ID
-			}
-			msg, err := sendTelegramRichMessage(raw, tbCtx.Chat().ID, replyToID, delivery.RichMessage)
-			if err == nil {
-				return msg, delivery.VisibleText, nil
-			}
-			zap.L().Debug("chatv2: failed to send rich non-stream message", zap.Error(err))
+		replyToID := 0
+		if msg := tbCtx.Message(); msg != nil {
+			replyToID = msg.ID
 		}
+		chatID := int64(0)
+		if existingMsg != nil && existingMsg.Chat != nil {
+			chatID = existingMsg.Chat.ID
+		} else if chat := tbCtx.Chat(); chat != nil {
+			chatID = chat.ID
+		}
+		msg, err := sendTelegramRichMessage(raw, chatID, replyToID, delivery.RichMessage)
+		if err == nil {
+			deleteExistingPlaceholderAfterRichSend(tbCtx, existingMsg, msg)
+			return msg, delivery.VisibleText, nil
+		}
+		zap.L().Debug("chatv2: failed to send rich non-stream message", zap.Error(err))
 		text = delivery.VisibleText
 		reasoning = ""
 	}
@@ -446,4 +440,18 @@ func nonStreamResponseWithCaller(
 		})
 	}
 	return sent, text, err
+}
+
+func deleteExistingPlaceholderAfterRichSend(tbCtx tb.Context, existingMsg, sent *tb.Message) {
+	if existingMsg == nil || existingMsg.Chat == nil {
+		return
+	}
+	if sent != nil && sent.Chat != nil && sent.Chat.ID == existingMsg.Chat.ID && sent.ID == existingMsg.ID {
+		return
+	}
+	if bot := tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(existingMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete rich placeholder", zap.Error(err))
+		}
+	}
 }

@@ -383,7 +383,8 @@ func agentV3RuntimeSkillRules() string {
 		"If an injected skill documents bash commands, run only those explicitly documented commands and arguments.\n" +
 		"Do not invent skill commands or /skills scripts.\n" +
 		"Do not write skill instructions into long-term memory.\n" +
-		"Use bash for command execution only through the remote runtime."
+		"Use bash for command execution only through the remote runtime.\n" +
+		"The bash runtime includes common utilities such as curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils."
 }
 
 func agentV3TurnsToMessages(turns []orm.AgentV3Turn) []*schema.Message {

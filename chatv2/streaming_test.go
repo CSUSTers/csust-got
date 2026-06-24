@@ -127,7 +127,7 @@ func TestUpdateMessageSuppressesPartialRichEnvelope(t *testing.T) {
 	assert.True(t, shouldSuppressPartialRichEnvelope(sp.getResponse(), sp.richEnabled))
 }
 
-func TestUpdateMessageEditsCompleteRichEnvelopeAsRawRichMarkdown(t *testing.T) {
+func TestUpdateMessageSuppressesCompleteRichEnvelopeUntilFinalize(t *testing.T) {
 	const rawMarkdown = "# Title\n\n**Body**"
 
 	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
@@ -147,13 +147,32 @@ func TestUpdateMessageEditsCompleteRichEnvelopeAsRawRichMarkdown(t *testing.T) {
 
 	sp.updateMessage()
 
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramEditRichMessagePayload)
-	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
-	assert.NotContains(t, payload.RichMessage.Markdown, "```")
-	assert.Equal(t, "Title\n\nBody", deriveTelegramRichFallback(payload.RichMessage.Markdown))
-	assert.True(t, tc.lastEditAt.Load() > 0)
+	assert.Empty(t, raw.method)
+	assert.Nil(t, raw.payload)
+	assert.Equal(t, int64(0), tc.lastEditAt.Load())
+}
+
+func TestUpdateMessageSuppressesRichPlainMarkdownUntilFinalize(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":7,"chat":{"id":100}}}`)}
+	tc := &TurnContext{}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot},
+		format:         &config.ChatOutputFormatConfig{Format: "markdown", Payload: "markdown-block"},
+		richEnabled:    true,
+		rawCaller:      raw,
+		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
+		tc:             tc,
+	}
+	sp.processChunk(schema.AssistantMessage("# Title\n\n**Body**", nil))
+
+	sp.updateMessage()
+
+	assert.Empty(t, raw.method)
+	assert.Nil(t, raw.payload)
+	assert.Equal(t, int64(0), tc.lastEditAt.Load())
 }
 
 func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
@@ -182,9 +201,9 @@ func TestFinalizeRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	assert.Empty(t, reasoning)
 	require.NotNil(t, sentMsg)
 	assert.Equal(t, 8, sentMsg.ID)
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, telegramSendRichMessageMethod, raw.method)
+	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramSendRichMessagePayload)
 	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
 	assert.NotContains(t, payload.RichMessage.Markdown, "```")
 	assert.True(t, tc.finalized.Load())
@@ -215,9 +234,9 @@ func TestFinalizeRichPlainMarkdownBypassesMarkdownBlockFormatting(t *testing.T) 
 	assert.Equal(t, wantFallback, response)
 	assert.Empty(t, reasoning)
 	require.NotNil(t, sentMsg)
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, telegramSendRichMessageMethod, raw.method)
+	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramSendRichMessagePayload)
 	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
 	assert.NotContains(t, payload.RichMessage.Markdown, "```")
 	assert.True(t, tc.finalized.Load())
@@ -274,11 +293,11 @@ func TestNonStreamResponseRichBypassesMarkdownBlockFormatting(t *testing.T) {
 	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, text, "", format, existingMsg, true)
 
 	require.NoError(t, err)
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method,
-		"rich edit API must be called, not a normal text edit")
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload,
-		"payload must be a rich edit payload, not a plain text edit payload")
-	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, telegramSendRichMessageMethod, raw.method,
+		"rich send API must be called, not a normal text edit")
+	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload,
+		"payload must be a rich send payload, not a plain text edit payload")
+	payload := raw.payload.(telegramSendRichMessagePayload)
 	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown,
 		"raw markdown must pass through unmodified - no ```markdown fences, no escaping")
 	assert.NotContains(t, payload.RichMessage.Markdown, "```",
@@ -308,9 +327,9 @@ func TestNonStreamResponseRichPlainMarkdownBypassesMarkdownBlockFormatting(t *te
 	msg, visibleText, err := nonStreamResponseWithCaller(raw, tbCtx, rawMarkdown, "", format, existingMsg, true)
 
 	require.NoError(t, err)
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramEditRichMessagePayload)
+	assert.Equal(t, telegramSendRichMessageMethod, raw.method)
+	require.IsType(t, telegramSendRichMessagePayload{}, raw.payload)
+	payload := raw.payload.(telegramSendRichMessagePayload)
 	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
 	assert.NotContains(t, payload.RichMessage.Markdown, "```")
 	assert.Equal(t, wantFallback, visibleText)
@@ -324,4 +343,8 @@ type mockStreamingContext struct {
 
 func (m *mockStreamingContext) Bot() *tb.Bot {
 	return m.bot
+}
+
+func (m *mockStreamingContext) Message() *tb.Message {
+	return nil
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -91,6 +92,28 @@ func TestAgentGetMaxSteps(t *testing.T) {
 	t.Run("default values stay unchanged when max steps unset", func(t *testing.T) {
 		assert.Equal(t, defaultAgentMaxSteps, (&AgentConfig{}).GetMaxSteps())
 		assert.Equal(t, defaultSubAgentMaxSteps, (&SubAgentConfig{}).GetMaxSteps())
+	})
+}
+
+func TestModelRetryDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults to three retries with 500ms initial delay", func(t *testing.T) {
+		var cfg *Model
+		assert.Equal(t, 3, cfg.RetryCount())
+		assert.Equal(t, 500*time.Millisecond, cfg.RetryInitialDelay())
+	})
+
+	t.Run("explicit retry count and duration string are respected", func(t *testing.T) {
+		cfg := &Model{
+			RetryNums:            5,
+			RetryInitialInterval: "750ms",
+		}
+		assert.Equal(t, 5, cfg.RetryCount())
+		assert.Equal(t, 750*time.Millisecond, cfg.RetryInitialDelay())
+	})
+
+	t.Run("legacy retry interval remains seconds", func(t *testing.T) {
+		cfg := &Model{RetryInterval: 2}
+		assert.Equal(t, 2*time.Second, cfg.RetryInitialDelay())
 	})
 }
 

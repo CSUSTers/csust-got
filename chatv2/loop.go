@@ -322,7 +322,7 @@ func buildStageMarker(ctx context.Context, calls []schema.ToolCall) string {
 	names := make([]string, 0, len(calls))
 	seen := map[string]bool{}
 	for _, tc := range calls {
-		n := tc.Function.Name
+		n := toolCallStageLabel(tc)
 		if n == "" || seen[n] {
 			continue
 		}
@@ -366,10 +366,60 @@ func agentV3ToolStageLabel(call schema.ToolCall) string {
 	case agentV3ToolEdit:
 		return "正在编辑 runtime 文件"
 	case agentV3ToolBash:
-		return "正在执行 bash 命令"
+		return toolCallStageLabel(call)
 	default:
+		return toolCallStageLabel(call)
+	}
+}
+
+func toolCallStageLabel(call schema.ToolCall) string {
+	name := strings.TrimSpace(call.Function.Name)
+	if name == "" {
 		return ""
 	}
+	if name == agentV3ToolBash || strings.EqualFold(name, "bash") {
+		if cmd := extractToolCallStringArg(call.Function.Arguments, agentV3ToolCommandField); cmd != "" {
+			return "$ " + truncateStageText(cmd, 120)
+		}
+		return "$ " + name
+	}
+	if skillName := stageSkillName(name); skillName != "" {
+		return "skill: " + truncateStageText(skillName, 80)
+	}
+	return name
+}
+
+func extractToolCallStringArg(argsJSON, key string) string {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	value, _ := args[key].(string)
+	return strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+}
+
+func stageSkillName(toolName string) string {
+	lower := strings.ToLower(toolName)
+	for _, prefix := range []string{"skill:", "skill_", "skill-", "skill."} {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(toolName[len(prefix):])
+		}
+	}
+	return ""
+}
+
+func truncateStageText(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func shouldEmitStageMarker(ctx context.Context) bool {
@@ -653,12 +703,13 @@ func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) 
 const loopDirectiveText = "工具调用纪律：\n" +
 	"1. 每一轮回复要么调用工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
 	"2. 最终答案之前不要输出正文说明；需要展示中间进度时调用 update_progress，不要把进度写成普通 assistant 文本。\n" +
-	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
-	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"5. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
-	"6. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
-	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
-	"8. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
+	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
+	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
+	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
+	"6. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
+	"7. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
+	"8. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
+	"9. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
 
 func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*schema.Message {
 	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
@@ -670,9 +721,10 @@ func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*sch
 const agentV3LoopDirectiveText = "工具调用纪律：\n" +
 	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 推进任务，要么直接给出最终答案，二者必择其一。\n" +
 	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
-	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
-	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"5. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。"
+	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
+	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
+	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
+	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。"
 
 func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
 	directive := schema.SystemMessage(text)

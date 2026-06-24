@@ -297,7 +297,7 @@ func agentV3ToolDefinitionsText() string {
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
 		{agentV3ToolNameField: agentV3ToolWrite, agentV3ToolArgsField: "path,content", agentV3ToolDescField: "Write a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
-		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace."},
+		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace. Common utilities include curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils."},
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)
@@ -477,9 +477,9 @@ type remoteBashArgs struct {
 func (t *remoteBashTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolBash,
-		Desc: "Run a shell command in the remote runtime workspace.",
+		Desc: "Run a shell command in the remote runtime workspace. Common utilities include curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			agentV3ToolCommandField: {Type: "string", Desc: "Shell command to execute", Required: true},
+			agentV3ToolCommandField: {Type: "string", Desc: "Shell command to execute with the runtime's installed CLI tools such as curl and jq", Required: true},
 			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},
 			agentV3ToolTimeoutField: {Type: "string", Desc: "Optional timeout such as 30s, capped by bot config"},
 		}),

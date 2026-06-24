@@ -8,7 +8,7 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates coreutils findutils grep proot sed \
+    && apt-get install -y --no-install-recommends bash ca-certificates coreutils curl file findutils git grep gzip jq less procps proot sed tar unzip \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -m -u 10001 runtime \
     && mkdir -p /runtime/workspaces /runtime/skills /runtime/logs \

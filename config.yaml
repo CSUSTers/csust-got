@@ -58,6 +58,7 @@ llm_models:
     api_key: "xxx"
     prompt_limit: 1000
     retry_nums: 5
+    retry_initial_interval: "500ms"
     retry_interval: 1 # 单位：秒
 
   gpt: &gpt

@@ -13,6 +13,7 @@ import (
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
@@ -43,7 +44,7 @@ const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一�
 const agentV3MinToolMaxSteps = 4
 
 // buildModel creates an eino ChatModel from a config.Model definition.
-func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
+func buildModel(ctx context.Context, modelCfg *config.Model) (model.ToolCallingChatModel, error) {
 	if modelCfg == nil {
 		return nil, errModelConfigNil
 	}
@@ -54,12 +55,12 @@ func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatMo
 		Model:   modelCfg.Model,
 	}
 
-	model, err := einoopenai.NewChatModel(ctx, cfg)
+	chatModel, err := einoopenai.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat model %q: %w", modelCfg.Name, err)
 	}
 
-	return model, nil
+	return newRetryingChatModel(chatModel, modelCfg), nil
 }
 
 // buildSubAgentTool creates a subagent wrapped as a tool.BaseTool.

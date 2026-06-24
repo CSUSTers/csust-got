@@ -15,14 +15,15 @@ import (
 
 // Model is the model configuration for chat
 type Model struct {
-	Name          string `mapstructure:"name"`
-	BaseUrl       string `mapstructure:"base_url"`
-	ApiKey        string `mapstructure:"api_key"`
-	PromptLimit   int    `mapstructure:"prompt_limit"`
-	Model         string `mapstructure:"model"`
-	RetryNums     int    `mapstructure:"retry_nums"`
-	RetryInterval int    `mapstructure:"retry_interval"`
-	Proxy         string `mapstructure:"proxy"`
+	Name                 string `mapstructure:"name"`
+	BaseUrl              string `mapstructure:"base_url"`
+	ApiKey               string `mapstructure:"api_key"`
+	PromptLimit          int    `mapstructure:"prompt_limit"`
+	Model                string `mapstructure:"model"`
+	RetryNums            int    `mapstructure:"retry_nums"`
+	RetryInterval        int    `mapstructure:"retry_interval"`
+	RetryInitialInterval string `mapstructure:"retry_initial_interval"`
+	Proxy                string `mapstructure:"proxy"`
 
 	Features ModelFeatures `mapstructure:"features"`
 }
@@ -33,6 +34,28 @@ type ModelFeatures struct {
 	ImageBase64Raw bool `mapstructure:"image_base64_raw"` // send raw base64 instead of data URI
 	Mcp            bool `mapstructure:"mcp"`
 	WhiteList      bool `mapstructure:"white_list"`
+}
+
+// RetryCount returns how many extra model-generation attempts are allowed after the first failure.
+func (m *Model) RetryCount() int {
+	if m == nil || m.RetryNums <= 0 {
+		return defaultModelRetryNums
+	}
+	return m.RetryNums
+}
+
+// RetryInitialDelay returns the first exponential-backoff delay for retryable model errors.
+func (m *Model) RetryInitialDelay() time.Duration {
+	if m == nil {
+		return defaultModelRetryInitialInterval
+	}
+	if d := parseFlexibleDuration(m.RetryInitialInterval, 0); d > 0 {
+		return d
+	}
+	if m.RetryInterval > 0 {
+		return time.Duration(m.RetryInterval) * time.Second
+	}
+	return defaultModelRetryInitialInterval
 }
 
 // ChatTrigger is the configuration for chat
@@ -84,6 +107,8 @@ const (
 
 	defaultSubAgentMaxSteps            = 5
 	defaultAgentMaxSteps               = 12
+	defaultModelRetryNums              = 3
+	defaultModelRetryInitialInterval   = 500 * time.Millisecond
 	minToolAgentMaxSteps               = 4
 	agentV3DefaultScope                = "group"
 	agentV3DefaultMemoryWritePolicy    = "explicit_or_admin"

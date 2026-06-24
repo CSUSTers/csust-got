@@ -40,6 +40,18 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	toolDefsText := agentV3ToolDefinitionsText()
 	assert.NotContains(t, toolDefsText, "load_skill")
 	assert.NotContains(t, toolDefsText, "/skills")
+	assert.Contains(t, toolDefsText, "curl")
+	assert.Contains(t, toolDefsText, "jq")
+	assert.Contains(t, agentV3RuntimeSkillRules(), "curl")
+	assert.Contains(t, agentV3RuntimeSkillRules(), "jq")
+}
+
+func TestRemoteBashToolDocumentsCommonUtilities(t *testing.T) {
+	info, err := (&remoteBashTool{}).Info(t.Context())
+	require.NoError(t, err)
+
+	assert.Contains(t, info.Desc, "curl")
+	assert.Contains(t, info.Desc, "jq")
 }
 
 func TestRemoteRuntimeClientAndBashTool(t *testing.T) {
@@ -258,7 +270,7 @@ func TestAgentV3StageMarkersDescribeRuntimeIntent(t *testing.T) {
 
 	got := buildAgentV3StageMarker(calls)
 	assert.Contains(t, got, "正在读取 runtime 文件")
-	assert.Contains(t, got, "正在执行 bash 命令")
+	assert.Contains(t, got, "$ go test ./chatv2")
 	assert.Contains(t, got, "正在编辑 runtime 文件")
 	assert.NotContains(t, got, "skill 文档")
 	assert.NotContains(t, got, "skill CLI")

@@ -5,6 +5,7 @@ package chatv2
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -110,6 +111,45 @@ func TestFriendlyAgentErrorMessage(t *testing.T) {
 		assert.Contains(t, msg, "工具调用阶段")
 		assert.Contains(t, msg, "Telegram 图片不可用")
 	})
+}
+
+func TestToolCallStageLabels(t *testing.T) {
+	bashCall := schema.ToolCall{
+		Function: schema.FunctionCall{
+			Name:      agentV3ToolBash,
+			Arguments: `{"command":"printf 'hello world' &&   jq --version"}`,
+		},
+	}
+	skillCall := schema.ToolCall{
+		Function: schema.FunctionCall{
+			Name:      "skill_search_docs",
+			Arguments: `{}`,
+		},
+	}
+
+	assert.Equal(t, "$ printf 'hello world' && jq --version", agentV3ToolStageLabel(bashCall))
+	assert.Equal(t, "skill: search_docs", agentV3ToolStageLabel(skillCall))
+	assert.Equal(t, "▸ 调用工具: $ printf 'hello world' && jq --version, skill: search_docs",
+		buildStageMarker(t.Context(), []schema.ToolCall{bashCall, skillCall}))
+}
+
+func TestToolCallStageLabelTruncatesLongBashCommand(t *testing.T) {
+	call := schema.ToolCall{
+		Function: schema.FunctionCall{
+			Name:      agentV3ToolBash,
+			Arguments: `{"command":"` + strings.Repeat("x", 140) + `"}`,
+		},
+	}
+
+	label := agentV3ToolStageLabel(call)
+
+	assert.Len(t, []rune(strings.TrimPrefix(label, "$ ")), 120)
+	assert.True(t, strings.HasSuffix(label, "..."))
+}
+
+func TestLoopDirectivesAskForInternalToolPlanning(t *testing.T) {
+	assert.Contains(t, loopDirectiveText, "在内部推理中先选择必要工具并排出简短工作步骤")
+	assert.Contains(t, agentV3LoopDirectiveText, "不要向用户展示你的思维链或内部计划")
 }
 
 func TestGenerateDropsIntermediateToolTurnOutput(t *testing.T) {
