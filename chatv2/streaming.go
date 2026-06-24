@@ -253,8 +253,7 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 			return delivery.VisibleText, reason, sp.placeholderMsg, nil
 		}
 		zap.L().Debug("chatv2: failed to send rich streaming message", zap.Error(err))
-		text = delivery.VisibleText
-		reason = ""
+		return delivery.VisibleText, "", sp.placeholderMsg, err
 	}
 	if delivery.VisibleText != "" && delivery.VisibleText != text {
 		text = delivery.VisibleText
@@ -354,7 +353,7 @@ func (sp *streamProcessor) getReasoning() string {
 }
 
 // NonStreamResponse sends a complete response without streaming.
-// If existingMsg is provided, edits it instead of sending a new message.
+// If existingMsg is provided, plain responses edit it while rich responses are sent as new messages.
 // Returns the sent message, the visible text used for persistence, and any error.
 func NonStreamResponse(
 	tbCtx tb.Context,
@@ -394,8 +393,7 @@ func nonStreamResponseWithCaller(
 			return msg, delivery.VisibleText, nil
 		}
 		zap.L().Debug("chatv2: failed to send rich non-stream message", zap.Error(err))
-		text = delivery.VisibleText
-		reasoning = ""
+		return existingMsg, delivery.VisibleText, err
 	}
 	if delivery.VisibleText != "" && delivery.VisibleText != text {
 		text = delivery.VisibleText

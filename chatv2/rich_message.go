@@ -18,7 +18,6 @@ const (
 	telegramRichEnvelopeEnd   = "</telegram_rich_message>"
 
 	telegramSendRichMessageMethod = "sendRichMessage"
-	telegramEditMessageTextMethod = "editMessageText"
 
 	telegramRichInvalidFallbackText = "I tried to send a rich message, but its payload was invalid. Please try again."
 )
@@ -86,12 +85,6 @@ type telegramSendRichMessagePayload struct {
 	ReplyParameters *telegramReplyParameters `json:"reply_parameters,omitempty"`
 }
 
-type telegramEditRichMessagePayload struct {
-	ChatID      int64            `json:"chat_id"`
-	MessageID   int              `json:"message_id"`
-	RichMessage inputRichMessage `json:"rich_message"`
-}
-
 func sendTelegramRichMessage(raw telegramRawCaller, chatID int64, replyToMessageID int, rich inputRichMessage) (*tb.Message, error) {
 	payload := telegramSendRichMessagePayload{
 		ChatID:      chatID,
@@ -102,18 +95,6 @@ func sendTelegramRichMessage(raw telegramRawCaller, chatID int64, replyToMessage
 	}
 
 	body, err := raw.Raw(telegramSendRichMessageMethod, payload)
-	if err != nil {
-		return nil, err
-	}
-	return unwrapTelegramResult(body)
-}
-
-func editTelegramRichMessage(raw telegramRawCaller, chatID int64, messageID int, rich inputRichMessage) (*tb.Message, error) {
-	body, err := raw.Raw(telegramEditMessageTextMethod, telegramEditRichMessagePayload{
-		ChatID:      chatID,
-		MessageID:   messageID,
-		RichMessage: rich,
-	})
 	if err != nil {
 		return nil, err
 	}

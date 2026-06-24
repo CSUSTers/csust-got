@@ -133,21 +133,6 @@ func TestSendTelegramRichMessageUsesRawMethodAndPayload(t *testing.T) {
 	assert.Equal(t, 99, payload.ReplyParameters.MessageID)
 }
 
-func TestEditTelegramRichMessageUsesEditMessageTextWithRichMessage(t *testing.T) {
-	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":321,"chat":{"id":654}}}`)}
-
-	message, err := editTelegramRichMessage(raw, 654, 321, inputRichMessage{Markdown: "# hello"})
-
-	require.NoError(t, err)
-	assert.Equal(t, 321, message.ID)
-	assert.Equal(t, telegramEditMessageTextMethod, raw.method)
-	require.IsType(t, telegramEditRichMessagePayload{}, raw.payload)
-	payload := raw.payload.(telegramEditRichMessagePayload)
-	assert.Equal(t, int64(654), payload.ChatID)
-	assert.Equal(t, 321, payload.MessageID)
-	assert.Equal(t, "# hello", payload.RichMessage.Markdown)
-}
-
 func TestTelegramRichRawFailureIsReturned(t *testing.T) {
 	raw := &stubTelegramRawCaller{err: errTelegramRichRawTestFailure}
 
