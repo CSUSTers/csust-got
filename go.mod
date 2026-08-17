@@ -3,9 +3,10 @@ module csust-got
 go 1.26.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/cloudwego/eino v0.9.2
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
-	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
+	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.9
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/mark3labs/mcp-go v0.54.1
@@ -26,7 +27,6 @@ require (
 )
 
 require (
-	github.com/alicebob/miniredis/v2 v2.38.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
