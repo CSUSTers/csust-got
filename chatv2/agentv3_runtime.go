@@ -307,7 +307,7 @@ func agentV3ToolDefinitionsText(includeLoadSkill bool) string {
 		infos = append(infos, map[string]any{
 			agentV3ToolNameField: agentV3ToolLoadSkill,
 			agentV3ToolArgsField: "name",
-			agentV3ToolDescField: "Load an agent-v3 built-in skill for the next answer. For rich-message, this MUST be the LAST tool call immediately before the final <telegram_rich_message>; no other tool or assistant text may come between them.",
+			agentV3ToolDescField: "Load an agent-v3 built-in skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
 		})
 	}
 	data, _ := json.Marshal(infos)
@@ -545,9 +545,9 @@ type loadSkillArgs struct {
 func (t *loadSkillTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolLoadSkill,
-		Desc: "Load one built-in agent-v3 skill by name. Use name=\"rich-message\" as the LAST tool call immediately before the final <telegram_rich_message> answer. If you call any other tool after load_skill, you must call load_skill again before rich output.",
+		Desc: "Load one built-in agent-v3 skill by name. Use name=\"rich-message\" before rich output, then finish with one <telegram_rich_message> answer.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			agentV3ToolSkillNameField: {Type: "string", Desc: "Built-in skill name. For Telegram rich output use exactly rich-message, then immediately produce the final rich envelope.", Required: true},
+			agentV3ToolSkillNameField: {Type: "string", Desc: "Built-in skill name. For Telegram rich output use exactly rich-message before the final rich envelope.", Required: true},
 		}),
 	}, nil
 }
@@ -571,7 +571,7 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	b.WriteString("\">\n")
 	b.WriteString(skill.Content)
 	b.WriteString("\n</loaded_skill>\n")
-	b.WriteString("ACTIVATION RULE: This skill is active only for your very next assistant response. That response must be the final <telegram_rich_message> envelope. Do not call any other tool first. Do not output normal prose first. If you need another tool, use it now and then call load_skill(name=\"rich-message\") again immediately before rich output.")
+	b.WriteString("ACTIVATION RULE: This skill is active for this turn. If you choose rich output, make the final answer exactly one <telegram_rich_message> envelope with no surrounding prose.")
 	return b.String(), nil
 }
 

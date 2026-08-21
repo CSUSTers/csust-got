@@ -117,6 +117,122 @@ func TestProcessChunkClearsAccumulatedOutputOnToolBoundary(t *testing.T) {
 	assert.Equal(t, "已获取到今日金价。", sp.getResponse())
 }
 
+func TestStreamProcessorReturnsEmptyResponseAfterClearThenError(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	sr, sw := schema.Pipe[*schema.Message](3)
+	go func() {
+		defer sw.Close()
+		sw.Send(schema.AssistantMessage("partial", nil), nil)
+		sw.Send(newClearStreamOutputMessage(), nil)
+		sw.Send(nil, errRetryStubUpstream500)
+	}()
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot},
+		reader:         sr,
+		format:         &config.ChatOutputFormatConfig{},
+		editInterval:   time.Hour,
+		placeholderMsg: &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}},
+		done:           make(chan struct{}),
+	}
+
+	response, reasoning, sentMsg, err := sp.process(sp.placeholderMsg)
+
+	assert.ErrorIs(t, err, errRetryStubUpstream500)
+	assert.Empty(t, response)
+	assert.Empty(t, reasoning)
+	assert.Nil(t, sentMsg)
+	assert.Nil(t, sp.placeholderMsg)
+}
+
+func TestStreamProcessorDeletesOldPlaceholderWhenPostClearContentErrorsBeforeEdit(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	placeholder := &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot, chat: &tb.Chat{ID: 100}},
+		format:         &config.ChatOutputFormatConfig{},
+		editInterval:   time.Hour,
+		placeholderMsg: placeholder,
+		done:           make(chan struct{}),
+	}
+	require.NotNil(t, sp.placeholderMsg)
+
+	sr, sw := schema.Pipe[*schema.Message](3)
+	go func() {
+		defer sw.Close()
+		sw.Send(newClearStreamOutputMessage(), nil)
+		sw.Send(schema.AssistantMessage("new partial before next tick", nil), nil)
+		sw.Send(nil, errRetryStubUpstream500)
+	}()
+	sp.reader = sr
+
+	response, reasoning, sentMsg, err := sp.process(sp.placeholderMsg)
+
+	assert.ErrorIs(t, err, errRetryStubUpstream500)
+	assert.Empty(t, response)
+	assert.Empty(t, reasoning)
+	assert.Nil(t, sentMsg)
+	assert.Nil(t, sp.placeholderMsg)
+}
+
+func TestFinalizeDeletesOldPlaceholderWhenPostClearEditFails(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	oldConfig := config.BotConfig
+	config.BotConfig = config.NewBotConfig()
+	config.BotConfig.Bot = bot
+	log.InitLogger()
+	t.Cleanup(func() { config.BotConfig = oldConfig })
+	placeholder := &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot, chat: &tb.Chat{ID: 100}},
+		format:         &config.ChatOutputFormatConfig{},
+		placeholderMsg: placeholder,
+		done:           make(chan struct{}),
+	}
+	sp.processChunk(newClearStreamOutputMessage())
+	sp.processChunk(schema.AssistantMessage("new final before edit failure", nil))
+
+	response, reasoning, sentMsg, err := sp.finalize()
+
+	require.Error(t, err)
+	assert.Empty(t, response)
+	assert.Empty(t, reasoning)
+	assert.Nil(t, sentMsg)
+	assert.Nil(t, sp.placeholderMsg)
+}
+
+func TestFinalizeDeletesOldPlaceholderWhenPostClearRichSendFails(t *testing.T) {
+	bot, err := tb.NewBot(tb.Settings{Token: "test-token", Offline: true})
+	require.NoError(t, err)
+	placeholder := &tb.Message{ID: 7, Chat: &tb.Chat{ID: 100}}
+	sp := &streamProcessor{
+		ctx:            t.Context(),
+		tbCtx:          &mockStreamingContext{bot: bot, chat: &tb.Chat{ID: 100}},
+		format:         &config.ChatOutputFormatConfig{},
+		richEnabled:    true,
+		rawCaller:      &stubTelegramRawCaller{err: errTelegramRichRawTestFailure},
+		placeholderMsg: placeholder,
+		tc:             &TurnContext{},
+		done:           make(chan struct{}),
+	}
+	authorizeRichMessageForFinal(t, sp.tc)
+	sp.processChunk(newClearStreamOutputMessage())
+	sp.processChunk(schema.AssistantMessage(mustTelegramRichEnvelope("# rich final"), nil))
+
+	response, reasoning, sentMsg, err := sp.finalize()
+
+	assert.ErrorIs(t, err, errTelegramRichRawTestFailure)
+	assert.Empty(t, response)
+	assert.Empty(t, reasoning)
+	assert.Nil(t, sentMsg)
+	assert.Nil(t, sp.placeholderMsg)
+}
+
 func TestUpdateMessageSuppressesPartialRichEnvelope(t *testing.T) {
 	sp := &streamProcessor{
 		format:      &config.ChatOutputFormatConfig{},
@@ -393,7 +509,8 @@ func TestNonStreamResponseRichSendFailureDoesNotEditPlaceholderFallback(t *testi
 
 type mockStreamingContext struct {
 	tb.Context
-	bot *tb.Bot
+	bot  *tb.Bot
+	chat *tb.Chat
 }
 
 func (m *mockStreamingContext) Bot() *tb.Bot {
@@ -402,6 +519,13 @@ func (m *mockStreamingContext) Bot() *tb.Bot {
 
 func (m *mockStreamingContext) Message() *tb.Message {
 	return nil
+}
+
+func (m *mockStreamingContext) Chat() *tb.Chat {
+	if m.chat != nil {
+		return m.chat
+	}
+	return &tb.Chat{ID: 100}
 }
 
 func authorizeRichMessageForFinal(t *testing.T, tc *TurnContext) {

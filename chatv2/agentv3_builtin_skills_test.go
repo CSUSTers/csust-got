@@ -43,10 +43,11 @@ func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
 		skills := buildAgentV3BuiltinSkills(tc, cfg)
 		require.Len(t, skills, 1)
 		assert.Equal(t, "rich-message", skills[0].Name)
-		assert.Contains(t, skills[0].Description, "LAST tool call")
+		assert.Contains(t, skills[0].Description, "before rich output")
 		assert.NotEmpty(t, skills[0].Content)
 		assert.Contains(t, skills[0].Content, "telegram_rich_message")
-		assert.Contains(t, skills[0].Content, "HARD REQUIREMENT")
+		assert.Contains(t, skills[0].Content, "load_skill(name=\"rich-message\")")
+		assert.NotContains(t, skills[0].Content, "HARD REQUIREMENT")
 	})
 
 	t.Run("rich disabled returns no builtins", func(t *testing.T) {
@@ -158,9 +159,9 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 		}
 		got := buildAgentV3SkillPromptBlock(skills)
 		assert.Contains(t, got, "Do not use read/grep to load skills from /skills")
-		assert.Contains(t, got, "STRICT RICH OUTPUT GATE")
-		assert.Contains(t, got, "immediately previous action")
-		assert.Contains(t, got, "must_call_load_skill_as_last_tool_call_before_final_output")
+		assert.Contains(t, got, "Rich output gate")
+		assert.Contains(t, got, "during this turn")
+		assert.Contains(t, got, "call_load_skill_before_final_output")
 		assert.Contains(t, got, "load_skill")
 	})
 }

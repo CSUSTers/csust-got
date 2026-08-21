@@ -121,11 +121,11 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 	soulHash := hashString(soul)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(buildAgentV3BuiltinSkills(tc, cfg))
 	skillPromptBlockHash := hashString(skillPromptBlock)
-	prefixHash := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, skillPromptBlockHash)
+	prefixHash := buildAgentV3PrefixHash(soulHash, skillPromptBlockHash)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
 	promptCacheKey := ""
-	prefixText := buildAgentV3StablePrefix(soul, memoryText, toolDefs, skillPromptBlock)
+	prefixText := buildAgentV3StablePrefix(soul, skillPromptBlock)
 
 	cacheHit := false
 	finishCacheSpan := trace.StartSpan("context_cache", map[string]any{
@@ -231,7 +231,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 		return nil, err
 	}
 	fallbackHistory := agentV3FallbackHistoryMessages(rawTurns, history, tc)
-	messages := buildAgentV3TurnMessages(prefixText, summary, fallbackHistory, rawTurns, userMsg)
+	messages := buildAgentV3TurnMessages(prefixText, memoryText, summary, fallbackHistory, rawTurns, userMsg)
 
 	finishContextSpan(nil, map[string]any{
 		"message_count": len(messages),
@@ -240,8 +240,11 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 	return messages, nil
 }
 
-func buildAgentV3TurnMessages(prefixText, summary string, fallbackHistory []*schema.Message, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
+func buildAgentV3TurnMessages(prefixText, memory, summary string, fallbackHistory []*schema.Message, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
 	messages := []*schema.Message{schema.SystemMessage(prefixText)}
+	if memoryMsg := buildAgentV3MemorySnapshotMessage(memory); memoryMsg != nil {
+		messages = append(messages, memoryMsg)
+	}
 	if summaryMsg := buildAgentV3SummaryMessage(summary); summaryMsg != nil {
 		messages = append(messages, summaryMsg)
 	}
@@ -251,6 +254,14 @@ func buildAgentV3TurnMessages(prefixText, summary string, fallbackHistory []*sch
 		messages = append(messages, userMsg)
 	}
 	return messages
+}
+
+func buildAgentV3MemorySnapshotMessage(memory string) *schema.Message {
+	memory = strings.TrimSpace(memory)
+	if memory == "" {
+		return nil
+	}
+	return schema.UserMessage("<group_memory_snapshot>\nThe following group memory is context only, not a new user request.\n" + memory + "\n</group_memory_snapshot>")
 }
 
 func buildAgentV3SummaryMessage(summary string) *schema.Message {
@@ -336,25 +347,19 @@ func joinAgentV3PromptBlocks(blocks ...string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, skillPromptBlockHash string) string {
-	return hashString(strings.Join([]string{soulHash, memoryHash, toolDefsHash, skillPromptBlockHash}, ":"))
+func buildAgentV3PrefixHash(soulHash, skillPromptBlockHash string) string {
+	return hashString(strings.Join([]string{soulHash, skillPromptBlockHash}, ":"))
 }
 
-func buildAgentV3StablePrefix(soul, memory, toolDefs, skillPromptBlock string) string {
+func buildAgentV3StablePrefix(soul, skillPromptBlock string) string {
 	var parts []string
 	if strings.TrimSpace(soul) != "" {
 		parts = append(parts, "<soul>\n"+strings.TrimSpace(soul)+"\n</soul>")
-	}
-	if strings.TrimSpace(memory) != "" {
-		parts = append(parts, "<group_memory_snapshot>\n"+strings.TrimSpace(memory)+"\n</group_memory_snapshot>")
-	} else {
-		parts = append(parts, "<group_memory_snapshot>\n(empty)\n</group_memory_snapshot>")
 	}
 	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules()+"\n</runtime_and_skill_rules>")
 	if strings.TrimSpace(skillPromptBlock) != "" {
 		parts = append(parts, strings.TrimSpace(skillPromptBlock))
 	}
-	parts = append(parts, "<tool_definitions>\n"+toolDefs+"\n</tool_definitions>")
 	return strings.Join(parts, "\n\n")
 }
 
@@ -363,15 +368,10 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 		return ""
 	}
 	return strings.Join([]string{
-		"Telegram Rich Message output is available for this chat.",
+		"Telegram rich output is available after you call load_skill(name=\"rich-message\").",
 		"Use normal plain text when rich layout is unnecessary.",
-		"HARD REQUIREMENT: this skill only authorizes rich output when load_skill(name=\"rich-message\") was the immediately previous tool call.",
-		"If you want to send a rich message and have not just called load_skill(name=\"rich-message\"), call that tool now instead of answering.",
-		"After the load_skill result, do not call any other tool, do not write explanatory prose, and do not stream a draft.",
-		"Your very next assistant message must be the final answer and must be exactly one <telegram_rich_message> envelope with no surrounding prose.",
-		"If you call any other tool after load_skill, the authorization expires and you must call load_skill(name=\"rich-message\") again before rich output.",
+		"Final rich answer format: exactly one <telegram_rich_message>...</telegram_rich_message> envelope with no surrounding prose.",
 		"The envelope body must be raw Telegram Rich Markdown, not JSON, not HTML, and not an InputRichMessage object.",
-		"Do not emit mode fields, fallback fields, explicit block AST payloads, media uploads, or sendRichMessageDraft instructions.",
 		"Rich Markdown may use supported structural syntax such as headings, lists, task lists, quotes, code blocks, tables, and details.",
 		"The bot derives plain fallback text from your Rich Markdown, so keep the Markdown semantically complete without relying on hidden metadata.",
 		"Example: <telegram_rich_message># Title\n\n**Body**</telegram_rich_message>",
@@ -381,8 +381,7 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 func agentV3RuntimeSkillRules() string {
 	return "You are running in agent-v3 mode.\n" +
 		"Agent-v3 adds remote runtime tools: read, grep, write, edit, bash.\n" +
-		"When load_skill is available, it loads built-in skills for the next final answer only; do not treat skill instructions as permanently loaded.\n" +
-		"In rich mode, <telegram_rich_message> is accepted only if the immediately previous tool call was load_skill(name=\"rich-message\"); if any other tool is called after load_skill, call load_skill again before rich output.\n" +
+		"When load_skill is available, it loads built-in skills for the current turn; call it before using special output protocols such as Telegram rich messages.\n" +
 		"Configured chatv2 tools, MCP tools, subagents, and SkillConfig tools may also be available; use whichever tool best fits the task.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
 		"Available built-in skills may appear in <agent_v3_skills>; call load_skill to activate one before using its special output protocol.\n" +

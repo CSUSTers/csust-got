@@ -260,6 +260,14 @@ func (a *CustomAgent) streamOneTurn(
 		if chunk == nil {
 			continue
 		}
+		if isClearStreamOutputMessage(chunk) {
+			chunks = nil
+			reasoningChunks = nil
+			if closed := sw.Send(chunk, nil); closed {
+				return nil, nil, errDownstreamClosed
+			}
+			continue
+		}
 		chunks = append(chunks, chunk)
 
 		if chunk.Content != "" {
@@ -739,7 +747,7 @@ const agentV3LoopDirectiveText = "工具调用纪律：\n" +
 	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
 	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
 	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。\n" +
-	"7. 如果要输出 Telegram rich message，不要直接输出 <telegram_rich_message>；先调用 load_skill(name=\"rich-message\")，并确保它是最终答案前的最后一次工具调用。load_skill 返回后立即输出最终 rich envelope，不要再调用任何工具或输出普通正文；否则 <telegram_rich_message> 会被当作普通文本。"
+	"7. 如果要输出 Telegram rich message，先在本轮调用 load_skill(name=\"rich-message\")，最终答案只输出一个 <telegram_rich_message>...</telegram_rich_message> envelope，不要附加普通正文。"
 
 func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
 	directive := schema.SystemMessage(text)

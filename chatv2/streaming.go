@@ -64,6 +64,7 @@ type streamProcessor struct {
 	reasoningContent strings.Builder
 	placeholderMsg   *tb.Message
 	tc               *TurnContext // For editMu locking and lifecycle flags
+	deleteOnError    bool
 
 	// Ticker control
 	done chan struct{}
@@ -124,6 +125,9 @@ func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb
 		if recvErr != nil {
 			close(sp.done)
 			sp.wg.Wait()
+			if sp.shouldDeletePlaceholderOnStreamError() {
+				sp.deletePlaceholderAfterClearedStreamError()
+			}
 			return sp.getResponse(), sp.getReasoning(), sp.placeholderMsg, recvErr
 		}
 		sp.processChunk(msg)
@@ -162,6 +166,7 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 	if isClearStreamOutputMessage(msg) {
 		sp.fullResponse.Reset()
 		sp.reasoningContent.Reset()
+		sp.deleteOnError = sp.placeholderMsg != nil
 		return
 	}
 
@@ -171,6 +176,30 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 	if msg.ReasoningContent != "" {
 		sp.reasoningContent.WriteString(unquoteJSONString(msg.ReasoningContent))
 	}
+}
+
+func (sp *streamProcessor) shouldDeletePlaceholderOnStreamError() bool {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	return sp.deleteOnError
+}
+
+func (sp *streamProcessor) deletePlaceholderAfterClearedStreamError() {
+	sp.mu.Lock()
+	sp.fullResponse.Reset()
+	sp.reasoningContent.Reset()
+	sp.deleteOnError = false
+	sp.mu.Unlock()
+	if sp.placeholderMsg == nil || sp.placeholderMsg.Chat == nil {
+		sp.placeholderMsg = nil
+		return
+	}
+	if bot := sp.tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(sp.placeholderMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete cleared streaming placeholder", zap.Error(err))
+		}
+	}
+	sp.placeholderMsg = nil
 }
 
 // unquoteJSONString attempts to decode a JSON-encoded string value.
@@ -253,6 +282,10 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 			return delivery.VisibleText, reason, sp.placeholderMsg, nil
 		}
 		zap.L().Debug("chatv2: failed to send rich streaming message", zap.Error(err))
+		if sp.shouldDeletePlaceholderOnStreamError() {
+			sp.deletePlaceholderAfterClearedStreamError()
+			return "", "", nil, err
+		}
 		return delivery.VisibleText, "", sp.placeholderMsg, err
 	}
 	if delivery.VisibleText != "" && delivery.VisibleText != text {
@@ -261,6 +294,10 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
 	if err := sp.editPlaceholder(formatted, true); err != nil {
+		if sp.shouldDeletePlaceholderOnStreamError() {
+			sp.deletePlaceholderAfterClearedStreamError()
+			return "", "", nil, err
+		}
 		return text, reason, sp.placeholderMsg, err
 	}
 	if sp.tc != nil {
@@ -333,6 +370,9 @@ func (sp *streamProcessor) editPlaceholder(formatted string, force bool) error {
 			return err
 		}
 	}
+	sp.mu.Lock()
+	sp.deleteOnError = false
+	sp.mu.Unlock()
 	if sp.tc != nil {
 		sp.tc.MarkEdited()
 	}

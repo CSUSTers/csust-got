@@ -5,6 +5,8 @@ package chatv2
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"sync"
 	"testing"
@@ -18,6 +20,8 @@ import (
 )
 
 var errRetryStubUpstream500 = errors.New("upstream returned 500")
+var errRetryStubConnectionReset = errors.New("connection reset by peer")
+var errRetryStubHTTP408 = errors.New("HTTP status 408: timeout")
 
 func TestRetryingChatModelRetriesGenerate429AndBacksOff(t *testing.T) {
 	stub := &retryStubModel{
@@ -124,15 +128,117 @@ func TestRetryingChatModelRetriesInitialStreamError(t *testing.T) {
 	assert.Equal(t, []time.Duration{500 * time.Millisecond}, sleeps)
 }
 
+func TestRetryingChatModelRetriesStreamRecvErrorAndClearsPartial(t *testing.T) {
+	stub := &retryStubModel{
+		streamSteps: []retryStreamStep{
+			{
+				chunks:  []*schema.Message{schema.AssistantMessage("partial", nil)},
+				recvErr: errRetryStubUpstream500,
+			},
+			{chunks: []*schema.Message{schema.AssistantMessage("final", nil)}},
+		},
+	}
+	var sleeps []time.Duration
+	wrapped := &retryingChatModel{
+		inner:        stub,
+		retries:      3,
+		initialDelay: 500 * time.Millisecond,
+		sleep: func(_ context.Context, d time.Duration) error {
+			sleeps = append(sleeps, d)
+			return nil
+		},
+	}
+
+	stream, err := wrapped.Stream(t.Context(), nil)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	first, recvErr := stream.Recv()
+	require.NoError(t, recvErr)
+	assert.Equal(t, "partial", first.Content)
+
+	clearMsg, recvErr := stream.Recv()
+	require.NoError(t, recvErr)
+	assert.True(t, isClearStreamOutputMessage(clearMsg))
+
+	final, recvErr := stream.Recv()
+	require.NoError(t, recvErr)
+	assert.Equal(t, "final", final.Content)
+
+	_, recvErr = stream.Recv()
+	assert.ErrorIs(t, recvErr, io.EOF)
+	assert.Equal(t, 2, stub.streamCalls)
+	assert.Equal(t, []time.Duration{500 * time.Millisecond}, sleeps)
+}
+
+func TestRetryingChatModelClearsPartialBeforeTerminalStreamError(t *testing.T) {
+	stub := &retryStubModel{
+		streamSteps: []retryStreamStep{
+			{
+				chunks:  []*schema.Message{schema.AssistantMessage("partial", nil)},
+				recvErr: errRetryStubUpstream500,
+			},
+			{err: errRetryStubUpstream500},
+		},
+	}
+	var sleeps []time.Duration
+	wrapped := &retryingChatModel{
+		inner:        stub,
+		retries:      1,
+		initialDelay: 500 * time.Millisecond,
+		sleep: func(_ context.Context, d time.Duration) error {
+			sleeps = append(sleeps, d)
+			return nil
+		},
+	}
+
+	stream, err := wrapped.Stream(t.Context(), nil)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	first, recvErr := stream.Recv()
+	require.NoError(t, recvErr)
+	assert.Equal(t, "partial", first.Content)
+
+	clearMsg, recvErr := stream.Recv()
+	require.NoError(t, recvErr)
+	assert.True(t, isClearStreamOutputMessage(clearMsg))
+
+	_, recvErr = stream.Recv()
+	assert.ErrorIs(t, recvErr, errRetryStubUpstream500)
+	assert.Equal(t, 2, stub.streamCalls)
+	assert.Equal(t, []time.Duration{500 * time.Millisecond}, sleeps)
+}
+
+func TestRetryableModelErrorsIncludeTransientTransportErrors(t *testing.T) {
+	assert.True(t, isRetryableModelError(context.DeadlineExceeded))
+	assert.True(t, isRetryableModelError(io.ErrUnexpectedEOF))
+	assert.True(t, isRetryableModelError(&temporaryNetError{}))
+	assert.True(t, isRetryableModelError(errRetryStubConnectionReset))
+	assert.True(t, isRetryableModelError(errRetryStubHTTP408))
+
+	assert.False(t, isRetryableModelError(context.Canceled))
+	assert.False(t, isRetryableModelError(&einoopenai.APIError{HTTPStatusCode: http.StatusUnauthorized}))
+}
+
 type retryGenerateStep struct {
 	msg *schema.Message
 	err error
 }
 
 type retryStreamStep struct {
-	chunks []*schema.Message
-	err    error
+	chunks  []*schema.Message
+	err     error
+	recvErr error
 }
+
+type temporaryNetError struct{}
+
+func (e *temporaryNetError) Error() string   { return "temporary network error" }
+func (e *temporaryNetError) Timeout() bool   { return true }
+func (e *temporaryNetError) Temporary() bool { return false }
+
+var _ net.Error = (*temporaryNetError)(nil)
 
 type retryStubModel struct {
 	mu            sync.Mutex
@@ -165,6 +271,17 @@ func (m *retryStubModel) Stream(context.Context, []*schema.Message, ...model.Opt
 	step := m.streamSteps[idx]
 	if step.err != nil {
 		return nil, step.err
+	}
+	if step.recvErr != nil {
+		sr, sw := schema.Pipe[*schema.Message](len(step.chunks) + 1)
+		go func() {
+			defer sw.Close()
+			for _, chunk := range step.chunks {
+				sw.Send(chunk, nil)
+			}
+			sw.Send(nil, step.recvErr)
+		}()
+		return sr, nil
 	}
 	return schema.StreamReaderFromArray(step.chunks), nil
 }

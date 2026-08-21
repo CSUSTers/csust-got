@@ -64,7 +64,7 @@ func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash", "load_skill"}, richNames)
 	assert.Contains(t, agentV3ToolDefinitionsText(true), "load_skill")
-	assert.Contains(t, agentV3ToolDefinitionsText(true), "LAST tool call")
+	assert.Contains(t, agentV3ToolDefinitionsText(true), "before rich output")
 
 	disabled := false
 	noBuiltinTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
@@ -94,8 +94,8 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 
 	info, err := (&loadSkillTool{}).Info(t.Context())
 	require.NoError(t, err)
-	assert.Contains(t, info.Desc, "LAST tool call")
-	assert.Contains(t, info.Desc, "call load_skill again")
+	assert.Contains(t, info.Desc, "before rich output")
+	assert.NotContains(t, info.Desc, "LAST tool call")
 
 	tc := &TurnContext{Config: richAgentV3ChatConfig()}
 	ctx := WithTurnContext(t.Context(), tc)
@@ -105,7 +105,8 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 	assert.Contains(t, out, "<loaded_skill name=\"rich-message\">")
 	assert.Contains(t, out, "telegram_rich_message")
 	assert.Contains(t, out, "ACTIVATION RULE")
-	assert.Contains(t, out, "very next assistant response")
+	assert.Contains(t, out, "final answer")
+	assert.NotContains(t, out, "very next assistant response")
 
 	tc.Config = nonRichAgentV3ChatConfig()
 	out, err = (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
@@ -113,7 +114,7 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 	assert.Contains(t, out, "[Skill Error]")
 }
 
-func TestRichMessageAuthorizationRequiresImmediatelyPreviousLoadSkill(t *testing.T) {
+func TestRichMessageAuthorizationAllowsLoadedSkillDuringCurrentTurn(t *testing.T) {
 	old := config.BotConfig
 	defer func() { config.BotConfig = old }()
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
@@ -126,7 +127,7 @@ func TestRichMessageAuthorizationRequiresImmediatelyPreviousLoadSkill(t *testing
 	assert.True(t, tc.richMessageSkillLoadedForFinal())
 
 	tc.recordToolCall(agentV3ToolRead)
-	assert.False(t, tc.richMessageSkillLoadedForFinal())
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
 }
 
 func TestRemoteRuntimeClientAndBashTool(t *testing.T) {
@@ -234,6 +235,7 @@ func TestAgentV3Helpers(t *testing.T) {
 func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 	messages := buildAgentV3TurnMessages(
 		"stable prefix",
+		"- memory fact",
 		"- user: old question\n- assistant: old answer",
 		nil,
 		[]orm.AgentV3Turn{
@@ -243,17 +245,22 @@ func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 		schema.UserMessage("current user"),
 	)
 
-	require.Len(t, messages, 5)
+	require.Len(t, messages, 6)
 	assert.Equal(t, 1, countRoleMessages(messages, schema.System))
 	assert.Equal(t, schema.System, messages[0].Role)
+	assert.NotContains(t, messages[0].Content, "memory fact")
 	assert.Equal(t, schema.User, messages[1].Role)
-	assert.Contains(t, messages[1].Content, "<conversation_summary>")
+	assert.Contains(t, messages[1].Content, "<group_memory_snapshot>")
 	assert.Contains(t, messages[1].Content, "context only")
+	assert.Equal(t, schema.User, messages[2].Role)
+	assert.Contains(t, messages[2].Content, "<conversation_summary>")
+	assert.Contains(t, messages[2].Content, "context only")
 
 	ctx := WithTurnContext(t.Context(), &TurnContext{V3: &AgentV3TurnState{}})
 	withDirective := injectLoopDirectives(ctx, messages)
 	assert.Equal(t, 1, countRoleMessages(withDirective, schema.System))
 	assert.Contains(t, withDirective[0].Content, "stable prefix")
+	assert.NotContains(t, withDirective[0].Content, "memory fact")
 	assert.Contains(t, withDirective[0].Content, "工具调用纪律")
 }
 
@@ -556,12 +563,11 @@ func TestAgentV3RichMessageRulesAreGated(t *testing.T) {
 
 	enabled := agentV3RichMessageSkillContract(true)
 	assert.Contains(t, enabled, "telegram_rich_message")
-	assert.Contains(t, enabled, "HARD REQUIREMENT")
-	assert.Contains(t, enabled, "immediately previous tool call")
-	assert.Contains(t, enabled, "call that tool now instead of answering")
+	assert.Contains(t, enabled, "load_skill(name=\"rich-message\")")
+	assert.NotContains(t, enabled, "HARD REQUIREMENT")
+	assert.NotContains(t, enabled, "immediately previous tool call")
 	assert.Contains(t, enabled, "raw Telegram Rich Markdown")
 	assert.Contains(t, enabled, "not JSON")
-	assert.Contains(t, enabled, "Do not emit mode fields")
 	assert.Contains(t, enabled, "headings, lists, task lists")
 }
 
@@ -580,41 +586,51 @@ func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
 }
 
 func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *testing.T) {
-	withoutRich := buildAgentV3StablePrefix("soul", "memory", "tools", "")
+	withoutRich := buildAgentV3StablePrefix("soul", "")
+	assert.NotContains(t, withoutRich, "<group_memory_snapshot>")
 	assert.NotContains(t, withoutRich, "<rich_message_skill>")
 	assert.NotContains(t, withoutRich, "\n<agent_v3_skills>\n")
-	assert.Contains(t, withoutRich, "<tool_definitions>")
+	assert.NotContains(t, withoutRich, "<tool_definitions>")
 
 	skillBlock := buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{
 		Name:        "rich-message",
 		Description: "Rich output",
 		Content:     "rich rules",
 	}})
-	withRich := buildAgentV3StablePrefix("soul", "memory", "tools", skillBlock)
+	withRich := buildAgentV3StablePrefix("soul", skillBlock)
+	assert.NotContains(t, withRich, "<group_memory_snapshot>")
 	assert.NotContains(t, withRich, "<rich_message_skill>")
 	assert.Contains(t, withRich, "<agent_v3_skills>")
 	assert.Contains(t, withRich, "Do not use read/grep to load skills from /skills")
-	assert.Contains(t, withRich, "STRICT RICH OUTPUT GATE")
 	assert.Contains(t, withRich, "load_skill")
-	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" activation=\"must_call_load_skill_as_last_tool_call_before_final_output\" />")
+	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" activation=\"call_load_skill_before_final_output\" />")
 	assert.NotContains(t, withRich, "rich rules")
-	assert.Contains(t, withRich, "<tool_definitions>")
+	assert.NotContains(t, withRich, "<tool_definitions>")
 
 	idxRuntimeRules := strings.Index(withRich, "<runtime_and_skill_rules>")
 	idxSkills := strings.Index(withRich, "<agent_v3_skills>")
-	idxToolDefs := strings.Index(withRich, "<tool_definitions>")
 	assert.Greater(t, idxRuntimeRules, -1, "<runtime_and_skill_rules> must be present")
 	assert.Less(t, idxRuntimeRules, idxSkills, "<runtime_and_skill_rules> must appear before <agent_v3_skills>")
-	assert.Less(t, idxSkills, idxToolDefs, "<agent_v3_skills> must appear before <tool_definitions>")
 }
 
-func TestBuildAgentV3PrefixHashSeparatesSkillPromptBlock(t *testing.T) {
+func TestBuildAgentV3PrefixHashIgnoresVolatileContext(t *testing.T) {
 	soulHash := hashString("soul")
-	memoryHash := hashString("memory")
-	toolDefsHash := hashString("tools")
-	withoutRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(""))
-	withRich := buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString(buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
+	withoutRich := buildAgentV3PrefixHash(soulHash, hashString(""))
+	withChangedMemoryAndTools := buildAgentV3PrefixHash(soulHash, hashString(""))
+	withRich := buildAgentV3PrefixHash(soulHash, hashString(buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
 
+	assert.Equal(t, withoutRich, withChangedMemoryAndTools)
 	assert.NotEqual(t, withoutRich, withRich)
-	assert.Equal(t, withoutRich, buildAgentV3PrefixHash(soulHash, memoryHash, toolDefsHash, hashString("")))
+	assert.Equal(t, withoutRich, buildAgentV3PrefixHash(soulHash, hashString("")))
+}
+
+func TestBuildAgentV3MemorySnapshotMessageKeepsMemoryOutOfSystem(t *testing.T) {
+	assert.Nil(t, buildAgentV3MemorySnapshotMessage("   "))
+
+	msg := buildAgentV3MemorySnapshotMessage("- remember me")
+	require.NotNil(t, msg)
+	assert.Equal(t, schema.User, msg.Role)
+	assert.Contains(t, msg.Content, "<group_memory_snapshot>")
+	assert.Contains(t, msg.Content, "- remember me")
+	assert.Contains(t, msg.Content, "context only")
 }

@@ -188,6 +188,44 @@ func TestGenerateDropsIntermediateToolTurnOutput(t *testing.T) {
 	assert.Equal(t, "最终答案", msg.Content)
 }
 
+func TestStreamOneTurnForwardsClearOutputAndDropsPartialBeforeRetry(t *testing.T) {
+	ctx := t.Context()
+	mdl := &scriptedToolModel{
+		turns: [][]*schema.Message{
+			{
+				schema.AssistantMessage("partial", nil),
+				newClearStreamOutputMessage(),
+				schema.AssistantMessage("final", nil),
+			},
+		},
+	}
+	agent, err := NewCustomAgent(ctx, &CustomAgentConfig{
+		Name:     "test",
+		Model:    mdl,
+		Tools:    []tool.BaseTool{lookupTool{}},
+		MaxSteps: 4,
+	})
+	require.NoError(t, err)
+	sr, sw := schema.Pipe[*schema.Message](8)
+
+	msg, _, err := agent.streamOneTurn(ctx, agent.boundModel, []*schema.Message{schema.UserMessage("问题")}, sw)
+	sw.Close()
+
+	require.NoError(t, err)
+	require.NotNil(t, msg)
+	assert.Equal(t, "final", msg.Content)
+
+	first, recvErr := sr.Recv()
+	require.NoError(t, recvErr)
+	assert.Equal(t, "partial", first.Content)
+	clearMsg, recvErr := sr.Recv()
+	require.NoError(t, recvErr)
+	assert.True(t, isClearStreamOutputMessage(clearMsg))
+	third, recvErr := sr.Recv()
+	require.NoError(t, recvErr)
+	assert.Equal(t, "final", third.Content)
+}
+
 type scriptedToolModel struct {
 	mu    sync.Mutex
 	turns [][]*schema.Message
