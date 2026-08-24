@@ -12,7 +12,7 @@ require (
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/meilisearch/meilisearch-go v0.36.2
 	github.com/puzpuzpuz/xsync/v4 v4.5.0
-	github.com/redis/go-redis/v9 v9.20.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.0
