@@ -3,6 +3,7 @@
 package chatv2
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -556,6 +557,32 @@ func TestAgentV3TraceUsageIsAccumulated(t *testing.T) {
 	}}})
 	assert.Equal(t, 17, trace.PromptTokens)
 	assert.Equal(t, 6, trace.CachedTokens)
+}
+
+func TestAgentV3TraceSaveContextDetachedFromParent(t *testing.T) {
+	type contextKey struct{}
+
+	parent, cancelParent := context.WithTimeout(
+		context.WithValue(t.Context(), contextKey{}, "trace-value"),
+		time.Minute,
+	)
+	cancelParent()
+	t.Cleanup(cancelParent)
+	require.ErrorIs(t, parent.Err(), context.Canceled)
+
+	started := time.Now()
+	saveCtx, cancelSave := agentV3TraceSaveContext(parent)
+	t.Cleanup(cancelSave)
+
+	require.NoError(t, saveCtx.Err())
+	assert.Equal(t, "trace-value", saveCtx.Value(contextKey{}))
+	deadline, ok := saveCtx.Deadline()
+	require.True(t, ok)
+	assert.WithinDuration(t, started.Add(agentV3TraceSaveTimeout), deadline, time.Second)
+	assert.ErrorIs(t, parent.Err(), context.Canceled)
+
+	cancelSave()
+	assert.ErrorIs(t, saveCtx.Err(), context.Canceled)
 }
 
 func TestAgentV3RichMessageRulesAreGated(t *testing.T) {

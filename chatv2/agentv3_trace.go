@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const agentV3TraceSaveTimeout = 5 * time.Second
+
 // AgentV3Trace records one agent-v3 run.
 type AgentV3Trace struct {
 	mu                      sync.Mutex
@@ -143,6 +145,10 @@ func (t *AgentV3Trace) SetError(err error) {
 	t.mu.Unlock()
 }
 
+func agentV3TraceSaveContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), agentV3TraceSaveTimeout)
+}
+
 // Finish saves the agent-v3 trace summary and JSONL payload.
 func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
 	if t == nil || config.BotConfig == nil || config.BotConfig.AgentV3 == nil || !config.BotConfig.AgentV3.Observability.Enable {
@@ -175,7 +181,10 @@ func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
 	payload, _ := json.Marshal(t)
 	t.mu.Unlock()
 
-	if err := orm.AgentV3SaveTraceSummary(ctx, scope, summary, config.BotConfig.AgentV3.ContextCacheTTL()); err != nil {
+	saveCtx, cancelSave := agentV3TraceSaveContext(ctx)
+	err := orm.AgentV3SaveTraceSummary(saveCtx, scope, summary, config.BotConfig.AgentV3.ContextCacheTTL())
+	cancelSave()
+	if err != nil {
 		zap.L().Warn("chatv2: failed to save agent v3 trace summary",
 			zap.String("run_id", t.RunID),
 			zap.Error(err),

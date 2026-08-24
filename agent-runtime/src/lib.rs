@@ -773,20 +773,25 @@ async fn ensure_within(path: &Path, base: &Path) -> Result<(), RuntimeError> {
     let canonical_base = fs::canonicalize(base)
         .await
         .map_err(|e| RuntimeError::internal(format!("canonicalize base failed: {e}")))?;
-    let existing = if path.exists() {
-        path.to_path_buf()
-    } else {
-        path.parent().unwrap_or(base).to_path_buf()
-    };
-    let canonical_existing = match fs::canonicalize(existing).await {
-        Ok(path) => path,
-        Err(_) if path.starts_with(base) => return Ok(()),
-        Err(e) => {
-            return Err(RuntimeError::internal(format!(
-                "canonicalize path failed: {e}"
-            )));
+    let mut existing = path;
+    loop {
+        match fs::symlink_metadata(existing).await {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                existing = existing
+                    .parent()
+                    .ok_or_else(|| RuntimeError::forbidden("resolved path escapes namespace"))?;
+            }
+            Err(error) => {
+                return Err(RuntimeError::internal(format!(
+                    "inspect path failed: {error}"
+                )));
+            }
         }
-    };
+    }
+    let canonical_existing = fs::canonicalize(existing)
+        .await
+        .map_err(|e| RuntimeError::internal(format!("canonicalize path failed: {e}")))?;
     if canonical_existing.starts_with(canonical_base) {
         Ok(())
     } else {
@@ -1170,6 +1175,16 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(unix)]
+    fn create_dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn create_dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
+    }
+
     #[test]
     fn namespace_is_sanitized() {
         assert_eq!(sanitize_namespace("bot:tg:-100"), "bot_tg_-100");
@@ -1218,7 +1233,7 @@ mod tests {
                 json!({
                     "namespace": "bot:tg:-1",
                     "run_id": "run_test",
-                    "path": "/workspace/notes/a.txt",
+                    "path": "/workspace/notes/deep/a.txt",
                     "content": "alpha\nbeta\n",
                 }),
             ))
@@ -1233,7 +1248,7 @@ mod tests {
                 json!({
                     "namespace": "bot:tg:-1",
                     "run_id": "run_test",
-                    "path": "/workspace/notes/a.txt",
+                    "path": "/workspace/notes/deep/a.txt",
                 }),
             ))
             .await
@@ -1257,7 +1272,7 @@ mod tests {
             .unwrap();
         let body = to_bytes(grep_resp.into_body(), usize::MAX).await.unwrap();
         let parsed: TextResponse = serde_json::from_slice(&body).unwrap();
-        assert!(parsed.output.contains("/workspace/notes/a.txt:2:beta"));
+        assert!(parsed.output.contains("/workspace/notes/deep/a.txt:2:beta"));
         assert!(!parsed.output.contains("workspaces"));
     }
 
@@ -1470,6 +1485,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn write_rejects_symlinked_missing_parent_escape() {
+        let state = test_state();
+        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let other_workspace = namespace_workspace(&state, "bot:tg:-2");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::create_dir_all(&other_workspace).await.unwrap();
+        if let Err(error) = create_dir_symlink(&other_workspace, &workspace.join("escape")) {
+            if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied {
+                return;
+            }
+            panic!("create directory symlink: {error}");
+        }
+        let escaped_file = other_workspace.join("new/note.txt");
+        let app = app(state);
+
+        let response = app
+            .oneshot(request_with_json(
+                "/v1/write",
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_symlink_escape",
+                    "path": "/workspace/escape/new/note.txt",
+                    "content": "escaped",
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!escaped_file.exists());
     }
 
     #[tokio::test]
