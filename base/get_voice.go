@@ -16,6 +16,7 @@ import (
 	"math/rand/v2"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -224,6 +225,15 @@ func getMeilisearchClient(c *config.MeiliSearch) meilisearch.ServiceManager {
 	return client
 }
 
+func setSearchRequestHitsPerPage(searchOpt *meilisearch.SearchRequest, hitsPerPage int64) {
+	field := reflect.ValueOf(searchOpt).Elem().FieldByName("HitsPerPage")
+	if field.Kind() == reflect.Pointer {
+		field.Set(reflect.ValueOf(&hitsPerPage))
+		return
+	}
+	field.SetInt(hitsPerPage)
+}
+
 var (
 	// ErrIndexNotFound for index not found
 	ErrIndexNotFound = errors.New("index not found")
@@ -298,7 +308,7 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 
 			// TODO check meilisearch query
 			searchOpt.Limit = 2000
-			searchOpt.HitsPerPage = 1
+			setSearchRequestHitsPerPage(searchOpt, 1)
 
 			resp, err = idx.Search(query.Text, searchOpt)
 			if err != nil {
@@ -324,7 +334,7 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 			}
 		}
 
-		searchOpt.HitsPerPage = 1
+		setSearchRequestHitsPerPage(searchOpt, 1)
 		searchOpt.Page = rand.N(resp.TotalHits)
 		resp, err = idx.Search(query.Text, searchOpt)
 		if err != nil {
@@ -344,7 +354,7 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 		ret = v
 	} else {
 		searchOpt.Limit = 2000
-		searchOpt.HitsPerPage = 2000
+		setSearchRequestHitsPerPage(searchOpt, 2000)
 		resp, err := idx.Search(query.Text, searchOpt)
 		if err != nil {
 			return nil, err

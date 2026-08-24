@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -53,6 +54,7 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 
 	infos := make([]*schema.ToolInfo, 0, len(cfg.Tools))
 	invokables := make(map[string]tool.InvokableTool, len(cfg.Tools))
+	seenNames := make(map[string]struct{}, len(cfg.Tools))
 	names := make([]string, 0, len(cfg.Tools))
 
 	for _, t := range cfg.Tools {
@@ -62,6 +64,14 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 				zap.String("agent", cfg.Name), zap.Error(err))
 			continue
 		}
+		if _, exists := seenNames[info.Name]; exists {
+			zap.L().Warn("chatv2/loop: duplicate tool name, keeping first",
+				zap.String("agent", cfg.Name),
+				zap.String("tool", info.Name),
+			)
+			continue
+		}
+		seenNames[info.Name] = struct{}{}
 		infos = append(infos, info)
 		names = append(names, info.Name)
 
@@ -137,7 +147,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 	history := append([]*schema.Message{}, input...)
 	history = sanitizeHistory(history)
 	if len(a.invokables) > 0 {
-		history = injectLoopDirectives(history)
+		history = injectLoopDirectives(ctx, history)
 	}
 
 	dupCounts := map[string]int{}
@@ -185,7 +195,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
-		if marker := buildStageMarker(assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
+		if marker := buildStageMarker(ctx, assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
 			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
@@ -213,8 +223,23 @@ func (a *CustomAgent) streamOneTurn(
 	input []*schema.Message,
 	sw *schema.StreamWriter[*schema.Message],
 ) (*schema.Message, []*schema.Message, error) {
-	stream, err := mdl.Stream(ctx, input)
+	var opts []model.Option
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.PromptCacheKey != "" {
+		opts = append(opts, einoopenai.WithExtraFields(map[string]any{
+			"prompt_cache_key": tc.V3.PromptCacheKey,
+		}))
+	}
+	var finishSpan func(error, map[string]any)
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		finishSpan = tc.V3.Trace.StartSpan("model_stream", map[string]any{
+			"message_count": len(input),
+		})
+	}
+	stream, err := mdl.Stream(ctx, input, opts...)
 	if err != nil {
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return nil, nil, fmt.Errorf("model stream: %w", err)
 	}
 	defer stream.Close()
@@ -227,9 +252,20 @@ func (a *CustomAgent) streamOneTurn(
 			break
 		}
 		if recvErr != nil {
+			if finishSpan != nil {
+				finishSpan(recvErr, nil)
+			}
 			return nil, nil, fmt.Errorf("model stream recv: %w", recvErr)
 		}
 		if chunk == nil {
+			continue
+		}
+		if isClearStreamOutputMessage(chunk) {
+			chunks = nil
+			reasoningChunks = nil
+			if closed := sw.Send(chunk, nil); closed {
+				return nil, nil, errDownstreamClosed
+			}
 			continue
 		}
 		chunks = append(chunks, chunk)
@@ -253,23 +289,48 @@ func (a *CustomAgent) streamOneTurn(
 	}
 
 	if len(chunks) == 0 {
+		if finishSpan != nil {
+			finishSpan(nil, map[string]any{"empty": true})
+		}
 		return nil, nil, nil
 	}
 	merged, err := schema.ConcatMessages(chunks)
 	if err != nil {
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return nil, nil, fmt.Errorf("concat turn chunks: %w", err)
+	}
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		tc.V3.Trace.RecordUsage(merged)
+		if finishSpan != nil {
+			attrs := map[string]any{}
+			if merged.ResponseMeta != nil && merged.ResponseMeta.Usage != nil {
+				attrs["prompt_tokens"] = merged.ResponseMeta.Usage.PromptTokens
+				attrs["cached_tokens"] = merged.ResponseMeta.Usage.PromptTokenDetails.CachedTokens
+			}
+			if preview, ok := agentV3TracePreview(merged.Content); ok {
+				attrs["output_preview"] = preview
+			}
+			finishSpan(nil, attrs)
+		}
+	} else if finishSpan != nil {
+		finishSpan(nil, nil)
 	}
 	return merged, reasoningChunks, nil
 }
 
-func buildStageMarker(calls []schema.ToolCall) string {
+func buildStageMarker(ctx context.Context, calls []schema.ToolCall) string {
 	if len(calls) == 0 {
 		return ""
+	}
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
+		return buildAgentV3StageMarker(calls)
 	}
 	names := make([]string, 0, len(calls))
 	seen := map[string]bool{}
 	for _, tc := range calls {
-		n := tc.Function.Name
+		n := toolCallStageLabel(tc)
 		if n == "" || seen[n] {
 			continue
 		}
@@ -280,6 +341,98 @@ func buildStageMarker(calls []schema.ToolCall) string {
 		return ""
 	}
 	return "▸ 调用工具: " + strings.Join(names, ", ")
+}
+
+func buildAgentV3StageMarker(calls []schema.ToolCall) string {
+	labels := make([]string, 0, len(calls))
+	seen := map[string]bool{}
+	for _, call := range calls {
+		label := agentV3ToolStageLabel(call)
+		if label == "" || seen[label] {
+			continue
+		}
+		seen[label] = true
+		labels = append(labels, label)
+	}
+	if len(labels) == 0 {
+		return ""
+	}
+	if len(labels) == 1 {
+		return labels[0]
+	}
+	return strings.Join(labels, "\n")
+}
+
+func agentV3ToolStageLabel(call schema.ToolCall) string {
+	switch call.Function.Name {
+	case agentV3ToolRead:
+		return "正在读取 runtime 文件"
+	case agentV3ToolGrep:
+		return "正在搜索 runtime 文件"
+	case agentV3ToolWrite:
+		return "正在写入 runtime 文件"
+	case agentV3ToolEdit:
+		return "正在编辑 runtime 文件"
+	case agentV3ToolBash:
+		return toolCallStageLabel(call)
+	case agentV3ToolLoadSkill:
+		if name := extractToolCallStringArg(call.Function.Arguments, agentV3ToolSkillNameField); name != "" {
+			return "正在加载 skill: " + truncateStageText(name, 80)
+		}
+		return "正在加载 skill"
+	default:
+		return toolCallStageLabel(call)
+	}
+}
+
+func toolCallStageLabel(call schema.ToolCall) string {
+	name := strings.TrimSpace(call.Function.Name)
+	if name == "" {
+		return ""
+	}
+	if name == agentV3ToolBash || strings.EqualFold(name, "bash") {
+		if cmd := extractToolCallStringArg(call.Function.Arguments, agentV3ToolCommandField); cmd != "" {
+			return "$ " + truncateStageText(cmd, 120)
+		}
+		return "$ " + name
+	}
+	if skillName := stageSkillName(name); skillName != "" {
+		return "skill: " + truncateStageText(skillName, 80)
+	}
+	return name
+}
+
+func extractToolCallStringArg(argsJSON, key string) string {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	value, _ := args[key].(string)
+	return strings.TrimSpace(strings.Join(strings.Fields(value), " "))
+}
+
+func stageSkillName(toolName string) string {
+	lower := strings.ToLower(toolName)
+	for _, prefix := range []string{"skill:", "skill_", "skill-", "skill."} {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(toolName[len(prefix):])
+		}
+	}
+	return ""
+}
+
+func truncateStageText(s string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit <= 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 func shouldEmitStageMarker(ctx context.Context) bool {
@@ -295,6 +448,22 @@ func shouldEmitStageMarker(ctx context.Context) bool {
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {
 	name := tc.Function.Name
 	args := tc.Function.Arguments
+	var toolSeq int64
+	var finishSpan func(error, map[string]any)
+	if turn := GetTurnContext(ctx); turn != nil && turn.V3 != nil && turn.V3.Trace != nil {
+		turn.V3.Trace.RecordToolCall()
+		attrs := map[string]any{
+			"tool":      name,
+			"args_hash": hashString(args),
+		}
+		if preview, ok := agentV3TracePreview(args); ok {
+			attrs["args_preview"] = preview
+		}
+		finishSpan = turn.V3.Trace.StartSpan("tool_call", attrs)
+	}
+	if turn := GetTurnContext(ctx); turn != nil {
+		toolSeq = turn.recordToolCall(name)
+	}
 
 	t, ok := a.invokables[name]
 	if !ok {
@@ -303,6 +472,10 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			zap.String("tool", name),
 			zap.Strings("available", a.toolNames),
 		)
+		err := fmt.Errorf("%w: %q", errUnknownTool, name)
+		if finishSpan != nil {
+			finishSpan(err, nil)
+		}
 		return schema.ToolMessage(
 			fmt.Sprintf(
 				"[Tool Error] Tool %q does not exist. Available tools: %s. Please use one of the available tool names exactly.",
@@ -324,6 +497,18 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"[Tool Error] %s\nPlease try a different approach or adjust parameters.",
 			err.Error(),
 		)
+	}
+	if err == nil && name == agentV3ToolLoadSkill && isRichMessageLoadSkillArgs(args) && !strings.HasPrefix(result, "[Skill Error]") {
+		if turn := GetTurnContext(ctx); turn != nil {
+			turn.markRichMessageSkillLoaded(toolSeq)
+		}
+	}
+	if finishSpan != nil {
+		attrs := map[string]any{"result_chars": len(result)}
+		if preview, ok := agentV3TracePreview(result); ok {
+			attrs["result_preview"] = preview
+		}
+		finishSpan(err, attrs)
 	}
 
 	return schema.ToolMessage(result, tc.ID, schema.WithToolName(name))
@@ -451,10 +636,21 @@ func marshalSorted(v any) (string, error) {
 
 func sanitizeHistory(in []*schema.Message) []*schema.Message {
 	out := make([]*schema.Message, 0, len(in))
+	systemIdx := -1
 
 	for i := range in {
 		msg := in[i]
 		if msg == nil {
+			continue
+		}
+
+		if msg.Role == schema.System {
+			if systemIdx < 0 {
+				out = append(out, msg)
+				systemIdx = len(out) - 1
+				continue
+			}
+			out[systemIdx] = mergeSystemMessages(out[systemIdx], msg)
 			continue
 		}
 
@@ -488,6 +684,22 @@ func sanitizeHistory(in []*schema.Message) []*schema.Message {
 	return out
 }
 
+func mergeSystemMessages(base, extra *schema.Message) *schema.Message {
+	if base == nil {
+		return extra
+	}
+	if extra == nil || strings.TrimSpace(extra.Content) == "" {
+		return base
+	}
+	merged := *base
+	if strings.TrimSpace(merged.Content) == "" {
+		merged.Content = extra.Content
+	} else {
+		merged.Content = merged.Content + "\n\n" + extra.Content
+	}
+	return &merged
+}
+
 func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) bool {
 	for k := len(out) - 1; k >= 0; k-- {
 		prev := out[k]
@@ -513,22 +725,39 @@ func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) 
 const loopDirectiveText = "工具调用纪律：\n" +
 	"1. 每一轮回复要么调用工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
 	"2. 最终答案之前不要输出正文说明；需要展示中间进度时调用 update_progress，不要把进度写成普通 assistant 文本。\n" +
-	"3. 一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
-	"4. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"5. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
-	"6. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
-	"7. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
-	"8. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
+	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
+	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
+	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
+	"6. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
+	"7. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
+	"8. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
+	"9. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
 
-func injectLoopDirectives(history []*schema.Message) []*schema.Message {
-	directive := schema.SystemMessage(loopDirectiveText)
+func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*schema.Message {
+	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
+		return injectDirectiveText(history, agentV3LoopDirectiveText)
+	}
+	return injectDirectiveText(history, loopDirectiveText)
+}
+
+const agentV3LoopDirectiveText = "工具调用纪律：\n" +
+	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 或其他已提供工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
+	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
+	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
+	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
+	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
+	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。\n" +
+	"7. 如果要输出 Telegram rich message，先在本轮调用 load_skill(name=\"rich-message\")，最终答案只输出一个 <telegram_rich_message>...</telegram_rich_message> envelope，不要附加普通正文。"
+
+func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
+	directive := schema.SystemMessage(text)
 	for i, msg := range history {
 		if msg != nil && msg.Role == schema.System {
 			merged := *msg
 			if merged.Content == "" {
-				merged.Content = loopDirectiveText
+				merged.Content = text
 			} else {
-				merged.Content = msg.Content + "\n\n" + loopDirectiveText
+				merged.Content = msg.Content + "\n\n" + text
 			}
 			out := make([]*schema.Message, len(history))
 			copy(out, history)

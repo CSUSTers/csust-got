@@ -13,6 +13,7 @@ import (
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	toolutils "github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
@@ -40,8 +41,10 @@ const softTurnGuidance = "你已经进行了 %d 轮工具调用。如果你认�
 
 const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
+const agentV3MinToolMaxSteps = 4
+
 // buildModel creates an eino ChatModel from a config.Model definition.
-func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatModel, error) {
+func buildModel(ctx context.Context, modelCfg *config.Model) (model.ToolCallingChatModel, error) {
 	if modelCfg == nil {
 		return nil, errModelConfigNil
 	}
@@ -52,12 +55,12 @@ func buildModel(ctx context.Context, modelCfg *config.Model) (*einoopenai.ChatMo
 		Model:   modelCfg.Model,
 	}
 
-	model, err := einoopenai.NewChatModel(ctx, cfg)
+	chatModel, err := einoopenai.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat model %q: %w", modelCfg.Name, err)
 	}
 
-	return model, nil
+	return newRetryingChatModel(chatModel, modelCfg), nil
 }
 
 // buildSubAgentTool creates a subagent wrapped as a tool.BaseTool.
@@ -147,58 +150,31 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, fmt.Errorf("%w for chat %q", errAgentConfigNil, chatCfg.Name)
 	}
 
+	modelCfg := chatCfg.Model
+	if chatCfg.IsAgentV3Enabled() && config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		modelCfg = config.BotConfig.AgentV3.EffectiveModel(chatCfg.Model)
+	}
+
 	// Build the main model
-	mainModel, err := buildModel(ctx, chatCfg.Model)
+	mainModel, err := buildModel(ctx, modelCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build model for chat %q: %w", chatCfg.Name, err)
 	}
 
-	// Merge skill configurations into effective tools/mcpServers/toolModels
-	effectiveTools, effectiveMcpServers, effectiveToolModels := mergeSkillConfigs(agentCfg)
-
-	// Collect all tools
-	var allTools []tool.BaseTool
-
-	// 1. Built-in tools (agent's own + from skills)
-	if len(effectiveTools) > 0 {
-		builtins, err := BuildBuiltinTools(effectiveTools, effectiveToolModels)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build tools for chat %q: %w", chatCfg.Name, err)
-		}
-		allTools = append(allTools, builtins...)
+	allTools, err := buildConfiguredAgentTools(ctx, chatCfg.Name, agentCfg, mcpMgr)
+	if err != nil {
+		return nil, err
 	}
-
-	// 2. MCP tools (agent's own + from skills)
-	if len(effectiveMcpServers) > 0 && mcpMgr != nil {
-		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, effectiveMcpServers)
-		if err != nil {
-			zap.L().Warn("chatv2/agent: failed to get MCP tools, continuing without them",
-				zap.String("chat", chatCfg.Name),
-				zap.Error(err),
-			)
-		} else {
-			allTools = append(allTools, mcpTools...)
-		}
+	if chatCfg.IsAgentV3Enabled() {
+		allTools = append(buildAgentV3Tools(chatCfg, config.BotConfig.AgentV3), allTools...)
 	}
-
-	// 3. Subagent tools
-	for _, subCfg := range agentCfg.SubAgents {
-		subTool, err := buildSubAgentTool(ctx, subCfg, mcpMgr)
-		if err != nil {
-			zap.L().Error("chatv2/agent: failed to build subagent, skipping",
-				zap.String("subagent", subCfg.Name),
-				zap.Error(err),
-			)
-			continue // graceful degradation
-		}
-		allTools = append(allTools, subTool)
-	}
-
-	// 4. Wrap all tools with error handler so errors become model-readable messages
 	allTools = wrapToolsWithErrorHandler(allTools)
 
 	maxSteps := agentCfg.GetMaxSteps()
-	if agentCfg.MaxSteps > 0 && agentHasTools(agentCfg) && maxSteps != agentCfg.MaxSteps {
+	if chatCfg.IsAgentV3Enabled() && maxSteps < agentV3MinToolMaxSteps {
+		maxSteps = agentV3MinToolMaxSteps
+	}
+	if agentCfg.MaxSteps > 0 && (agentHasTools(agentCfg) || chatCfg.IsAgentV3Enabled()) && maxSteps != agentCfg.MaxSteps {
 		zap.L().Warn("chatv2/agent: main agent max_steps too low for tool-enabled workflow, clamped",
 			zap.String("chat", chatCfg.Name),
 			zap.Int("configured", agentCfg.MaxSteps),
@@ -216,7 +192,11 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, fmt.Errorf("failed to create main agent for chat %q: %w", chatCfg.Name, err)
 	}
 
-	zap.L().Info("chatv2/agent: built main agent",
+	logMsg := "chatv2/agent: built main agent"
+	if chatCfg.IsAgentV3Enabled() {
+		logMsg = "chatv2/agent: built agent v3"
+	}
+	zap.L().Info(logMsg,
 		zap.String("chat", chatCfg.Name),
 		zap.Int("total_tools", len(allTools)),
 		zap.Int("subagents", len(agentCfg.SubAgents)),
@@ -225,6 +205,50 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 	)
 
 	return agent, nil
+}
+
+func buildConfiguredAgentTools(ctx context.Context, chatName string, agentCfg *config.AgentConfig, mcpMgr *McpManager) ([]tool.BaseTool, error) {
+	// Merge skill configurations into effective tools/mcpServers/toolModels
+	effectiveTools, effectiveMcpServers, effectiveToolModels := mergeSkillConfigs(agentCfg)
+
+	var allTools []tool.BaseTool
+
+	// 1. Built-in tools (agent's own + from skills)
+	if len(effectiveTools) > 0 {
+		builtins, err := BuildBuiltinTools(effectiveTools, effectiveToolModels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build tools for chat %q: %w", chatName, err)
+		}
+		allTools = append(allTools, builtins...)
+	}
+
+	// 2. MCP tools (agent's own + from skills)
+	if len(effectiveMcpServers) > 0 && mcpMgr != nil {
+		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, effectiveMcpServers)
+		if err != nil {
+			zap.L().Warn("chatv2/agent: failed to get MCP tools, continuing without them",
+				zap.String("chat", chatName),
+				zap.Error(err),
+			)
+		} else {
+			allTools = append(allTools, mcpTools...)
+		}
+	}
+
+	// 3. Subagent tools
+	for _, subCfg := range agentCfg.SubAgents {
+		subTool, err := buildSubAgentTool(ctx, subCfg, mcpMgr)
+		if err != nil {
+			zap.L().Error("chatv2/agent: failed to build subagent, skipping",
+				zap.String("subagent", subCfg.Name),
+				zap.Error(err),
+			)
+			continue
+		}
+		allTools = append(allTools, subTool)
+	}
+
+	return allTools, nil
 }
 
 // calcGuidanceLevel determines what kind of guidance (if any) to inject based
@@ -384,13 +408,15 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 		return nil, fmt.Errorf("failed to build main agent for %q: %w", chatCfg.Name, err)
 	}
 
+	skillAddons := GetSkillPromptAddons(chatCfg.Agent)
+
 	return &CompiledChat{
 		Name:              chatCfg.Name,
 		Config:            chatCfg,
 		Agent:             agent,
 		SystemTemplate:    systemTpl,
 		PromptTemplate:    promptTpl,
-		SkillPromptAddons: GetSkillPromptAddons(chatCfg.Agent),
+		SkillPromptAddons: skillAddons,
 	}, nil
 }
 

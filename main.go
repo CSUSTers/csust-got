@@ -5,8 +5,6 @@ import (
 	"csust-got/chat"
 	"csust-got/chatv2"
 	"csust-got/inline"
-	"csust-got/meili"
-	"csust-got/sd"
 	"csust-got/store"
 	"csust-got/util/gacha"
 	"encoding/json"
@@ -67,16 +65,9 @@ func main() {
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
 	registerChatConfigHandler(bot)
-	bot.Handle("/sd", sd.Handler, whiteMiddleware)
-	bot.Handle("/sdcfg", sd.ConfigHandler)
-	bot.Handle("/sdlast", sd.LastPromptHandler)
 
 	// inline mode
 	inline.RegisterInlineHandler(bot, config.BotConfig)
-
-	meili.InitMeili()
-
-	go sd.Process()
 
 	base.Init()
 
@@ -121,7 +112,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
-		messagesCollectionMiddleware, messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
+		messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
 	config.BotConfig.Bot = bot
@@ -177,9 +168,11 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/getvoice", base.GetVoice)
-
-	// meilisearch handler
-	bot.Handle("/search", meili.SearchHandle)
+	bot.Handle("/memory", chatv2.MemoryCommand)
+	bot.Handle("/trace_last", chatv2.TraceLastCommand)
+	bot.Handle("/context_cache", chatv2.ContextCacheCommand)
+	bot.Handle("/runtime_status", chatv2.RuntimeStatusCommand)
+	bot.Handle("/runtime_reset", chatv2.RuntimeResetCommand)
 
 	// gacha handler
 	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
@@ -406,26 +399,6 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 	}
 }
 
-func whiteMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		if !config.BotConfig.WhiteListConfig.Enabled {
-			return next(ctx)
-		}
-
-		m := ctx.Message()
-		// continue with inline query
-		if m == nil && ctx.Query() != nil {
-			return next(ctx)
-		}
-
-		if ctx.Chat() != nil && !config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
-			log.Info("chat ignore by white list", zap.String("chat", ctx.Chat().Title))
-			return nil
-		}
-		return next(ctx)
-	}
-}
-
 func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
@@ -455,32 +428,6 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 			log.Info("message ignore by shutdown", zap.String("chat", ctx.Chat().Title),
 				zap.String("user", ctx.Sender().Username))
 			return nil
-		}
-		return next(ctx)
-	}
-}
-
-func messagesCollectionMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		m := ctx.Message()
-		// continue with inline query
-		if m == nil && ctx.Query() != nil {
-			return next(ctx)
-		}
-		if config.BotConfig.MeiliConfig.Enabled {
-			// 将message存入 meilisearch
-			msgJSON, err := json.Marshal(m)
-			if err != nil {
-				log.Error("[MeiliSearch] json marshal message error", zap.Error(err))
-				return next(ctx)
-			}
-			var msgMap map[string]any
-			err = json.Unmarshal(msgJSON, &msgMap)
-			if err != nil {
-				log.Error("[MeiliSearch] json unmarshal message error", zap.Error(err))
-				return next(ctx)
-			}
-			meili.AddData2Meili(msgMap, ctx.Chat().ID)
 		}
 		return next(ctx)
 	}

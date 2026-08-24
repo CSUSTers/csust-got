@@ -1,0 +1,30 @@
+[package]
+name = "agent-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+cap-fs-ext = "4.0.2"
+cap-std = "4.0.2"
+diffy = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+walkdir = "2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["fs", "process"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+seccompiler = { version = "=0.5.0", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

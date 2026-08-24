@@ -4,6 +4,7 @@ import (
 	"log"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,14 +15,15 @@ import (
 
 // Model is the model configuration for chat
 type Model struct {
-	Name          string `mapstructure:"name"`
-	BaseUrl       string `mapstructure:"base_url"`
-	ApiKey        string `mapstructure:"api_key"`
-	PromptLimit   int    `mapstructure:"prompt_limit"`
-	Model         string `mapstructure:"model"`
-	RetryNums     int    `mapstructure:"retry_nums"`
-	RetryInterval int    `mapstructure:"retry_interval"`
-	Proxy         string `mapstructure:"proxy"`
+	Name                 string `mapstructure:"name"`
+	BaseUrl              string `mapstructure:"base_url"`
+	ApiKey               string `mapstructure:"api_key"`
+	PromptLimit          int    `mapstructure:"prompt_limit"`
+	Model                string `mapstructure:"model"`
+	RetryNums            int    `mapstructure:"retry_nums"`
+	RetryInterval        int    `mapstructure:"retry_interval"`
+	RetryInitialInterval string `mapstructure:"retry_initial_interval"`
+	Proxy                string `mapstructure:"proxy"`
 
 	Features ModelFeatures `mapstructure:"features"`
 }
@@ -32,6 +34,28 @@ type ModelFeatures struct {
 	ImageBase64Raw bool `mapstructure:"image_base64_raw"` // send raw base64 instead of data URI
 	Mcp            bool `mapstructure:"mcp"`
 	WhiteList      bool `mapstructure:"white_list"`
+}
+
+// RetryCount returns how many extra model-generation attempts are allowed after the first failure.
+func (m *Model) RetryCount() int {
+	if m == nil || m.RetryNums <= 0 {
+		return defaultModelRetryNums
+	}
+	return m.RetryNums
+}
+
+// RetryInitialDelay returns the first exponential-backoff delay for retryable model errors.
+func (m *Model) RetryInitialDelay() time.Duration {
+	if m == nil {
+		return defaultModelRetryInitialInterval
+	}
+	if d := parseFlexibleDuration(m.RetryInitialInterval, 0); d > 0 {
+		return d
+	}
+	if m.RetryInterval > 0 {
+		return time.Duration(m.RetryInterval) * time.Second
+	}
+	return defaultModelRetryInitialInterval
 }
 
 // ChatTrigger is the configuration for chat
@@ -81,10 +105,23 @@ const (
 	// OutputFormatHTML is the HTML format type
 	OutputFormatHTML = "html"
 
-	defaultSubAgentMaxSteps = 5
-	defaultAgentMaxSteps    = 12
-	minToolAgentMaxSteps    = 4
+	defaultSubAgentMaxSteps            = 5
+	defaultAgentMaxSteps               = 12
+	defaultModelRetryNums              = 3
+	defaultModelRetryInitialInterval   = 500 * time.Millisecond
+	minToolAgentMaxSteps               = 4
+	agentV3DefaultScope                = "group"
+	agentV3DefaultMemoryWritePolicy    = "explicit_or_admin"
+	agentV3DefaultRuntimeMode          = "remote_http"
+	agentV3DefaultSkillsMode           = "system_prompt"
+	agentV3DefaultRuntimeEndpoint      = "http://agent-runtime:8080"
+	agentV3DefaultCommandTimeout       = "120s"
+	agentV3DefaultObservabilityJSONL   = "logs/agentv3-traces.jsonl"
+	agentV3DefaultCaptureContent       = "preview"
+	agentV3DefaultContextCacheRedisTTL = "30d"
 )
+
+var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
 
 // GetFormat get message format
 func (c *ChatOutputFormatConfig) GetFormat() string {
@@ -237,12 +274,79 @@ type SkillConfig struct {
 // AgentConfig defines the agent mode configuration for chatv2
 type AgentConfig struct {
 	Enable     bool                `mapstructure:"enable"`
+	V3         bool                `mapstructure:"v3"`
+	Rich       bool                `mapstructure:"rich"`
 	Tools      []string            `mapstructure:"tools"`
 	MaxSteps   int                 `mapstructure:"max_steps"`
 	SubAgents  []*SubAgentConfig   `mapstructure:"subagents"`
 	McpServers []*ToolServerConfig `mapstructure:"mcp_servers"`
 	ToolModels map[string]*Model   `mapstructure:"tool_models"`
 	Skills     []*SkillConfig      `mapstructure:"skills"`
+}
+
+// AgentV3Config defines global agent-v3 defaults and runtime settings.
+type AgentV3Config struct {
+	Enable        bool                       `mapstructure:"enable"`
+	Model         *Model                     `mapstructure:"model"`
+	SoulPath      string                     `mapstructure:"soul_path"`
+	ContextCache  AgentV3ContextCacheConfig  `mapstructure:"context_cache"`
+	Memory        AgentV3MemoryConfig        `mapstructure:"memory"`
+	Runtime       AgentV3RuntimeConfig       `mapstructure:"runtime"`
+	Tools         AgentV3ToolsConfig         `mapstructure:"tools"`
+	Skills        AgentV3SkillsConfig        `mapstructure:"skills"`
+	Observability AgentV3ObservabilityConfig `mapstructure:"observability"`
+}
+
+// AgentV3ContextCacheConfig controls agent-v3 prompt cache and history windows.
+type AgentV3ContextCacheConfig struct {
+	Enable               bool   `mapstructure:"enable"`
+	RawTurns             int    `mapstructure:"raw_turns"`
+	SummaryTurns         int    `mapstructure:"summary_turns"`
+	MaxSummaryTokens     int    `mapstructure:"max_summary_tokens"`
+	MaxRawTokens         int    `mapstructure:"max_raw_tokens"`
+	PromptCacheRetention string `mapstructure:"prompt_cache_retention"`
+	RedisTTL             string `mapstructure:"redis_ttl"`
+}
+
+// AgentV3MemoryConfig controls chat-scoped agent-v3 memory.
+type AgentV3MemoryConfig struct {
+	Enable            bool   `mapstructure:"enable"`
+	Scope             string `mapstructure:"scope"`
+	AllowGlobal       bool   `mapstructure:"allow_global"`
+	SnapshotMaxTokens int    `mapstructure:"snapshot_max_tokens"`
+	WritePolicy       string `mapstructure:"write_policy"`
+}
+
+// AgentV3RuntimeConfig points agent-v3 tools at the remote runtime service.
+type AgentV3RuntimeConfig struct {
+	Enable         bool   `mapstructure:"enable"`
+	Mode           string `mapstructure:"mode"`
+	Endpoint       string `mapstructure:"endpoint"`
+	AuthTokenEnv   string `mapstructure:"auth_token_env"`
+	NamespaceScope string `mapstructure:"namespace_scope"`
+	CommandTimeout string `mapstructure:"command_timeout"`
+	MaxOutputChars int    `mapstructure:"max_output_chars"`
+	RequestTimeout string `mapstructure:"request_timeout"`
+}
+
+// AgentV3ToolsConfig constrains agent-v3 visible tools.
+type AgentV3ToolsConfig struct {
+	ExposeOnly []string `mapstructure:"expose_only"`
+}
+
+// AgentV3SkillsConfig configures agent-v3 system-prompt skill injection.
+type AgentV3SkillsConfig struct {
+	Mode          string `mapstructure:"mode"`
+	Root          string `mapstructure:"root"`
+	InjectBuiltin *bool  `mapstructure:"inject_builtin"`
+}
+
+// AgentV3ObservabilityConfig controls agent-v3 trace capture.
+type AgentV3ObservabilityConfig struct {
+	Enable         bool   `mapstructure:"enable"`
+	JSONLPath      string `mapstructure:"jsonl_path"`
+	CaptureContent string `mapstructure:"capture_content"`
+	PreviewChars   int    `mapstructure:"preview_chars"`
 }
 
 // GetMaxSteps returns the max tool call steps for the main agent
@@ -283,6 +387,24 @@ func (c *AgentConfig) usesTools() bool {
 // IsAgentEnabled returns true if chatv2 agent mode is enabled for this chat config
 func (ccs *ChatConfigSingle) IsAgentEnabled() bool {
 	return ccs.Agent != nil && ccs.Agent.Enable
+}
+
+// IsAgentV3Enabled reports whether this chat uses agent-v3 execution.
+func (ccs *ChatConfigSingle) IsAgentV3Enabled() bool {
+	if ccs == nil || !ccs.IsAgentEnabled() {
+		return false
+	}
+	return ccs.Agent != nil && ccs.Agent.V3 && BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
+}
+
+// IsAgentV3RichEnabled reports whether rich Telegram delivery is enabled for agent-v3.
+func (ccs *ChatConfigSingle) IsAgentV3RichEnabled() bool {
+	return ccs != nil && ccs.IsAgentV3Enabled() && ccs.Agent != nil && ccs.Agent.Rich
+}
+
+// BuiltinInjectionEnabled reports whether built-in agent-v3 skills should be injected.
+func (c *AgentV3SkillsConfig) BuiltinInjectionEnabled() bool {
+	return c == nil || c.InjectBuiltin == nil || *c.InjectBuiltin
 }
 
 // TriggerOnReply checks if the chat will trigger on reply
@@ -337,6 +459,185 @@ func (c *McpoConfig) readConfig() {
 	if err != nil {
 		log.Fatal("cannot parse mcpo config", zap.Error(err))
 	}
+}
+
+func (c *AgentV3Config) readConfig() {
+	err := viper.UnmarshalKey("agent_v3", c, viper.DecodeHook(DispatchFor()))
+	if err != nil {
+		zap.L().Warn("cannot parse agent_v3 config", zap.Error(err))
+	}
+}
+
+func (c *AgentV3Config) checkConfig() {
+	if c == nil {
+		return
+	}
+	if c.ContextCache.RawTurns <= 0 {
+		c.ContextCache.RawTurns = 12
+	}
+	if c.ContextCache.SummaryTurns <= 0 {
+		c.ContextCache.SummaryTurns = 80
+	}
+	if c.ContextCache.MaxSummaryTokens <= 0 {
+		c.ContextCache.MaxSummaryTokens = 2000
+	}
+	if c.ContextCache.MaxRawTokens <= 0 {
+		c.ContextCache.MaxRawTokens = 6000
+	}
+	if c.ContextCache.RedisTTL == "" {
+		c.ContextCache.RedisTTL = agentV3DefaultContextCacheRedisTTL
+	}
+	if c.Memory.Scope == "" {
+		c.Memory.Scope = agentV3DefaultScope
+	}
+	if c.Memory.Scope != agentV3DefaultScope {
+		zap.L().Warn("unsupported agent_v3 memory scope, reset to group", zap.String("scope", c.Memory.Scope))
+		c.Memory.Scope = agentV3DefaultScope
+	}
+	if c.Memory.AllowGlobal {
+		zap.L().Warn("agent_v3 memory allow_global is not supported in v3 first release, reset to false")
+		c.Memory.AllowGlobal = false
+	}
+	if c.Memory.SnapshotMaxTokens <= 0 {
+		c.Memory.SnapshotMaxTokens = 2000
+	}
+	if c.Memory.WritePolicy == "" {
+		c.Memory.WritePolicy = agentV3DefaultMemoryWritePolicy
+	}
+	if c.Memory.WritePolicy != agentV3DefaultMemoryWritePolicy {
+		zap.L().Warn("unsupported agent_v3 memory write_policy, reset to explicit_or_admin", zap.String("write_policy", c.Memory.WritePolicy))
+		c.Memory.WritePolicy = agentV3DefaultMemoryWritePolicy
+	}
+	if c.Runtime.Mode == "" {
+		c.Runtime.Mode = agentV3DefaultRuntimeMode
+	}
+	if c.Runtime.Mode != agentV3DefaultRuntimeMode {
+		zap.L().Warn("unsupported agent_v3 runtime mode, reset to remote_http", zap.String("mode", c.Runtime.Mode))
+		c.Runtime.Mode = agentV3DefaultRuntimeMode
+	}
+	if c.Runtime.Endpoint == "" {
+		c.Runtime.Endpoint = agentV3DefaultRuntimeEndpoint
+	}
+	if c.Runtime.NamespaceScope == "" {
+		c.Runtime.NamespaceScope = agentV3DefaultScope
+	}
+	if c.Runtime.NamespaceScope != agentV3DefaultScope {
+		zap.L().Warn("unsupported agent_v3 runtime namespace_scope, reset to group", zap.String("namespace_scope", c.Runtime.NamespaceScope))
+		c.Runtime.NamespaceScope = agentV3DefaultScope
+	}
+	if c.Runtime.CommandTimeout == "" {
+		c.Runtime.CommandTimeout = agentV3DefaultCommandTimeout
+	}
+	if c.Runtime.RequestTimeout == "" {
+		c.Runtime.RequestTimeout = c.Runtime.CommandTimeout
+	}
+	if c.Runtime.MaxOutputChars <= 0 {
+		c.Runtime.MaxOutputChars = 12000
+	}
+	if !sameStringSet(c.Tools.ExposeOnly, agentV3FixedTools) {
+		if len(c.Tools.ExposeOnly) > 0 {
+			zap.L().Warn("agent_v3 tools.expose_only must stay fixed to runtime tools, reset to default",
+				zap.Strings("configured", c.Tools.ExposeOnly),
+				zap.Strings("expected", agentV3FixedTools),
+			)
+		}
+		c.Tools.ExposeOnly = append([]string(nil), agentV3FixedTools...)
+	}
+	if c.Skills.Mode == "" {
+		c.Skills.Mode = agentV3DefaultSkillsMode
+	}
+	if c.Skills.Mode != agentV3DefaultSkillsMode {
+		zap.L().Warn("unsupported agent_v3 skills mode, reset to system_prompt", zap.String("mode", c.Skills.Mode))
+		c.Skills.Mode = agentV3DefaultSkillsMode
+	}
+	if c.Skills.Root != "" {
+		zap.L().Warn("agent_v3 skills.root is unused in system_prompt mode, reset to empty", zap.String("root", c.Skills.Root))
+		c.Skills.Root = ""
+	}
+	if c.Skills.InjectBuiltin == nil {
+		injectBuiltin := true
+		c.Skills.InjectBuiltin = &injectBuiltin
+	}
+	if c.Observability.JSONLPath == "" {
+		c.Observability.JSONLPath = agentV3DefaultObservabilityJSONL
+	}
+	if c.Observability.CaptureContent == "" {
+		c.Observability.CaptureContent = agentV3DefaultCaptureContent
+	}
+	if c.Observability.PreviewChars <= 0 {
+		c.Observability.PreviewChars = 512
+	}
+}
+
+// ContextCacheTTL returns the parsed agent-v3 context cache TTL.
+func (c *AgentV3Config) ContextCacheTTL() time.Duration {
+	if c == nil {
+		return 30 * 24 * time.Hour
+	}
+	return parseFlexibleDuration(c.ContextCache.RedisTTL, 30*24*time.Hour)
+}
+
+// RuntimeCommandTimeout returns the agent-v3 runtime command timeout.
+func (c *AgentV3Config) RuntimeCommandTimeout() time.Duration {
+	if c == nil {
+		return 120 * time.Second
+	}
+	return parseFlexibleDuration(c.Runtime.CommandTimeout, 120*time.Second)
+}
+
+// RuntimeRequestTimeout returns the agent-v3 runtime HTTP request timeout.
+func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
+	if c == nil {
+		return 120 * time.Second
+	}
+	return parseFlexibleDuration(c.Runtime.RequestTimeout, c.RuntimeCommandTimeout())
+}
+
+// EffectiveModel returns the agent-v3 model override or the chat fallback.
+func (c *AgentV3Config) EffectiveModel(fallback *Model) *Model {
+	if c != nil && c.Model != nil {
+		return c.Model
+	}
+	return fallback
+}
+
+func parseFlexibleDuration(raw string, fallback time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	if d, err := time.ParseDuration(raw); err == nil {
+		return d
+	}
+	if strings.HasSuffix(raw, "d") {
+		n, err := strconv.Atoi(strings.TrimSuffix(raw, "d"))
+		if err == nil && n > 0 {
+			return time.Duration(n) * 24 * time.Hour
+		}
+	}
+	return fallback
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, item := range a {
+		seen[item]++
+	}
+	for _, item := range b {
+		seen[item]--
+		if seen[item] < 0 {
+			return false
+		}
+	}
+	for _, count := range seen {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Tool server type constants define the supported connection protocol for tool servers.

@@ -88,9 +88,11 @@ func AddTasks(tasks ...*TaskNonced) error {
 // QueryTasks query tasks from redis with a time range.
 func QueryTasks(from, to int64) ([]*RawTask, error) {
 	froms, tos := util.I2Dec(from), util.I2Dec(to)
-	zs, err := rc.ZRangeByScore(context.TODO(), TimeTaskKey(), &redis.ZRangeBy{
-		Min: froms,
-		Max: tos,
+	zs, err := rc.ZRangeArgs(context.TODO(), redis.ZRangeArgs{
+		Key:     TimeTaskKey(),
+		Start:   froms,
+		Stop:    tos,
+		ByScore: true,
 	}).Result()
 	if err != nil {
 		log.Error("query tasks failed", zap.Error(err))

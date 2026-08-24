@@ -21,13 +21,14 @@ import (
 
 // StreamToTelegram reads from an eino StreamReader and streams the output to a Telegram message.
 // If existingMsg is provided (e.g. from progress placeholder), it reuses that message instead
-// of creating a new one. Returns the final response text, reasoning content, and any error.
+// of creating a new one. Returns the final visible response text, reasoning content, and any error.
 func StreamToTelegram(
 	ctx context.Context,
 	tbCtx tb.Context,
 	reader *schema.StreamReader[*schema.Message],
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
+	richEnabled bool,
 ) (response string, reasoning string, sentMsg *tb.Message, err error) {
 	tc := GetTurnContext(ctx) // may be nil outside chatv2
 	sp := &streamProcessor{
@@ -35,6 +36,8 @@ func StreamToTelegram(
 		tbCtx:          tbCtx,
 		reader:         reader,
 		format:         format,
+		richEnabled:    richEnabled,
+		rawCaller:      tbCtx.Bot(),
 		sentenceDelims: config.BotConfig.SentenceDelimiters,
 		editInterval:   getEditInterval(format),
 		done:           make(chan struct{}),
@@ -50,6 +53,8 @@ type streamProcessor struct {
 	tbCtx          tb.Context
 	reader         *schema.StreamReader[*schema.Message]
 	format         *config.ChatOutputFormatConfig
+	richEnabled    bool
+	rawCaller      telegramRawCaller
 	sentenceDelims []string
 	editInterval   time.Duration
 
@@ -59,6 +64,7 @@ type streamProcessor struct {
 	reasoningContent strings.Builder
 	placeholderMsg   *tb.Message
 	tc               *TurnContext // For editMu locking and lifecycle flags
+	deleteOnError    bool
 
 	// Ticker control
 	done chan struct{}
@@ -119,6 +125,9 @@ func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb
 		if recvErr != nil {
 			close(sp.done)
 			sp.wg.Wait()
+			if sp.shouldDeletePlaceholderOnStreamError() {
+				sp.deletePlaceholderAfterClearedStreamError()
+			}
 			return sp.getResponse(), sp.getReasoning(), sp.placeholderMsg, recvErr
 		}
 		sp.processChunk(msg)
@@ -157,6 +166,7 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 	if isClearStreamOutputMessage(msg) {
 		sp.fullResponse.Reset()
 		sp.reasoningContent.Reset()
+		sp.deleteOnError = sp.placeholderMsg != nil
 		return
 	}
 
@@ -166,6 +176,30 @@ func (sp *streamProcessor) processChunk(msg *schema.Message) {
 	if msg.ReasoningContent != "" {
 		sp.reasoningContent.WriteString(unquoteJSONString(msg.ReasoningContent))
 	}
+}
+
+func (sp *streamProcessor) shouldDeletePlaceholderOnStreamError() bool {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	return sp.deleteOnError
+}
+
+func (sp *streamProcessor) deletePlaceholderAfterClearedStreamError() {
+	sp.mu.Lock()
+	sp.fullResponse.Reset()
+	sp.reasoningContent.Reset()
+	sp.deleteOnError = false
+	sp.mu.Unlock()
+	if sp.placeholderMsg == nil || sp.placeholderMsg.Chat == nil {
+		sp.placeholderMsg = nil
+		return
+	}
+	if bot := sp.tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(sp.placeholderMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete cleared streaming placeholder", zap.Error(err))
+		}
+	}
+	sp.placeholderMsg = nil
 }
 
 // unquoteJSONString attempts to decode a JSON-encoded string value.
@@ -192,6 +226,16 @@ func (sp *streamProcessor) updateMessage() {
 
 	if len(text) == 0 && len(reason) == 0 {
 		return
+	}
+	parts := splitOutputWithReason(text, reason, sp.format)
+	if shouldSuppressPartialRichEnvelope(parts.payload, sp.richEnabled) {
+		return
+	}
+	if sp.richEnabled {
+		delivery := resolveTelegramRichDelivery(text, reason, sp.format, true, sp.richAuthorized())
+		if delivery.ShouldSendRich {
+			return
+		}
 	}
 
 	// Find a sentence boundary for clean display
@@ -220,14 +264,81 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		}
 		return "", "", sp.placeholderMsg, nil
 	}
+	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled, sp.richAuthorized())
+	if delivery.ShouldSendRich {
+		replyToID := 0
+		if msg := sp.tbCtx.Message(); msg != nil {
+			replyToID = msg.ID
+		}
+		sent, err := sendTelegramRichMessage(sp.telegramRaw(), sp.targetChatID(), replyToID, delivery.RichMessage)
+		if err == nil {
+			if sp.tc != nil {
+				sp.tc.finalized.Store(true)
+			}
+			sp.deletePlaceholderAfterRichSend(sent)
+			if sent != nil {
+				sp.placeholderMsg = sent
+			}
+			return delivery.VisibleText, reason, sp.placeholderMsg, nil
+		}
+		zap.L().Debug("chatv2: failed to send rich streaming message", zap.Error(err))
+		if sp.shouldDeletePlaceholderOnStreamError() {
+			sp.deletePlaceholderAfterClearedStreamError()
+			return "", "", nil, err
+		}
+		return delivery.VisibleText, "", sp.placeholderMsg, err
+	}
+	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		text = delivery.VisibleText
+		reason = ""
+	}
 	formatted := FormatOutputWithReason(text, reason, sp.format)
 	if err := sp.editPlaceholder(formatted, true); err != nil {
+		if sp.shouldDeletePlaceholderOnStreamError() {
+			sp.deletePlaceholderAfterClearedStreamError()
+			return "", "", nil, err
+		}
 		return text, reason, sp.placeholderMsg, err
 	}
 	if sp.tc != nil {
 		sp.tc.finalized.Store(true)
 	}
 	return text, reason, sp.placeholderMsg, nil
+}
+
+func (sp *streamProcessor) telegramRaw() telegramRawCaller {
+	if sp.rawCaller != nil {
+		return sp.rawCaller
+	}
+	return sp.tbCtx.Bot()
+}
+
+func (sp *streamProcessor) richAuthorized() bool {
+	return sp.richEnabled && sp.tc != nil && sp.tc.richMessageSkillLoadedForFinal()
+}
+
+func (sp *streamProcessor) targetChatID() int64 {
+	if sp.placeholderMsg != nil && sp.placeholderMsg.Chat != nil && sp.placeholderMsg.Chat.ID != 0 {
+		return sp.placeholderMsg.Chat.ID
+	}
+	if chat := sp.tbCtx.Chat(); chat != nil {
+		return chat.ID
+	}
+	return 0
+}
+
+func (sp *streamProcessor) deletePlaceholderAfterRichSend(sent *tb.Message) {
+	if sp.placeholderMsg == nil || sp.placeholderMsg.Chat == nil {
+		return
+	}
+	if sent != nil && sent.Chat != nil && sent.Chat.ID == sp.placeholderMsg.Chat.ID && sent.ID == sp.placeholderMsg.ID {
+		return
+	}
+	if bot := sp.tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(sp.placeholderMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete rich placeholder", zap.Error(err))
+		}
+	}
 }
 
 // editPlaceholder edits the placeholder message with new content.
@@ -259,6 +370,9 @@ func (sp *streamProcessor) editPlaceholder(formatted string, force bool) error {
 			return err
 		}
 	}
+	sp.mu.Lock()
+	sp.deleteOnError = false
+	sp.mu.Unlock()
 	if sp.tc != nil {
 		sp.tc.MarkEdited()
 	}
@@ -280,14 +394,54 @@ func (sp *streamProcessor) getReasoning() string {
 }
 
 // NonStreamResponse sends a complete response without streaming.
-// If existingMsg is provided, edits it instead of sending a new message.
+// If existingMsg is provided, plain responses edit it while rich responses are sent as new messages.
+// Returns the sent message, the visible text used for persistence, and any error.
 func NonStreamResponse(
 	tbCtx tb.Context,
 	text string,
 	reasoning string,
 	format *config.ChatOutputFormatConfig,
 	existingMsg *tb.Message,
-) (*tb.Message, error) {
+	richEnabled bool,
+	richAuthorized bool,
+) (*tb.Message, string, error) {
+	return nonStreamResponseWithCaller(tbCtx.Bot(), tbCtx, text, reasoning, format, existingMsg, richEnabled, richAuthorized)
+}
+
+func nonStreamResponseWithCaller(
+	raw telegramRawCaller,
+	tbCtx tb.Context,
+	text string,
+	reasoning string,
+	format *config.ChatOutputFormatConfig,
+	existingMsg *tb.Message,
+	richEnabled bool,
+	richAuthorized bool,
+) (*tb.Message, string, error) {
+	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled, richAuthorized)
+	if delivery.ShouldSendRich {
+		replyToID := 0
+		if msg := tbCtx.Message(); msg != nil {
+			replyToID = msg.ID
+		}
+		chatID := int64(0)
+		if existingMsg != nil && existingMsg.Chat != nil {
+			chatID = existingMsg.Chat.ID
+		} else if chat := tbCtx.Chat(); chat != nil {
+			chatID = chat.ID
+		}
+		msg, err := sendTelegramRichMessage(raw, chatID, replyToID, delivery.RichMessage)
+		if err == nil {
+			deleteExistingPlaceholderAfterRichSend(tbCtx, existingMsg, msg)
+			return msg, delivery.VisibleText, nil
+		}
+		zap.L().Debug("chatv2: failed to send rich non-stream message", zap.Error(err))
+		return existingMsg, delivery.VisibleText, err
+	}
+	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		text = delivery.VisibleText
+		reasoning = ""
+	}
 	formatted := FormatOutputWithReason(text, reasoning, format)
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
@@ -302,10 +456,10 @@ func NonStreamResponse(
 			_, err = tbCtx.Bot().Edit(existingMsg, text)
 			if err != nil {
 				zap.L().Debug("chatv2: failed to edit non-stream message", zap.Error(err))
-				return existingMsg, err
+				return existingMsg, text, err
 			}
 		}
-		return existingMsg, nil
+		return existingMsg, text, nil
 	}
 
 	// Send new message (original behavior)
@@ -323,5 +477,19 @@ func NonStreamResponse(
 			ReplyTo: tbCtx.Message(),
 		})
 	}
-	return sent, err
+	return sent, text, err
+}
+
+func deleteExistingPlaceholderAfterRichSend(tbCtx tb.Context, existingMsg, sent *tb.Message) {
+	if existingMsg == nil || existingMsg.Chat == nil {
+		return
+	}
+	if sent != nil && sent.Chat != nil && sent.Chat.ID == existingMsg.Chat.ID && sent.ID == existingMsg.ID {
+		return
+	}
+	if bot := tbCtx.Bot(); bot != nil {
+		if err := bot.Delete(existingMsg); err != nil {
+			zap.L().Debug("chatv2: failed to delete rich placeholder", zap.Error(err))
+		}
+	}
 }

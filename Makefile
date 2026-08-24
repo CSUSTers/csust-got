@@ -31,7 +31,7 @@ build: get
 	go build -o $(OUTPUT) .
 
 test: 
-	go test -v -race -covermode=atomic -test.short ./...
+	go test -v -race -covermode=atomic -short ./...
 
 fmt:
 	gofmt -l -w . && golangci-lint run

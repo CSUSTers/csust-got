@@ -58,6 +58,7 @@ llm_models:
     api_key: "xxx"
     prompt_limit: 1000
     retry_nums: 5
+    retry_initial_interval: "500ms"
     retry_interval: 1 # 单位：秒
 
   gpt: &gpt
@@ -85,6 +86,47 @@ mcpo_server:
     - time
     - searxng
     - fetch
+
+agent_v3:
+  enable: false
+  soul_path: "docs/agent_v3_soul.md"
+  context_cache:
+    enable: true
+    raw_turns: 12
+    summary_turns: 80
+    max_summary_tokens: 2000
+    max_raw_tokens: 6000
+    prompt_cache_retention: "in_memory"
+    redis_ttl: "30d"
+  memory:
+    enable: true
+    scope: "group"
+    allow_global: false
+    snapshot_max_tokens: 2000
+    write_policy: "explicit_or_admin"
+  runtime:
+    enable: true
+    mode: "remote_http"
+    endpoint: "http://agent-runtime:8080"
+    auth_token_env: "AGENT_RUNTIME_TOKEN"
+    namespace_scope: "group"
+    command_timeout: "120s"
+    max_output_chars: 12000
+  tools:
+    expose_only:
+      - read
+      - grep
+      - write
+      - edit
+      - bash
+  skills:
+    mode: "system_prompt"
+    inject_builtin: true
+  observability:
+    enable: true
+    jsonl_path: "logs/agentv3-traces.jsonl"
+    capture_content: "preview"
+    preview_chars: 512
 
 chats:
   - name: 什么是bot

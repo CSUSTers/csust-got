@@ -50,6 +50,7 @@ func NewBotConfig() *Config {
 		Chats:           new(ChatConfigV1),
 		Agents:          new(ChatConfigV2),
 		McpoServer:      new(McpoConfig),
+		AgentV3:         new(AgentV3Config),
 	}
 
 	config.WhiteListConfig.SetName("white_list")
@@ -84,6 +85,7 @@ type Config struct {
 	Agents      *ChatConfigV2
 	ChatEngine  string
 	McpoServer  *McpoConfig
+	AgentV3     *AgentV3Config
 	MeiliConfig *meiliConfig
 	McConfig    *mcConfig
 
@@ -159,6 +161,7 @@ func readConfig() {
 	BotConfig.Chats.readConfig()
 	BotConfig.Agents.readConfig()
 	BotConfig.McpoServer.readConfig()
+	BotConfig.AgentV3.readConfig()
 
 	// genshin voice
 	BotConfig.readConfig()
@@ -197,6 +200,7 @@ func checkConfig() {
 	BotConfig.checkConfig()
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
+	BotConfig.AgentV3.checkConfig()
 
 	BotConfig.DebugOptConfig.checkConfig()
 }

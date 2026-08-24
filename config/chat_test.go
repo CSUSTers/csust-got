@@ -3,9 +3,11 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatConfigV1_ReadConfig(t *testing.T) {
@@ -91,4 +93,121 @@ func TestAgentGetMaxSteps(t *testing.T) {
 		assert.Equal(t, defaultAgentMaxSteps, (&AgentConfig{}).GetMaxSteps())
 		assert.Equal(t, defaultSubAgentMaxSteps, (&SubAgentConfig{}).GetMaxSteps())
 	})
+}
+
+func TestModelRetryDefaultsAndOverrides(t *testing.T) {
+	t.Run("defaults to three retries with 500ms initial delay", func(t *testing.T) {
+		var cfg *Model
+		assert.Equal(t, 3, cfg.RetryCount())
+		assert.Equal(t, 500*time.Millisecond, cfg.RetryInitialDelay())
+	})
+
+	t.Run("explicit retry count and duration string are respected", func(t *testing.T) {
+		cfg := &Model{
+			RetryNums:            5,
+			RetryInitialInterval: "750ms",
+		}
+		assert.Equal(t, 5, cfg.RetryCount())
+		assert.Equal(t, 750*time.Millisecond, cfg.RetryInitialDelay())
+	})
+
+	t.Run("legacy retry interval remains seconds", func(t *testing.T) {
+		cfg := &Model{RetryInterval: 2}
+		assert.Equal(t, 2*time.Second, cfg.RetryInitialDelay())
+	})
+}
+
+func TestAgentRichConfigParsesFromChatV2(t *testing.T) {
+	const raw = `
+agents:
+  - name: rich-agent
+    agent:
+      enable: true
+      v3: true
+      rich: true
+`
+	v := viper.New()
+	v.SetConfigType("yaml")
+	assert.NoError(t, v.ReadConfig(strings.NewReader(raw)))
+
+	var cfg ChatConfigV2
+	assert.NoError(t, v.UnmarshalKey("agents", &cfg, viper.DecodeHook(DispatchFor())))
+
+	if assert.Len(t, cfg, 1) && assert.NotNil(t, cfg[0].Agent) {
+		assert.True(t, cfg[0].Agent.Rich)
+	}
+}
+
+func TestIsAgentV3RichEnabledRequiresAgentV3AndRichGate(t *testing.T) {
+	old := BotConfig
+	t.Cleanup(func() { BotConfig = old })
+	BotConfig = &Config{AgentV3: &AgentV3Config{Enable: true}}
+
+	tests := []struct {
+		name string
+		cfg  *ChatConfigSingle
+		want bool
+	}{
+		{name: "nil config is false"},
+		{
+			name: "missing agent is false",
+			cfg:  &ChatConfigSingle{},
+		},
+		{
+			name: "rich without agent enable is false",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Rich: true}},
+		},
+		{
+			name: "v3 without rich is false",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, V3: true}},
+		},
+		{
+			name: "global v3 alone does not migrate chat",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, Rich: true}},
+		},
+		{
+			name: "per chat v3 plus rich is true",
+			cfg:  &ChatConfigSingle{Agent: &AgentConfig{Enable: true, V3: true, Rich: true}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cfg.IsAgentV3RichEnabled())
+		})
+	}
+}
+
+func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
+	cfg := &AgentV3Config{
+		Memory: AgentV3MemoryConfig{
+			Scope:       "global",
+			AllowGlobal: true,
+			WritePolicy: "model_auto",
+		},
+		Runtime: AgentV3RuntimeConfig{
+			Mode:           "host",
+			NamespaceScope: "global",
+		},
+		Tools: AgentV3ToolsConfig{
+			ExposeOnly: []string{"read", "bash", "mcp_search"},
+		},
+		Skills: AgentV3SkillsConfig{
+			Mode: "runtime_filesystem",
+			Root: "/tmp/skills",
+		},
+	}
+	cfg.checkConfig()
+
+	assert.Equal(t, "group", cfg.Memory.Scope)
+	assert.False(t, cfg.Memory.AllowGlobal)
+	assert.Equal(t, "explicit_or_admin", cfg.Memory.WritePolicy)
+	assert.Equal(t, "remote_http", cfg.Runtime.Mode)
+	assert.Equal(t, "group", cfg.Runtime.NamespaceScope)
+	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, cfg.Tools.ExposeOnly)
+	assert.Equal(t, "system_prompt", cfg.Skills.Mode)
+	assert.Empty(t, cfg.Skills.Root)
+	require.NotNil(t, cfg.Skills.InjectBuiltin)
+	assert.True(t, *cfg.Skills.InjectBuiltin)
 }

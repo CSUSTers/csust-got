@@ -1,4 +1,4 @@
-This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI chat, message search (MeiliSearch), image generation (Stable Diffusion), gacha systems, and comprehensive permission controls.
+This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI chat, gacha systems, and comprehensive permission controls.
 
 ## Architecture Overview
 
@@ -7,16 +7,15 @@ This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI c
 - **Bot Framework**: `gopkg.in/telebot.v3` - All commands registered via `bot.Handle()`
 - **Configuration**: `config.yaml` → structs in `config/` → global `config.BotConfig`
 - **Data Layer**: `orm/` - Redis-based persistence (NOT a SQL ORM); stores chat state, user lists, caches
-- **Queue System**: `store/` - Background task processing (message deletion, SD generation)
-- **Feature Packages**: `chat/`, `sd/`, `meili/`, `restrict/`, `base/`, `inline/`
+- **Queue System**: `store/` - Background task processing (message deletion)
+- **Feature Packages**: `chat/`, `restrict/`, `base/`, `inline/`
 
 ### Middleware Pipeline
 All requests flow through this ordered chain (see `main.go:116-119`):
 ```go
 loggerMiddleware → skipMiddleware → blockMiddleware → fakeBanMiddleware →
 rateMiddleware → noStickerMiddleware → shutdownMiddleware →
-messagesCollectionMiddleware → messageStoreMiddleware → contentFilterMiddleware →
-byeWorldMiddleware → mcMiddleware
+messageStoreMiddleware → contentFilterMiddleware → byeWorldMiddleware → mcMiddleware
 ```
 **Key Insight**: Middleware order matters! `blockMiddleware` must run before permission checks.
 
@@ -30,7 +29,6 @@ byeWorldMiddleware → mcMiddleware
 - `util.PrivateCommand(handler)` - Only in private chats
 - `util.GroupCommand(handler)` - Only in group chats
 - `util.GroupCommandCtx(handler)` - Group-only with context tracking
-- `whiteMiddleware` - Whitelist enforcement (only for sensitive commands like `/sd`)
 
 ### Redis Key Patterns (orm/redis.go)
 - `wrapKey(key)` - Adds global prefix
@@ -41,7 +39,7 @@ byeWorldMiddleware → mcMiddleware
 ### Async Task Queues (store/)
 - `TaskQueue[T]` interface: `Push()`, `Cancel()`, `fetch()`, `process()`
 - Example: `ByeWorldQueue` for delayed message deletion
-- Background goroutines: `go sd.Process()`, `store.InitQueues(bot)`
+- Background goroutines: `store.InitQueues(bot)`
 
 ### Chat Config System (config/chat.go)
 - Multi-model AI support with templates (Go `text/template`)
@@ -168,17 +166,6 @@ The chat module is the core AI conversation system with MCP (Model Context Proto
 2. **New Template Variable**: Add field to `promptData` struct, populate in `Chat()` function
 3. **New Output Format**: Add case in `formatText()` with markdown/html escaping logic
 4. **New MCP Tool**: Deploy OpenAPI-compliant HTTP server, add to `mcpo_server.tools` list
-
-### MeiliSearch Indexing (meili/)
-1. Middleware: `messageStoreMiddleware` enqueues messages
-2. Background: Queue processor pushes to MeiliSearch
-3. Search: `/search [-id chatID] [-p page] keyword` with pagination
-
-### Stable Diffusion (sd/)
-1. Queue: `ch <- context` (buffered, size 10)
-2. Worker: `go sd.Process()` consumes queue
-3. HTTP/3: Custom `mixRoundTripper` tries QUIC first, falls back to TCP
-4. Rate limiting: `busyUser` map tracks per-user concurrency
 
 ## Pull Request Guidelines
 1. **Base branch**: Always create PRs against `dev` (not `master`)

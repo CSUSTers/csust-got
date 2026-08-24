@@ -20,12 +20,16 @@ type turnContextKey struct{}
 // TurnContext holds per-request runtime data passed through Go context.
 // Tools and subagents access this to interact with Telegram, Redis, etc.
 type TurnContext struct {
-	Bot     *tb.Bot
-	Message *tb.Message
-	ChatID  int64
-	Config  *config.ChatConfigSingle
-	Trigger *config.ChatTrigger
-	BotUser *tb.User
+	Bot           *tb.Bot
+	Message       *tb.Message
+	ChatID        int64
+	Config        *config.ChatConfigSingle
+	Trigger       *config.ChatTrigger
+	BotUser       *tb.User
+	RunID         string
+	Namespace     string
+	RuntimeClient *RemoteRuntimeClient
+	V3            *AgentV3TurnState
 	// Progress tracking — used by update_progress tool and streaming handlers.
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex
@@ -37,6 +41,9 @@ type TurnContext struct {
 	streamingStarted atomic.Bool                // Set true when streaming/final output begins
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
+	toolMu           sync.Mutex
+	toolSeq          int64
+	richSkillToolSeq int64
 }
 
 type progressStep struct {
@@ -64,6 +71,34 @@ func (tc *TurnContext) MarkEdited() {
 		return
 	}
 	tc.lastEditAt.Store(time.Now().UnixNano())
+}
+
+func (tc *TurnContext) recordToolCall(_ string) int64 {
+	if tc == nil {
+		return 0
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	tc.toolSeq++
+	return tc.toolSeq
+}
+
+func (tc *TurnContext) markRichMessageSkillLoaded(seq int64) {
+	if tc == nil || seq <= 0 {
+		return
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	tc.richSkillToolSeq = seq
+}
+
+func (tc *TurnContext) richMessageSkillLoadedForFinal() bool {
+	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() {
+		return false
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	return tc.richSkillToolSeq > 0
 }
 
 // WithTurnContext stores TurnContext in a Go context.
