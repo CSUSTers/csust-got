@@ -13,10 +13,16 @@ use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
     path::{Component, Path, PathBuf},
+    process::Stdio,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{fs, io::AsyncWriteExt, process::Command, time::timeout};
+use tokio::{
+    fs,
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::{Child, Command},
+    time::timeout,
+};
 use tracing::{info, warn};
 use walkdir::WalkDir;
 
@@ -494,26 +500,119 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
     command.env("PATH", default_path());
     command.env("HOME", "/tmp");
     command.kill_on_drop(true);
-    let output_result = timeout(timeout_duration, command.output()).await;
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::internal(format!("command failed: {error}")));
+        }
+    };
+    let Some(stdout) = child.stdout.take() else {
+        cleanup_failed_command(&mut child).await;
+        cleanup_shell_dir(cleanup_dir.as_deref()).await;
+        return Err(RuntimeError::internal(
+            "command failed: stdout pipe unavailable",
+        ));
+    };
+    let Some(stderr) = child.stderr.take() else {
+        cleanup_failed_command(&mut child).await;
+        cleanup_shell_dir(cleanup_dir.as_deref()).await;
+        return Err(RuntimeError::internal(
+            "command failed: stderr pipe unavailable",
+        ));
+    };
+    let result = timeout(timeout_duration, async {
+        tokio::try_join!(
+            child.wait(),
+            collect_output(stdout, state.max_output_chars),
+            collect_output(stderr, state.max_output_chars),
+        )
+    })
+    .await;
+    let (status, stdout, stderr) = match result {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            cleanup_failed_command(&mut child).await;
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::internal(format!("command failed: {error}")));
+        }
+        Err(_) => {
+            cleanup_failed_command(&mut child).await;
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::bad_request("command timed out"));
+        }
+    };
+    cleanup_shell_dir(cleanup_dir.as_deref()).await;
+    let duration_ms = started.elapsed().as_millis();
+    Ok(BashResponse {
+        exit_code: status.code().unwrap_or(-1),
+        truncated: stdout.truncated || stderr.truncated,
+        stdout: format_collected_output(stdout),
+        stderr: format_collected_output(stderr),
+        duration_ms,
+        error: String::new(),
+    })
+}
+
+const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
+const TRUNCATION_MARKER: &str = "\n[truncated]";
+
+struct CollectedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+async fn collect_output<R>(mut reader: R, limit: usize) -> std::io::Result<CollectedOutput>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut bytes = Vec::with_capacity(limit.min(OUTPUT_READ_BUFFER_SIZE));
+    let mut buffer = [0; OUTPUT_READ_BUFFER_SIZE];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        if limit == 0 {
+            bytes.extend_from_slice(&buffer[..read]);
+            continue;
+        }
+        let retained = read.min(limit.saturating_sub(bytes.len()));
+        bytes.extend_from_slice(&buffer[..retained]);
+        truncated |= retained < read;
+    }
+    Ok(CollectedOutput { bytes, truncated })
+}
+
+fn format_collected_output(output: CollectedOutput) -> String {
+    let mut text = String::from_utf8_lossy(&output.bytes).into_owned();
+    if !output.truncated {
+        return text;
+    }
+    let limit = output.bytes.len();
+    if text.len() > limit {
+        return truncate_output(text, limit).0;
+    }
+    text.push_str(TRUNCATION_MARKER);
+    text
+}
+
+async fn cleanup_failed_command(child: &mut Child) {
+    if let Err(error) = child.start_kill() {
+        warn!(%error, "failed to kill command during cleanup");
+    }
+    if let Err(error) = child.wait().await {
+        warn!(%error, "failed to reap command during cleanup");
+    }
+}
+
+async fn cleanup_shell_dir(cleanup_dir: Option<&Path>) {
     if let Some(dir) = cleanup_dir {
         let _ = fs::remove_dir_all(dir).await;
     }
-    let output = output_result
-        .map_err(|_| RuntimeError::bad_request("command timed out"))?
-        .map_err(|e| RuntimeError::internal(format!("command failed: {e}")))?;
-    let duration_ms = started.elapsed().as_millis();
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let (stdout, t1) = truncate_output(stdout, state.max_output_chars);
-    let (stderr, t2) = truncate_output(stderr, state.max_output_chars);
-    Ok(BashResponse {
-        exit_code: output.status.code().unwrap_or(-1),
-        stdout,
-        stderr,
-        duration_ms,
-        truncated: t1 || t2,
-        error: String::new(),
-    })
 }
 
 async fn reset_namespace(
@@ -956,7 +1055,7 @@ fn truncate_output(value: String, limit: usize) -> (String, bool) {
         end -= 1;
     }
     let mut out = value[..end].to_string();
-    out.push_str("\n[truncated]");
+    out.push_str(TRUNCATION_MARKER);
     (out, true)
 }
 
@@ -1088,6 +1187,23 @@ mod tests {
         let (out, truncated) = truncate_output("你好hello".to_string(), 7);
         assert!(truncated);
         assert!(out.starts_with("你好h"));
+    }
+
+    #[tokio::test]
+    async fn output_collector_limits_retained_bytes_at_utf8_boundary() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let writer_task = tokio::spawn(async move {
+            writer.write_all("你好".as_bytes()).await.unwrap();
+        });
+
+        let output = collect_output(reader, 4).await.unwrap();
+        writer_task.await.unwrap();
+
+        assert!(output.truncated);
+        assert_eq!(output.bytes.len(), 4);
+        let formatted = format_collected_output(output);
+        assert_eq!(formatted, "你\n[truncated]");
+        assert!(!formatted.contains('\u{fffd}'));
     }
 
     #[tokio::test]
@@ -1381,6 +1497,65 @@ mod tests {
         assert!(parsed.stdout.contains("hello"));
         let trace = fs::read_to_string(trace_path).await.unwrap();
         assert!(trace.contains("\"op\":\"bash\""));
+    }
+
+    #[tokio::test]
+    async fn bash_concurrently_drains_and_truncates_large_streams() {
+        let mut state = test_state();
+        state.max_output_chars = 64;
+        state.command_timeout = Duration::from_secs(10);
+        let command = if cfg!(windows) {
+            "(for /L %i in (1,1,1024) do @echo stdout) & (for /L %i in (1,1,1024) do @echo stderr 1>&2) & exit /b 7"
+        } else {
+            "yes stdout | head -c 262144 & yes stderr | head -c 262144 >&2 & wait; exit 7"
+        };
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "bot:tg:-1".to_string(),
+                run_id: "run_large_output".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: command.to_string(),
+            timeout: "8s".to_string(),
+        };
+
+        let response = timeout(Duration::from_secs(10), run_bash(&state, &req))
+            .await
+            .expect("large output command should not deadlock")
+            .unwrap();
+
+        assert_eq!(response.exit_code, 7);
+        assert!(response.truncated);
+        for output in [&response.stdout, &response.stderr] {
+            assert!(output.contains("[truncated]"));
+            assert_eq!(output.matches("[truncated]").count(), 1);
+            assert!(output.len() <= state.max_output_chars + "\n[truncated]".len());
+        }
+    }
+
+    #[tokio::test]
+    async fn bash_timeout_returns_existing_error_without_proot() {
+        let mut state = test_state();
+        state.command_timeout = Duration::from_millis(50);
+        let command = if cfg!(windows) {
+            "ping -n 3 127.0.0.1 > nul"
+        } else {
+            "sleep 2"
+        };
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "bot:tg:-1".to_string(),
+                run_id: "run_timeout".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: command.to_string(),
+            timeout: String::new(),
+        };
+
+        let error = run_bash(&state, &req).await.unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "command timed out");
     }
 
     #[tokio::test]

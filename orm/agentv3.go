@@ -143,10 +143,7 @@ func AgentV3AppendTurn(ctx context.Context, scope AgentV3Scope, turn AgentV3Turn
 	if maxTurns <= 0 {
 		maxTurns = 12
 	}
-	if turn.CreatedAt.IsZero() {
-		turn.CreatedAt = time.Now()
-	}
-	data, err := json.Marshal(turn)
+	data, err := marshalAgentV3Turn(turn)
 	if err != nil {
 		return err
 	}
@@ -158,6 +155,33 @@ func AgentV3AppendTurn(ctx context.Context, scope AgentV3Scope, turn AgentV3Turn
 	pipe.RPush(ctx, key, data)
 	pipe.LTrim(ctx, key, int64(-maxTurns), -1)
 	pipe.Expire(ctx, key, ttl)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+// AgentV3AppendTurnPair atomically appends a user and assistant turn to agent-v3 history.
+func AgentV3AppendTurnPair(ctx context.Context, scope AgentV3Scope, userTurn, assistantTurn AgentV3Turn, maxTurns int, ttl time.Duration) error {
+	if maxTurns <= 0 {
+		maxTurns = 12
+	}
+	userData, err := marshalAgentV3Turn(userTurn)
+	if err != nil {
+		return err
+	}
+	assistantData, err := marshalAgentV3Turn(assistantTurn)
+	if err != nil {
+		return err
+	}
+
+	turnsKey := agentV3TurnsKey(scope)
+	hotKey := agentV3HotRawTurnsKey(scope)
+	pipe := rc.TxPipeline()
+	pipe.RPush(ctx, turnsKey, userData, assistantData)
+	pipe.LTrim(ctx, turnsKey, -agentV3MaxStoredTurns, -1)
+	pipe.Expire(ctx, turnsKey, ttl)
+	pipe.RPush(ctx, hotKey, userData, assistantData)
+	pipe.LTrim(ctx, hotKey, int64(-maxTurns), -1)
+	pipe.Expire(ctx, hotKey, ttl)
 	_, err = pipe.Exec(ctx)
 	return err
 }
@@ -363,6 +387,13 @@ func decodeAgentV3Turns(items []string) []AgentV3Turn {
 		turns = append(turns, turn)
 	}
 	return turns
+}
+
+func marshalAgentV3Turn(turn AgentV3Turn) ([]byte, error) {
+	if turn.CreatedAt.IsZero() {
+		turn.CreatedAt = time.Now()
+	}
+	return json.Marshal(turn)
 }
 
 func agentV3PrefixCurrentKey(scope AgentV3Scope, agent, model string) string {

@@ -17,9 +17,7 @@ async fn main() -> anyhow::Result<()> {
     let skills_root = PathBuf::from(
         env::var("AGENT_RUNTIME_SKILLS_ROOT").unwrap_or_else(|_| "skills".to_string()),
     );
-    let auth_token = env::var("AGENT_RUNTIME_TOKEN")
-        .ok()
-        .filter(|v| !v.trim().is_empty());
+    let auth_token = Some(required_auth_token(env::var("AGENT_RUNTIME_TOKEN").ok())?);
     let max_output_chars = env::var("AGENT_RUNTIME_MAX_OUTPUT_CHARS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -53,7 +51,36 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn required_auth_token(token: Option<String>) -> anyhow::Result<String> {
+    token
+        .filter(|token| !token.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("AGENT_RUNTIME_TOKEN must be set and non-empty"))
+}
+
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt().with_env_filter(filter).json().init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::required_auth_token;
+
+    #[test]
+    fn required_auth_token_rejects_missing_or_blank_values() {
+        for token in [None, Some(String::new()), Some(" \t\n".to_string())] {
+            let err = required_auth_token(token).expect_err("blank token must be rejected");
+            assert_eq!(
+                err.to_string(),
+                "AGENT_RUNTIME_TOKEN must be set and non-empty"
+            );
+        }
+    }
+
+    #[test]
+    fn required_auth_token_preserves_non_blank_value() {
+        let token = " token-with-surrounding-space ".to_string();
+
+        assert_eq!(required_auth_token(Some(token.clone())).unwrap(), token);
+    }
 }

@@ -1,6 +1,8 @@
 package orm
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,4 +115,68 @@ func TestAgentV3PrefixTurnsMemoryAndTrace(t *testing.T) {
 	assert.Equal(t, "context_cache", gotSummary.Spans[0].Name)
 	assert.Equal(t, true, gotSummary.Spans[0].Attrs["cache_hit"])
 	assert.Equal(t, "bash", gotSummary.Spans[1].Attrs["tool"])
+}
+
+func TestAgentV3AppendTurnPairConcurrentKeepsPairsAdjacent(t *testing.T) {
+	setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	const pairs = 48
+	ttl := time.Hour
+
+	start := make(chan struct{})
+	errs := make(chan error, pairs)
+	var wg sync.WaitGroup
+	for id := range pairs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- AgentV3AppendTurnPair(ctx, scope,
+				AgentV3Turn{Role: "user", Content: fmt.Sprintf("user-%d", id), MessageID: id},
+				AgentV3Turn{Role: "assistant", Content: fmt.Sprintf("assistant-%d", id), MessageID: id},
+				pairs*2, ttl)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	for _, load := range []struct {
+		name string
+		fn   func() ([]AgentV3Turn, error)
+	}{
+		{"hot", func() ([]AgentV3Turn, error) { return AgentV3LoadTurns(ctx, scope, pairs*2) }},
+		{"long", func() ([]AgentV3Turn, error) { return AgentV3LoadRecentTurns(ctx, scope, pairs*2) }},
+	} {
+		t.Run(load.name, func(t *testing.T) {
+			turns, err := load.fn()
+			require.NoError(t, err)
+			require.Len(t, turns, pairs*2)
+
+			seen := make(map[int]struct{}, pairs)
+			for i := 0; i < len(turns); i += 2 {
+				user := turns[i]
+				assistant := turns[i+1]
+				require.Equal(t, "user", user.Role)
+				require.Equal(t, "assistant", assistant.Role)
+				require.Equal(t, user.MessageID, assistant.MessageID)
+				require.Equal(t, fmt.Sprintf("user-%d", user.MessageID), user.Content)
+				require.Equal(t, fmt.Sprintf("assistant-%d", assistant.MessageID), assistant.Content)
+				_, duplicate := seen[user.MessageID]
+				require.False(t, duplicate, "pair %d was duplicated", user.MessageID)
+				seen[user.MessageID] = struct{}{}
+			}
+			require.Len(t, seen, pairs)
+		})
+	}
+
+	for _, key := range []string{agentV3TurnsKey(scope), agentV3HotRawTurnsKey(scope)} {
+		remaining, err := rc.TTL(ctx, key).Result()
+		require.NoError(t, err)
+		assert.Positive(t, remaining)
+	}
 }

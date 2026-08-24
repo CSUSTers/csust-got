@@ -428,7 +428,33 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 	}
 	ttl := config.BotConfig.AgentV3.ContextCacheTTL()
 	maxTurns := config.BotConfig.AgentV3.ContextCache.RawTurns
-	if strings.TrimSpace(userInput) != "" {
+	hasUserInput := strings.TrimSpace(userInput) != ""
+	hasAssistantOutput := strings.TrimSpace(assistantOutput) != ""
+	switch {
+	case hasUserInput && hasAssistantOutput:
+		now := time.Now()
+		messageID := 0
+		if tc.Message != nil {
+			messageID = tc.Message.ID
+		}
+		if err := orm.AgentV3AppendTurnPair(ctx, tc.V3.Scope, orm.AgentV3Turn{
+			Role:      string(schema.User),
+			Content:   userInput,
+			MessageID: messageID,
+			CreatedAt: now,
+		}, orm.AgentV3Turn{
+			Role:      string(schema.Assistant),
+			Content:   assistantOutput,
+			MessageID: assistantMsgID,
+			CreatedAt: now,
+		}, maxTurns, ttl); err != nil {
+			err = fmt.Errorf("agent v3 append turn pair: %w", err)
+			if finishSpan != nil {
+				finishSpan(err, nil)
+			}
+			return err
+		}
+	case hasUserInput:
 		messageID := 0
 		if tc.Message != nil {
 			messageID = tc.Message.ID
@@ -445,8 +471,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			}
 			return err
 		}
-	}
-	if strings.TrimSpace(assistantOutput) != "" {
+	case hasAssistantOutput:
 		if err := orm.AgentV3AppendTurn(ctx, tc.V3.Scope, orm.AgentV3Turn{
 			Role:      string(schema.Assistant),
 			Content:   assistantOutput,

@@ -22,7 +22,10 @@ services:
     ports:
       - "7777:7777"
     environment:
-      - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:-}
+      - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:?AGENT_RUNTIME_TOKEN must be set and non-empty}
+    networks:
+      - bot-runtime
+      - bot-data
 
   agent-runtime:
     build:
@@ -31,7 +34,7 @@ services:
     container_name: agent-runtime
     <<: *common
     environment:
-      - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:-}
+      - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:?AGENT_RUNTIME_TOKEN must be set and non-empty}
       - AGENT_RUNTIME_WORKSPACE_ROOT=/runtime/workspaces
       - AGENT_RUNTIME_SKILLS_ROOT=/runtime/skills
       - AGENT_RUNTIME_TRACE_JSONL=/runtime/logs/runtime-traces.jsonl
@@ -42,6 +45,8 @@ services:
       - ./agent-runtime/workspaces:/runtime/workspaces
       - ./skills:/runtime/skills:ro
       - ./logs:/runtime/logs
+    networks:
+      - bot-runtime
 
   redis:
     image: redis:alpine
@@ -54,3 +59,9 @@ services:
       - ./data:/data
     command:
       - /usr/local/etc/redis/redis.conf
+    networks:
+      - bot-data
+
+networks:
+  bot-runtime:
+  bot-data:
