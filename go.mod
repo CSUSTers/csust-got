@@ -4,16 +4,16 @@ go 1.26.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/cloudwego/eino v0.9.2
+	github.com/cloudwego/eino v0.9.14
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.9
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/mark3labs/mcp-go v0.58.0
-	github.com/meilisearch/meilisearch-go v0.36.2
+	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/sashabaranov/go-openai v1.41.2
+	github.com/sashabaranov/go-openai v1.42.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.0
 	github.com/swaggest/openapi-go v0.2.61
