@@ -29,3 +29,5 @@ func TraceLastCommand(_ tb.Context) error { return nil }
 func ContextCacheCommand(_ tb.Context) error { return nil }
 
 func RuntimeStatusCommand(_ tb.Context) error { return nil }
+
+func RuntimeResetCommand(_ tb.Context) error { return nil }
