@@ -846,6 +846,19 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
     command.stderr(Stdio::piped());
     #[cfg(unix)]
     command.process_group(0);
+    #[cfg(target_os = "linux")]
+    {
+        let filter = process_group_seccomp_filter()?;
+        unsafe {
+            command.pre_exec(move || {
+                if seccompiler::apply_filter(&filter).is_ok() {
+                    Ok(())
+                } else {
+                    Err(io::Error::from_raw_os_error(libc::EPERM))
+                }
+            });
+        }
+    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -960,6 +973,46 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
         duration_ms,
         error: String::new(),
     })
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_seccomp_filter() -> Result<seccompiler::BpfProgram, RuntimeError> {
+    use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+
+    let target_arch = match std::env::consts::ARCH {
+        "x86_64" => TargetArch::x86_64,
+        "aarch64" => TargetArch::aarch64,
+        arch => {
+            return Err(RuntimeError::internal(format!(
+                "command seccomp is unsupported on Linux architecture {arch}"
+            )));
+        }
+    };
+    let filter = SeccompFilter::new(
+        process_group_seccomp_rules(),
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::EPERM as u32),
+        target_arch,
+    )
+    .map_err(|error| RuntimeError::internal(format!("compile command seccomp filter: {error}")))?;
+    filter
+        .try_into()
+        .map_err(|error| RuntimeError::internal(format!("build command seccomp filter: {error}")))
+}
+
+#[cfg(target_os = "linux")]
+fn process_group_seccomp_rules() -> std::collections::BTreeMap<i64, Vec<seccompiler::SeccompRule>> {
+    let mut rules = std::collections::BTreeMap::from([
+        (libc::SYS_setsid as i64, Vec::new()),
+        (libc::SYS_setpgid as i64, Vec::new()),
+    ]);
+    #[cfg(target_arch = "x86_64")]
+    {
+        const X32_SYSCALL_BIT: i64 = 0x4000_0000;
+        rules.insert((libc::SYS_setsid as i64) | X32_SYSCALL_BIT, Vec::new());
+        rules.insert((libc::SYS_setpgid as i64) | X32_SYSCALL_BIT, Vec::new());
+    }
+    rules
 }
 
 const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
@@ -1624,6 +1677,26 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("background process {pid} still exists after command cleanup");
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn kill_test_process_from_pid_file(pid_file: &Path) {
+        let pid = std::fs::read_to_string(pid_file)
+            .expect("escaped command should write its pid")
+            .trim()
+            .parse::<libc::pid_t>()
+            .expect("escaped pid should be numeric");
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        let process_path = PathBuf::from(format!("/proc/{pid}"));
+        for _ in 0..40 {
+            if !process_path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("test cleanup could not kill escaped process {pid}");
     }
 
     #[cfg(unix)]
@@ -2371,6 +2444,15 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    #[test]
+    fn process_group_seccomp_blocks_setpgid() {
+        let rules = process_group_seccomp_rules();
+        assert!(rules.contains_key(&(libc::SYS_setpgid as i64)));
+        #[cfg(target_arch = "x86_64")]
+        assert!(rules.contains_key(&((libc::SYS_setpgid as i64) | 0x4000_0000)));
+    }
+
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn bash_normal_exit_cleans_up_redirected_background_process() {
         let state = test_state();
@@ -2390,6 +2472,37 @@ mod tests {
 
         assert_eq!(response.exit_code, 0);
         assert_background_process_exits(&pid_file).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bash_blocks_setsid_process_group_escape() {
+        let state = test_state();
+        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("escaped-session.pid");
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "bot:tg:-1".to_string(),
+                run_id: "run_setsid_escape".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: "setsid --fork sh -c 'echo $$ > escaped-session.pid; exec sleep 30'"
+                .to_string(),
+            timeout: String::new(),
+        };
+
+        let result = run_bash(&state, &req).await;
+        let marker_created = pid_file.exists();
+        if marker_created {
+            kill_test_process_from_pid_file(&pid_file).await;
+        }
+        let response = result.unwrap();
+
+        assert!(
+            response.exit_code != 0
+                || response.stderr.contains("Operation not permitted")
+                || response.stderr.contains("EPERM")
+        );
+        assert!(!marker_created, "setsid created an escaped process");
     }
 
     #[tokio::test]
