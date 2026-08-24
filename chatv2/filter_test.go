@@ -164,6 +164,10 @@ func TestBuildFilters(t *testing.T) {
 }
 
 func TestProcessFilters(t *testing.T) {
+	originalConfig := config.BotConfig
+	config.BotConfig = config.NewBotConfig()
+	t.Cleanup(func() { config.BotConfig = originalConfig })
+
 	tests := []struct {
 		name    string
 		msg     *tb.Message
@@ -204,6 +208,58 @@ func TestProcessFilters(t *testing.T) {
 			ctx := &mockTbContext{msg: tt.msg}
 			got := ProcessFilters(ctx, cfg)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestProcessFilters_EnabledGlobalWhitelistRejectsUnlistedGroup(t *testing.T) {
+	originalConfig := config.BotConfig
+	config.BotConfig = config.NewBotConfig()
+	t.Cleanup(func() { config.BotConfig = originalConfig })
+
+	tests := []struct {
+		name      string
+		enabled   bool
+		whitelist []int64
+		msg       *tb.Message
+		want      bool
+	}{
+		{
+			name:    "disabled allows unlisted group",
+			enabled: false,
+			msg:     &tb.Message{Sender: &tb.User{ID: 100}, Chat: &tb.Chat{ID: 200}},
+			want:    true,
+		},
+		{
+			name:      "listed group allowed",
+			enabled:   true,
+			whitelist: []int64{200},
+			msg:       &tb.Message{Sender: &tb.User{ID: 999}, Chat: &tb.Chat{ID: 200}},
+			want:      true,
+		},
+		{
+			name:      "listed sender cannot authorize unlisted group",
+			enabled:   true,
+			whitelist: []int64{100},
+			msg:       &tb.Message{Sender: &tb.User{ID: 100}, Chat: &tb.Chat{ID: 200}},
+			want:      false,
+		},
+		{
+			name:      "unlisted group rejected",
+			enabled:   true,
+			whitelist: []int64{300},
+			msg:       &tb.Message{Sender: &tb.User{ID: 999}, Chat: &tb.Chat{ID: 200}},
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.BotConfig.WhiteListConfig.Enabled = tt.enabled
+			config.BotConfig.WhiteListConfig.Chats = tt.whitelist
+
+			got := ProcessFilters(&mockTbContext{msg: tt.msg}, &config.ChatConfigSingle{})
+			assert.Equalf(t, tt.want, got, "global whitelist enabled=%t chats=%v must authorize by chat ID", tt.enabled, tt.whitelist)
 		})
 	}
 }

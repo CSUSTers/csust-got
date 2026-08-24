@@ -1,11 +1,24 @@
 package main
 
 import (
+	"csust-got/config"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	. "gopkg.in/telebot.v3"
 )
+
+type mainTestContext struct {
+	Context
+	msg *Message
+	bot *Bot
+}
+
+func (m *mainTestContext) Message() *Message { return m.msg }
+func (m *mainTestContext) Chat() *Chat       { return m.msg.Chat }
+func (m *mainTestContext) Sender() *User     { return m.msg.Sender }
+func (m *mainTestContext) Bot() *Bot         { return m.bot }
 
 func TestIsAllowedMessageCommand(t *testing.T) {
 	tests := []struct {
@@ -102,4 +115,44 @@ func TestIsAllowedMcDeadCommand(t *testing.T) {
 			require.Equal(t, tt.wantAllow, isAllowedMcDeadCommand(tt.command, tt.shutdown))
 		})
 	}
+}
+
+func TestCustomHandler_EnabledGlobalWhitelistRejectsUnlistedAgentBeforeFallback(t *testing.T) {
+	originalConfig := config.BotConfig
+	originalRegexHandlers := regexHandlers
+	restoreLogger := zap.ReplaceGlobals(zap.NewNop())
+	t.Cleanup(func() {
+		config.BotConfig = originalConfig
+		regexHandlers = originalRegexHandlers
+		restoreLogger()
+	})
+
+	config.BotConfig = config.NewBotConfig()
+	config.BotConfig.ChatEngine = "v2"
+	config.BotConfig.WhiteListConfig.Enabled = true
+	config.BotConfig.WhiteListConfig.Chats = []int64{300}
+	*config.BotConfig.Agents = config.ChatConfigV2{
+		&config.ChatConfigSingle{
+			Name:    "uncompiled-agent",
+			Agent:   &config.AgentConfig{Enable: true},
+			Trigger: []*config.ChatTrigger{{Reply: true}},
+		},
+	}
+	regexHandlers = nil
+
+	ctx := &mainTestContext{
+		msg: &Message{
+			Text:   "hello",
+			Chat:   &Chat{ID: 200},
+			Sender: &User{ID: 100},
+			ReplyTo: &Message{
+				Sender: &User{Username: "test_bot"},
+			},
+		},
+		bot: &Bot{Me: &User{Username: "test_bot"}},
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, customHandler(ctx))
+	}, "unlisted Agent chat must be rejected before legacy fallback")
 }
