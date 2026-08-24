@@ -6,12 +6,18 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::{
+    ambient_authority,
+    fs::{Dir, OpenOptions},
+};
 use diffy::Patch;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
+    io::{self, Read as _, Write as _},
     path::{Component, Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -436,15 +442,15 @@ fn join_virtual_path(prefix: &str, rel: &Path) -> String {
 }
 
 async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse, RuntimeError> {
-    let path = resolve_virtual_path(state, &req.common, &req.path, AccessMode::Write).await?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .await
-            .map_err(|e| RuntimeError::internal(format!("create parent failed: {e}")))?;
-    }
-    fs::write(&path, req.content.as_bytes())
-        .await
-        .map_err(|e| RuntimeError::internal(format!("write failed: {e}")))?;
+    let components = workspace_write_components(state, &req.common, &req.path)?;
+    write_workspace_file_nofollow(
+        state,
+        &req.common.namespace,
+        components,
+        req.content.as_bytes().to_vec(),
+        "write failed",
+    )
+    .await?;
     Ok(TextResponse {
         ok: true,
         bytes: req.content.len(),
@@ -453,22 +459,163 @@ async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse
 }
 
 async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, RuntimeError> {
-    let path = resolve_virtual_path(state, &req.common, &req.path, AccessMode::Write).await?;
-    let original = fs::read_to_string(&path)
-        .await
-        .map_err(|e| RuntimeError::bad_request(format!("read before edit failed: {e}")))?;
+    let components = workspace_write_components(state, &req.common, &req.path)?;
+    let original =
+        read_workspace_file_nofollow(state, &req.common.namespace, components.clone()).await?;
     let patch = Patch::from_str(&req.patch)
         .map_err(|e| RuntimeError::bad_request(format!("invalid unified diff: {e}")))?;
     let edited = diffy::apply(&original, &patch)
         .map_err(|e| RuntimeError::bad_request(format!("apply patch failed: {e}")))?;
-    fs::write(&path, edited.as_bytes())
-        .await
-        .map_err(|e| RuntimeError::internal(format!("write edited file failed: {e}")))?;
+    write_workspace_file_nofollow(
+        state,
+        &req.common.namespace,
+        components,
+        edited.as_bytes().to_vec(),
+        "write edited file failed",
+    )
+    .await?;
     Ok(TextResponse {
         ok: true,
         bytes: edited.len(),
         ..Default::default()
     })
+}
+
+fn workspace_write_components(
+    state: &AppState,
+    common: &CommonRequest,
+    raw: &str,
+) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
+    let workspace = namespace_workspace(state, &common.namespace);
+    let raw = if raw.trim().is_empty() {
+        "/workspace"
+    } else {
+        raw.trim()
+    };
+    let (base, rel) = split_virtual_path(state, &workspace, &common.cwd, raw)?;
+    if base.as_path() == state.skills_root.as_path() {
+        return Err(RuntimeError::forbidden("skills are read-only"));
+    }
+    if base != workspace {
+        return Err(RuntimeError::forbidden(
+            "write path must be under /workspace",
+        ));
+    }
+    safe_join(&workspace, &rel)?;
+    workspace_file_components(&rel)
+}
+
+fn workspace_file_components(relative: &Path) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
+    let mut components = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(name) => components.push(name.to_os_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(RuntimeError::forbidden("path traversal is not allowed"));
+            }
+        }
+    }
+    if components.is_empty() {
+        return Err(RuntimeError::bad_request("write target must name a file"));
+    }
+    Ok(components)
+}
+
+async fn read_workspace_file_nofollow(
+    state: &AppState,
+    namespace: &str,
+    components: Vec<std::ffi::OsString>,
+) -> Result<String, RuntimeError> {
+    let workspace_root = state.workspace_root.clone();
+    let namespace = sanitize_namespace(namespace);
+    tokio::task::spawn_blocking(move || {
+        let (parent, file_name) =
+            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components)?;
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        let mut file = parent
+            .open_with(Path::new(&file_name), &options)
+            .map_err(|error| {
+                RuntimeError::bad_request(format!("read before edit failed: {error}"))
+            })?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).map_err(|error| {
+            RuntimeError::bad_request(format!("read before edit failed: {error}"))
+        })?;
+        Ok(contents)
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("workspace read task failed: {error}")))?
+}
+
+async fn write_workspace_file_nofollow(
+    state: &AppState,
+    namespace: &str,
+    components: Vec<std::ffi::OsString>,
+    content: Vec<u8>,
+    error_prefix: &'static str,
+) -> Result<usize, RuntimeError> {
+    let workspace_root = state.workspace_root.clone();
+    let namespace = sanitize_namespace(namespace);
+    tokio::task::spawn_blocking(move || {
+        let (parent, file_name) =
+            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components)?;
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .follow(FollowSymlinks::No);
+        let mut file = parent
+            .open_with(Path::new(&file_name), &options)
+            .map_err(|error| {
+                RuntimeError::forbidden(format!("{error_prefix}: safe open failed: {error}"))
+            })?;
+        file.write_all(&content)
+            .map_err(|error| RuntimeError::internal(format!("{error_prefix}: {error}")))?;
+        Ok(content.len())
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("workspace write task failed: {error}")))?
+}
+
+fn open_workspace_file_parent_nofollow(
+    workspace_root: &Path,
+    namespace: &str,
+    components: &[std::ffi::OsString],
+) -> Result<(Dir, std::ffi::OsString), RuntimeError> {
+    let root = Dir::open_ambient_dir(workspace_root, ambient_authority())
+        .map_err(|error| RuntimeError::internal(format!("open workspace root failed: {error}")))?;
+    let mut directory =
+        open_or_create_dir_nofollow(&root, Path::new(namespace)).map_err(|error| {
+            RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
+        })?;
+    let (file_name, parent_components) = components
+        .split_last()
+        .ok_or_else(|| RuntimeError::bad_request("write target must name a file"))?;
+    for component in parent_components {
+        directory =
+            open_or_create_dir_nofollow(&directory, Path::new(component)).map_err(|error| {
+                RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
+            })?;
+    }
+    Ok((directory, file_name.clone()))
+}
+
+fn open_or_create_dir_nofollow(parent: &Dir, name: &Path) -> io::Result<Dir> {
+    match parent.open_dir_nofollow(name) {
+        Ok(directory) => Ok(directory),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if let Err(error) = parent.create_dir(name)
+                && error.kind() != io::ErrorKind::AlreadyExists
+            {
+                return Err(error);
+            }
+            parent.open_dir_nofollow(name)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, RuntimeError> {
@@ -502,6 +649,8 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
     command.kill_on_drop(true);
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -509,39 +658,101 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
             return Err(RuntimeError::internal(format!("command failed: {error}")));
         }
     };
+    let child_id = child.id();
     let Some(stdout) = child.stdout.take() else {
-        cleanup_failed_command(&mut child).await;
+        cleanup_failed_command(&mut child, child_id).await;
         cleanup_shell_dir(cleanup_dir.as_deref()).await;
         return Err(RuntimeError::internal(
             "command failed: stdout pipe unavailable",
         ));
     };
     let Some(stderr) = child.stderr.take() else {
-        cleanup_failed_command(&mut child).await;
+        cleanup_failed_command(&mut child, child_id).await;
         cleanup_shell_dir(cleanup_dir.as_deref()).await;
         return Err(RuntimeError::internal(
             "command failed: stderr pipe unavailable",
         ));
     };
-    let result = timeout(timeout_duration, async {
-        tokio::try_join!(
-            child.wait(),
-            collect_output(stdout, state.max_output_chars),
-            collect_output(stderr, state.max_output_chars),
-        )
-    })
-    .await;
-    let (status, stdout, stderr) = match result {
-        Ok(Ok(result)) => result,
+    let stdout_collector = collect_output(stdout, state.max_output_chars);
+    let stderr_collector = collect_output(stderr, state.max_output_chars);
+    tokio::pin!(stdout_collector, stderr_collector);
+    let mut stdout_result = None;
+    let mut stderr_result = None;
+    let child_wait_result = {
+        let child_wait = child.wait();
+        tokio::pin!(child_wait);
+        timeout(timeout_duration, async {
+            loop {
+                tokio::select! {
+                    biased;
+                    status = &mut child_wait => break status,
+                    output = &mut stdout_collector, if stdout_result.is_none() => match output {
+                        Ok(output) => stdout_result = Some(output),
+                        Err(error) => return Err(error),
+                    },
+                    output = &mut stderr_collector, if stderr_result.is_none() => match output {
+                        Ok(output) => stderr_result = Some(output),
+                        Err(error) => return Err(error),
+                    },
+                }
+            }
+        })
+        .await
+    };
+    let status = match child_wait_result {
+        Ok(Ok(status)) => status,
         Ok(Err(error)) => {
-            cleanup_failed_command(&mut child).await;
+            cleanup_failed_command(&mut child, child_id).await;
             cleanup_shell_dir(cleanup_dir.as_deref()).await;
             return Err(RuntimeError::internal(format!("command failed: {error}")));
         }
         Err(_) => {
-            cleanup_failed_command(&mut child).await;
+            cleanup_failed_command(&mut child, child_id).await;
             cleanup_shell_dir(cleanup_dir.as_deref()).await;
             return Err(RuntimeError::bad_request("command timed out"));
+        }
+    };
+    if let Err(error) = cleanup_command_process_group(child_id) {
+        warn!(%error, "failed to kill command process group during cleanup");
+        cleanup_shell_dir(cleanup_dir.as_deref()).await;
+        return Err(RuntimeError::internal(format!("command failed: {error}")));
+    }
+    let (stdout, stderr) = match timeout(timeout_duration, async {
+        tokio::join!(
+            async {
+                match stdout_result.take() {
+                    Some(output) => Ok(output),
+                    None => stdout_collector.await,
+                }
+            },
+            async {
+                match stderr_result.take() {
+                    Some(output) => Ok(output),
+                    None => stderr_collector.await,
+                }
+            },
+        )
+    })
+    .await
+    {
+        Ok((Ok(stdout), Ok(stderr))) => (stdout, stderr),
+        Ok((Err(error), _)) => {
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::internal(format!(
+                "command failed: stdout collection failed: {error}"
+            )));
+        }
+        Ok((_, Err(error))) => {
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::internal(format!(
+                "command failed: stderr collection failed: {error}"
+            )));
+        }
+        Err(_) => {
+            cleanup_shell_dir(cleanup_dir.as_deref()).await;
+            return Err(RuntimeError::internal(
+                "command failed: output collection timed out",
+            ));
         }
     };
     cleanup_shell_dir(cleanup_dir.as_deref()).await;
@@ -600,13 +811,41 @@ fn format_collected_output(output: CollectedOutput) -> String {
     text
 }
 
-async fn cleanup_failed_command(child: &mut Child) {
+async fn cleanup_failed_command(child: &mut Child, child_id: Option<u32>) {
+    if let Err(error) = cleanup_command_process_group(child_id) {
+        warn!(%error, "failed to kill command process group during cleanup");
+    }
     if let Err(error) = child.start_kill() {
         warn!(%error, "failed to kill command during cleanup");
     }
     if let Err(error) = child.wait().await {
         warn!(%error, "failed to reap command during cleanup");
     }
+}
+
+#[cfg(unix)]
+fn cleanup_command_process_group(child_id: Option<u32>) -> Result<(), String> {
+    use rustix::{
+        io::Errno,
+        process::{Pid, Signal, kill_process_group},
+    };
+
+    let Some(child_id) = child_id else {
+        return Ok(());
+    };
+    let child_id = i32::try_from(child_id)
+        .map_err(|_| format!("command process id {child_id} exceeds i32"))?;
+    let pid = Pid::from_raw(child_id)
+        .ok_or_else(|| format!("command process id {child_id} is not positive"))?;
+    match kill_process_group(pid, Signal::KILL) {
+        Ok(()) | Err(Errno::SRCH) => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(not(unix))]
+fn cleanup_command_process_group(_child_id: Option<u32>) -> Result<(), String> {
+    Ok(())
 }
 
 async fn cleanup_shell_dir(cleanup_dir: Option<&Path>) {
@@ -1175,6 +1414,23 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(target_os = "linux")]
+    async fn assert_background_process_exits(pid_file: &Path) {
+        let pid = std::fs::read_to_string(pid_file)
+            .expect("background command should write its pid")
+            .trim()
+            .parse::<u32>()
+            .expect("background pid should be numeric");
+        let process_path = PathBuf::from(format!("/proc/{pid}"));
+        for _ in 0..40 {
+            if !process_path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("background process {pid} still exists after command cleanup");
+    }
+
     #[cfg(unix)]
     fn create_dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
         std::os::unix::fs::symlink(target, link)
@@ -1183,6 +1439,16 @@ mod tests {
     #[cfg(windows)]
     fn create_dir_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
         std::os::windows::fs::symlink_dir(target, link)
+    }
+
+    #[cfg(unix)]
+    fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(target, link)
     }
 
     #[test]
@@ -1521,6 +1787,123 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn write_and_edit_reject_final_symlink_escape() {
+        let state = test_state();
+        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let outside = tempdir().unwrap().keep();
+        let sentinel = outside.join("sentinel.txt");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(&sentinel, b"outside sentinel\n").await.unwrap();
+        if let Err(error) = create_file_symlink(&sentinel, &workspace.join("link.txt")) {
+            if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied {
+                return;
+            }
+            panic!("create file symlink: {error}");
+        }
+        let app = app(state);
+
+        let write_response = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/write",
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_final_symlink_write",
+                    "path": "/workspace/link.txt",
+                    "content": "escaped",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            write_response.status() == StatusCode::FORBIDDEN
+                || write_response.status() == StatusCode::BAD_REQUEST
+        );
+        assert_eq!(fs::read(&sentinel).await.unwrap(), b"outside sentinel\n");
+
+        let edit_response = app
+            .oneshot(request_with_json(
+                "/v1/edit",
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_final_symlink_edit",
+                    "path": "/workspace/link.txt",
+                    "patch": "--- a/sentinel.txt\n+++ b/sentinel.txt\n@@ -1 +1 @@\n-outside sentinel\n+escaped\n",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert!(
+            edit_response.status() == StatusCode::FORBIDDEN
+                || edit_response.status() == StatusCode::BAD_REQUEST
+        );
+        assert_eq!(fs::read(&sentinel).await.unwrap(), b"outside sentinel\n");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn write_rejects_symlink_swap_race() {
+        use rustix::fs::{RenameFlags, renameat_with};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let state = test_state();
+        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let outside = tempdir().unwrap().keep();
+        let sentinel = outside.join("note");
+        fs::create_dir_all(workspace.join("pivot")).await.unwrap();
+        fs::write(&sentinel, b"outside sentinel\n").await.unwrap();
+        create_dir_symlink(&outside, &workspace.join("pivot-link")).unwrap();
+
+        let swapping = Arc::new(AtomicBool::new(true));
+        let switcher = {
+            let swapping = Arc::clone(&swapping);
+            let workspace = workspace.clone();
+            std::thread::spawn(move || {
+                let workspace_dir = std::fs::File::open(workspace).unwrap();
+                while swapping.load(Ordering::Relaxed) {
+                    renameat_with(
+                        &workspace_dir,
+                        "pivot",
+                        &workspace_dir,
+                        "pivot-link",
+                        RenameFlags::EXCHANGE,
+                    )
+                    .unwrap();
+                }
+            })
+        };
+
+        let app = app(state);
+        let mut statuses = Vec::new();
+        for _ in 0..200 {
+            let response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/write",
+                    json!({
+                        "namespace": "bot:tg:-1",
+                        "run_id": "run_symlink_swap",
+                        "path": "/workspace/pivot/note",
+                        "content": "inside",
+                    }),
+                ))
+                .await
+                .unwrap();
+            statuses.push(response.status());
+        }
+
+        swapping.store(false, Ordering::Relaxed);
+        switcher.join().unwrap();
+
+        assert_eq!(fs::read(&sentinel).await.unwrap(), b"outside sentinel\n");
+        assert!(
+            statuses
+                .iter()
+                .all(|status| status.is_success() || status.is_client_error())
+        );
+    }
+
+    #[tokio::test]
     async fn bash_executes_and_traces() {
         let state = test_state();
         let trace_path = state.trace_jsonl_path.clone();
@@ -1604,6 +1987,51 @@ mod tests {
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bash_timeout_cleans_up_background_process_group() {
+        let mut state = test_state();
+        state.command_timeout = Duration::from_millis(100);
+        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("timeout-background.pid");
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "bot:tg:-1".to_string(),
+                run_id: "run_timeout_background".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: "sleep 30 & echo $! > timeout-background.pid; wait".to_string(),
+            timeout: String::new(),
+        };
+
+        let error = run_bash(&state, &req).await.unwrap_err();
+
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.message, "command timed out");
+        assert_background_process_exits(&pid_file).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bash_normal_exit_cleans_up_redirected_background_process() {
+        let state = test_state();
+        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("normal-background.pid");
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "bot:tg:-1".to_string(),
+                run_id: "run_normal_background".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: "sleep 30 >/dev/null 2>&1 & echo $! > normal-background.pid; exit 0"
+                .to_string(),
+            timeout: String::new(),
+        };
+
+        let response = run_bash(&state, &req).await.unwrap();
+
+        assert_eq!(response.exit_code, 0);
+        assert_background_process_exits(&pid_file).await;
     }
 
     #[tokio::test]

@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 axum = "0.8"
+cap-fs-ext = "4.0.2"
+cap-std = "4.0.2"
 diffy = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -15,6 +17,9 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 walkdir = "2"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"
