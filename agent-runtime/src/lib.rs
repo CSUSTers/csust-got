@@ -353,10 +353,21 @@ async fn reset_handler(
 }
 
 async fn read_file(state: &AppState, req: &ReadRequest) -> Result<TextResponse, RuntimeError> {
-    let path = resolve_virtual_path(state, &req.common, &req.path, AccessMode::Read).await?;
-    let data = fs::read_to_string(&path)
-        .await
-        .map_err(|e| RuntimeError::bad_request(format!("read failed: {e}")))?;
+    let data = if let Some(components) = workspace_access_components(state, &req.common, &req.path)?
+    {
+        if components.is_empty() {
+            return Err(RuntimeError::bad_request(
+                "read failed: path is a directory",
+            ));
+        }
+        read_workspace_file_nofollow(state, &req.common.namespace, components, "read failed")
+            .await?
+    } else {
+        let path = resolve_virtual_path(state, &req.common, &req.path, AccessMode::Read).await?;
+        fs::read_to_string(&path)
+            .await
+            .map_err(|e| RuntimeError::bad_request(format!("read failed: {e}")))?
+    };
     let (content, truncated) = truncate_output(data, state.max_output_chars);
     Ok(TextResponse {
         content,
@@ -375,24 +386,30 @@ async fn grep_files(state: &AppState, req: &GrepRequest) -> Result<TextResponse,
     } else {
         req.path.as_str()
     };
-    let path = resolve_virtual_path(state, &req.common, target, AccessMode::Read).await?;
     let re = Regex::new(&req.pattern)
         .or_else(|_| Regex::new(&regex::escape(&req.pattern)))
         .map_err(|e| RuntimeError::bad_request(format!("invalid pattern: {e}")))?;
-    let mut output = String::new();
-    if path.is_file() {
-        grep_one_file(state, &req.common.namespace, &path, &re, &mut output).await?;
+    let output = if let Some(components) = workspace_access_components(state, &req.common, target)?
+    {
+        grep_workspace_nofollow(state, &req.common.namespace, components, re).await?
     } else {
-        for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            grep_one_file(state, &req.common.namespace, entry.path(), &re, &mut output).await?;
-            if output.len() > state.max_output_chars {
-                break;
+        let path = resolve_virtual_path(state, &req.common, target, AccessMode::Read).await?;
+        let mut output = String::new();
+        if path.is_file() {
+            grep_one_file(state, &req.common.namespace, &path, &re, &mut output).await?;
+        } else {
+            for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                grep_one_file(state, &req.common.namespace, entry.path(), &re, &mut output).await?;
+                if output.len() > state.max_output_chars {
+                    break;
+                }
             }
         }
-    }
+        output
+    };
     let (output, truncated) = truncate_output(output, state.max_output_chars);
     Ok(TextResponse {
         output,
@@ -413,12 +430,16 @@ async fn grep_one_file(
         return Ok(());
     };
     let display_path = virtual_output_path(state, namespace, path);
+    append_grep_matches(&display_path, &data, re, output);
+    Ok(())
+}
+
+fn append_grep_matches(display_path: &str, data: &str, re: &Regex, output: &mut String) {
     for (idx, line) in data.lines().enumerate() {
         if re.is_match(line) {
             output.push_str(&format!("{display_path}:{}:{line}\n", idx + 1));
         }
     }
-    Ok(())
 }
 
 fn virtual_output_path(state: &AppState, namespace: &str, path: &Path) -> String {
@@ -449,6 +470,7 @@ async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse
         components,
         req.content.as_bytes().to_vec(),
         "write failed",
+        true,
     )
     .await?;
     Ok(TextResponse {
@@ -460,8 +482,13 @@ async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse
 
 async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, RuntimeError> {
     let components = workspace_write_components(state, &req.common, &req.path)?;
-    let original =
-        read_workspace_file_nofollow(state, &req.common.namespace, components.clone()).await?;
+    let original = read_workspace_file_nofollow(
+        state,
+        &req.common.namespace,
+        components.clone(),
+        "read before edit failed",
+    )
+    .await?;
     let patch = Patch::from_str(&req.patch)
         .map_err(|e| RuntimeError::bad_request(format!("invalid unified diff: {e}")))?;
     let edited = diffy::apply(&original, &patch)
@@ -472,6 +499,7 @@ async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, 
         components,
         edited.as_bytes().to_vec(),
         "write edited file failed",
+        false,
     )
     .await?;
     Ok(TextResponse {
@@ -486,6 +514,20 @@ fn workspace_write_components(
     common: &CommonRequest,
     raw: &str,
 ) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
+    let Some(components) = workspace_access_components(state, common, raw)? else {
+        return Err(RuntimeError::forbidden("skills are read-only"));
+    };
+    if components.is_empty() {
+        return Err(RuntimeError::bad_request("write target must name a file"));
+    }
+    Ok(components)
+}
+
+fn workspace_access_components(
+    state: &AppState,
+    common: &CommonRequest,
+    raw: &str,
+) -> Result<Option<Vec<std::ffi::OsString>>, RuntimeError> {
     let workspace = namespace_workspace(state, &common.namespace);
     let raw = if raw.trim().is_empty() {
         "/workspace"
@@ -494,18 +536,18 @@ fn workspace_write_components(
     };
     let (base, rel) = split_virtual_path(state, &workspace, &common.cwd, raw)?;
     if base.as_path() == state.skills_root.as_path() {
-        return Err(RuntimeError::forbidden("skills are read-only"));
+        return Ok(None);
     }
     if base != workspace {
         return Err(RuntimeError::forbidden(
-            "write path must be under /workspace",
+            "path must be under /workspace or /skills",
         ));
     }
     safe_join(&workspace, &rel)?;
-    workspace_file_components(&rel)
+    Ok(Some(workspace_path_components(&rel)?))
 }
 
-fn workspace_file_components(relative: &Path) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
+fn workspace_path_components(relative: &Path) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
     let mut components = Vec::new();
     for component in relative.components() {
         match component {
@@ -516,9 +558,6 @@ fn workspace_file_components(relative: &Path) -> Result<Vec<std::ffi::OsString>,
             }
         }
     }
-    if components.is_empty() {
-        return Err(RuntimeError::bad_request("write target must name a file"));
-    }
     Ok(components)
 }
 
@@ -526,24 +565,15 @@ async fn read_workspace_file_nofollow(
     state: &AppState,
     namespace: &str,
     components: Vec<std::ffi::OsString>,
+    error_prefix: &'static str,
 ) -> Result<String, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
     let namespace = sanitize_namespace(namespace);
     tokio::task::spawn_blocking(move || {
         let (parent, file_name) =
-            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components)?;
-        let mut options = OpenOptions::new();
-        options.read(true).follow(FollowSymlinks::No);
-        let mut file = parent
-            .open_with(Path::new(&file_name), &options)
-            .map_err(|error| {
-                RuntimeError::bad_request(format!("read before edit failed: {error}"))
-            })?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).map_err(|error| {
-            RuntimeError::bad_request(format!("read before edit failed: {error}"))
-        })?;
-        Ok(contents)
+            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components, false)?;
+        read_file_from_dir_nofollow(&parent, &file_name)
+            .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))
     })
     .await
     .map_err(|error| RuntimeError::internal(format!("workspace read task failed: {error}")))?
@@ -555,12 +585,17 @@ async fn write_workspace_file_nofollow(
     components: Vec<std::ffi::OsString>,
     content: Vec<u8>,
     error_prefix: &'static str,
+    create_parents: bool,
 ) -> Result<usize, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
     let namespace = sanitize_namespace(namespace);
     tokio::task::spawn_blocking(move || {
-        let (parent, file_name) =
-            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components)?;
+        let (parent, file_name) = open_workspace_file_parent_nofollow(
+            &workspace_root,
+            &namespace,
+            &components,
+            create_parents,
+        )?;
         let mut options = OpenOptions::new();
         options
             .write(true)
@@ -584,29 +619,42 @@ fn open_workspace_file_parent_nofollow(
     workspace_root: &Path,
     namespace: &str,
     components: &[std::ffi::OsString],
+    create_parents: bool,
 ) -> Result<(Dir, std::ffi::OsString), RuntimeError> {
-    let root = Dir::open_ambient_dir(workspace_root, ambient_authority())
-        .map_err(|error| RuntimeError::internal(format!("open workspace root failed: {error}")))?;
     let mut directory =
-        open_or_create_dir_nofollow(&root, Path::new(namespace)).map_err(|error| {
-            RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
-        })?;
+        open_workspace_namespace_nofollow(workspace_root, namespace, create_parents)?;
     let (file_name, parent_components) = components
         .split_last()
         .ok_or_else(|| RuntimeError::bad_request("write target must name a file"))?;
     for component in parent_components {
-        directory =
-            open_or_create_dir_nofollow(&directory, Path::new(component)).map_err(|error| {
-                RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
-            })?;
+        directory = open_or_create_dir_nofollow(&directory, Path::new(component), create_parents)
+            .map_err(|error| {
+            RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
+        })?;
     }
     Ok((directory, file_name.clone()))
 }
 
-fn open_or_create_dir_nofollow(parent: &Dir, name: &Path) -> io::Result<Dir> {
+fn open_workspace_namespace_nofollow(
+    workspace_root: &Path,
+    namespace: &str,
+    create_namespace: bool,
+) -> Result<Dir, RuntimeError> {
+    let root = Dir::open_ambient_dir(workspace_root, ambient_authority())
+        .map_err(|error| RuntimeError::internal(format!("open workspace root failed: {error}")))?;
+    open_or_create_dir_nofollow(&root, Path::new(namespace), create_namespace).map_err(|error| {
+        RuntimeError::forbidden(format!("resolved path escapes namespace: {error}"))
+    })
+}
+
+fn open_or_create_dir_nofollow(
+    parent: &Dir,
+    name: &Path,
+    create_if_missing: bool,
+) -> io::Result<Dir> {
     match parent.open_dir_nofollow(name) {
         Ok(directory) => Ok(directory),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        Err(error) if create_if_missing && error.kind() == io::ErrorKind::NotFound => {
             if let Err(error) = parent.create_dir(name)
                 && error.kind() != io::ErrorKind::AlreadyExists
             {
@@ -616,6 +664,153 @@ fn open_or_create_dir_nofollow(parent: &Dir, name: &Path) -> io::Result<Dir> {
         }
         Err(error) => Err(error),
     }
+}
+
+async fn grep_workspace_nofollow(
+    state: &AppState,
+    namespace: &str,
+    components: Vec<std::ffi::OsString>,
+    re: Regex,
+) -> Result<String, RuntimeError> {
+    let workspace_root = state.workspace_root.clone();
+    let namespace = sanitize_namespace(namespace);
+    let max_output_chars = state.max_output_chars;
+    tokio::task::spawn_blocking(move || {
+        grep_workspace_nofollow_sync(
+            &workspace_root,
+            &namespace,
+            &components,
+            &re,
+            max_output_chars,
+        )
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("workspace grep task failed: {error}")))?
+}
+
+fn grep_workspace_nofollow_sync(
+    workspace_root: &Path,
+    namespace: &str,
+    components: &[std::ffi::OsString],
+    re: &Regex,
+    max_output_chars: usize,
+) -> Result<String, RuntimeError> {
+    let mut output = String::new();
+    let relative = workspace_relative_path(components);
+    if components.is_empty() {
+        let directory = open_workspace_namespace_nofollow(workspace_root, namespace, false)?;
+        grep_workspace_directory_nofollow(
+            &directory,
+            &relative,
+            re,
+            &mut output,
+            max_output_chars,
+        )?;
+        return Ok(output);
+    }
+
+    let (parent, file_name) =
+        open_workspace_file_parent_nofollow(workspace_root, namespace, components, false)?;
+    let metadata = parent
+        .symlink_metadata(Path::new(&file_name))
+        .map_err(|error| {
+            RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
+        })?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(RuntimeError::forbidden("grep target is a symbolic link"));
+    }
+    if file_type.is_dir() {
+        let directory = parent
+            .open_dir_nofollow(Path::new(&file_name))
+            .map_err(|error| {
+                RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
+            })?;
+        grep_workspace_directory_nofollow(
+            &directory,
+            &relative,
+            re,
+            &mut output,
+            max_output_chars,
+        )?;
+    } else if file_type.is_file() {
+        let data = read_file_from_dir_nofollow(&parent, &file_name).map_err(|error| {
+            RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
+        })?;
+        append_grep_matches(
+            &join_virtual_path("/workspace", &relative),
+            &data,
+            re,
+            &mut output,
+        );
+    }
+    Ok(output)
+}
+
+fn grep_workspace_directory_nofollow(
+    directory: &Dir,
+    relative: &Path,
+    re: &Regex,
+    output: &mut String,
+    max_output_chars: usize,
+) -> Result<(), RuntimeError> {
+    let entries = directory
+        .entries()
+        .map_err(|error| RuntimeError::internal(format!("grep directory failed: {error}")))?;
+    for entry in entries.filter_map(Result::ok) {
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name();
+        let child_relative = relative.join(&name);
+        if file_type.is_dir() {
+            let Ok(child) = directory.open_dir_nofollow(Path::new(&name)) else {
+                continue;
+            };
+            grep_workspace_directory_nofollow(
+                &child,
+                &child_relative,
+                re,
+                output,
+                max_output_chars,
+            )?;
+        } else if file_type.is_file() {
+            let Ok(data) = read_file_from_dir_nofollow(directory, &name) else {
+                continue;
+            };
+            append_grep_matches(
+                &join_virtual_path("/workspace", &child_relative),
+                &data,
+                re,
+                output,
+            );
+        }
+        if output.len() > max_output_chars {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn read_file_from_dir_nofollow(parent: &Dir, file_name: &std::ffi::OsString) -> io::Result<String> {
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let mut file = parent.open_with(Path::new(file_name), &options)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    Ok(contents)
+}
+
+fn workspace_relative_path(components: &[std::ffi::OsString]) -> PathBuf {
+    let mut path = PathBuf::new();
+    for component in components {
+        path.push(component);
+    }
+    path
 }
 
 async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, RuntimeError> {
@@ -1840,6 +2035,65 @@ mod tests {
         assert_eq!(fs::read(&sentinel).await.unwrap(), b"outside sentinel\n");
     }
 
+    #[tokio::test]
+    async fn read_and_grep_reject_final_and_parent_symlink_escapes() {
+        let state = test_state();
+        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let outside = tempdir().unwrap().keep();
+        let secret = outside.join("secret.txt");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(&secret, b"outside-only-secret\n").await.unwrap();
+        if let Err(error) = create_file_symlink(&secret, &workspace.join("final-link.txt")) {
+            if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied {
+                return;
+            }
+            panic!("create file symlink: {error}");
+        }
+        if let Err(error) = create_dir_symlink(&outside, &workspace.join("parent-link")) {
+            if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied {
+                return;
+            }
+            panic!("create directory symlink: {error}");
+        }
+        let app = app(state);
+
+        for path in [
+            "/workspace/final-link.txt",
+            "/workspace/parent-link/secret.txt",
+        ] {
+            let read_response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/read",
+                    json!({
+                        "namespace": "bot:tg:-1",
+                        "run_id": "run_symlink_read",
+                        "path": path,
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert!(read_response.status().is_client_error());
+
+            let grep_response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/grep",
+                    json!({
+                        "namespace": "bot:tg:-1",
+                        "run_id": "run_symlink_grep",
+                        "pattern": "outside-only-secret",
+                        "path": path,
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert!(grep_response.status().is_client_error());
+        }
+
+        assert_eq!(fs::read(&secret).await.unwrap(), b"outside-only-secret\n");
+    }
+
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn write_rejects_symlink_swap_race() {
@@ -1896,6 +2150,110 @@ mod tests {
         switcher.join().unwrap();
 
         assert_eq!(fs::read(&sentinel).await.unwrap(), b"outside sentinel\n");
+        assert!(
+            statuses
+                .iter()
+                .all(|status| status.is_success() || status.is_client_error())
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn read_and_grep_reject_symlink_swap_race() {
+        use rustix::fs::{RenameFlags, renameat_with};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let state = test_state();
+        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let outside = tempdir().unwrap().keep();
+        let secret = "outside-only-secret";
+        let outside_note = outside.join("note");
+        fs::create_dir_all(workspace.join("pivot")).await.unwrap();
+        fs::write(workspace.join("pivot/note"), b"inside note\n")
+            .await
+            .unwrap();
+        fs::write(&outside_note, format!("{secret}\n"))
+            .await
+            .unwrap();
+        create_dir_symlink(&outside, &workspace.join("pivot-link")).unwrap();
+
+        let swapping = Arc::new(AtomicBool::new(true));
+        let switcher = {
+            let swapping = Arc::clone(&swapping);
+            let workspace = workspace.clone();
+            std::thread::spawn(move || {
+                let workspace_dir = std::fs::File::open(workspace).unwrap();
+                while swapping.load(Ordering::Relaxed) {
+                    renameat_with(
+                        &workspace_dir,
+                        "pivot",
+                        &workspace_dir,
+                        "pivot-link",
+                        RenameFlags::EXCHANGE,
+                    )
+                    .unwrap();
+                }
+            })
+        };
+
+        let app = app(state);
+        let mut statuses = Vec::new();
+        let mut outside_secret_returned = false;
+        for _ in 0..200 {
+            let read_response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/read",
+                    json!({
+                        "namespace": "bot:tg:-1",
+                        "run_id": "run_symlink_swap_read",
+                        "path": "/workspace/pivot/note",
+                    }),
+                ))
+                .await
+                .unwrap();
+            let read_status = read_response.status();
+            if read_status.is_success() {
+                let body = to_bytes(read_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let parsed: TextResponse = serde_json::from_slice(&body).unwrap();
+                outside_secret_returned |= parsed.content.contains(secret);
+            }
+            statuses.push(read_status);
+
+            let grep_response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/grep",
+                    json!({
+                        "namespace": "bot:tg:-1",
+                        "run_id": "run_symlink_swap_grep",
+                        "pattern": secret,
+                        "path": "/workspace/pivot",
+                    }),
+                ))
+                .await
+                .unwrap();
+            let grep_status = grep_response.status();
+            if grep_status.is_success() {
+                let body = to_bytes(grep_response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let parsed: TextResponse = serde_json::from_slice(&body).unwrap();
+                outside_secret_returned |= parsed.output.contains(secret);
+            }
+            statuses.push(grep_status);
+        }
+
+        swapping.store(false, Ordering::Relaxed);
+        switcher.join().unwrap();
+
+        assert!(!outside_secret_returned);
+        assert_eq!(
+            fs::read(&outside_note).await.unwrap(),
+            format!("{secret}\n").as_bytes()
+        );
         assert!(
             statuses
                 .iter()
