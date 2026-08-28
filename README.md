@@ -86,6 +86,36 @@ Please modify the configuration in `config.yaml`.
 - `redis.pass`: Change Redis password
 - `requirepass` in `redis.conf`: Change Redis password (must match the above)
 
+## Agent v3 Runtime and Controlled Fetch
+
+The repository defaults are `agent_v3.enable: false` and `agent_v3.runtime.fetch_enabled: false`. To expose Agent v3 CLI Fetch, explicitly enable Agent v3, its Runtime, and its Fetch gate:
+
+```yaml
+agent_v3:
+  enable: true
+  runtime:
+    enable: true
+    fetch_enabled: true
+```
+
+These bot configuration gates do not, by themselves, activate production egress. The base `docker-compose.yml` keeps Fetch disabled. Controlled Fetch requires the `docker-compose.fetch.yml` overlay and its `agent-fetch` profile, plus the required environment, secret, bounded mounts, network, and cgroup prerequisites.
+
+Model and MCP tools are direct model tool calls using registered schemas. Runtime Fetch instead runs `/usr/local/bin/fetch` inside the Bash environment through the `bash` tool, conceptually `bash(command="fetch GET ...")`. An MCP/MCPO tool named `fetch` is a separate capability and does not pass through the Runtime Egress Broker. If the Runtime Broker must be the only web-egress policy boundary, remove or disable fetch-like MCP tools for that Agent.
+
+Shell direct IPv4 and IPv6 access is denied; the Bash CLI reaches the Runtime proxy through an inherited Unix FD, and the Broker alone has public egress, enforcing SSRF, DNS, redirect, budget, and audit controls. MCP fetch does not use this path.
+
+Before enabling Fetch in production, run the following on the target native Linux host:
+
+```bash
+bash scripts/validate-agent-runtime-host.sh
+bash scripts/test-agent-runtime-compose.sh
+bash scripts/agent-runtime-attack-matrix.sh
+```
+
+Each command must exit 0, the attack matrix must report `fail=0 skipped=0`, and cleanup must leave zero residue. A target-native Linux production receipt is still pending, so do not enable production Fetch until these conditions are met. See the [Agent Runtime Fetch Egress design](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md) for the full threat model and deployment contract.
+
+The Agent Runtime workflow publishes `ghcr.io/csusters/agent-runtime:<tag>` and `ghcr.io/csusters/agent-fetch-broker:<tag>`. The `dev` branch publishes `dev` and `latest-dev`; a published release publishes its release tag and `latest`. Current Compose files build the `runtime` and `broker` targets from source by default. To use GHCR, replace deployment-specific `build:` entries with matching `image:` references; the base Compose files do not pull these images automatically.
+
 ## Commands
 
 ### Basic Functions

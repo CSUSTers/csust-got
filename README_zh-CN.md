@@ -86,6 +86,36 @@ docker-compose up -d
 - `redis.pass`: 修改 Redis 密码
 - `redis.conf` 中的 `requirepass`: 修改 Redis 密码（需要和上面一致）
 
+## Agent v3 Runtime 与受控 Fetch
+
+仓库默认配置为 `agent_v3.enable: false` 和 `agent_v3.runtime.fetch_enabled: false`。如需开放 Agent v3 的 CLI Fetch，必须显式启用 Agent v3、其 Runtime 和 Fetch 开关：
+
+```yaml
+agent_v3:
+  enable: true
+  runtime:
+    enable: true
+    fetch_enabled: true
+```
+
+这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile，并满足所需的环境变量、密钥、受限挂载、网络和 cgroup 前置条件。
+
+模型和 MCP 工具是通过已注册 schema 直接发起的模型工具调用。Runtime Fetch 则在 Bash 环境中运行 `/usr/local/bin/fetch`，并通过 `bash` 工具调用，概念上为 `bash(command="fetch GET ...")`。名为 `fetch` 的 MCP/MCPO 工具是独立能力，不经过 Runtime Egress Broker。若要求 Runtime Broker 成为唯一的 Web 出站策略边界，请为该 Agent 移除或禁用 fetch 类 MCP 工具。
+
+Shell 的直接 IPv4 和 IPv6 访问会被拒绝，Bash CLI 通过继承的 Unix FD 访问 Runtime 代理；只有 Broker 可以公共出站，并执行 SSRF、DNS、重定向、预算和审计控制。MCP fetch 不走这一路径。
+
+在生产环境启用 Fetch 前，请在目标原生 Linux 主机上运行：
+
+```bash
+bash scripts/validate-agent-runtime-host.sh
+bash scripts/test-agent-runtime-compose.sh
+bash scripts/agent-runtime-attack-matrix.sh
+```
+
+每个命令都必须以 0 退出，攻击矩阵必须报告 `fail=0 skipped=0`，且清理后不得留下任何残留物。目标原生 Linux 的生产启用回执仍在等待中，在满足这些条件前请勿启用生产 Fetch。完整威胁模型和部署约定见 [Agent Runtime Fetch Egress 设计](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md)。
+
+Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。当前 Compose 文件默认从源码构建 `runtime` 和 `broker` target。若要使用 GHCR，请将部署专用的 `build:` 条目替换为匹配的 `image:` 引用，基础 Compose 文件不会自动拉取这些镜像。
+
 ## 命令列表
 
 ### 基础功能
