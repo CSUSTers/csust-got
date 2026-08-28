@@ -112,6 +112,7 @@ agent_v3:
     namespace_scope: "group"
     command_timeout: "120s"
     max_output_chars: 12000
+    fetch_enabled: false
   tools:
     expose_only:
       - read

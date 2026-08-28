@@ -327,6 +327,7 @@ type AgentV3RuntimeConfig struct {
 	CommandTimeout string `mapstructure:"command_timeout"`
 	MaxOutputChars int    `mapstructure:"max_output_chars"`
 	RequestTimeout string `mapstructure:"request_timeout"`
+	FetchEnabled   *bool  `mapstructure:"fetch_enabled"`
 }
 
 // AgentV3ToolsConfig constrains agent-v3 visible tools.
@@ -591,6 +592,11 @@ func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
 		return 120 * time.Second
 	}
 	return parseFlexibleDuration(c.Runtime.RequestTimeout, c.RuntimeCommandTimeout())
+}
+
+// RuntimeFetchEnabled reports whether controlled external fetch guidance is enabled.
+func (c *AgentV3Config) RuntimeFetchEnabled() bool {
+	return c != nil && c.Runtime.FetchEnabled != nil && *c.Runtime.FetchEnabled
 }
 
 // EffectiveModel returns the agent-v3 model override or the chat fallback.

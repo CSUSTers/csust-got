@@ -282,12 +282,13 @@ func truncateForModel(s string, limit int, already bool) (string, bool) {
 }
 
 func buildAgentV3Tools(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config) []tool.BaseTool {
+	fetchEnabled := cfg.RuntimeFetchEnabled()
 	tools := []tool.BaseTool{
 		&remoteReadTool{},
 		&remoteGrepTool{},
 		&remoteWriteTool{},
 		&remoteEditTool{},
-		&remoteBashTool{},
+		&remoteBashTool{fetchEnabled: fetchEnabled},
 	}
 	if agentV3RichSkillAvailable(chatCfg, cfg) {
 		tools = append(tools, &loadSkillTool{})
@@ -295,13 +296,13 @@ func buildAgentV3Tools(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Conf
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
 		{agentV3ToolNameField: agentV3ToolWrite, agentV3ToolArgsField: "path,content", agentV3ToolDescField: "Write a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
-		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: "Run a shell command in the remote runtime namespace. Common utilities include curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils."},
+		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: agentV3BashToolDescription(fetchEnabled)},
 	}
 	if includeLoadSkill {
 		infos = append(infos, map[string]any{
@@ -477,7 +478,9 @@ func (t *remoteEditTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	return "edit ok", nil
 }
 
-type remoteBashTool struct{}
+type remoteBashTool struct {
+	fetchEnabled bool
+}
 
 type remoteBashArgs struct {
 	Command string `json:"command"`
@@ -488,13 +491,29 @@ type remoteBashArgs struct {
 func (t *remoteBashTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolBash,
-		Desc: "Run a shell command in the remote runtime workspace. Common utilities include curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils.",
+		Desc: agentV3BashToolDescription(t.fetchEnabled),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			agentV3ToolCommandField: {Type: "string", Desc: "Shell command to execute with the runtime's installed CLI tools such as curl and jq", Required: true},
+			agentV3ToolCommandField: {Type: "string", Desc: agentV3BashCommandDescription(t.fetchEnabled), Required: true},
 			agentV3ToolCWDField:     {Type: "string", Desc: agentV3ToolCWDDescription},
 			agentV3ToolTimeoutField: {Type: "string", Desc: "Optional timeout such as 30s, capped by bot config"},
 		}),
 	}, nil
+}
+
+func agentV3BashToolDescription(fetchEnabled bool) string {
+	desc := "Run a shell command in the remote runtime workspace. Common local utilities include jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils. Git can operate only on local repositories. curl, wget, remote git operations, /dev/tcp, and other socket clients cannot connect to external networks."
+	if fetchEnabled {
+		desc += " Use fetch as the only external network entry point. It supports application-layer HTTP methods except CONNECT, application headers, bodies, stdin, file uploads, pipes, and --output. This is prompt guidance only, not a complete HTTPie implementation. Response bodies use stdout; headers and errors use stderr, so pipes and redirection work."
+	}
+	return desc
+}
+
+func agentV3BashCommandDescription(fetchEnabled bool) string {
+	desc := "Shell command to execute with the runtime's installed local CLI tools"
+	if fetchEnabled {
+		desc += "; for external HTTP requests, fetch supports application-layer HTTP methods except CONNECT, application headers, bodies, stdin, file uploads, pipes, and --output; this is prompt guidance only, not a complete HTTPie implementation"
+	}
+	return desc
 }
 
 func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
