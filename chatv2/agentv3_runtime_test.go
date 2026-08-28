@@ -102,7 +102,14 @@ func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
 func TestAgentV3FetchGuidanceMatchesRuntimeContract(t *testing.T) {
 	rules := agentV3RuntimeSkillRules(true)
 	for _, want := range []string{
-		"fetch is the only allowed external network entry point",
+		"Model and MCP tools live in the model tool namespace",
+		"called directly according to their registered schemas",
+		"fetch refers specifically to the /usr/local/bin/fetch executable inside the Bash environment",
+		"Invoke this CLI only through the bash tool",
+		"bash(command=\"fetch GET https://api.example.com/items\")",
+		"only allowed external network entry point for shell commands in the Bash environment",
+		"does not apply to model/MCP tool calls",
+		"An MCP tool also named fetch is distinct and must not be substituted when instructions require the Bash CLI",
 		"fetch GET https://api.example.com/items | jq '.items[]'",
 		"fetch POST https://api.example.com/items name=value count:=2",
 		"fetch POST https://upload.example.com --form file@/workspace/report.txt",
@@ -129,9 +136,23 @@ func TestAgentV3FetchGuidanceMatchesRuntimeContract(t *testing.T) {
 
 func TestAgentV3FetchGuidanceIsOmittedWhenDisabled(t *testing.T) {
 	rules := agentV3RuntimeSkillRules(false)
+	prefix := buildAgentV3StablePrefix("soul", "", false)
 	toolDefs := agentV3ToolDefinitionsText(false, false)
-	assert.NotContains(t, rules, "fetch")
-	assert.NotContains(t, toolDefs, "fetch")
+	desc := agentV3BashToolDescription(false)
+	commandDesc := agentV3BashCommandDescription(false)
+	for name, text := range map[string]string{
+		"runtime rules":     rules,
+		"stable prefix":     prefix,
+		"JSON definitions":  toolDefs,
+		"bash description":  desc,
+		"command parameter": commandDesc,
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.NotContains(t, text, "fetch")
+			assert.NotContains(t, text, "/usr/local/bin/fetch")
+			assert.NotContains(t, text, "bash(command=")
+		})
+	}
 	assert.Contains(t, rules, "curl")
 	assert.Contains(t, rules, "cannot connect")
 
@@ -152,6 +173,11 @@ func TestRemoteBashToolDocumentsMethodsExceptCONNECT(t *testing.T) {
 	require.NoError(t, err)
 
 	methodContract := "application-layer HTTP methods except CONNECT"
+	toolNamespaceContract := "Model and MCP tools live in the model tool namespace"
+	cliContract := "fetch refers specifically to the /usr/local/bin/fetch executable inside the Bash environment"
+	invocationContract := "Invoke this CLI only through the bash tool"
+	egressScopeContract := "only allowed external network entry point for shell commands in the Bash environment"
+	mcpFetchContract := "An MCP tool also named fetch is distinct and must not be substituted when instructions require the Bash CLI"
 	for name, text := range map[string]string{
 		"stable prefix":     buildAgentV3StablePrefix("soul", "", true),
 		"JSON definitions":  agentV3ToolDefinitionsText(false, true),
@@ -159,6 +185,13 @@ func TestRemoteBashToolDocumentsMethodsExceptCONNECT(t *testing.T) {
 		"command parameter": string(paramsJSON),
 	} {
 		t.Run(name, func(t *testing.T) {
+			assert.Contains(t, text, toolNamespaceContract)
+			assert.Contains(t, text, cliContract)
+			assert.Contains(t, text, invocationContract)
+			assert.Contains(t, text, "fetch GET https://api.example.com/items")
+			assert.Contains(t, text, egressScopeContract)
+			assert.Contains(t, text, "does not apply to model/MCP tool calls")
+			assert.Contains(t, text, mcpFetchContract)
 			assert.Contains(t, text, methodContract)
 			assert.Contains(t, text, "application headers")
 			assert.Contains(t, text, "bodies")
@@ -733,7 +766,7 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 	assert.Less(t, idxRuntimeRules, idxSkills, "<runtime_and_skill_rules> must appear before <agent_v3_skills>")
 
 	withoutFetch := buildAgentV3StablePrefix("soul", skillBlock, false)
-	assert.Contains(t, withRich, "fetch is the only allowed external network entry point")
+	assert.Contains(t, withRich, "only allowed external network entry point for shell commands in the Bash environment")
 	assert.NotContains(t, withoutFetch, "fetch")
 }
 
