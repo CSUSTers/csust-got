@@ -104,7 +104,9 @@ agent_v3:
 
 Shell 的直接 IPv4 和 IPv6 访问会被拒绝，Bash CLI 通过继承的 Unix FD 访问 Runtime 代理；只有 Broker 可以公共出站，并执行 SSRF、DNS、重定向、预算和审计控制。MCP fetch 不走这一路径。
 
-在生产环境启用 Fetch 前，请在目标原生 Linux 主机上运行：
+PRoot 会创建并执行临时 loader，因此 Runtime 的 `/tmp` 必须可执行。基础 Compose 部署通过 `/tmp:rw,exec,nosuid,nodev,size=64m,mode=1777` 满足这一仅限部署的兼容性要求；它不会新增 Runtime readiness gate。
+
+在生产环境启用 Fetch 前，请在目标原生 Linux 主机上运行以下推荐的部署检查：
 
 ```bash
 bash scripts/validate-agent-runtime-host.sh
@@ -112,7 +114,7 @@ bash scripts/test-agent-runtime-compose.sh
 bash scripts/agent-runtime-attack-matrix.sh
 ```
 
-每个命令都必须以 0 退出，攻击矩阵必须报告 `fail=0 skipped=0`，且清理后不得留下任何残留物。目标原生 Linux 的生产启用回执仍在等待中，在满足这些条件前请勿启用生产 Fetch。完整威胁模型和部署约定见 [Agent Runtime Fetch Egress 设计](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md)。
+validator、Compose/static 测试和攻击矩阵都是部署检查，而不是 Runtime gate：Runtime 不会动态读取或根据其回执进行 gate。每个命令应以 0 退出，攻击矩阵应报告 `fail=0 skipped=0`，且清理后不应留下任何残留物。主机 validator 接受等价的 nftables reject 渲染，例如 `iifname "br-agent-fetch" reject with icmp port-unreachable`；但它仍要求精确的 bridge 匹配、所需 deny set、hook/priority/policy，以及紧跟预期匹配后的 reject verdict。不要为规避 PRoot 问题而使用 `privileged`、Docker `seccomp=unconfined`、AppArmor unconfined 或 `SYS_PTRACE`，除非已单独接受其风险。目标原生 Linux 的生产启用回执仍在等待中，在满足这些条件前请勿启用生产 Fetch。完整威胁模型和部署约定见 [Agent Runtime Fetch Egress 设计](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md)。
 
 Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。当前 Compose 文件默认从源码构建 `runtime` 和 `broker` target。若要使用 GHCR，请将部署专用的 `build:` 条目替换为匹配的 `image:` 引用，基础 Compose 文件不会自动拉取这些镜像。
 

@@ -104,7 +104,9 @@ Model and MCP tools are direct model tool calls using registered schemas. Runtim
 
 Shell direct IPv4 and IPv6 access is denied; the Bash CLI reaches the Runtime proxy through an inherited Unix FD, and the Broker alone has public egress, enforcing SSRF, DNS, redirect, budget, and audit controls. MCP fetch does not use this path.
 
-Before enabling Fetch in production, run the following on the target native Linux host:
+PRoot creates and executes a temporary loader, so the Runtime `/tmp` must be executable. The base Compose deployment supplies `/tmp:rw,exec,nosuid,nodev,size=64m,mode=1777` for this deployment-only compatibility requirement; it does not add a Runtime readiness gate.
+
+Before enabling Fetch in production, run these recommended deployment checks on the target native Linux host:
 
 ```bash
 bash scripts/validate-agent-runtime-host.sh
@@ -112,7 +114,7 @@ bash scripts/test-agent-runtime-compose.sh
 bash scripts/agent-runtime-attack-matrix.sh
 ```
 
-Each command must exit 0, the attack matrix must report `fail=0 skipped=0`, and cleanup must leave zero residue. A target-native Linux production receipt is still pending, so do not enable production Fetch until these conditions are met. See the [Agent Runtime Fetch Egress design](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md) for the full threat model and deployment contract.
+The validator, Compose/static test, and attack matrix are deployment checks, not Runtime gates: the Runtime does not dynamically consume or gate on their receipt. Each command should exit 0, the attack matrix should report `fail=0 skipped=0`, and cleanup should leave zero residue. The host validator accepts equivalent nftables reject rendering such as `iifname "br-agent-fetch" reject with icmp port-unreachable`, while still requiring the exact bridge match, required deny sets, hook/priority/policy, and a reject verdict immediately after the expected match. Do not compensate for PRoot issues by using `privileged`, Docker `seccomp=unconfined`, AppArmor unconfined, or `SYS_PTRACE` unless that risk is separately accepted. A target-native Linux production receipt is still pending, so do not enable production Fetch until these conditions are met. See the [Agent Runtime Fetch Egress design](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md) for the full threat model and deployment contract.
 
 The Agent Runtime workflow publishes `ghcr.io/csusters/agent-runtime:<tag>` and `ghcr.io/csusters/agent-fetch-broker:<tag>`. The `dev` branch publishes `dev` and `latest-dev`; a published release publishes its release tag and `latest`. Current Compose files build the `runtime` and `broker` targets from source by default. To use GHCR, replace deployment-specific `build:` entries with matching `image:` references; the base Compose files do not pull these images automatically.
 
