@@ -1,0 +1,5 @@
+table inet agent_fetch {
+  chain input {
+    iifname "br-agent-fetch" reject
+  }
+}

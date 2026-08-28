@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+NFT_REJECT_MATCHER="$SCRIPT_DIR/nft-agent-fetch-reject.awk"
+
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
@@ -294,17 +297,23 @@ chain_has_exact_rule() {
   ' "$NFT_TABLE"
 }
 
+chain_has_required_reject() {
+  chain=$1
+  prefix=$2
+  awk -v chain="$chain" -v prefix="$prefix" -f "$NFT_REJECT_MATCHER" "$NFT_TABLE"
+}
+
 chain_has_exact_rule input 'type filter hook input priority filter - 5; policy accept;' ||
   chain_has_exact_rule input 'type filter hook input priority -5; policy accept;' ||
   fail 'nftables input chain lacks the required hook, priority, or accept policy'
-chain_has_exact_rule input 'iifname "br-agent-fetch" reject' ||
+chain_has_required_reject input 'iifname "br-agent-fetch"' ||
   fail 'nftables input chain lacks the unconditional br-agent-fetch host reject'
 chain_has_exact_rule forward 'type filter hook forward priority filter - 5; policy accept;' ||
   chain_has_exact_rule forward 'type filter hook forward priority -5; policy accept;' ||
   fail 'nftables forward chain lacks the required hook, priority, or accept policy'
-chain_has_exact_rule forward 'iifname "br-agent-fetch" ip daddr @deny4 reject' ||
+chain_has_required_reject forward 'iifname "br-agent-fetch" ip daddr @deny4' ||
   fail 'nftables forward chain lacks the br-agent-fetch IPv4 destination reject'
-chain_has_exact_rule forward 'iifname "br-agent-fetch" ip6 daddr @deny6 reject' ||
+chain_has_required_reject forward 'iifname "br-agent-fetch" ip6 daddr @deny6' ||
   fail 'nftables forward chain lacks the br-agent-fetch IPv6 destination reject'
 
 tr ',{}' '\n\n\n' <"$NFT_DENY4" | sed 's/^[[:space:]]*//;s/[[:space:];]*$//' >"$NFT_DENY4_TOKENS"

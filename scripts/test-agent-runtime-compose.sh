@@ -11,6 +11,11 @@ for tool in awk docker jq mktemp grep rm rmdir sed; do
   fi
 done
 
+if ! sh "$SCRIPT_DIR/test-agent-runtime-nft-reject.sh"; then
+  printf 'error: nft reject matcher fixtures failed\n' >&2
+  exit 1
+fi
+
 TMP_DIR=$(mktemp -d)
 cleanup() {
   [ -n "$TMP_DIR" ] || return
@@ -239,6 +244,18 @@ check_file_excludes 'base Compose does not define Fetch socket or HMAC material'
   "$REPO_ROOT/docker-compose.yml" 'fetch-socket'
 check_file_excludes 'base Compose does not define Fetch egress' \
   "$REPO_ROOT/docker-compose.yml" 'fetch-egress'
+check_file_contains_all 'host validator delegates semantic reject matching to the tested AWK helper' \
+  "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" \
+  'chain_has_required_reject() {' \
+  '-f "$NFT_REJECT_MATCHER"' \
+  'chain_has_required_reject input' \
+  'chain_has_required_reject forward'
+check_file_excludes 'host validator does not revert input reject validation to byte-exact matching' \
+  "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" \
+  "chain_has_exact_rule input 'iifname \"br-agent-fetch\" reject'"
+check_file_contains 'semantic reject matcher requires reject immediately after the expected prefix' \
+  "$REPO_ROOT/scripts/nft-agent-fetch-reject.awk" \
+  'remainder ~ /^[[:space:]]+reject([[:space:]]+with[[:space:]].+)?$/'
 check_file_contains 'Runtime Dockerfile defines the approved security-test-only target' \
   "$REPO_ROOT/agent-runtime/Dockerfile" 'FROM runtime-base AS runtime-security-test'
 check_file_contains 'Runtime security-test target has the approved image label' \
@@ -950,10 +967,11 @@ check_json 'HMAC secret is exclusive to runtime and broker' '
   .services["agent-fetch-broker"].secrets[0].uid == "10002" and
   .services["agent-fetch-broker"].secrets[0].gid == "10001" and
   .services["agent-fetch-broker"].secrets[0].mode == "0440"'
-check_json 'dangerous container privileges and Docker socket are absent' '
+check_json 'dangerous container privileges, tracing, unconfined profiles, and Docker socket are absent' '
   all(.services | to_entries[];
     (.value.privileged // false) != true and
-    (all(.value.cap_add[]?; ascii_upcase != "SYS_ADMIN")) and
+    (all(.value.cap_add[]?; (ascii_upcase != "SYS_ADMIN" and ascii_upcase != "SYS_PTRACE"))) and
+    (all(.value.security_opt[]?; (ascii_downcase != "seccomp=unconfined" and ascii_downcase != "apparmor=unconfined"))) and
     (all(.value.volumes[]?;
       (((.source // "") | ascii_downcase) | contains("docker.sock") | not) and
       (((.target // "") | ascii_downcase) | contains("docker.sock") | not) and
@@ -971,12 +989,15 @@ check_json 'runtime has aggregate Docker resource limits' '
   (.services["agent-runtime"].memswap_limit | tonumber) == 1073741824 and
   .services["agent-runtime"].cpus == 2 and
   .services["agent-runtime"].init == true'
-check_json 'runtime has finite nofile and bounded tmpfs' '
+check_json 'runtime has finite nofile and executable hardened tmpfs for PRoot' '
   .services["agent-runtime"].ulimits.nofile.soft == 256 and
   .services["agent-runtime"].ulimits.nofile.hard == 4096 and
   any(.services["agent-runtime"].tmpfs[];
-    . == "/tmp:size=64m,mode=1777" or
-    (.path == "/tmp" and .size == 67108864 and .mode == 1023))'
+    . == "/tmp:rw,exec,nosuid,nodev,size=64m,mode=1777" or
+    (.path == "/tmp" and .size == 67108864 and .mode == 1023 and .exec == true and .nosuid == true and .nodev == true)) and
+  all(.services["agent-runtime"].tmpfs[];
+    (type != "string" or (contains("noexec") | not)) and
+    (type != "object" or (.noexec // false) != true))'
 check_json 'delegated commands sibling uses the canonical host path in Runtime' '
   .services["agent-runtime"].environment as $e |
   $e.AGENT_RUNTIME_CGROUP_AGGREGATE_ROOT == ("/sys/fs/cgroup/" + $cgroup_parent) and
@@ -1139,11 +1160,12 @@ check_security_json 'security override retains caller-prepared bounded roots and
   any(.services["agent-runtime"].volumes[]; .source == $workspace_host and .target == "/runtime/workspaces") and
   any(.services["agent-runtime"].volumes[]; .source == $runtime_log_host and .target == "/runtime/logs") and
   any(.services["agent-fetch-broker"].volumes[]; .source == $audit_host and .target == "/var/log/agent-fetch")'
-check_security_json 'security override does not add privileged, SYS_ADMIN, Docker socket, or host network' '
+check_security_json 'security override does not add privileged, SYS_ADMIN, SYS_PTRACE, unconfined profiles, Docker socket, or host network' '
   all(.services | to_entries[];
     (.value.privileged // false) != true and
     (.value.network_mode // "") != "host" and
-    all(.value.cap_add[]?; ascii_upcase != "SYS_ADMIN") and
+    all(.value.cap_add[]?; (ascii_upcase != "SYS_ADMIN" and ascii_upcase != "SYS_PTRACE")) and
+    all(.value.security_opt[]?; (ascii_downcase != "seccomp=unconfined" and ascii_downcase != "apparmor=unconfined")) and
     all(.value.volumes[]?;
       (((.source // "") | ascii_downcase) | contains("docker.sock") | not) and
       (((.target // "") | ascii_downcase) | contains("docker.sock") | not)))'
