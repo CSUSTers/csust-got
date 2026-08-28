@@ -1,0 +1,68 @@
+services:
+  agent-runtime:
+    build:
+      target: runtime-security-test
+    labels:
+      org.csusters.agent-runtime.security-test-only: "true"
+      org.csusters.agent-runtime.security-test-guard: ${AGENT_RUNTIME_SECURITY_TEST_GUARD:?set the Task 9 security-test guard}
+    environment:
+      AGENT_RUNTIME_SECURITY_TEST_ONLY: "1"
+      AGENT_RUNTIME_CGROUP_ROOT: ${AGENT_RUNTIME_TEST_CGROUP_ROOT:-/sys/fs/cgroup/${AGENT_RUNTIME_CGROUP_PARENT}/commands}
+      AGENT_RUNTIME_COMMAND_TIMEOUT_SECS: "30"
+      AGENT_RUNTIME_COMMAND_CPU_BUDGET_SECS: "10"
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import json,os,urllib.request;
+          r=urllib.request.Request('http://127.0.0.1:8080/v1/status',headers={'Authorization':'Bearer '+os.environ['AGENT_RUNTIME_TOKEN']});
+          s=json.load(urllib.request.urlopen(r,timeout=1));print(json.dumps(s,separators=(',',':')));
+          raise SystemExit(0 if s.get('ok') else 1)
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  agent-fetch-broker:
+    environment:
+      AGENT_FETCH_DNS_SERVERS: 11.0.0.10:5353
+      AGENT_FETCH_AUDIT_PATH: ${AGENT_FETCH_TEST_AUDIT_PATH:-/var/log/agent-fetch/audit.jsonl}
+    networks:
+      fetch-egress:
+        ipv4_address: 11.0.0.2
+
+  agent-fetch-fixture:
+    build:
+      context: ./agent-runtime/tests/fixtures
+      dockerfile: Dockerfile
+    restart: "no"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 32
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    environment:
+      FIXTURE_MAX_REQUEST_BODY_BYTES: "8388608"
+      FIXTURE_MAX_EVENTS: "256"
+      FIXTURE_STREAM_MAX_BYTES: "67108864"
+      FIXTURE_BYTES_MAX_BYTES: "8388608"
+    labels:
+      org.csusters.agent-runtime.security-test-only: "true"
+      org.csusters.agent-runtime.security-test-guard: ${AGENT_RUNTIME_SECURITY_TEST_GUARD:?set the Task 9 security-test guard}
+    networks:
+      fetch-egress:
+        ipv4_address: 11.0.0.10
+
+networks:
+  fetch-egress:
+    ipam:
+      config:
+        - subnet: 11.0.0.0/24
+          gateway: 11.0.0.1
