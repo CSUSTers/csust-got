@@ -21,11 +21,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use tokio::fs;
 #[cfg(test)]
 use tokio::io::{AsyncRead, AsyncReadExt};
 #[cfg(test)]
 use tokio::time::timeout;
-use tokio::{fs, io::AsyncWriteExt};
 use tracing::{info, warn};
 use walkdir::WalkDir;
 
@@ -46,6 +46,7 @@ pub mod runtime_fetch_proxy;
 pub mod runtime_security;
 pub mod sandbox;
 pub mod scan;
+pub mod trace;
 pub mod workspace_budget;
 
 use cgroup::CommandIdentity;
@@ -53,6 +54,7 @@ use exec::{BashHealth, CommandSupervisor, ExecTarget, SupervisorError};
 use identity::{RuntimeIdentity, command_jail_root};
 use namespace_gate::{NamespaceGate, NamespaceGateError};
 use runtime_fetch_proxy::RuntimeFetchProxy;
+use trace::JsonlTraceSink;
 use workspace_budget::{Reservation, WorkspaceBudget};
 
 #[derive(Clone)]
@@ -62,7 +64,7 @@ pub struct AppState {
     pub auth_token: Option<String>,
     pub max_output_chars: usize,
     pub command_timeout: Duration,
-    pub trace_jsonl_path: PathBuf,
+    pub trace_sink: JsonlTraceSink,
     pub bash_sandbox: BashSandboxMode,
     pub command_supervisor: Option<CommandSupervisor>,
     pub bash_health: BashHealth,
@@ -1842,21 +1844,11 @@ async fn write_trace(
     } else {
         info!(run_id_hash = %record.run_id_hash, op = %record.op, duration_ms = record.duration_ms, "runtime operation completed");
     }
-    let Ok(line) = serde_json::to_vec(&record) else {
+    let Ok(mut line) = serde_json::to_vec(&record) else {
         return;
     };
-    if let Some(parent) = state.trace_jsonl_path.parent() {
-        let _ = fs::create_dir_all(parent).await;
-    }
-    if let Ok(mut f) = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&state.trace_jsonl_path)
-        .await
-    {
-        let _ = f.write_all(&line).await;
-        let _ = f.write_all(b"\n").await;
-    }
+    line.push(b'\n');
+    let _ = state.trace_sink.append_record(line).await;
 }
 
 fn hash(value: &str) -> String {
@@ -1902,6 +1894,7 @@ mod tests {
     use axum::body::to_bytes;
     use serde_json::json;
     use tempfile::tempdir;
+    use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
 
     fn test_state() -> AppState {
@@ -1931,7 +1924,7 @@ mod tests {
             auth_token: None,
             max_output_chars: 128,
             command_timeout: Duration::from_secs(5),
-            trace_jsonl_path: tempdir().unwrap().keep().join("trace.jsonl"),
+            trace_sink: JsonlTraceSink::new(tempdir().unwrap().keep().join("trace.jsonl")),
             bash_sandbox: BashSandboxMode::None,
             command_supervisor: Some(command_supervisor),
             bash_health,
@@ -3164,9 +3157,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bash_executes_and_traces() {
+    async fn runtime_writes_trace_jsonl() {
         let state = test_state();
-        let trace_path = state.trace_jsonl_path.clone();
+        let trace_path = state.trace_sink.path().to_path_buf();
         let app = app(state);
         let resp = app
             .oneshot(request_with_json(

@@ -221,7 +221,8 @@ fn c7_cpu_usage_read_and_parse_failure_latch() {
 async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     use agent_runtime::{
         AppState, BashSandboxMode, app, namespace_gate::NamespaceGate,
-        runtime_fetch_proxy::RuntimeFetchProxy, workspace_budget::WorkspaceBudget,
+        runtime_fetch_proxy::RuntimeFetchProxy, trace::JsonlTraceSink,
+        workspace_budget::WorkspaceBudget,
     };
     use axum::{body::Body, http::Request};
     use std::time::Duration;
@@ -242,7 +243,7 @@ async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
         auth_token: None,
         max_output_chars: 1024,
         command_timeout: Duration::from_secs(1),
-        trace_jsonl_path: root.path().join("trace.jsonl"),
+        trace_sink: JsonlTraceSink::new(root.path().join("trace.jsonl")),
         bash_sandbox: BashSandboxMode::Proot,
         command_supervisor: None,
         bash_health: health.clone(),

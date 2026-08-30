@@ -5,6 +5,7 @@ use agent_runtime::{
     namespace_gate::NamespaceGate,
     runtime_fetch_proxy::RuntimeFetchProxy,
     runtime_security::RuntimeFetchSecurity,
+    trace::JsonlTraceSink,
     workspace_budget::WorkspaceBudget,
 };
 use std::env;
@@ -57,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
         auth_token: Some(config.auth_token.expose_secret().to_owned()),
         max_output_chars: config.max_output_chars,
         command_timeout: config.command_timeout,
-        trace_jsonl_path: config.trace_jsonl_path.clone(),
+        trace_sink: JsonlTraceSink::new(config.trace_jsonl_path.clone()),
         bash_sandbox: BashSandboxMode::Proot,
         command_supervisor: command_supervisor.clone(),
         bash_health,

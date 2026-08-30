@@ -5,7 +5,9 @@ package chatv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +22,8 @@ import (
 )
 
 const agentV3TraceSaveTimeout = 5 * time.Second
+
+var agentV3TraceSinkMu sync.Mutex
 
 // AgentV3Trace records one agent-v3 run.
 type AgentV3Trace struct {
@@ -203,21 +207,39 @@ func appendAgentV3TraceJSONL(path string, payload []byte) error {
 	if path == "" || len(payload) == 0 {
 		return nil
 	}
+	record := make([]byte, len(payload)+1)
+	copy(record, payload)
+	record[len(payload)] = '\n'
+
+	agentV3TraceSinkMu.Lock()
+	defer agentV3TraceSinkMu.Unlock()
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
 			return err
 		}
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.Write(payload); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil {
+		return errors.Join(err, f.Close())
+	}
+	writeErr := writeAgentV3TraceRecord(f, record)
+	closeErr := f.Close()
+	return errors.Join(writeErr, closeErr)
+}
+
+func writeAgentV3TraceRecord(w io.Writer, record []byte) error {
+	n, err := w.Write(record)
+	if err != nil {
 		return err
 	}
-	if _, err := f.Write([]byte("\n")); err != nil {
-		return err
+	if n != len(record) {
+		return io.ErrShortWrite
 	}
 	return nil
 }
