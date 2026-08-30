@@ -12,6 +12,7 @@ import (
 	"csust-got/orm"
 	"csust-got/util"
 
+	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -35,7 +36,7 @@ func MemoryCommand(ctx tb.Context) error {
 			return ctx.Reply("要记住的内容不能为空。")
 		}
 		if err := addAgentV3Memory(context.Background(), scope, agentV3SenderID(ctx), rest); err != nil {
-			return ctx.Reply("写入 memory 失败：" + err.Error())
+			return replyAgentV3CommandError(ctx, "memory_add", err)
 		}
 		return ctx.Reply("已记住。")
 	case "list":
@@ -44,7 +45,7 @@ func MemoryCommand(ctx tb.Context) error {
 		}
 		items, err := orm.AgentV3ListMemory(context.Background(), scope)
 		if err != nil {
-			return ctx.Reply("读取 memory 失败：" + err.Error())
+			return replyAgentV3CommandError(ctx, "memory_list", err)
 		}
 		if len(items) == 0 {
 			return ctx.Reply("当前没有 memory。")
@@ -65,11 +66,11 @@ func MemoryCommand(ctx tb.Context) error {
 			return ctx.Reply("请提供 memory id。")
 		}
 		if err := orm.AgentV3ForgetMemory(context.Background(), scope, rest); err != nil {
-			return ctx.Reply("删除 memory 失败：" + err.Error())
+			return replyAgentV3CommandError(ctx, "memory_forget", err)
 		}
 		if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
 			if err := rebuildAgentV3MemorySnapshot(context.Background(), scope, config.BotConfig.AgentV3.ContextCacheTTL()); err != nil {
-				return ctx.Reply("重建 memory snapshot 失败：" + err.Error())
+				return replyAgentV3CommandError(ctx, "memory_snapshot_rebuild", err)
 			}
 		}
 		return ctx.Reply("已删除。")
@@ -85,7 +86,7 @@ func TraceLastCommand(ctx tb.Context) error {
 	}
 	summary, err := orm.AgentV3GetTraceSummary(context.Background(), agentV3ScopeFromContext(ctx))
 	if err != nil {
-		return ctx.Reply("读取 trace 失败：" + err.Error())
+		return replyAgentV3CommandError(ctx, "trace_last", err)
 	}
 	if summary == nil {
 		return ctx.Reply("还没有 agent v3 trace。")
@@ -101,7 +102,7 @@ func ContextCacheCommand(ctx tb.Context) error {
 	}
 	summary, err := orm.AgentV3GetTraceSummary(context.Background(), agentV3ScopeFromContext(ctx))
 	if err != nil {
-		return ctx.Reply("读取 context cache 失败：" + err.Error())
+		return replyAgentV3CommandError(ctx, "context_cache", err)
 	}
 	if summary == nil {
 		return ctx.Reply("还没有 context cache 记录。")
@@ -154,7 +155,7 @@ func RuntimeStatusCommand(ctx tb.Context) error {
 	)
 	status, err := client.Status(context.Background())
 	if err != nil {
-		return ctx.Reply("runtime 不可用：" + err.Error())
+		return replyAgentV3CommandError(ctx, "runtime_status", err)
 	}
 	data, _ := json.MarshalIndent(status, "", "  ")
 	return replyAgentV3Pre(ctx, string(data))
@@ -186,7 +187,7 @@ func RuntimeResetCommand(ctx tb.Context) error {
 		},
 	})
 	if err != nil {
-		return ctx.Reply("runtime reset 失败：" + err.Error())
+		return replyAgentV3CommandError(ctx, "runtime_reset", err)
 	}
 	data, _ := json.MarshalIndent(resp, "", "  ")
 	return replyAgentV3Pre(ctx, string(data))
@@ -214,6 +215,37 @@ func agentV3SenderID(ctx tb.Context) int64 {
 		return 0
 	}
 	return ctx.Sender().ID
+}
+
+func replyAgentV3CommandError(ctx tb.Context, operation string, err error) error {
+	zap.L().Warn("chatv2: agent v3 command failed",
+		zap.String("operation", operation),
+		zap.Error(err),
+	)
+	return ctx.Reply(agentV3CommandErrorMessage(operation))
+}
+
+func agentV3CommandErrorMessage(operation string) string {
+	switch operation {
+	case "memory_add":
+		return "写入 memory 失败，请稍后重试。"
+	case "memory_list":
+		return "读取 memory 失败，请稍后重试。"
+	case "memory_forget":
+		return "删除 memory 失败，请稍后重试。"
+	case "memory_snapshot_rebuild":
+		return "重建 memory snapshot 失败，请稍后重试。"
+	case "trace_last":
+		return "读取 trace 失败，请稍后重试。"
+	case "context_cache":
+		return "读取 context cache 失败，请稍后重试。"
+	case "runtime_status":
+		return "runtime 不可用，请稍后重试。"
+	case "runtime_reset":
+		return "runtime reset 失败，请稍后重试。"
+	default:
+		return "命令执行失败，请稍后重试。"
+	}
 }
 
 func replyAgentV3Pre(ctx tb.Context, text string) error {

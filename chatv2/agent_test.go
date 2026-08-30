@@ -106,11 +106,69 @@ func TestFriendlyAgentErrorMessage(t *testing.T) {
 		assert.Contains(t, msg, "步骤上限")
 	})
 
-	t.Run("tool node errors mention tool stage", func(t *testing.T) {
+	t.Run("known image tool errors keep the allowlisted message", func(t *testing.T) {
 		msg := friendlyAgentErrorMessage(errToolNodeBadFileID)
-		assert.Contains(t, msg, "工具调用阶段")
 		assert.Contains(t, msg, "Telegram 图片不可用")
 	})
+
+	t.Run("tool errors do not expose internal details", func(t *testing.T) {
+		secret := "Bearer secret-token"
+		internalURL := "http://redis.internal:6379/runtime"
+		windowsPath := `C:\\agent\\secrets\\config.yaml`
+		unixPath := "/var/lib/redis/dump.rdb"
+		err := fmt.Errorf("[NodeRunError] tool failed: %s %s %s %s\n------------------------\nnode path: [tools]\nstack detail", secret, internalURL, windowsPath, unixPath)
+
+		msg := friendlyAgentErrorMessage(err)
+
+		assert.Contains(t, msg, "工具调用阶段")
+		for _, sensitive := range []string{secret, internalURL, windowsPath, unixPath, "stack detail"} {
+			assert.NotContains(t, msg, sensitive)
+		}
+	})
+
+	t.Run("answer errors do not expose internal details", func(t *testing.T) {
+		secret := "Bearer secret-token"
+		err := fmt.Errorf("[GraphRunError] generation failed: %s\n------------------------\nstack detail", secret)
+
+		msg := friendlyAgentErrorMessage(err)
+
+		assert.Contains(t, msg, "回答生成阶段")
+		assert.NotContains(t, msg, secret)
+		assert.NotContains(t, msg, "stack detail")
+	})
+}
+
+func TestAgentV3CommandErrorMessage(t *testing.T) {
+	sensitiveDetails := []string{
+		"Bearer secret-token",
+		"http://runtime.internal:8080",
+		`C:\agent\secrets`,
+		"/var/lib/redis/dump.rdb",
+	}
+	tests := []struct {
+		operation string
+		want      string
+	}{
+		{operation: "memory_add", want: "写入 memory 失败，请稍后重试。"},
+		{operation: "memory_list", want: "读取 memory 失败，请稍后重试。"},
+		{operation: "memory_forget", want: "删除 memory 失败，请稍后重试。"},
+		{operation: "memory_snapshot_rebuild", want: "重建 memory snapshot 失败，请稍后重试。"},
+		{operation: "trace_last", want: "读取 trace 失败，请稍后重试。"},
+		{operation: "context_cache", want: "读取 context cache 失败，请稍后重试。"},
+		{operation: "runtime_status", want: "runtime 不可用，请稍后重试。"},
+		{operation: "runtime_reset", want: "runtime reset 失败，请稍后重试。"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.operation, func(t *testing.T) {
+			msg := agentV3CommandErrorMessage(tt.operation)
+
+			assert.Equal(t, tt.want, msg)
+			for _, sensitive := range sensitiveDetails {
+				assert.NotContains(t, msg, sensitive)
+			}
+		})
+	}
 }
 
 func TestToolCallStageLabels(t *testing.T) {

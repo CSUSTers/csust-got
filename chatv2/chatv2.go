@@ -289,39 +289,13 @@ func friendlyAgentErrorMessage(err error) string {
 		return "这次处理卡在 agent 的步骤上限了：它已经跑完了可用轮次，但还没来得及收束成最终答案。请稍后重试；如果这是搜索或总结类 bot，通常需要把对应配置里的 max_steps 调高。"
 	}
 
-	detail := sanitizeAgentErrorDetail(err)
-	if detail == "" {
-		return ""
-	}
-
-	if strings.Contains(err.Error(), "node path: [tools]") {
-		return "这次处理卡在工具调用阶段：" + detail
-	}
-
-	return "这次处理卡在回答生成阶段：" + detail
-}
-
-func sanitizeAgentErrorDetail(err error) string {
-	if err == nil {
-		return ""
-	}
-
 	if msg, ok := recoverableImageToolMessage(err); ok {
 		return msg
 	}
 
-	detail := err.Error()
-	if idx := strings.Index(detail, "\n------------------------"); idx >= 0 {
-		detail = detail[:idx]
+	if strings.Contains(err.Error(), "node path: [tools]") {
+		return "工具调用阶段遇到错误，请稍后重试。"
 	}
-	detail = strings.TrimPrefix(detail, "[GraphRunError] ")
-	detail = strings.TrimPrefix(detail, "[NodeRunError] ")
-	detail = strings.TrimSpace(detail)
-	if detail == "" {
-		return ""
-	}
-	if len(detail) > 180 {
-		return detail[:177] + "..."
-	}
-	return detail
+
+	return "回答生成阶段遇到错误，请稍后重试。"
 }
