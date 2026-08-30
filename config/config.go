@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -108,11 +110,16 @@ func InitViper(configFile, envPrefix string) {
 
 		// 检查同一目录下是否存在custom.yaml文件
 		customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
-		v := viper.New()
-		v.SetConfigFile(customConfigFile)
-		if err := v.ReadInConfig(); err == nil {
-			// 成功读取了custom.yaml，合并配置
-			if err := viper.MergeConfigMap(v.AllSettings()); err != nil {
+		if _, err := os.Stat(customConfigFile); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+			}
+		} else {
+			v := viper.New()
+			v.SetConfigFile(customConfigFile)
+			if err := v.ReadInConfig(); err != nil {
+				zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+			} else if err := viper.MergeConfigMap(v.AllSettings()); err != nil {
 				zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
 			} else {
 				zap.L().Info("custom config merged successfully", zap.String("customConfigFile", customConfigFile))

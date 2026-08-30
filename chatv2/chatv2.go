@@ -28,9 +28,13 @@ var (
 // Init compiles all agent-enabled chat configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
+	if err := validateAgentV3StartupConfig(); err != nil {
+		return err
+	}
+
 	mcpManager = NewMcpManager()
 
-	if config.BotConfig.Agents == nil || len(*config.BotConfig.Agents) == 0 {
+	if config.BotConfig == nil || config.BotConfig.Agents == nil || len(*config.BotConfig.Agents) == 0 {
 		return nil
 	}
 
@@ -52,6 +56,23 @@ func Init(ctx context.Context) error {
 		zap.L().Info("chatv2: compiled chat config",
 			zap.String("name", chatCfg.Name),
 		)
+	}
+
+	return nil
+}
+
+func validateAgentV3StartupConfig() error {
+	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil || config.BotConfig.Agents == nil {
+		return nil
+	}
+
+	for _, chatCfg := range *config.BotConfig.Agents {
+		if !chatCfg.IsAgentV3Enabled() {
+			continue
+		}
+		if err := validateAgentV3RuntimeConfig(config.BotConfig.AgentV3); err != nil {
+			return fmt.Errorf("chatv2: agent v3 chat %q cannot use runtime: %w", chatCfg.Name, err)
+		}
 	}
 
 	return nil
