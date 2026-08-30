@@ -84,7 +84,7 @@ pub enum BashSandboxMode {
     Proot,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct CommonRequest {
     pub namespace: String,
     pub run_id: String,
@@ -124,7 +124,7 @@ pub struct EditRequest {
     pub patch: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct BashRequest {
     #[serde(flatten)]
     pub common: CommonRequest,
@@ -251,6 +251,24 @@ impl IntoResponse for RuntimeError {
     }
 }
 
+struct BashCallerDrop {
+    sender: Option<tokio::sync::watch::Sender<bool>>,
+}
+
+impl BashCallerDrop {
+    fn disarm(&mut self) {
+        self.sender.take();
+    }
+}
+
+impl Drop for BashCallerDrop {
+    fn drop(&mut self) {
+        if let Some(sender) = self.sender.take() {
+            sender.send_replace(true);
+        }
+    }
+}
+
 pub fn app(state: AppState) -> Router {
     let state = Arc::new(state);
     Router::new()
@@ -346,11 +364,13 @@ async fn write_handler(
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
     let identity = RuntimeIdentity::from_common(&req.common)?;
-    let _use_lease = state
-        .namespace_gate
-        .acquire_use(identity.namespace_key())
-        .await
-        .map_err(namespace_gate_runtime_error)?;
+    let use_lease = Arc::new(
+        state
+            .namespace_gate
+            .acquire_use(identity.namespace_key())
+            .await
+            .map_err(namespace_gate_runtime_error)?,
+    );
     #[cfg(test)]
     state
         .namespace_use_test_hooks
@@ -360,7 +380,7 @@ async fn write_handler(
         )
         .await;
     let start = Instant::now();
-    let result = write_file(&state, &req, &identity).await;
+    let result = write_file(&state, &req, &identity, use_lease).await;
     write_trace(
         &state,
         &req.common,
@@ -381,11 +401,13 @@ async fn edit_handler(
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
     let identity = RuntimeIdentity::from_common(&req.common)?;
-    let _use_lease = state
-        .namespace_gate
-        .acquire_use(identity.namespace_key())
-        .await
-        .map_err(namespace_gate_runtime_error)?;
+    let use_lease = Arc::new(
+        state
+            .namespace_gate
+            .acquire_use(identity.namespace_key())
+            .await
+            .map_err(namespace_gate_runtime_error)?,
+    );
     #[cfg(test)]
     state
         .namespace_use_test_hooks
@@ -395,7 +417,7 @@ async fn edit_handler(
         )
         .await;
     let start = Instant::now();
-    let result = edit_file(&state, &req, &identity).await;
+    let result = edit_file(&state, &req, &identity, use_lease).await;
     write_trace(
         &state,
         &req.common,
@@ -416,7 +438,7 @@ async fn bash_handler(
 ) -> Result<Json<BashResponse>, RuntimeError> {
     authorize(&state, &headers)?;
     let identity = RuntimeIdentity::from_common(&req.common)?;
-    let _use_lease = state
+    let use_lease = state
         .namespace_gate
         .acquire_use(identity.namespace_key())
         .await
@@ -430,7 +452,7 @@ async fn bash_handler(
         )
         .await;
     let start = Instant::now();
-    let result = run_bash(&state, &req, &identity).await;
+    let result = run_bash(&state, &req, &identity, use_lease).await;
     let exit_code = result.as_ref().ok().map(|r| r.exit_code);
     let truncated = result.as_ref().map(|r| r.truncated).unwrap_or(false);
     write_trace(
@@ -690,10 +712,21 @@ async fn write_file(
     state: &AppState,
     req: &WriteRequest,
     identity: &RuntimeIdentity,
+    use_lease: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
 ) -> Result<TextResponse, RuntimeError> {
     let components = workspace_write_components(state, identity, &req.common, &req.path)?;
     let target = workspace_host_path(state, identity.namespace_key(), &components);
-    let reservation = reserve_workspace_replace(state, target, req.content.len()).await?;
+    let reservation = reserve_workspace_replace(
+        state,
+        target,
+        req.content.len(),
+        Arc::clone(&use_lease),
+        #[cfg(test)]
+        state.namespace_use_test_hooks.clone(),
+        #[cfg(test)]
+        namespace_gate::Operation::Write,
+    )
+    .await?;
     write_workspace_file_nofollow(
         state,
         identity.namespace_key(),
@@ -701,6 +734,11 @@ async fn write_file(
         req.content.as_bytes().to_vec(),
         "write failed",
         true,
+        use_lease,
+        #[cfg(test)]
+        state.namespace_use_test_hooks.clone(),
+        #[cfg(test)]
+        namespace_gate::Operation::Write,
     )
     .await?;
     reservation.commit();
@@ -715,6 +753,7 @@ async fn edit_file(
     state: &AppState,
     req: &EditRequest,
     identity: &RuntimeIdentity,
+    use_lease: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
 ) -> Result<TextResponse, RuntimeError> {
     let components = workspace_write_components(state, identity, &req.common, &req.path)?;
     let original = read_workspace_file_nofollow(
@@ -722,6 +761,7 @@ async fn edit_file(
         identity.namespace_key(),
         components.clone(),
         "read before edit failed",
+        Arc::clone(&use_lease),
     )
     .await?;
     let patch = Patch::from_str(&req.patch)
@@ -729,7 +769,17 @@ async fn edit_file(
     let edited = diffy::apply(&original, &patch)
         .map_err(|e| RuntimeError::bad_request(format!("apply patch failed: {e}")))?;
     let target = workspace_host_path(state, identity.namespace_key(), &components);
-    let reservation = reserve_workspace_replace(state, target, edited.len()).await?;
+    let reservation = reserve_workspace_replace(
+        state,
+        target,
+        edited.len(),
+        Arc::clone(&use_lease),
+        #[cfg(test)]
+        state.namespace_use_test_hooks.clone(),
+        #[cfg(test)]
+        namespace_gate::Operation::Edit,
+    )
+    .await?;
     write_workspace_file_nofollow(
         state,
         identity.namespace_key(),
@@ -737,6 +787,11 @@ async fn edit_file(
         edited.as_bytes().to_vec(),
         "write edited file failed",
         false,
+        use_lease,
+        #[cfg(test)]
+        state.namespace_use_test_hooks.clone(),
+        #[cfg(test)]
+        namespace_gate::Operation::Edit,
     )
     .await?;
     reservation.commit();
@@ -817,11 +872,20 @@ async fn reserve_workspace_replace(
     state: &AppState,
     path: PathBuf,
     new_len: usize,
+    use_lease: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
+    #[cfg(test)] test_hooks: namespace_gate::NamespaceUseTestHooks,
+    #[cfg(test)] operation: namespace_gate::Operation,
 ) -> Result<Reservation, RuntimeError> {
     let budget = state.workspace_budget.clone();
     let new_len = u64::try_from(new_len)
         .map_err(|_| RuntimeError::bad_request("workspace capacity limit exceeded"))?;
     tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        let _reservation_completed =
+            test_hooks.signal_on_drop(operation, namespace_gate::Phase::ReservationWorkerCompleted);
+        let _use_lease = use_lease;
+        #[cfg(test)]
+        test_hooks.pause_blocking(operation, namespace_gate::Phase::ReservationWorkerStarted);
         let mut reservation = budget.begin_replace(path)?;
         reservation.reserve_total(new_len)?;
         Ok::<_, crate::workspace_budget::WorkspaceBudgetError>(reservation)
@@ -842,10 +906,12 @@ async fn read_workspace_file_nofollow(
     namespace_key: &str,
     components: Vec<std::ffi::OsString>,
     error_prefix: &'static str,
+    use_lease: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
 ) -> Result<String, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
     let namespace_key = namespace_key.to_string();
     tokio::task::spawn_blocking(move || {
+        let _use_lease = use_lease;
         let (parent, file_name) = open_workspace_file_parent_nofollow(
             &workspace_root,
             &namespace_key,
@@ -896,10 +962,19 @@ async fn write_workspace_file_nofollow(
     content: Vec<u8>,
     error_prefix: &'static str,
     create_parents: bool,
+    use_lease: Arc<tokio::sync::OwnedRwLockReadGuard<()>>,
+    #[cfg(test)] test_hooks: namespace_gate::NamespaceUseTestHooks,
+    #[cfg(test)] operation: namespace_gate::Operation,
 ) -> Result<usize, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
     let namespace_key = namespace_key.to_string();
     tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        let _worker_completed =
+            test_hooks.signal_on_drop(operation, namespace_gate::Phase::WorkerCompleted);
+        let _use_lease = use_lease;
+        #[cfg(test)]
+        test_hooks.pause_blocking(operation, namespace_gate::Phase::BlockingWorkerStarted);
         let mut host_parent = workspace_root.join(&namespace_key);
         for component in &components[..components.len().saturating_sub(1)] {
             host_parent.push(component);
@@ -1230,7 +1305,37 @@ async fn run_bash(
     state: &AppState,
     req: &BashRequest,
     runtime_identity: &RuntimeIdentity,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
 ) -> Result<BashResponse, RuntimeError> {
+    let (caller_drop_sender, caller_drop_receiver) = tokio::sync::watch::channel(false);
+    let mut caller_drop = BashCallerDrop {
+        sender: Some(caller_drop_sender),
+    };
+    let owner = tokio::spawn(run_bash_owner(
+        state.clone(),
+        req.clone(),
+        runtime_identity.clone(),
+        use_lease,
+        caller_drop_receiver,
+    ));
+    let result = owner
+        .await
+        .map_err(|error| RuntimeError::internal(format!("bash command owner failed: {error}")))?;
+    caller_drop.disarm();
+    result
+}
+
+async fn run_bash_owner(
+    state: AppState,
+    req: BashRequest,
+    runtime_identity: RuntimeIdentity,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+    caller_drop: tokio::sync::watch::Receiver<bool>,
+) -> Result<BashResponse, RuntimeError> {
+    let _use_lease = use_lease;
+    if caller_dropped(&caller_drop) {
+        return Err(RuntimeError::bad_request("command canceled"));
+    }
     if req.command.trim().is_empty() {
         return Err(RuntimeError::bad_request("command is empty"));
     }
@@ -1241,18 +1346,24 @@ async fn run_bash(
         return Err(RuntimeError::unavailable(state.bash_health.reason()));
     }
     let cwd = resolve_virtual_path(
-        state,
-        runtime_identity,
+        &state,
+        &runtime_identity,
         &req.common.cwd,
         &req.common.cwd,
         AccessMode::Read,
     )
     .await?;
+    if caller_dropped(&caller_drop) {
+        return Err(RuntimeError::bad_request("command canceled"));
+    }
     let virtual_cwd = normalize_virtual_cwd(&req.common.cwd)?;
     if virtual_cwd == "/workspace" || virtual_cwd.starts_with("/workspace/") {
         fs::create_dir_all(&cwd)
             .await
             .map_err(|e| RuntimeError::internal(format!("create cwd failed: {e}")))?;
+        if caller_dropped(&caller_drop) {
+            return Err(RuntimeError::bad_request("command canceled"));
+        }
     } else if !cwd.exists() {
         return Err(RuntimeError::bad_request("cwd does not exist"));
     }
@@ -1270,14 +1381,18 @@ async fn run_bash(
         &command_id,
     );
     let (target, cleanup_dir) = shell_exec_target(
-        state,
-        runtime_identity,
+        &state,
+        &runtime_identity,
         &command_id,
         &req.command,
         &cwd,
         &virtual_cwd,
     )
     .await?;
+    if caller_dropped(&caller_drop) {
+        cleanup_unstarted_bash(cleanup_dir).await?;
+        return Err(RuntimeError::bad_request("command canceled"));
+    }
     let fetch_proxy = state.fetch_proxy.clone();
     let fetch_health = supervisor.health();
     let namespace = runtime_identity.namespace().to_string();
@@ -1314,7 +1429,15 @@ async fn run_bash(
             return Err(supervisor_runtime_error(error));
         }
     };
-    let output = handle.wait().await.map_err(supervisor_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Bash,
+            namespace_gate::Phase::BashCommandStarted,
+        )
+        .await;
+    let output = handle.wait_or_caller_drop(caller_drop).await;
     #[cfg(test)]
     state
         .namespace_use_test_hooks
@@ -1323,6 +1446,25 @@ async fn run_bash(
             namespace_gate::Phase::BashWaitReturned,
         )
         .await;
+    #[cfg(test)]
+    {
+        state
+            .namespace_use_test_hooks
+            .pause(
+                namespace_gate::Operation::Bash,
+                namespace_gate::Phase::BashCleanupCompleted,
+            )
+            .await;
+        drop(_use_lease);
+        state
+            .namespace_use_test_hooks
+            .pause(
+                namespace_gate::Operation::Bash,
+                namespace_gate::Phase::BashLeaseReleased,
+            )
+            .await;
+    }
+    let output = output.map_err(supervisor_runtime_error)?;
     let duration_ms = started.elapsed().as_millis();
     Ok(BashResponse {
         exit_code: output.exit_code,
@@ -1332,6 +1474,19 @@ async fn run_bash(
         duration_ms,
         error: String::new(),
     })
+}
+
+fn caller_dropped(caller_drop: &tokio::sync::watch::Receiver<bool>) -> bool {
+    *caller_drop.borrow()
+}
+
+async fn cleanup_unstarted_bash(cleanup_dir: Option<PathBuf>) -> Result<(), RuntimeError> {
+    if let Some(directory) = cleanup_dir {
+        fs::remove_dir_all(directory).await.map_err(|error| {
+            RuntimeError::internal(format!("cleanup canceled command failed: {error}"))
+        })?;
+    }
+    Ok(())
 }
 
 fn supervisor_runtime_error(error: SupervisorError) -> RuntimeError {
@@ -1959,6 +2114,19 @@ mod tests {
 
     fn valid_identity(common: &CommonRequest) -> RuntimeIdentity {
         RuntimeIdentity::from_common(common).expect("test identity must be valid")
+    }
+
+    async fn run_bash_for_test(
+        state: &AppState,
+        req: &BashRequest,
+    ) -> Result<BashResponse, RuntimeError> {
+        let identity = valid_identity(&req.common);
+        let use_lease = state
+            .namespace_gate
+            .acquire_use(identity.namespace_key())
+            .await
+            .unwrap();
+        run_bash(state, req, &identity, use_lease).await
     }
 
     #[cfg(target_os = "linux")]
@@ -2688,6 +2856,264 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_write_and_edit_workers_keep_namespace_busy_until_they_release_it() {
+        use namespace_gate::{Operation, Phase};
+
+        for (operation, path, body) in [
+            (
+                Operation::Write,
+                "/v1/write",
+                json!({
+                    "namespace": "cancel-write",
+                    "run_id": "write",
+                    "path": "/workspace/note.txt",
+                    "content": "written\n",
+                }),
+            ),
+            (
+                Operation::Edit,
+                "/v1/edit",
+                json!({
+                    "namespace": "cancel-edit",
+                    "run_id": "edit",
+                    "path": "/workspace/note.txt",
+                    "patch": "@@ -1 +1 @@\n-before\n+after\n",
+                }),
+            ),
+        ] {
+            let state = test_state();
+            let namespace = match operation {
+                Operation::Write => "cancel-write",
+                Operation::Edit => "cancel-edit",
+                _ => unreachable!(),
+            };
+            let workspace = test_workspace(&state, namespace);
+            fs::create_dir_all(&workspace).await.unwrap();
+            fs::write(workspace.join("note.txt"), b"before\n")
+                .await
+                .unwrap();
+            fs::write(workspace.join("sentinel.txt"), b"do not delete")
+                .await
+                .unwrap();
+            let hooks = state.namespace_use_test_hooks.clone();
+            let mut worker_started = hooks.arm(operation, Phase::BlockingWorkerStarted);
+            let mut worker_completed = hooks.arm(operation, Phase::WorkerCompleted);
+            let app = app(state);
+            let request_app = app.clone();
+            let request = tokio::spawn(async move {
+                request_app
+                    .oneshot(request_with_json(path, body))
+                    .await
+                    .unwrap()
+            });
+
+            worker_started.wait_until_reached().await;
+            request.abort();
+            assert!(request.await.unwrap_err().is_cancelled());
+            let busy_reset = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": namespace, "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    busy_reset.status(),
+                    workspace.join("sentinel.txt").is_file(),
+                ),
+                (StatusCode::CONFLICT, true),
+                "{operation:?}"
+            );
+
+            worker_started.release();
+            worker_completed.wait_until_reached().await;
+            let reset = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": namespace, "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reset.status(), StatusCode::OK, "{operation:?}");
+            assert!(!workspace.exists(), "{operation:?}");
+            worker_completed.release();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_write_and_edit_reservations_keep_namespace_busy_until_they_release_it() {
+        use namespace_gate::{Operation, Phase};
+
+        for (operation, path, body) in [
+            (
+                Operation::Write,
+                "/v1/write",
+                json!({
+                    "namespace": "cancel-reservation-write",
+                    "run_id": "write",
+                    "path": "/workspace/note.txt",
+                    "content": "written\n",
+                }),
+            ),
+            (
+                Operation::Edit,
+                "/v1/edit",
+                json!({
+                    "namespace": "cancel-reservation-edit",
+                    "run_id": "edit",
+                    "path": "/workspace/note.txt",
+                    "patch": "@@ -1 +1 @@\n-before\n+after\n",
+                }),
+            ),
+        ] {
+            let state = test_state();
+            let namespace = match operation {
+                Operation::Write => "cancel-reservation-write",
+                Operation::Edit => "cancel-reservation-edit",
+                _ => unreachable!(),
+            };
+            let workspace = test_workspace(&state, namespace);
+            fs::create_dir_all(&workspace).await.unwrap();
+            fs::write(workspace.join("note.txt"), b"before\n")
+                .await
+                .unwrap();
+            fs::write(workspace.join("sentinel.txt"), b"do not delete")
+                .await
+                .unwrap();
+            let hooks = state.namespace_use_test_hooks.clone();
+            let mut reservation_started = hooks.arm(operation, Phase::ReservationWorkerStarted);
+            let mut reservation_completed = hooks.arm(operation, Phase::ReservationWorkerCompleted);
+            let app = app(state);
+            let request_app = app.clone();
+            let request = tokio::spawn(async move {
+                request_app
+                    .oneshot(request_with_json(path, body))
+                    .await
+                    .unwrap()
+            });
+
+            reservation_started.wait_until_reached().await;
+            request.abort();
+            assert!(request.await.unwrap_err().is_cancelled());
+            let busy_reset = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": namespace, "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    busy_reset.status(),
+                    workspace.join("sentinel.txt").is_file(),
+                ),
+                (StatusCode::CONFLICT, true),
+                "{operation:?}"
+            );
+
+            reservation_started.release();
+            reservation_completed.wait_until_reached().await;
+            let reset = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": namespace, "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reset.status(), StatusCode::OK, "{operation:?}");
+            assert!(!workspace.exists(), "{operation:?}");
+            reservation_completed.release();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_bash_keeps_namespace_busy_through_supervisor_cleanup() {
+        use namespace_gate::{Operation, Phase};
+
+        let state = test_state();
+        let workspace = test_workspace(&state, "cancel-bash");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(workspace.join("sentinel.txt"), b"do not delete")
+            .await
+            .unwrap();
+        let hooks = state.namespace_use_test_hooks.clone();
+        let mut command_started = hooks.arm(Operation::Bash, Phase::BashCommandStarted);
+        let mut cleanup_completed = hooks.arm(Operation::Bash, Phase::BashCleanupCompleted);
+        let mut lease_released = hooks.arm(Operation::Bash, Phase::BashLeaseReleased);
+        let command = if cfg!(windows) {
+            "for /L %i in (1,1,2147483647) do @rem"
+        } else {
+            "sleep 5"
+        };
+        let app = app(state);
+        let request_app = app.clone();
+        let request = tokio::spawn(async move {
+            request_app
+                .oneshot(request_with_json(
+                    "/v1/bash",
+                    json!({
+                        "namespace": "cancel-bash",
+                        "run_id": "bash",
+                        "command": command,
+                    }),
+                ))
+                .await
+                .unwrap()
+        });
+
+        command_started.wait_until_reached().await;
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+        let busy_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "cancel-bash", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                busy_reset.status(),
+                workspace.join("sentinel.txt").is_file(),
+            ),
+            (StatusCode::CONFLICT, true)
+        );
+
+        command_started.release();
+        cleanup_completed.wait_until_reached().await;
+        let cleanup_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "cancel-bash", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cleanup_reset.status(), StatusCode::CONFLICT);
+        assert!(workspace.join("sentinel.txt").is_file());
+
+        cleanup_completed.release();
+        lease_released.wait_until_reached().await;
+        let reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "cancel-bash", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reset.status(), StatusCode::OK);
+        assert!(!workspace.exists());
+        lease_released.release();
+    }
+
+    #[tokio::test]
     async fn bash_use_lease_outlives_command_wait_and_binding_drain() {
         use namespace_gate::{Operation, Phase};
 
@@ -3238,9 +3664,7 @@ mod tests {
             timeout: "2s".to_string(),
         };
 
-        let response = run_bash(&state, &req, &valid_identity(&req.common))
-            .await
-            .unwrap();
+        let response = run_bash_for_test(&state, &req).await.unwrap();
         assert_eq!(response.exit_code, 0, "{}", response.stderr);
         let environment = response
             .stdout
@@ -3363,13 +3787,10 @@ mod tests {
             timeout: "8s".to_string(),
         };
 
-        let response = timeout(
-            Duration::from_secs(10),
-            run_bash(&state, &req, &valid_identity(&req.common)),
-        )
-        .await
-        .expect("large output command should not deadlock")
-        .unwrap();
+        let response = timeout(Duration::from_secs(10), run_bash_for_test(&state, &req))
+            .await
+            .expect("large output command should not deadlock")
+            .unwrap();
 
         assert_eq!(response.exit_code, 7);
         assert!(response.truncated);
@@ -3402,9 +3823,7 @@ mod tests {
             timeout: String::new(),
         };
 
-        let error = run_bash(&state, &req, &valid_identity(&req.common))
-            .await
-            .unwrap_err();
+        let error = run_bash_for_test(&state, &req).await.unwrap_err();
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
@@ -3426,9 +3845,7 @@ mod tests {
             timeout: String::new(),
         };
 
-        let error = run_bash(&state, &req, &valid_identity(&req.common))
-            .await
-            .unwrap_err();
+        let error = run_bash_for_test(&state, &req).await.unwrap_err();
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
@@ -3451,9 +3868,7 @@ mod tests {
             timeout: String::new(),
         };
 
-        let response = run_bash(&state, &req, &valid_identity(&req.common))
-            .await
-            .unwrap();
+        let response = run_bash_for_test(&state, &req).await.unwrap();
 
         assert_eq!(response.exit_code, 0);
         assert_background_process_exits(&pid_file).await;
@@ -3475,7 +3890,7 @@ mod tests {
             timeout: String::new(),
         };
 
-        let result = run_bash(&state, &req, &valid_identity(&req.common)).await;
+        let result = run_bash_for_test(&state, &req).await;
         let marker_created = pid_file.exists();
         if marker_created {
             kill_test_process_from_pid_file(&pid_file).await;

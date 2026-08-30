@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::sync::Condvar;
 use std::{
     collections::HashMap,
     fmt,
@@ -62,7 +64,14 @@ pub(crate) enum Operation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Phase {
     LeaseAcquired,
+    ReservationWorkerStarted,
+    ReservationWorkerCompleted,
+    BlockingWorkerStarted,
+    WorkerCompleted,
+    BashCommandStarted,
     BashWaitReturned,
+    BashCleanupCompleted,
+    BashLeaseReleased,
 }
 
 #[cfg(test)]
@@ -77,6 +86,50 @@ enum HookState {
 #[cfg(test)]
 struct HookSlot {
     state: tokio::sync::watch::Sender<HookState>,
+    blocking_state: Mutex<HookState>,
+    blocking_wake: Condvar,
+}
+
+#[cfg(test)]
+impl HookSlot {
+    fn set_state(&self, state: HookState) {
+        if let Ok(mut blocking_state) = self.blocking_state.lock() {
+            *blocking_state = state;
+            self.state.send_replace(state);
+            self.blocking_wake.notify_all();
+            return;
+        }
+        self.state.send_replace(state);
+    }
+
+    fn reach(&self) -> bool {
+        let Ok(mut blocking_state) = self.blocking_state.lock() else {
+            return false;
+        };
+        if *blocking_state != HookState::Armed {
+            return false;
+        }
+        *blocking_state = HookState::Reached;
+        self.state.send_replace(HookState::Reached);
+        self.blocking_wake.notify_all();
+        true
+    }
+
+    fn pause_blocking(&self) {
+        if !self.reach() {
+            return;
+        }
+        let mut blocking_state = self
+            .blocking_state
+            .lock()
+            .expect("namespace use hook blocking state is available");
+        while !matches!(*blocking_state, HookState::Released | HookState::Cancelled) {
+            blocking_state = self
+                .blocking_wake
+                .wait(blocking_state)
+                .expect("namespace use hook blocking state is available");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -89,7 +142,11 @@ pub(crate) struct NamespaceUseTestHooks {
 impl NamespaceUseTestHooks {
     pub(crate) fn arm(&self, operation: Operation, phase: Phase) -> NamespaceUseTestHook {
         let (state, receiver) = tokio::sync::watch::channel(HookState::Armed);
-        let slot = Arc::new(HookSlot { state });
+        let slot = Arc::new(HookSlot {
+            state,
+            blocking_state: Mutex::new(HookState::Armed),
+            blocking_wake: Condvar::new(),
+        });
         let key = (operation, phase);
         let mut slots = self
             .slots
@@ -116,7 +173,9 @@ impl NamespaceUseTestHooks {
         let Some(slot) = slot else {
             return;
         };
-        slot.state.send_replace(HookState::Reached);
+        if !slot.reach() {
+            return;
+        }
         let mut receiver = slot.state.subscribe();
         if matches!(
             *receiver.borrow(),
@@ -127,6 +186,40 @@ impl NamespaceUseTestHooks {
         let _ = receiver
             .wait_for(|state| matches!(*state, HookState::Released | HookState::Cancelled))
             .await;
+    }
+
+    pub(crate) fn pause_blocking(&self, operation: Operation, phase: Phase) {
+        let slot = self
+            .slots
+            .lock()
+            .ok()
+            .and_then(|slots| slots.get(&(operation, phase)).cloned());
+        if let Some(slot) = slot {
+            slot.pause_blocking();
+        }
+    }
+
+    pub(crate) fn signal_on_drop(
+        &self,
+        operation: Operation,
+        phase: Phase,
+    ) -> NamespaceUseTestCompletion {
+        NamespaceUseTestCompletion {
+            hooks: self.clone(),
+            operation,
+            phase,
+        }
+    }
+
+    fn signal(&self, operation: Operation, phase: Phase) {
+        let slot = self
+            .slots
+            .lock()
+            .ok()
+            .and_then(|slots| slots.get(&(operation, phase)).cloned());
+        if let Some(slot) = slot {
+            let _ = slot.reach();
+        }
     }
 
     fn remove(&self, key: (Operation, Phase), slot: &Arc<HookSlot>) {
@@ -151,6 +244,20 @@ pub(crate) struct NamespaceUseTestHook {
 }
 
 #[cfg(test)]
+pub(crate) struct NamespaceUseTestCompletion {
+    hooks: NamespaceUseTestHooks,
+    operation: Operation,
+    phase: Phase,
+}
+
+#[cfg(test)]
+impl Drop for NamespaceUseTestCompletion {
+    fn drop(&mut self) {
+        self.hooks.signal(self.operation, self.phase);
+    }
+}
+
+#[cfg(test)]
 impl NamespaceUseTestHook {
     pub(crate) async fn wait_until_reached(&mut self) {
         let state = *self
@@ -166,12 +273,12 @@ impl NamespaceUseTestHook {
     }
 
     pub(crate) fn release(&self) {
-        self.slot.state.send_replace(HookState::Released);
+        self.slot.set_state(HookState::Released);
         self.hooks.remove(self.key, &self.slot);
     }
 
     pub(crate) fn cancel(&self) {
-        self.slot.state.send_replace(HookState::Cancelled);
+        self.slot.set_state(HookState::Cancelled);
         self.hooks.remove(self.key, &self.slot);
     }
 }
