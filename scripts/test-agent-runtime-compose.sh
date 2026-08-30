@@ -253,6 +253,9 @@ check_file_contains_all 'host validator delegates semantic reject matching to th
 check_file_excludes 'host validator does not revert input reject validation to byte-exact matching' \
   "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" \
   "chain_has_exact_rule input 'iifname \"br-agent-fetch\" reject'"
+check_file_contains 'attack matrix invokes the mode-100644 host validator through Bash with its existing log capture' \
+  "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" \
+  'if bash "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" >"$validator_log" 2>&1; then'
 check_file_contains 'semantic reject matcher requires reject immediately after the expected prefix' \
   "$REPO_ROOT/scripts/nft-agent-fetch-reject.awk" \
   'remainder ~ /^[[:space:]]+reject([[:space:]]+with[[:space:]].+)?$/'
