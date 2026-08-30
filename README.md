@@ -51,11 +51,7 @@ Before starting the checked-in Compose deployment, set these required base input
 
 `AGENT_RUNTIME_TOKEN`, `AGENT_RUNTIME_CGROUP_PARENT`, `AGENT_RUNTIME_WORKSPACE_MAX_BYTES`, `AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES`, `AGENT_RUNTIME_LOG_FS_MAX_BYTES`, `AGENT_RUNTIME_WORKSPACE_HOST_ROOT`, `AGENT_RUNTIME_LOG_HOST_ROOT`, and `AGENT_RUNTIME_CGROUP_HOST_ROOT`.
 
-The host aggregate/delegated cgroup and the bounded workspace and Runtime-log mount roots must already exist. Compose does not create them. Validate the host before starting the stack:
-
-```bash
-scripts/validate-agent-runtime-host.sh
-```
+The host aggregate/delegated cgroup and the bounded workspace and Runtime-log mount roots must already exist. Compose does not create them. The full host validation is part of the controlled-Fetch preflight below; do not claim a host has passed it with only these base inputs.
 
 Then start the base deployment. Fetch remains disabled:
 
@@ -134,7 +130,13 @@ agent_v3:
 
 These bot configuration gates do not, by themselves, activate production egress. The base `docker-compose.yml` keeps Fetch disabled. Controlled Fetch requires the `docker-compose.fetch.yml` overlay and its `agent-fetch` profile. Keep it off unless the operator sets `AGENT_FETCH_ENABLE=true` and supplies `AGENT_FETCH_POLICY_VERSION`, `AGENT_FETCH_EXTRA_DENY_CIDRS`, `AGENT_FETCH_DNS_SERVERS`, `AGENT_FETCH_AUDIT_FS_MAX_BYTES`, `AGENT_FETCH_AUDIT_HOST_ROOT`, and `AGENT_FETCH_HMAC_SECRET_FILE`.
 
-The host aggregate/delegated cgroup and all bounded mount roots, including the Fetch audit root, must already exist and pass `scripts/validate-agent-runtime-host.sh`. Neither Compose nor the validator creates host paths or migrates data. Start controlled Fetch only with the overlay and profile:
+Before the first validator run, provide the complete Runtime and controlled-Fetch host contract. Although base Fetch is off, the validator unconditionally requires `AGENT_FETCH_AUDIT_HOST_ROOT`, `AGENT_FETCH_HMAC_SECRET_FILE`, `AGENT_FETCH_AUDIT_FS_MAX_BYTES`, `AGENT_FETCH_DNS_SERVERS`, and `AGENT_FETCH_EXTRA_DENY_CIDRS`, in addition to the Runtime inputs listed above. `AGENT_FETCH_ENABLE` and `AGENT_FETCH_POLICY_VERSION` are not validator inputs. The host aggregate/delegated cgroup and all bounded mount roots, including the Fetch audit root, must already exist. Neither Compose nor the validator creates host paths or migrates data.
+
+Run the read-only validator as root on the target native Linux host, then start controlled Fetch only with the overlay and profile:
+
+```bash
+bash scripts/validate-agent-runtime-host.sh
+```
 
 ```bash
 docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d

@@ -51,11 +51,7 @@ cd csust-got
 
 `AGENT_RUNTIME_TOKEN`、`AGENT_RUNTIME_CGROUP_PARENT`、`AGENT_RUNTIME_WORKSPACE_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES`、`AGENT_RUNTIME_LOG_FS_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_HOST_ROOT`、`AGENT_RUNTIME_LOG_HOST_ROOT` 和 `AGENT_RUNTIME_CGROUP_HOST_ROOT`。
 
-主机上的聚合/委派 cgroup，以及受限的工作区和 Runtime 日志挂载根目录必须预先存在。Compose 不会创建它们。启动前请验证主机：
-
-```bash
-scripts/validate-agent-runtime-host.sh
-```
+主机上的聚合/委派 cgroup，以及受限的工作区和 Runtime 日志挂载根目录必须预先存在。Compose 不会创建它们。完整主机验证属于下文受控 Fetch 的预检；只有这些基础输入时，不要声称主机已通过验证。
 
 然后启动基础部署。Fetch 保持禁用：
 
@@ -134,7 +130,13 @@ agent_v3:
 
 这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile。除非运维人员设置 `AGENT_FETCH_ENABLE=true`，并提供 `AGENT_FETCH_POLICY_VERSION`、`AGENT_FETCH_EXTRA_DENY_CIDRS`、`AGENT_FETCH_DNS_SERVERS`、`AGENT_FETCH_AUDIT_FS_MAX_BYTES`、`AGENT_FETCH_AUDIT_HOST_ROOT` 和 `AGENT_FETCH_HMAC_SECRET_FILE`，否则请保持禁用。
 
-主机上的聚合/委派 cgroup 和全部受限挂载根目录（包括 Fetch 审计根目录）必须预先存在，并通过 `scripts/validate-agent-runtime-host.sh` 验证。Compose 和验证脚本都不会创建主机路径或迁移数据。仅使用覆盖文件和 profile 启动受控 Fetch：
+首次运行 validator 前，必须提供完整的 Runtime 与受控 Fetch 主机约定。即使基础 Fetch 默认关闭，validator 仍会无条件要求 `AGENT_FETCH_AUDIT_HOST_ROOT`、`AGENT_FETCH_HMAC_SECRET_FILE`、`AGENT_FETCH_AUDIT_FS_MAX_BYTES`、`AGENT_FETCH_DNS_SERVERS` 和 `AGENT_FETCH_EXTRA_DENY_CIDRS`，以及上文列出的 Runtime 输入。`AGENT_FETCH_ENABLE` 和 `AGENT_FETCH_POLICY_VERSION` 不是 validator 输入。主机上的聚合/委派 cgroup 和全部受限挂载根目录（包括 Fetch 审计根目录）必须预先存在。Compose 和 validator 都不会创建主机路径或迁移数据。
+
+请以 root 身份在目标原生 Linux 主机上运行只读 validator，然后仅使用覆盖文件和 profile 启动受控 Fetch：
+
+```bash
+bash scripts/validate-agent-runtime-host.sh
+```
 
 ```bash
 docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
