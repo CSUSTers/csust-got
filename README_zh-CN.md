@@ -30,14 +30,15 @@
 ## 系统要求
 
 - Go 1.26+
+- Rust 1.95+（仅在从源码构建或验证 Agent Runtime 时需要）
 - Redis
-- Docker & Docker Compose（推荐）
+- Docker Engine 与 Docker Compose v2（推荐）
 
 ## 快速部署
 
 ### 使用 Docker Compose（推荐）
 
-您需要先安装 Docker。
+请先安装 Docker Engine 与 Docker Compose v2。
 
 克隆项目：
 
@@ -46,10 +47,20 @@ git clone git@github.com:CSUSTers/csust-got.git
 cd csust-got
 ```
 
-然后使用 Docker Compose 运行：
+启动仓库中已提交的 Compose 部署前，请在部署环境中设置以下必需的基础输入：
+
+`AGENT_RUNTIME_TOKEN`、`AGENT_RUNTIME_CGROUP_PARENT`、`AGENT_RUNTIME_WORKSPACE_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES`、`AGENT_RUNTIME_LOG_FS_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_HOST_ROOT`、`AGENT_RUNTIME_LOG_HOST_ROOT` 和 `AGENT_RUNTIME_CGROUP_HOST_ROOT`。
+
+主机上的聚合/委派 cgroup，以及受限的工作区和 Runtime 日志挂载根目录必须预先存在。Compose 不会创建它们。启动前请验证主机：
 
 ```bash
-docker-compose up -d
+scripts/validate-agent-runtime-host.sh
+```
+
+然后启动基础部署。Fetch 保持禁用：
+
+```bash
+docker compose up -d
 ```
 
 ### 从源码构建
@@ -69,13 +80,36 @@ make build
 ./got
 ```
 
-## 升级
-
-克隆最新版本：
+如需直接验证源码，请使用受支持的 Linux 构建环境。生产用 Agent Runtime 构建仅支持 Linux：
 
 ```bash
-docker-compose pull
-docker-compose up -d
+go build ./...
+cargo build --manifest-path agent-runtime/Cargo.toml --locked --release --bins
+```
+
+## 升级
+
+已提交的 Compose 文件会从源码构建 Runtime；启用 Fetch 覆盖文件时也会从源码构建 Broker。请先更新源码检出，再重新构建并启动基础部署：
+
+```bash
+git pull --ff-only
+docker compose build --pull agent-runtime
+docker compose up -d
+```
+
+对于受控 Fetch 部署，请使用覆盖文件重建两个从源码构建的服务：
+
+```bash
+git pull --ff-only
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml build --pull agent-runtime agent-fetch-broker
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
+```
+
+`docker compose pull` 不会更新从源码构建的 Runtime 或 Broker。对于由运维人员维护镜像的部署，请将仅限该部署的 `build:` 条目替换为匹配的 Bot、Runtime，以及启用 Fetch 时的 Broker 镜像标签。拉取这些匹配的镜像标签后，再启动同一部署：
+
+```bash
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml pull
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
 ```
 
 ## 配置
@@ -98,7 +132,13 @@ agent_v3:
     fetch_enabled: true
 ```
 
-这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile，并满足所需的环境变量、密钥、受限挂载、网络和 cgroup 前置条件。
+这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile。除非运维人员设置 `AGENT_FETCH_ENABLE=true`，并提供 `AGENT_FETCH_POLICY_VERSION`、`AGENT_FETCH_EXTRA_DENY_CIDRS`、`AGENT_FETCH_DNS_SERVERS`、`AGENT_FETCH_AUDIT_FS_MAX_BYTES`、`AGENT_FETCH_AUDIT_HOST_ROOT` 和 `AGENT_FETCH_HMAC_SECRET_FILE`，否则请保持禁用。
+
+主机上的聚合/委派 cgroup 和全部受限挂载根目录（包括 Fetch 审计根目录）必须预先存在，并通过 `scripts/validate-agent-runtime-host.sh` 验证。Compose 和验证脚本都不会创建主机路径或迁移数据。仅使用覆盖文件和 profile 启动受控 Fetch：
+
+```bash
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
+```
 
 模型和 MCP 工具是通过已注册 schema 直接发起的模型工具调用。Runtime Fetch 则在 Bash 环境中运行 `/usr/local/bin/fetch`，并通过 `bash` 工具调用，概念上为 `bash(command="fetch GET ...")`。名为 `fetch` 的 MCP/MCPO 工具是独立能力，不经过 Runtime Egress Broker。若要求 Runtime Broker 成为唯一的 Web 出站策略边界，请为该 Agent 移除或禁用 fetch 类 MCP 工具。
 
@@ -116,7 +156,13 @@ bash scripts/agent-runtime-attack-matrix.sh
 
 validator、Compose/static 测试和攻击矩阵都是部署检查，而不是 Runtime gate：Runtime 不会动态读取或根据其回执进行 gate。每个命令应以 0 退出，攻击矩阵应报告 `fail=0 skipped=0`，且清理后不应留下任何残留物。主机 validator 接受等价的 nftables reject 渲染，例如 `iifname "br-agent-fetch" reject with icmp port-unreachable`；但它仍要求精确的 bridge 匹配、所需 deny set、hook/priority/policy，以及紧跟预期匹配后的 reject verdict。不要为规避 PRoot 问题而使用 `privileged`、Docker `seccomp=unconfined`、AppArmor unconfined 或 `SYS_PTRACE`，除非已单独接受其风险。目标原生 Linux 的生产启用回执仍在等待中，在满足这些条件前请勿启用生产 Fetch。完整威胁模型和部署约定见 [Agent Runtime Fetch Egress 设计](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md)。
 
-Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。当前 Compose 文件默认从源码构建 `runtime` 和 `broker` target。若要使用 GHCR，请将部署专用的 `build:` 条目替换为匹配的 `image:` 引用，基础 Compose 文件不会自动拉取这些镜像。
+Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。
+
+### Runtime 工作区存储与旧工作区迁移
+
+新版 Runtime 使用完整命名空间的全小写 SHA-256 值作为命名空间目录键，不会自动打开旧版有损工作区目录。旧映射可能发生碰撞，因此自动迁移可能会将数据关联到错误的命名空间。
+
+如需保留旧工作区，请停止 Runtime、备份工作区卷，然后执行经运维人员审查的显式离线迁移。不要使用自动重命名算法。
 
 ## 命令列表
 

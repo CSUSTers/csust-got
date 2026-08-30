@@ -260,6 +260,37 @@ check_file_contains 'Runtime Dockerfile defines the approved security-test-only 
   "$REPO_ROOT/agent-runtime/Dockerfile" 'FROM runtime-base AS runtime-security-test'
 check_file_contains 'Runtime security-test target has the approved image label' \
   "$REPO_ROOT/agent-runtime/Dockerfile" 'LABEL org.csusters.agent-runtime.security-test-only="true"'
+probe_copy='COPY --from=build /src/target/release/agent-runtime-net-probe /usr/local/bin/agent-runtime-net-probe'
+if awk -v probe_copy="$probe_copy" '
+  /^FROM debian:bookworm-slim AS runtime-base$/ { runtime_base = 1; next }
+  runtime_base && /^FROM / { runtime_base = 0 }
+  runtime_base && $0 == probe_copy { runtime_base_probe_copy = NR }
+  runtime_base && /^USER runtime$/ { runtime_base_user = NR }
+  /^FROM runtime-base AS runtime-security-test$/ { security_test = 1; next }
+  security_test && /^FROM / { security_test = 0 }
+  security_test && $0 == probe_copy { security_test_probe_copy = NR }
+  END {
+    exit(runtime_base_probe_copy > 0 && runtime_base_user > runtime_base_probe_copy &&
+      security_test_probe_copy == 0 ? 0 : 1)
+  }
+' "$REPO_ROOT/agent-runtime/Dockerfile"; then
+  printf 'ok - Runtime network probe is copied into runtime-base before dropping privileges without a security-test duplicate\n'
+else
+  printf 'not ok - Runtime network probe is copied into runtime-base before dropping privileges without a security-test duplicate\n' >&2
+  failures=$((failures + 1))
+fi
+production_activation_source=$(awk '/^production_activation_default_off\(\)/,/^}/' \
+  "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh")
+if ! printf '%s\n' "$production_activation_source" | grep -F -- 'python3' >/dev/null 2>&1 \
+  && printf '%s\n' "$production_activation_source" | grep -F -- \
+    'test "$(agent-runtime-net-probe socket inet)" = errno=1;' >/dev/null 2>&1 \
+  && printf '%s\n' "$production_activation_source" | grep -F -- \
+    'test "$(agent-runtime-net-probe socket inet6)" = errno=1' >/dev/null 2>&1; then
+  printf 'ok - production activation default-off probes IPv4 and IPv6 sockets with the Runtime binary\n'
+else
+  printf 'not ok - production activation default-off probes IPv4 and IPv6 sockets with the Runtime binary\n' >&2
+  failures=$((failures + 1))
+fi
 if awk '
   /^FROM runtime-base AS runtime-security-test$/ { security = NR }
   /^FROM runtime-base AS runtime$/ { production = NR }

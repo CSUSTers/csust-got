@@ -34,6 +34,7 @@ WORKDIR /runtime
 COPY --from=build /src/target/release/agent-runtime /usr/local/bin/agent-runtime
 COPY --from=build /src/target/release/agent-runtime-exec /usr/local/bin/agent-runtime-exec
 COPY --from=build /src/target/release/fetch /usr/local/bin/fetch
+COPY --from=build /src/target/release/agent-runtime-net-probe /usr/local/bin/agent-runtime-net-probe
 
 ENV AGENT_RUNTIME_ADDR=0.0.0.0:8080
 ENV AGENT_RUNTIME_WORKSPACE_ROOT=/runtime/workspaces
@@ -59,7 +60,6 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl wget python3 nodejs \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /src/target/release/agent-runtime-net-probe /usr/local/bin/agent-runtime-net-probe
 ENV AGENT_RUNTIME_SECURITY_TEST_ONLY=1
 USER runtime
 

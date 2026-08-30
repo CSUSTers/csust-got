@@ -1122,15 +1122,8 @@ production_activation_default_off() {
     test "$(sed -n "s/^AGENT_FETCH_CONTROL_FD=//p" /tmp/initial-env)" = 4;
     test ! -e /run/agent-fetch;
     test ! -e /run/secrets/agent-fetch-hmac-key;
-    python3 - <<"PY"
-import errno
-import socket
-try:
-    socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-except OSError as error:
-    raise SystemExit(0 if error.errno == errno.EPERM else 3)
-raise SystemExit(2)
-PY
+    test "$(agent-runtime-net-probe socket inet)" = errno=1;
+    test "$(agent-runtime-net-probe socket inet6)" = errno=1
   ' task9-rollback base-local-only 5s || result=1
 
   dc_base down --volumes --remove-orphans --rmi local --timeout 10 >/dev/null 2>&1 || result=1
