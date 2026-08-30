@@ -39,9 +39,11 @@
 - Register exactly `searxng_web_search`, `searxng_search_suggestions`, and `searxng_instance_info`; native registration precedes configured/MCP/MCPO tools, wins same-name collisions, and emits a warning.
 - Before a successful current-turn `load_skill("searxng")`, each native SearXNG tool returns one stable activation error with zero credential reads and zero HTTP work, including DNS and connection work.
 - SearXNG is one fixed configured origin with no model-selectable scheme, host, port, or URL; disable redirects, bound timeout and body, bound result count and display runes, preserve response order for search results, and return only reconstructed results.
+- SearXNG suggestions accept only a top-level string array or the exact two-element tuple `[query, suggestions]` with a string query and string-array suggestions; reject other tuple lengths or element types, then deterministically truncate, deduplicate, lexicographically sort, and bound the resulting suggestion list.
 - Treat skill content and all SearXNG data as untrusted; neither may alter system/developer policy, tool schemas, authorization, or long-term memory.
 - Do not log SearXNG passwords, Authorization, response bodies, full sensitive queries, or skill content; model-facing failures use stable categories only.
 - Use the existing HTTP stack and existing dependencies; do not add Go modules or Rust crates.
+- Split the Task 1, Task 2, and Task 7 production modules by the responsibilities in the File Map; no newly introduced production module in those tasks may exceed 250 pure production lines, while existing test files may remain consolidated where the task permits.
 - Fetch Broker injects exactly `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36` only when no case-insensitive caller User-Agent exists.
 - For duplicate caller User-Agent fields, the last caller value wins; other duplicate-header semantics remain unchanged.
 - Default and caller User-Agent are non-sensitive and survive redirects; existing cross-origin stripping for Authorization, Cookie, configured credentials, and other sensitive headers remains unchanged.
@@ -63,7 +65,7 @@
 - When a task introduces an entirely new interface, first add the exact compile-safe skeleton stated in that task. The skeleton must return a stable not-implemented error or an intentionally incomplete value; do not count compilation failure as RED.
 - Record RED and GREEN command output in execution notes outside the repository. Do not commit generated logs, test receipts, build outputs, credentials, or fixture data.
 - Suggested A–F commits are pending review boundaries only. Workers report readiness and the suggested semantic title; they never execute Git writes, and the orchestrator must not stage or commit any A–F implementation content before Task 11 verification and all required identity-matched Reviewer/Oracle receipts approve the canonical working-tree artifact.
-- Before implementation begins, the orchestrator may use the user's existing explicit authorization to commit only this approved plan Markdown as the authoritative plan artifact. Implementation starts from that clean plan-commit `HEAD`, whose full object ID is recorded as `PLAN_BASE_SHA`; no other working-tree content may enter that commit.
+- For the responsibility/response-shape revision made after Tasks 1/2/3/4/7/9 began, the orchestrator may use the user's existing explicit authorization to commit only this re-approved plan Markdown while leaving all pre-existing implementation changes unstaged. The resulting `HEAD` contains no A–F implementation commit and becomes the new full `PLAN_BASE_SHA`; no other working-tree content may enter the plan-revision commit, and the plan must not change again after that new base is recorded.
 - After Task 11 review approval, the authorized orchestrator may create A–F semantic commits in order and may push only after post-commit content/range/delivery checks pass. That authorization never delegates Git writes to task workers.
 - Go symlink assertions must run on native Linux even if a Windows developer machine cannot create symlinks. A Windows test may skip only after `os.Symlink` returns a platform permission error; the native-Linux lane may not skip.
 - Runtime startup, PRoot, Docker image, and host validator evidence must come from native Linux. Unit tests, Go/Rust formatting checks, non-Linux tests, and Compose rendering may also run from Windows where supported.
@@ -76,7 +78,7 @@
 | 2 | 3, 7 | Task 3 consumes Task 2's frozen Runtime response. Task 7 consumes Task 4's validated SearXNG config. Their files do not overlap. |
 | 3 | 5 | Consumes Tasks 1, 3, and 4. It owns Bot startup loading and the one-call Runtime client path. |
 | 4 | 6 | Consumes Tasks 1 and 5. It owns `CompiledChat`, per-turn merge, Stable Prefix, generic `load_skill`, and loaded-name/rich-gate behavior. |
-| 5 | 8 | Consumes Tasks 4, 6, and 7. It owns native SearXNG tool registration, activation, and collision behavior. |
+| 5 | 8 | Consumes Tasks 4, 6, and 7. It owns native SearXNG tool registration, activation, and collision behavior; it revisits `agentv3_context.go` only after Task 6, so that shared file is serialized by wave order rather than edited concurrently. |
 | 6 | 10 | Documentation/config/deployment contract after all runtime behavior and names are final. |
 | 7 | 11 | Full repository verification and final acceptance packet only after Tasks 1–10 are GREEN. |
 
@@ -84,10 +86,13 @@
 
 | File | Responsibility |
 |---|---|
-| `chatv2/agentv3_skills.go` | New shared Go descriptor, canonical-name validation, filesystem loader, snapshot hashing/validation, merge, and shadow records. |
+| `chatv2/agentv3_skills.go` | Shared Go descriptor/snapshot/catalog types, strict canonical-name parsing, content/snapshot hashing, snapshot validation, merge, source priority, and shadow records. |
+| `chatv2/agentv3_skills_fs.go` | Go filesystem-only `Lstat`, bounded read, direct-child discovery, and first-prose-line description helpers. |
 | `chatv2/agentv3_skills_test.go` | Go filesystem boundaries, description/rune rules, canonical encoding vectors, duplicates, sorting, and precedence. |
 | `chatv2/rich_message.go` | Verify unchanged: its existing rich load-argument parser keeps using the compatibility normalizer until the Task 6 loop no longer consults that parser. |
-| `agent-runtime/src/skills.rs` | Rust `runtime-global` loader, matching canonical encoding, immutable snapshot, and pre-serialized bounded JSON body. |
+| `agent-runtime/src/skills.rs` | Rust public skill constants/types/errors, `FrozenSkillSnapshot`, canonical snapshot hash, private shared descriptor validation/build path, pre-serialized bounded JSON body, test-only snapshot builder, and private loader/test module wiring. |
+| `agent-runtime/src/skills/loader.rs` | Private Rust filesystem loader with the single parent-visible descriptor-loading entry point plus direct-child/read/description/canonical-name helpers. |
+| `agent-runtime/src/skills/tests.rs` | All Rust skill snapshot unit tests, compiled only through `#[cfg(test)] mod tests;`. |
 | `agent-runtime/src/config.rs` | Allow an explicitly blank Runtime skills root to disable that source while retaining the existing default root. |
 | `agent-runtime/src/config/parse.rs` | Parse a defaulted but explicitly disableable path without treating blank as an ambient path. |
 | `agent-runtime/src/main.rs` | Freeze Runtime skills before listener readiness and install the frozen snapshot in `AppState`. |
@@ -109,11 +114,13 @@
 | `chatv2/agent.go` | Per-chat builtin/source compilation, catalog-aware native tools, and native-over-configured ordering. |
 | `chatv2/agentv3_builtin_skills.go` | Descriptor-backed rich/SearXNG builtins and Stable Prefix availability XML. |
 | `chatv2/agentv3_builtin_skills_test.go` | Builtin gating, source/SHA metadata, no-content prefix, and untrusted guidance. |
-| `chatv2/agentv3_context.go` | Per-turn deterministic merge, catalog state, prefix hash, and no filesystem/HTTP reread. |
+| `chatv2/agentv3_context.go` | Per-turn deterministic merge, catalog state, real capability flags for tool-definition metadata/prefix hashing, and no filesystem/HTTP reread; Task 8 revisits its Task 6 call site serially. |
 | `chatv2/agentv3_runtime_test.go` | Tool exposure, generic `load_skill`, turn normalization, and existing Runtime/rich regressions. |
 | `chatv2/loop.go` | Remove result-string/last-tool special casing; successful `load_skill` owns loaded-name mutation. |
 | `chatv2/streaming_test.go` | Migrate the direct rich-authorization fixture from removed sequence helpers to the loaded-name set without changing streaming behavior. |
-| `chatv2/agentv3_searxng.go` | Fixed-origin client, parameter validation, bounded JSON decoding, reconstruction, truncation, and stable errors. |
+| `chatv2/agentv3_searxng.go` | Public-in-package SearXNG argument/client/settings types, fixed-origin request construction/execution, credential timing, and stable error mapping. |
+| `chatv2/agentv3_searxng_decode.go` | Strict JSON shape/type validation and suggestion, instance, engine, and search-result decoding. |
+| `chatv2/agentv3_searxng_format.go` | Rune truncation, token/list normalization, URL/text validation, and deterministic reconstructed text/JSON formatting. |
 | `chatv2/agentv3_searxng_test.go` | Controlled HTTP fixture for all three endpoints and transport/result boundaries. |
 | `chatv2/agentv3_searxng_tools.go` | Exact Eino tool schemas, activation gate, and delegation to the shared client. |
 | `chatv2/agentv3_searxng_tools_test.go` | Schema absence/presence, zero-I/O activation, loaded-turn success, and native collision warning. |
@@ -124,7 +131,7 @@
 | `README.md` | English configuration, rollout, mount, SearXNG, restart, and validator guidance. |
 | `README_zh-CN.md` | Chinese mirror of the same operator contract. |
 | `scripts/test-agent-runtime-compose.sh` | Static proof that Runtime mount remains read-only, Bot does not inherit it, and no SearXNG service is introduced. |
-| `docs/superpowers/plans/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua.md` | Approved/current plan artifact; the authorized orchestrator commits it alone before implementation, records that clean `HEAD` as `PLAN_BASE_SHA`, and does not modify it during Tasks 1–11. |
+| `docs/superpowers/plans/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua.md` | Approved/current plan artifact; after this revision is re-approved, the authorized orchestrator commits only it, records the resulting no-A–F-commit `HEAD` as the new `PLAN_BASE_SHA`, and does not modify it during resumed Tasks 1–11. |
 
 ## Locked Interface Contracts
 
@@ -262,6 +269,23 @@ impl FrozenSkillSnapshot {
 pub fn snapshot_sha256(schema_version: u32, sorted: &[SkillDescriptor]) -> String;
 ```
 
+**Locked Rust internal/test-only contracts (not public Runtime API):**
+
+```rust
+// agent-runtime/src/skills/loader.rs; production-internal, not re-exported
+pub(super) fn load_runtime_skill_descriptors(
+    root: &Path,
+) -> Result<Vec<SkillDescriptor>, SkillSnapshotError>;
+
+// agent-runtime/src/skills.rs; compiled only for the child tests module
+#[cfg(test)]
+pub(super) fn build_snapshot_for_test(
+    descriptors: Vec<SkillDescriptor>,
+) -> Result<SkillSnapshot, SkillSnapshotError>;
+```
+
+`agent-runtime/src/skills.rs` remains the public module surface: it declares private `mod loader;` and test-only `#[cfg(test)] mod tests;`, and the public constants, `SkillDescriptor`, `SkillSnapshot`, `SkillSnapshotError`, `FrozenSkillSnapshot`, and `snapshot_sha256` stay importable from `crate::skills` with no Task 3 import changes. `loader.rs` is not public and exports only `load_runtime_skill_descriptors` to its parent with `pub(super)`; no filesystem helper is re-exported. `build_snapshot_for_test` exists only under `cfg(test)`, delegates to the same private `build_validated_snapshot` path used by `FrozenSkillSnapshot::load`, and is absent from production builds and the Runtime API.
+
 ```rust
 pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 ```
@@ -270,19 +294,20 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 **Files:**
 - Create: `chatv2/agentv3_skills.go`
+- Create: `chatv2/agentv3_skills_fs.go`
 - Create: `chatv2/agentv3_skills_test.go`
 - Verify unchanged: `chatv2/agentv3_builtin_skills.go: normalizeAgentV3SkillName(raw string) string`
 - Verify unchanged: `chatv2/rich_message.go: isRichMessageLoadSkillArgs`
 
 **Interfaces:**
-- Consumes: existing `normalizeAgentV3SkillName(raw string) string` without changing its file or callers, plus Go standard `os`, `io`, `path/filepath`, `unicode/utf8`, `crypto/sha256`, `encoding/binary`, `encoding/hex`, `regexp`, `sort`, and `strings` only.
+- Consumes: existing `normalizeAgentV3SkillName(raw string) string` without changing its file or callers. `agentv3_skills.go` uses the standard hashing/encoding/regexp/sort/string APIs; `agentv3_skills_fs.go` alone owns standard `os`, `io`, `path/filepath`, filesystem `Lstat`/read, and description rune-scanning helpers.
 - Produces: new strict `parseAgentV3CanonicalSkillName(raw string) (string, error)`, every remaining Go descriptor/snapshot/catalog function in **Locked Interface Contracts**, constants `agentV3SkillSchemaVersion = 1`, `agentV3SkillFileMaxBytes = 64 * 1024`, `agentV3SkillsMaxCount = 128`, `agentV3SkillsMaxContentBytes = 1024 * 1024`, and stable validation errors consumed by Tasks 5–8.
 
 **Recommended executor:** `complex`
 
 - [ ] **Step 1: Add the compile-safe core skeleton and failing behavioral tests**
 
-  Add the exact locked structs/constants without declaring another `normalizeAgentV3SkillName`. Implement `parseAgentV3CanonicalSkillName` by calling the existing compatibility normalizer and then requiring `^[a-z0-9][a-z0-9-]{0,63}$`. For the remaining new functions, return `errAgentV3SkillSnapshotNotImplemented`; `emptyAgentV3SkillSnapshot` may call the skeleton and panic only if that explicit skeleton error is returned, so RED tests call the non-empty functions first.
+  In `agentv3_skills.go`, add the exact locked structs/constants without declaring another `normalizeAgentV3SkillName`; implement `parseAgentV3CanonicalSkillName` by calling the existing compatibility normalizer and then requiring `^[a-z0-9][a-z0-9-]{0,63}$`. In `agentv3_skills_fs.go`, add the compile-safe filesystem loader and description-helper skeletons. For the remaining new functions, return `errAgentV3SkillSnapshotNotImplemented`; `emptyAgentV3SkillSnapshot` may call the skeleton and panic only if that explicit skeleton error is returned, so RED tests call the non-empty functions first.
 
   Add table-driven tests named exactly:
 
@@ -332,9 +357,9 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 - [ ] **Step 3: Implement the minimal complete loader and canonical snapshot contract**
 
-  Implement exact canonical validation and limits. Use `os.Lstat` for root, direct entries, and `SKILL.md`; reject symlink modes before any `ReadFile`. Treat an absent/blank root only in callers—this loader receives a non-empty root and rejects missing/non-directory roots. Ignore root regular files, inspect every direct directory as one skill, and never walk beneath it.
+  Keep `agentv3_skills.go` limited to types, canonical parsing, content/snapshot hashing, validation, merge/precedence, cloning, and shadow records. In `agentv3_skills_fs.go`, implement exact filesystem validation and limits: use `os.Lstat` for root, direct entries, and `SKILL.md`; reject symlink modes before any bounded read. Treat an absent/blank root only in callers—this loader receives a non-empty root and rejects missing/non-directory roots. Ignore root regular files, inspect every direct directory as one skill, and never walk beneath it.
 
-  An ATX heading is a trimmed line beginning with one to six `#` characters followed by end-of-line or Unicode whitespace. Skip only blank and ATX-heading lines; the first other trimmed line is the description. Preserve raw file bytes as `Content`.
+  Keep first-prose-line extraction and ATX-heading detection in `agentv3_skills_fs.go`: an ATX heading is a trimmed line beginning with one to six `#` characters followed by end-of-line or Unicode whitespace. Skip only blank and ATX-heading lines; the first other trimmed line is the description. Preserve raw file bytes as `Content`. Keep each production file at or below the 250-pure-LOC structural limit without changing the locked package-level function signatures.
 
   `newAgentV3SkillSnapshot` requires `parseAgentV3CanonicalSkillName(name)` to return the original canonical descriptor name, overwrites descriptor `Source`, derives `SHA256`, requires builtin `VirtualPath == ""` and filesystem `VirtualPath == "/skills/"+name+"/SKILL.md"`, rejects duplicate names, sorts, and hashes. `validateAgentV3SkillSnapshot` does not repair external data: require schema 1, strict increasing order, exact source/path, per-item and aggregate limits, matching content hashes, matching snapshot hash, and for `bot-local`/`runtime-global` an exact match between `Description` and the first-prose-line extraction from `Content`. `mergeAgentV3SkillSnapshots` validates each source, applies the fixed priority map, emits shadow records, copies strings/descriptors into a new map/slice, sorts, and hashes the mixed-source final list.
 
@@ -355,6 +380,8 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 **Files:**
 - Create: `agent-runtime/src/skills.rs`
+- Create: `agent-runtime/src/skills/loader.rs`
+- Create: `agent-runtime/src/skills/tests.rs`
 - Modify: `agent-runtime/src/config.rs`
 - Modify: `agent-runtime/src/config/parse.rs`
 - Modify: `agent-runtime/src/main.rs`
@@ -363,16 +390,16 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 - Modify: `agent-runtime/tests/linux_cgroup.rs: AppState fixture`
 
 **Interfaces:**
-- Consumes: existing `sha2`, `serde`, `serde_json`, `bytes`, and standard filesystem APIs; existing live read-only `/skills` virtual-path behavior.
-- Produces: the Rust skill interfaces in **Locked Interface Contracts**, `RuntimeConfig.skills_root: Option<PathBuf>`, `AppState.skills_root: Option<PathBuf>`, and `AppState.skill_snapshot: FrozenSkillSnapshot` for Task 3.
+- Consumes: existing `sha2`, `serde`, `serde_json`, and `bytes` in `skills.rs`; standard filesystem APIs only through private `skills/loader.rs`; existing live read-only `/skills` virtual-path behavior.
+- Produces: the Rust skill interfaces in **Locked Interface Contracts** from the unchanged public path `crate::skills`, production-internal `loader::load_runtime_skill_descriptors(root: &Path)`, test-only `skills::build_snapshot_for_test(descriptors)`, `RuntimeConfig.skills_root: Option<PathBuf>`, `AppState.skills_root: Option<PathBuf>`, and `AppState.skill_snapshot: FrozenSkillSnapshot` for Task 3. `skills.rs` privately wires `loader` and test-only `tests`; the loader entry point compiles in production but is not public/re-exported, while the test helper is absent from production builds, and Task 3 imports neither.
 
 **Recommended executor:** `complex`
 
 - [ ] **Step 1: Add compile-safe Runtime skill types and RED tests**
 
-  Declare `pub mod skills;`, add the exact structs/constants, and add a compile-safe `FrozenSkillSnapshot` holding an empty snapshot plus empty `Bytes`; make `load(Some(_))` return `SkillSnapshotError::not_implemented()` and make `empty()` produce a valid empty snapshot only after calling the same canonical encoder skeleton.
+  Declare `pub mod skills;` from `lib.rs`. In `skills.rs`, add the exact public structs/constants/error, canonical hash skeleton, private `build_validated_snapshot(descriptors: Vec<SkillDescriptor>) -> Result<SkillSnapshot, SkillSnapshotError>`, `FrozenSkillSnapshot` holding an empty snapshot plus empty `Bytes`, private `mod loader;`, and `#[cfg(test)] mod tests;`. In `skills/loader.rs`, declare the exact production-internal `pub(super) fn load_runtime_skill_descriptors(root: &Path) -> Result<Vec<SkillDescriptor>, SkillSnapshotError>` skeleton. Make `load(Some(root))` call that loader and then `build_validated_snapshot`; make `empty()` call `build_validated_snapshot(Vec::new())`. Add `#[cfg(test)] pub(super) fn build_snapshot_for_test(...)` in `skills.rs` as a one-line delegation to `build_validated_snapshot`. Skeleton paths may return `SkillSnapshotError::not_implemented()` until GREEN. Keep all public names at `crate::skills::{...}` so Task 3 imports remain unchanged; do not declare `pub mod loader`.
 
-  In `skills.rs`, add unit tests named exactly:
+  In `skills/tests.rs`, add all unit tests, importing the parent surface with `use super::*;`, named exactly:
 
   ```rust
   #[test] fn runtime_skill_snapshot_loads_only_direct_children_and_preserves_content()
@@ -381,6 +408,8 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
   #[test] fn runtime_skill_snapshot_rejects_same_source_duplicate_descriptors()
   #[test] fn frozen_runtime_skill_snapshot_ignores_post_startup_file_changes()
   ```
+
+  For `runtime_skill_snapshot_rejects_same_source_duplicate_descriptors`, construct two otherwise valid `SkillDescriptor` values with the same canonical `name` and call `super::build_snapshot_for_test(vec![first, second])`; assert the same duplicate-name error returned by production `FrozenSkillSnapshot::load`. Do not attempt to manufacture duplicate direct-child directory names on a filesystem and do not import private loader helpers from the sibling test module.
 
   In `agent-runtime/tests/runtime_config.rs`, add `#[test] fn runtime_config_accepts_explicitly_disabled_skills_root()`.
 
@@ -398,7 +427,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 - [ ] **Step 3: Implement the matching Runtime loader and pre-serialized frozen response**
 
-  Mirror Task 1's direct-child, regular-file, UTF-8, description, 64 KiB/128/1 MiB, source/path, duplicate, sort, and canonical hash rules exactly. `source` is always `runtime-global`. Serialize the validated `SkillSnapshot` once into deterministic struct-field-order JSON, reject a body larger than `MAX_SKILLS_RESPONSE_BYTES`, and store both the immutable snapshot and `Bytes` in `FrozenSkillSnapshot`.
+  In private `skills/loader.rs`, implement `load_runtime_skill_descriptors` to mirror Task 1's direct-child, regular-file, UTF-8, description, 64 KiB/128/1 MiB, source/path, and canonical-name rules exactly; `source` is always `runtime-global`. Keep every helper below that single `pub(super)` entry point private. In `skills.rs`, implement `build_validated_snapshot` as the one shared duplicate/descriptor/source/path/content-hash validation, sorting, and canonical snapshot-hash path. `FrozenSkillSnapshot::load` must call `load_runtime_skill_descriptors` and then `build_validated_snapshot`; `empty()` and the cfg-test-only `build_snapshot_for_test` call that same builder directly. Then serialize the validated snapshot once in deterministic struct-field order, reject a body larger than `MAX_SKILLS_RESPONSE_BYTES`, and store both the immutable snapshot and `Bytes`. `skills/tests.rs` contains all tests only, and its duplicate-descriptor test calls only `super::build_snapshot_for_test`. Keep every production module at or below 250 pure production lines.
 
   In `main`, call `FrozenSkillSnapshot::load(config.skills_root.as_deref())` immediately after `RuntimeConfig::from_env` and before workspace/fetch/supervisor construction or listener bind. Put the same frozen object in `AppState`.
 
@@ -753,11 +782,13 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 **Files:**
 - Create: `chatv2/agentv3_searxng.go`
+- Create: `chatv2/agentv3_searxng_decode.go`
+- Create: `chatv2/agentv3_searxng_format.go`
 - Create: `chatv2/agentv3_searxng_test.go`
 
 **Interfaces:**
-- Consumes: Task 4's validated `config.AgentV3SearXNGConfig`, Go standard `net/http`, `net/url`, `encoding/json`, `io`, `math`, `sort`, `strings`, `unicode/utf8`, and `os.Getenv` through the injected `getenv` field.
-- Produces: the `searXNGClient` methods from **Locked Interface Contracts**, exact argument types below, deterministic reconstructed outputs, and model-facing error categories `unavailable`, `invalid_response`, `timeout`, and `request_failed`.
+- Consumes: Task 4's validated `config.AgentV3SearXNGConfig`. `agentv3_searxng.go` owns argument/client/settings types, argument validation, standard HTTP/URL/I/O/context error handling, and `os.Getenv` only through the injected `getenv` field; `agentv3_searxng_decode.go` owns `encoding/json` response-shape/type validation; `agentv3_searxng_format.go` owns sorting, token normalization, rune truncation, URL/text helpers, and deterministic formatting.
+- Produces: the unchanged public-in-package `searXNGClient` methods from **Locked Interface Contracts**, the exact argument types below, deterministic reconstructed outputs, and model-facing error categories `unavailable`, `invalid_response`, `timeout`, and `request_failed`. Decode/format helpers remain package-private implementation details, so Task 8 imports and calls do not change.
 
 **Recommended executor:** `complex`
 
@@ -792,7 +823,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
   }
   ```
 
-  Make the three client methods initially return `newSearXNGError("request_failed")`. Add a shared `httptest.Server` fixture that captures method/path/query/header/auth and has controllable response/status/body/delay. Add tests named exactly:
+  Put the exact argument/client/settings/error types and the three locked method skeletons in `agentv3_searxng.go`; put compile-safe decode helper skeletons in `agentv3_searxng_decode.go` and format/normalization helper skeletons in `agentv3_searxng_format.go`. Make the three client methods initially return `newSearXNGError("request_failed")`. Add a shared `httptest.Server` fixture that captures method/path/query/header/auth and has controllable response/status/body/delay. Keep the existing consolidated test file and add tests named exactly:
 
   ```go
   func TestSearXNGWebSearchUsesFixedOriginStableQueryAndDefaults(t *testing.T)
@@ -818,7 +849,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
   `newSearXNGClient` parses the already-validated base URL, trims only trailing slash semantics, stores the config by value, creates `http.Client{Timeout: parsedTimeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}`, and sets `getenv=os.Getenv`. It does not call `getenv`.
 
-  Build endpoints with `url.JoinPath(baseURL.String(), endpoint)` and verify the resulting `Scheme`, `Host`, and effective port equal the validated base before every request. The model supplies no URL field. Add only stable allowed query keys:
+  Keep request construction/execution and stable transport/status/error mapping in `agentv3_searxng.go`. Build endpoints with `url.JoinPath(baseURL.String(), endpoint)` and verify the resulting `Scheme`, `Host`, and effective port equal the validated base before every request. The model supplies no URL field. Add only stable allowed query keys:
 
   - `/search`: `q`, `format=json`, `pageno`, `time_range`, `language`, `safesearch`, `categories`, `engines`. Apply `min_score`, `num_results`, `response_format`, and `result_detail` locally.
   - `/autocompleter`: `q` and optional `language`; set `X-Requested-With: XMLHttpRequest` so supported SearXNG versions return a pure string array.
@@ -830,13 +861,15 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 - [ ] **Step 4: Implement exact validation, truncation, and reconstructed formats**
 
-  Validate non-empty query up to 1,000 runes; positive page (default 1); time range in `day|week|month|year`; language with Task 4's bounded/control rules; safesearch 0–2; finite min score; results 1..configured max (default configured max); format `text|json`; detail `compact|full` (default compact). Parse comma lists as at most 16 unique, input-order tokens matching `^[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$`.
+  In `agentv3_searxng.go`, validate non-empty query up to 1,000 runes; positive page (default 1); time range in `day|week|month|year`; language with Task 4's bounded/control rules; safesearch 0–2; finite min score; results 1..configured max (default configured max); format `text|json`; detail `compact|full` (default compact). Delegate comma-list normalization to `agentv3_searxng_format.go`: at most 16 unique, input-order tokens matching `^[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$`.
 
-  Search accepts a root object with `results` array and reads only `title`, `url`, `content`, `engine`, `engines`, `category`, `score`, and `publishedDate`; unknown keys are ignored, but wrong consumed types or a non-HTTP(S) absolute result URL are `invalid_response`. Preserve response order, apply finite `min_score`, then cap count. Truncate every displayed string by Unicode rune with marker `…[truncated]`; if the configured limit is shorter than the marker, return the marker's first `limit` runes.
+  In `agentv3_searxng_decode.go`, strictly decode only the documented consumed shapes. Search accepts a root object with `results` array and reads only `title`, `url`, `content`, `engine`, `engines`, `category`, `score`, and `publishedDate`; unknown keys are ignored, but wrong consumed types or a non-HTTP(S) absolute result URL are `invalid_response`. Preserve response order, apply finite `min_score`, then cap count. Use `agentv3_searxng_format.go` to truncate every displayed string by Unicode rune with marker `…[truncated]`; if the configured limit is shorter than the marker, return the marker's first `limit` runes.
 
-  Compact output is rank/title/url/summary. Full output may additionally include source, published date, finite score, and categories. Text uses that fixed field order and `---` between results. JSON marshals private fixed-order structs and never forwards raw JSON.
+  In `agentv3_searxng_format.go`, compact output is rank/title/url/summary. Full output may additionally include source, published date, finite score, and categories. Text uses that fixed field order and `---` between results. JSON marshals private fixed-order structs and never forwards raw JSON.
 
-  Suggestions accept either the XMLHttpRequest string array or the documented five-element envelope, extract strings only, truncate, deduplicate, lexicographically sort, and cap at configured `MaxResults`. Instance info reads only `instance_name`, `default_locale`, `safe_search`, `categories`, and engines with `name`, `shortcut`, `categories`, `enabled`; omit the engine array unless `IncludeEngines` is true, then apply category and disabled filters, sort engines by name, cap counts/strings, and emit reconstructed JSON.
+  Suggestions accept exactly either a top-level JSON string array or a two-element tuple `[query, suggestions]` whose first element is a string and second element is a string array. In `TestSearXNGSuggestionsReturnSortedDeduplicatedBoundedStrings`, add explicit subtests for both accepted shapes, tuple-shaped envelopes of lengths other than two, and wrong tuple element types; malformed shapes are `invalid_response`, while pure string arrays remain valid independently of their pre-cap length. Extract only suggestion strings, then use `agentv3_searxng_format.go` to truncate, deduplicate, lexicographically sort, and cap at configured `MaxResults`, preserving the deterministic bounded-list behavior. Instance info decoding in `agentv3_searxng_decode.go` reads only `instance_name`, `default_locale`, `safe_search`, `categories`, and engines with `name`, `shortcut`, `categories`, `enabled`; omit the engine array unless `IncludeEngines` is true, then use the format helpers to apply category and disabled filters, sort engines by name, cap counts/strings, and emit reconstructed JSON.
+
+  Keep each of the three production files at or below 250 pure production lines. Do not move or rename the locked client methods or argument types, and do not create an exported API between these same-package files.
 
 - [ ] **Step 5: Run GREEN client and race tests**
 
@@ -860,12 +893,13 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 - Modify: `chatv2/agentv3_builtin_skills.go`
 - Modify: `chatv2/agentv3_builtin_skills_test.go`
 - Modify: `chatv2/agentv3_runtime.go: buildAgentV3Tools and tool-definition metadata`
+- Modify: `chatv2/agentv3_context.go: agentV3ToolDefinitionsText call site after Task 6 catalog preparation`
 - Modify: `chatv2/agent.go: buildMainAgent ordering and collision warning`
 - Modify: `chatv2/agentv3_runtime_test.go`
 
 **Interfaces:**
-- Consumes: Task 6 catalog/loaded-name semantics and Task 7 client/argument types.
-- Produces: Eino invokable tools named exactly `searxng_web_search`, `searxng_search_suggestions`, and `searxng_instance_info`; `searxng` builtin descriptor; stable activation result; native-first collision warning.
+- Consumes: Task 6 catalog/loaded-name semantics, including the post-merge `prepareAgentV3Turn` call site in `agentv3_context.go`, and Task 7 client/argument types.
+- Produces: Eino invokable tools named exactly `searxng_web_search`, `searxng_search_suggestions`, and `searxng_instance_info`; `searxng` builtin descriptor; stable activation result; native-first collision warning; and `agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string` called with the current compiled chat's real capability state.
 
 **Recommended executor:** `complex`
 
@@ -917,7 +951,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
   3. `load_skill` when the compiled catalog is non-empty;
   4. existing configured/MCP/MCPO/subagent tools through the existing outer assembly.
 
-  Change metadata rendering to `agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string`; when enabled, prepend entries for the same exact three names and argument summaries so `ToolDefsHash` reflects the native schema set.
+  Change metadata rendering to `agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string`; when enabled, prepend entries for the same exact three names and argument summaries so `ToolDefsHash` reflects the native schema set. Update its sole production call site, `prepareAgentV3Turn` in `agentv3_context.go`, after Task 6's turn catalog is installed: set `includeLoadSkill := len(tc.V3.SkillCatalog.Sorted) > 0`, retain `fetchEnabled := cfg.RuntimeFetchEnabled()`, set `searxngEnabled := cc.AgentV3StartupSkills != nil && cc.AgentV3StartupSkills.SearXNG != nil`, and call `agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled)`. These production values must come from that current compiled chat/turn; do not hard-code any boolean or derive SearXNG availability from global enablement alone. Update every direct call in `agentv3_runtime_test.go` to pass the explicit third state: use `false` for existing non-SearXNG metadata regressions and add a `true` assertion that the exact three SearXNG definitions appear and change `ToolDefsHash`. The function definition, the one production call site, and all direct test call sites must compile with three arguments.
 
   Before `NewCustomAgent`, inspect names from the already-built configured list; for each exact SearXNG collision, log one warning containing chat and tool name and stating native-first selection. Do not remove the configured object or MCPO subsystem; let `NewCustomAgent` retain first-registration behavior and its existing generic duplicate warning.
 
@@ -1079,7 +1113,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 - Evidence only: execution notes outside the repository.
 
 **Interfaces:**
-- Consumes: the complete GREEN working tree from Tasks 1–10, the full `PLAN_BASE_SHA` of the clean `HEAD` containing only the separately committed authoritative plan, and pending (not yet committed) groups A–F.
+- Consumes: the complete GREEN working tree from Tasks 1–10, the full new `PLAN_BASE_SHA` of the `HEAD` whose latest commit contains only this separately committed authoritative plan revision and no A–F implementation content, and pending (not yet committed) groups A–F. The plan is byte-unchanged after that base.
 - Produces: one final acceptance packet bound to the `requesting-code-review` skill's canonical working-tree identity, a NUL-safe tracked-plus-untracked inventory covering all implementation since `PLAN_BASE_SHA`, task/review receipts, verification matrix, deployment evidence status, residual risks, worker Git-write status, approved working-tree content-equivalence evidence, and—only after review approval—the authorized orchestrator's A–F commit/range/push delivery evidence.
 
 **Recommended executor:** `normal-task`
@@ -1118,8 +1152,11 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
   const allowed = new Set([
     "chatv2/agentv3_skills.go",
+    "chatv2/agentv3_skills_fs.go",
     "chatv2/agentv3_skills_test.go",
     "agent-runtime/src/skills.rs",
+    "agent-runtime/src/skills/loader.rs",
+    "agent-runtime/src/skills/tests.rs",
     "agent-runtime/src/config.rs",
     "agent-runtime/src/config/parse.rs",
     "agent-runtime/src/main.rs",
@@ -1146,6 +1183,8 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
     "chatv2/loop.go",
     "chatv2/streaming_test.go",
     "chatv2/agentv3_searxng.go",
+    "chatv2/agentv3_searxng_decode.go",
+    "chatv2/agentv3_searxng_format.go",
     "chatv2/agentv3_searxng_test.go",
     "chatv2/agentv3_searxng_tools.go",
     "chatv2/agentv3_searxng_tools_test.go",
@@ -1436,12 +1475,12 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 | Contract | Primary tests/evidence | Full regression |
 |---|---|---|
 | Go filesystem descriptors, UTF-8/runes, limits, symlinks, duplicates, canonical hash | `agentv3_skills_test.go` | `go test -race -short ./...` |
-| Runtime startup freeze and exact cross-language snapshot | `skills.rs` unit tests and fixed canonical vector | `cargo test --all-features` |
+| Runtime startup freeze and exact cross-language snapshot | `skills/tests.rs` unit tests, private `skills/loader.rs`, and fixed canonical vector | `cargo test --all-features` |
 | Authenticated bounded single-response `/v1/skills` and live generic `/skills` | `lib.rs` route tests | Runtime full crate + native Linux |
 | Bot-local/Runtime one-call init and fail-fast validation | `agentv3_skills_startup_test.go`, `agentv3_runtime_snapshot_test.go` | Go full/race |
 | Per-chat precedence, turn-owned catalog, Stable Prefix SHA, no fallback | builtin/context/runtime tests | Go full/race |
 | Multi-name loaded set and unchanged rich gate | `types_test.go`, runtime/streaming/rich tests | Go full/race |
-| SearXNG config, three endpoints, fixed origin, redirect/body/time/result bounds | config + `agentv3_searxng_test.go` | Go full/race |
+| SearXNG config, three endpoints, fixed origin, both suggestion response shapes, strict decode, and redirect/body/time/result bounds | config + `agentv3_searxng_test.go` across client/decode/format modules | Go full/race |
 | Exact native schemas, activation zero-I/O, native-over-MCPO warning | `agentv3_searxng_tools_test.go` | Go full/race |
 | Fetch exact default/custom UA, final-map budget, redirect retention | `fetch_policy.rs`, `fetch_broker.rs` | Fetch protocol/security/full Rust |
 | Defaults, rollout, independent mounts, no service, validator evidence class | config tests, README/skills assertions, Compose static script | Docker render/native deployment lane |
