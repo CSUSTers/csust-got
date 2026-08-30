@@ -116,16 +116,19 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 	})
 
 	includeLoadSkill := agentV3RichSkillAvailable(tc.Config, cfg)
-	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill)
+	fetchEnabled := cfg.RuntimeFetchEnabled()
+	runtimeRules := agentV3RuntimeSkillRules(fetchEnabled)
+	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled)
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
+	runtimeRulesHash := hashString(runtimeRules)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(buildAgentV3BuiltinSkills(tc, cfg))
 	skillPromptBlockHash := hashString(skillPromptBlock)
-	prefixHash := buildAgentV3PrefixHash(soulHash, skillPromptBlockHash)
+	prefixHash := buildAgentV3PrefixHash(soulHash, runtimeRulesHash, skillPromptBlockHash)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
 	promptCacheKey := ""
-	prefixText := buildAgentV3StablePrefix(soul, skillPromptBlock)
+	prefixText := buildAgentV3StablePrefix(soul, skillPromptBlock, fetchEnabled)
 
 	cacheHit := false
 	finishCacheSpan := trace.StartSpan("context_cache", map[string]any{
@@ -347,16 +350,16 @@ func joinAgentV3PromptBlocks(blocks ...string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func buildAgentV3PrefixHash(soulHash, skillPromptBlockHash string) string {
-	return hashString(strings.Join([]string{soulHash, skillPromptBlockHash}, ":"))
+func buildAgentV3PrefixHash(soulHash, runtimeRulesHash, skillPromptBlockHash string) string {
+	return hashString(strings.Join([]string{soulHash, runtimeRulesHash, skillPromptBlockHash}, ":"))
 }
 
-func buildAgentV3StablePrefix(soul, skillPromptBlock string) string {
+func buildAgentV3StablePrefix(soul, skillPromptBlock string, fetchEnabled bool) string {
 	var parts []string
 	if strings.TrimSpace(soul) != "" {
 		parts = append(parts, "<soul>\n"+strings.TrimSpace(soul)+"\n</soul>")
 	}
-	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules()+"\n</runtime_and_skill_rules>")
+	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules(fetchEnabled)+"\n</runtime_and_skill_rules>")
 	if strings.TrimSpace(skillPromptBlock) != "" {
 		parts = append(parts, strings.TrimSpace(skillPromptBlock))
 	}
@@ -378,11 +381,12 @@ func agentV3RichMessageSkillContract(enabled bool) string {
 	}, "\n")
 }
 
-func agentV3RuntimeSkillRules() string {
-	return "You are running in agent-v3 mode.\n" +
+func agentV3RuntimeSkillRules(fetchEnabled bool) string {
+	rules := "You are running in agent-v3 mode.\n" +
 		"Agent-v3 adds remote runtime tools: read, grep, write, edit, bash.\n" +
 		"When load_skill is available, it loads built-in skills for the current turn; call it before using special output protocols such as Telegram rich messages.\n" +
 		"Configured chatv2 tools, MCP tools, subagents, and SkillConfig tools may also be available; use whichever tool best fits the task.\n" +
+		"Model and MCP tools live in the model tool namespace and must be called directly according to their registered schemas.\n" +
 		"Use the remote runtime namespace for this chat only; never assume access to another chat workspace.\n" +
 		"Available built-in skills may appear in <agent_v3_skills>; call load_skill to activate one before using its special output protocol.\n" +
 		"Do not use read, grep, or runtime filesystem paths to load skills from /skills.\n" +
@@ -390,7 +394,12 @@ func agentV3RuntimeSkillRules() string {
 		"Do not invent skill commands or /skills scripts.\n" +
 		"Do not write skill instructions into long-term memory.\n" +
 		"Use bash for command execution only through the remote runtime.\n" +
-		"The bash runtime includes common utilities such as curl, jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils."
+		"The bash runtime includes common local utilities such as jq, git, tar, gzip, unzip, file, sed, grep, find, and coreutils; git can operate only on local repositories.\n" +
+		"Within the Bash environment, curl, wget, remote git operations, /dev/tcp, and other socket clients cannot connect to external networks."
+	if !fetchEnabled {
+		return rules
+	}
+	return rules + "\n" + agentV3FetchCLIGuidance()
 }
 
 func agentV3TurnsToMessages(turns []orm.AgentV3Turn) []*schema.Message {

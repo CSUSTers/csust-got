@@ -13,8 +13,15 @@ on:
 
 jobs:
   build:
-    name: Build and Push
+    name: Build and Push (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: runtime
+            image: csusters/agent-runtime
+          - target: broker
+            image: csusters/agent-fetch-broker
     steps:
       - name: Get source
         uses: actions/checkout@v4
@@ -30,13 +37,14 @@ jobs:
         id: build-image
         uses: redhat-actions/buildah-build@v2
         with:
-          image: csusters/agent-runtime
+          image: ${{ matrix.image }}
           tags: |
             ${{ github.event_name == 'release' && 'latest' || format('latest-{0}', steps.sanitize.outputs.tag_name) }}
             ${{ steps.sanitize.outputs.tag_name }}
           containerfiles: |
             ./agent-runtime/Dockerfile
           layers: true
+          extra-args: --target=${{ matrix.target }}
 
       - name: Push To registry
         id: push-to-registry

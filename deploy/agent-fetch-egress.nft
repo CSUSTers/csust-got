@@ -1,0 +1,52 @@
+# Operators must add every site-specific Bot, Redis, host, and control CIDR to
+# the appropriate interval set before loading this table. Do not load a
+# deployment with an incomplete deny set or replace these rejects with a
+# permissive fallback.
+table inet agent_fetch {
+  set deny4 {
+    type ipv4_addr
+    flags interval
+    elements = {
+      0.0.0.0/8,
+      10.0.0.0/8,
+      100.64.0.0/10,
+      127.0.0.0/8,
+      169.254.0.0/16,
+      172.16.0.0/12,
+      192.0.0.0/24,
+      192.0.2.0/24,
+      192.168.0.0/16,
+      198.18.0.0/15,
+      198.51.100.0/24,
+      203.0.113.0/24,
+      224.0.0.0/4,
+      240.0.0.0/4
+    }
+  }
+
+  set deny6 {
+    type ipv6_addr
+    flags interval
+    elements = {
+      ::/128,
+      ::1/128,
+      ::ffff:0:0/96,
+      100::/64,
+      2001:db8::/32,
+      fc00::/7,
+      fe80::/10,
+      ff00::/8
+    }
+  }
+
+  chain input {
+    type filter hook input priority filter - 5; policy accept;
+    iifname "br-agent-fetch" reject
+  }
+
+  chain forward {
+    type filter hook forward priority filter - 5; policy accept;
+    iifname "br-agent-fetch" ip daddr @deny4 reject
+    iifname "br-agent-fetch" ip6 daddr @deny6 reject
+  }
+}

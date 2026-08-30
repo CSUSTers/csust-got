@@ -1,0 +1,109 @@
+services:
+  agent-runtime:
+    environment:
+      - AGENT_RUNTIME_FETCH_ENABLED=${AGENT_FETCH_ENABLE:?set true to enable controlled Fetch}
+      - AGENT_RUNTIME_REQUIRE_FETCH_FOR_READINESS=true
+      - AGENT_RUNTIME_FETCH_MAX_CONCURRENCY=2
+      - AGENT_RUNTIME_FETCH_MAX_REQUESTS=20
+      - AGENT_RUNTIME_FETCH_MAX_REQUEST_BYTES=8388608
+      - AGENT_RUNTIME_FETCH_MAX_RESPONSE_BYTES=33554432
+      - AGENT_FETCH_SOCKET=/run/agent-fetch/fetch.sock
+      - AGENT_FETCH_HMAC_KEY_FILE=/run/secrets/agent_fetch_hmac_key
+      - AGENT_FETCH_POLICY_VERSION=${AGENT_FETCH_POLICY_VERSION:?Fetch policy version is required}
+    volumes:
+      - type: volume
+        source: fetch-socket
+        target: /run/agent-fetch
+        volume:
+          nocopy: true
+    secrets:
+      - source: agent-fetch-hmac-key
+        target: /run/secrets/agent_fetch_hmac_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0440
+
+  agent-fetch-broker:
+    build:
+      context: .
+      dockerfile: agent-runtime/Dockerfile
+      target: broker
+    container_name: agent-fetch-broker
+    restart: always
+    profiles:
+      - agent-fetch
+    pids_limit: 128
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 1.0
+    ulimits:
+      nofile:
+        soft: 256
+        hard: 1024
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - AGENT_FETCH_ENABLED=${AGENT_FETCH_ENABLE:?set true}
+      - AGENT_FETCH_SOCKET=/run/agent-fetch/fetch.sock
+      - AGENT_FETCH_PEER_UID=10001
+      - AGENT_FETCH_PEER_GID=10001
+      - AGENT_FETCH_HMAC_KEY_FILE=/run/secrets/agent_fetch_hmac_key
+      - AGENT_FETCH_DENY_CIDRS=0.0.0.0/8,10.0.0.0/8,100.64.0.0/10,127.0.0.0/8,169.254.0.0/16,172.16.0.0/12,192.0.0.0/24,192.0.2.0/24,192.168.0.0/16,198.18.0.0/15,198.51.100.0/24,203.0.113.0/24,224.0.0.0/4,240.0.0.0/4,::/128,::1/128,::ffff:0:0/96,100::/64,2001:db8::/32,fc00::/7,fe80::/10,ff00::/8,${AGENT_FETCH_EXTRA_DENY_CIDRS:?site Bot Redis host and control deny CIDRs are required}
+      - AGENT_FETCH_DNS_SERVERS=${AGENT_FETCH_DNS_SERVERS:?dedicated DNS server socket addresses are required}
+      - AGENT_FETCH_REQUEST_HEADER_MAX_BYTES=32768
+      - AGENT_FETCH_REQUEST_BODY_MAX_BYTES=8388608
+      - AGENT_FETCH_RESPONSE_HEADER_MAX_BYTES=32768
+      - AGENT_FETCH_RESPONSE_NETWORK_MAX_BYTES=16777216
+      - AGENT_FETCH_RESPONSE_DECODED_MAX_BYTES=33554432
+      - AGENT_FETCH_MAX_DECOMPRESSION_RATIO=20
+      - AGENT_FETCH_DNS_TIMEOUT_MS=2000
+      - AGENT_FETCH_CONNECT_TIMEOUT_MS=3000
+      - AGENT_FETCH_FIRST_BYTE_TIMEOUT_MS=5000
+      - AGENT_FETCH_TOTAL_TIMEOUT_MS=30000
+      - AGENT_FETCH_MAX_CONCURRENCY=2
+      - AGENT_FETCH_MAX_REQUESTS=20
+      - AGENT_FETCH_MAX_REDIRECTS=5
+      - AGENT_FETCH_AUDIT_PATH=/var/log/agent-fetch/audit.jsonl
+      - AGENT_FETCH_AUDIT_FS_MAX_BYTES=${AGENT_FETCH_AUDIT_FS_MAX_BYTES:?Broker audit filesystem byte ceiling is required}
+      - AGENT_FETCH_POLICY_VERSION=${AGENT_FETCH_POLICY_VERSION:?Fetch policy version is required}
+    volumes:
+      - type: volume
+        source: fetch-socket
+        target: /run/agent-fetch
+        volume:
+          nocopy: true
+      - type: bind
+        source: ${AGENT_FETCH_AUDIT_HOST_ROOT:?bounded Broker audit mount root is required}
+        target: /var/log/agent-fetch
+        bind:
+          create_host_path: false
+    secrets:
+      - source: agent-fetch-hmac-key
+        target: /run/secrets/agent_fetch_hmac_key
+        uid: "10002"
+        gid: "10001"
+        mode: 0440
+    networks:
+      - fetch-egress
+
+networks:
+  fetch-egress:
+    name: fetch-egress
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-agent-fetch
+
+volumes:
+  fetch-socket:
+    name: fetch-socket
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1m,uid=10002,gid=10001,mode=0770,nosuid,nodev,noexec
+
+secrets:
+  agent-fetch-hmac-key:
+    file: ${AGENT_FETCH_HMAC_SECRET_FILE:?external HMAC secret file is required}

@@ -202,6 +202,23 @@ func stickerDlHandler(ctx Context) error {
 	return nil
 }
 
+func handleChatConfig(ctx Context, chatConfig *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
+	if chatConfig.IsAgentEnabled() {
+		if config.BotConfig.WhiteListConfig.Enabled &&
+			!config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
+			zap.L().Info("chat ignore by white list",
+				zap.Int64("chat_id", ctx.Chat().ID),
+				zap.String("agent", chatConfig.Name),
+			)
+			return nil
+		}
+		if chatv2.HasCompiledChat(chatConfig.Name) {
+			return chatv2.Chat(ctx, chatConfig, trigger)
+		}
+	}
+	return chat.Chat(ctx, chatConfig, trigger)
+}
+
 func customHandler(ctx Context) error {
 
 	cmd := entities.FromMessage(ctx.Message())
@@ -230,10 +247,7 @@ func customHandler(ctx Context) error {
 		if reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, v2 := range config.BotConfig.ActiveChatConfig() {
 				if trigger, ok := v2.TriggerOnReply(); ok {
-					if v2.IsAgentEnabled() && chatv2.HasCompiledChat(v2.Name) {
-						return chatv2.Chat(ctx, v2, trigger)
-					}
-					return chat.Chat(ctx, v2, trigger)
+					return handleChatConfig(ctx, v2, trigger)
 				}
 			}
 		}
@@ -279,10 +293,7 @@ func registerChatConfigHandler(bot *Bot) {
 				vCopy := v
 				trCopy := tr
 				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
-					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
-						return chatv2.Chat(ctx, vCopy, trCopy)
-					}
-					return chat.Chat(ctx, vCopy, trCopy)
+					return handleChatConfig(ctx, vCopy, trCopy)
 				})
 			}
 		}
@@ -304,10 +315,7 @@ func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
-					if vCopy.IsAgentEnabled() && chatv2.HasCompiledChat(vCopy.Name) {
-						return chatv2.Chat(context, vCopy, trCopy)
-					}
-					return chat.Chat(context, vCopy, trCopy)
+					return handleChatConfig(context, vCopy, trCopy)
 				}})
 			}
 		}

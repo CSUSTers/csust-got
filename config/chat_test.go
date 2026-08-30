@@ -211,3 +211,25 @@ func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
 	require.NotNil(t, cfg.Skills.InjectBuiltin)
 	assert.True(t, *cfg.Skills.InjectBuiltin)
 }
+
+func TestAgentV3RuntimeFetchDefaultsDisabled(t *testing.T) {
+	var nilConfig *AgentV3Config
+	assert.False(t, nilConfig.RuntimeFetchEnabled())
+
+	omitted := &AgentV3Config{}
+	assert.False(t, omitted.RuntimeFetchEnabled())
+	omitted.checkConfig()
+	assert.False(t, omitted.RuntimeFetchEnabled())
+}
+
+func TestAgentV3RuntimeFetchRequiresExplicitTrue(t *testing.T) {
+	cfg := &AgentV3Config{}
+
+	disabled := false
+	cfg.Runtime.FetchEnabled = &disabled
+	assert.False(t, cfg.RuntimeFetchEnabled())
+
+	enabled := true
+	cfg.Runtime.FetchEnabled = &enabled
+	assert.True(t, cfg.RuntimeFetchEnabled())
+}

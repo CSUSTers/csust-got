@@ -61,6 +61,15 @@ func (f *whitelistFilter) Check(tbCtx tb.Context, chatCfg *config.ChatConfigSing
 // ProcessFilters runs all configured filters on the message.
 // Returns true if the message should be processed, false to block.
 func ProcessFilters(tbCtx tb.Context, chatCfg *config.ChatConfigSingle) bool {
+	if config.BotConfig.WhiteListConfig.Enabled &&
+		!config.BotConfig.WhiteListConfig.Check(tbCtx.Chat().ID) {
+		zap.L().Debug("chatv2/filter: chat not in global whitelist",
+			zap.Int64("chat_id", tbCtx.Chat().ID),
+			zap.String("chat", chatCfg.Name),
+		)
+		return false
+	}
+
 	if len(chatCfg.Filters.Filters) == 0 {
 		return true
 	}

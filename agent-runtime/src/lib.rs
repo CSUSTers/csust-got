@@ -16,21 +16,39 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    ffi::OsStr,
     io::{self, Read as _, Write as _},
     path::{Component, Path, PathBuf},
-    process::Stdio,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{
-    fs,
-    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
-    process::{Child, Command},
-    time::timeout,
-};
+#[cfg(test)]
+use tokio::io::{AsyncRead, AsyncReadExt};
+#[cfg(test)]
+use tokio::time::timeout;
+use tokio::{fs, io::AsyncWriteExt};
 use tracing::{info, warn};
 use walkdir::WalkDir;
+
+pub mod audit;
+#[cfg(all(feature = "c7-test-support", target_os = "linux"))]
+pub mod c7_test_support;
+pub mod cgroup;
+pub mod config;
+pub mod exec;
+pub mod fetch_auth;
+pub mod fetch_broker;
+pub mod fetch_cli;
+pub mod fetch_policy;
+pub mod fetch_protocol;
+pub mod runtime_fetch_proxy;
+pub mod runtime_security;
+pub mod sandbox;
+pub mod workspace_budget;
+
+use cgroup::CommandIdentity;
+use exec::{BashHealth, CommandSupervisor, ExecTarget, SupervisorError};
+use runtime_fetch_proxy::RuntimeFetchProxy;
+use workspace_budget::{Reservation, WorkspaceBudget};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -41,10 +59,17 @@ pub struct AppState {
     pub command_timeout: Duration,
     pub trace_jsonl_path: PathBuf,
     pub bash_sandbox: BashSandboxMode,
+    pub command_supervisor: Option<CommandSupervisor>,
+    pub bash_health: BashHealth,
+    pub fetch_proxy: RuntimeFetchProxy,
+    pub require_fetch_for_readiness: bool,
+    pub bash_readiness_error: String,
+    pub workspace_budget: WorkspaceBudget,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BashSandboxMode {
+    #[cfg(test)]
     None,
     Proot,
 }
@@ -138,6 +163,12 @@ pub struct StatusResponse {
     pub workspace_root: String,
     pub skills_root: String,
     pub bash_sandbox: String,
+    pub bash_ready: bool,
+    pub fetch_enabled: bool,
+    pub fetch_ready: bool,
+    pub supervisor_dumpable: bool,
+    pub policy_version: String,
+    pub readiness_error: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,7 +180,7 @@ pub struct ResetResponse {
 
 #[derive(Debug, Serialize)]
 struct TraceRecord {
-    run_id: String,
+    run_id_hash: String,
     namespace_hash: String,
     op: String,
     duration_ms: u128,
@@ -184,6 +215,13 @@ impl RuntimeError {
     fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+
+    fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
             message: message.into(),
         }
     }
@@ -322,12 +360,40 @@ async fn status_handler(
     headers: HeaderMap,
 ) -> Result<Json<StatusResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let bash_ready = state.command_supervisor.is_some() && state.bash_health.is_ready();
+    let fetch_enabled = state.fetch_proxy.is_enabled();
+    let fetch_ready = state.fetch_proxy.probe().await;
+    let supervisor_dumpable = crate::sandbox::runtime_supervisor_dumpable().unwrap_or(true);
+    let mut readiness_errors = Vec::new();
+    if !bash_ready {
+        readiness_errors.push(if !state.bash_health.is_ready() {
+            state.bash_health.reason()
+        } else if state.bash_readiness_error.is_empty() {
+            "bash unavailable".to_string()
+        } else {
+            state.bash_readiness_error.clone()
+        });
+    }
+    if fetch_enabled && state.require_fetch_for_readiness && !fetch_ready {
+        readiness_errors.push("fetch broker unavailable".to_string());
+    }
+    if supervisor_dumpable {
+        readiness_errors.push("runtime supervisor is dumpable".to_string());
+    }
     Ok(Json(StatusResponse {
-        ok: true,
+        ok: bash_ready
+            && !supervisor_dumpable
+            && (!fetch_enabled || !state.require_fetch_for_readiness || fetch_ready),
         version: env!("CARGO_PKG_VERSION").to_string(),
         workspace_root: state.workspace_root.display().to_string(),
         skills_root: state.skills_root.display().to_string(),
         bash_sandbox: state.bash_sandbox.as_str().to_string(),
+        bash_ready,
+        fetch_enabled,
+        fetch_ready,
+        supervisor_dumpable,
+        policy_version: state.fetch_proxy.policy_version().to_string(),
+        readiness_error: readiness_errors.join("; "),
     }))
 }
 
@@ -464,6 +530,8 @@ fn join_virtual_path(prefix: &str, rel: &Path) -> String {
 
 async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse, RuntimeError> {
     let components = workspace_write_components(state, &req.common, &req.path)?;
+    let target = workspace_host_path(state, &req.common.namespace, &components);
+    let reservation = reserve_workspace_replace(state, target, req.content.len()).await?;
     write_workspace_file_nofollow(
         state,
         &req.common.namespace,
@@ -473,6 +541,7 @@ async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse
         true,
     )
     .await?;
+    reservation.commit();
     Ok(TextResponse {
         ok: true,
         bytes: req.content.len(),
@@ -493,6 +562,8 @@ async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, 
         .map_err(|e| RuntimeError::bad_request(format!("invalid unified diff: {e}")))?;
     let edited = diffy::apply(&original, &patch)
         .map_err(|e| RuntimeError::bad_request(format!("apply patch failed: {e}")))?;
+    let target = workspace_host_path(state, &req.common.namespace, &components);
+    let reservation = reserve_workspace_replace(state, target, edited.len()).await?;
     write_workspace_file_nofollow(
         state,
         &req.common.namespace,
@@ -502,6 +573,7 @@ async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, 
         false,
     )
     .await?;
+    reservation.commit();
     Ok(TextResponse {
         ok: true,
         bytes: edited.len(),
@@ -561,6 +633,42 @@ fn workspace_path_components(relative: &Path) -> Result<Vec<std::ffi::OsString>,
     Ok(components)
 }
 
+fn workspace_host_path(
+    state: &AppState,
+    namespace: &str,
+    components: &[std::ffi::OsString],
+) -> PathBuf {
+    let mut path = state.workspace_root.join(sanitize_namespace(namespace));
+    for component in components {
+        path.push(component);
+    }
+    path
+}
+
+async fn reserve_workspace_replace(
+    state: &AppState,
+    path: PathBuf,
+    new_len: usize,
+) -> Result<Reservation, RuntimeError> {
+    let budget = state.workspace_budget.clone();
+    let new_len = u64::try_from(new_len)
+        .map_err(|_| RuntimeError::bad_request("workspace capacity limit exceeded"))?;
+    tokio::task::spawn_blocking(move || {
+        let mut reservation = budget.begin_replace(path)?;
+        reservation.reserve_total(new_len)?;
+        Ok::<_, crate::workspace_budget::WorkspaceBudgetError>(reservation)
+    })
+    .await
+    .map_err(|_| RuntimeError::internal("workspace capacity check failed"))?
+    .map_err(|error| {
+        if error.is_invalid_path() {
+            RuntimeError::forbidden(error.to_string())
+        } else {
+            RuntimeError::bad_request(error.to_string())
+        }
+    })
+}
+
 async fn read_workspace_file_nofollow(
     state: &AppState,
     namespace: &str,
@@ -590,29 +698,88 @@ async fn write_workspace_file_nofollow(
     let workspace_root = state.workspace_root.clone();
     let namespace = sanitize_namespace(namespace);
     tokio::task::spawn_blocking(move || {
+        let mut host_parent = workspace_root.join(&namespace);
+        for component in &components[..components.len().saturating_sub(1)] {
+            host_parent.push(component);
+        }
         let (parent, file_name) = open_workspace_file_parent_nofollow(
             &workspace_root,
             &namespace,
             &components,
             create_parents,
         )?;
+        match parent.symlink_metadata(Path::new(&file_name)) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(RuntimeError::forbidden(format!(
+                    "{error_prefix}: destination is not a safe regular file"
+                )));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(RuntimeError::forbidden(format!(
+                    "{error_prefix}: inspect destination failed: {error}"
+                )));
+            }
+        }
+        let temporary = adjacent_temporary_name(&file_name)?;
         let mut options = OpenOptions::new();
         options
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .follow(FollowSymlinks::No);
-        let mut file = parent
-            .open_with(Path::new(&file_name), &options)
-            .map_err(|error| {
-                RuntimeError::forbidden(format!("{error_prefix}: safe open failed: {error}"))
+        let result = (|| {
+            let mut file = parent
+                .open_with(Path::new(&temporary), &options)
+                .map_err(|error| {
+                    RuntimeError::forbidden(format!(
+                        "{error_prefix}: safe temp open failed: {error}"
+                    ))
+                })?;
+            file.write_all(&content)
+                .map_err(|error| RuntimeError::internal(format!("{error_prefix}: {error}")))?;
+            file.sync_all().map_err(|error| {
+                RuntimeError::internal(format!("{error_prefix}: sync temp failed: {error}"))
             })?;
-        file.write_all(&content)
-            .map_err(|error| RuntimeError::internal(format!("{error_prefix}: {error}")))?;
+            parent
+                .rename(Path::new(&temporary), &parent, Path::new(&file_name))
+                .map_err(|error| {
+                    RuntimeError::internal(format!("{error_prefix}: atomic rename failed: {error}"))
+                })?;
+            #[cfg(unix)]
+            std::fs::File::open(&host_parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| {
+                    RuntimeError::internal(format!(
+                        "{error_prefix}: sync directory failed: {error}"
+                    ))
+                })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = parent.remove_file(Path::new(&temporary));
+        }
+        result?;
         Ok(content.len())
     })
     .await
     .map_err(|error| RuntimeError::internal(format!("workspace write task failed: {error}")))?
+}
+
+fn adjacent_temporary_name(
+    destination: &std::ffi::OsString,
+) -> Result<std::ffi::OsString, RuntimeError> {
+    let mut nonce = [0_u8; 8];
+    getrandom::fill(&mut nonce)
+        .map_err(|_| RuntimeError::internal("create workspace temporary name failed"))?;
+    let suffix = nonce
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(std::ffi::OsString::from(format!(
+        ".{}.agent-runtime-{suffix}.tmp",
+        destination.to_string_lossy()
+    )))
 }
 
 fn open_workspace_file_parent_nofollow(
@@ -817,11 +984,11 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
     if req.command.trim().is_empty() {
         return Err(RuntimeError::bad_request("command is empty"));
     }
-    if let Some(reason) = dangerous_command_reason(&req.command) {
-        return Err(RuntimeError::forbidden(reason));
-    }
-    if let Some(reason) = bash_path_escape_reason(state, &req.command) {
-        return Err(RuntimeError::forbidden(reason));
+    let supervisor = state.command_supervisor.as_ref().ok_or_else(|| {
+        RuntimeError::unavailable("bash unavailable: cgroup v2 delegation is not ready")
+    })?;
+    if !state.bash_health.is_ready() {
+        return Err(RuntimeError::unavailable(state.bash_health.reason()));
     }
     let cwd = resolve_virtual_path(state, &req.common, &req.common.cwd, AccessMode::Read).await?;
     let virtual_cwd = normalize_virtual_cwd(&req.common.cwd)?;
@@ -836,193 +1003,84 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
         .unwrap_or(state.command_timeout)
         .min(state.command_timeout);
     let started = Instant::now();
-    let (mut command, cleanup_dir) =
-        shell_command(state, &req.common, &req.command, &cwd, &virtual_cwd).await?;
-    command.env_clear();
-    command.env("PATH", default_path());
-    command.env("HOME", "/tmp");
-    command.kill_on_drop(true);
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    #[cfg(unix)]
-    command.process_group(0);
-    #[cfg(target_os = "linux")]
-    {
-        let filter = process_group_seccomp_filter()?;
-        unsafe {
-            command.pre_exec(move || {
-                if seccompiler::apply_filter(&filter).is_ok() {
-                    Ok(())
-                } else {
-                    Err(io::Error::from_raw_os_error(libc::EPERM))
-                }
-            });
-        }
-    }
-    let mut child = match command.spawn() {
-        Ok(child) => child,
+    let command_id = state
+        .fetch_proxy
+        .new_command_id()
+        .map_err(|error| RuntimeError::internal(error.to_string()))?;
+    let identity = CommandIdentity::new(&req.common.namespace, &req.common.run_id, &command_id);
+    let (target, cleanup_dir) =
+        shell_exec_target(state, &req.common, &req.command, &cwd, &virtual_cwd).await?;
+    let fetch_proxy = state.fetch_proxy.clone();
+    let fetch_health = supervisor.health();
+    let namespace = req.common.namespace.clone();
+    let run_id = req.common.run_id.clone();
+    let failed_start_cleanup = cleanup_dir.clone();
+    let handle = match supervisor.start_command_with_launch(
+        identity,
+        target,
+        move || {
+            let binding = fetch_proxy
+                .bind_command(
+                    &namespace,
+                    &run_id,
+                    command_id.clone(),
+                    timeout_duration,
+                    fetch_health,
+                )
+                .map_err(|error| error.to_string())?;
+            binding
+                .into_launch(fetch_proxy.shell_environment())
+                .map_err(|error| error.to_string())
+        },
+        timeout_duration,
+        state.max_output_chars,
+        cleanup_dir,
+    ) {
+        Ok(handle) => handle,
         Err(error) => {
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::internal(format!("command failed: {error}")));
-        }
-    };
-    let child_id = child.id();
-    let Some(stdout) = child.stdout.take() else {
-        cleanup_failed_command(&mut child, child_id).await;
-        cleanup_shell_dir(cleanup_dir.as_deref()).await;
-        return Err(RuntimeError::internal(
-            "command failed: stdout pipe unavailable",
-        ));
-    };
-    let Some(stderr) = child.stderr.take() else {
-        cleanup_failed_command(&mut child, child_id).await;
-        cleanup_shell_dir(cleanup_dir.as_deref()).await;
-        return Err(RuntimeError::internal(
-            "command failed: stderr pipe unavailable",
-        ));
-    };
-    let stdout_collector = collect_output(stdout, state.max_output_chars);
-    let stderr_collector = collect_output(stderr, state.max_output_chars);
-    tokio::pin!(stdout_collector, stderr_collector);
-    let mut stdout_result = None;
-    let mut stderr_result = None;
-    let child_wait_result = {
-        let child_wait = child.wait();
-        tokio::pin!(child_wait);
-        timeout(timeout_duration, async {
-            loop {
-                tokio::select! {
-                    biased;
-                    status = &mut child_wait => break status,
-                    output = &mut stdout_collector, if stdout_result.is_none() => match output {
-                        Ok(output) => stdout_result = Some(output),
-                        Err(error) => return Err(error),
-                    },
-                    output = &mut stderr_collector, if stderr_result.is_none() => match output {
-                        Ok(output) => stderr_result = Some(output),
-                        Err(error) => return Err(error),
-                    },
-                }
+            if !error.preserves_cleanup_state()
+                && let Some(directory) = failed_start_cleanup
+            {
+                let _ = fs::remove_dir_all(directory).await;
             }
-        })
-        .await
-    };
-    let status = match child_wait_result {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            cleanup_failed_command(&mut child, child_id).await;
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::internal(format!("command failed: {error}")));
-        }
-        Err(_) => {
-            cleanup_failed_command(&mut child, child_id).await;
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::bad_request("command timed out"));
+            return Err(supervisor_runtime_error(error));
         }
     };
-    if let Err(error) = cleanup_command_process_group(child_id) {
-        warn!(%error, "failed to kill command process group during cleanup");
-        cleanup_shell_dir(cleanup_dir.as_deref()).await;
-        return Err(RuntimeError::internal(format!("command failed: {error}")));
-    }
-    let (stdout, stderr) = match timeout(timeout_duration, async {
-        tokio::join!(
-            async {
-                match stdout_result.take() {
-                    Some(output) => Ok(output),
-                    None => stdout_collector.await,
-                }
-            },
-            async {
-                match stderr_result.take() {
-                    Some(output) => Ok(output),
-                    None => stderr_collector.await,
-                }
-            },
-        )
-    })
-    .await
-    {
-        Ok((Ok(stdout), Ok(stderr))) => (stdout, stderr),
-        Ok((Err(error), _)) => {
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::internal(format!(
-                "command failed: stdout collection failed: {error}"
-            )));
-        }
-        Ok((_, Err(error))) => {
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::internal(format!(
-                "command failed: stderr collection failed: {error}"
-            )));
-        }
-        Err(_) => {
-            cleanup_shell_dir(cleanup_dir.as_deref()).await;
-            return Err(RuntimeError::internal(
-                "command failed: output collection timed out",
-            ));
-        }
-    };
-    cleanup_shell_dir(cleanup_dir.as_deref()).await;
+    let output = handle.wait().await.map_err(supervisor_runtime_error)?;
     let duration_ms = started.elapsed().as_millis();
     Ok(BashResponse {
-        exit_code: status.code().unwrap_or(-1),
-        truncated: stdout.truncated || stderr.truncated,
-        stdout: format_collected_output(stdout),
-        stderr: format_collected_output(stderr),
+        exit_code: output.exit_code,
+        truncated: output.truncated,
+        stdout: output.stdout,
+        stderr: output.stderr,
         duration_ms,
         error: String::new(),
     })
 }
 
-#[cfg(target_os = "linux")]
-fn process_group_seccomp_filter() -> Result<seccompiler::BpfProgram, RuntimeError> {
-    use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
-
-    let target_arch = match std::env::consts::ARCH {
-        "x86_64" => TargetArch::x86_64,
-        "aarch64" => TargetArch::aarch64,
-        arch => {
-            return Err(RuntimeError::internal(format!(
-                "command seccomp is unsupported on Linux architecture {arch}"
-            )));
-        }
-    };
-    let filter = SeccompFilter::new(
-        process_group_seccomp_rules(),
-        SeccompAction::Allow,
-        SeccompAction::Errno(libc::EPERM as u32),
-        target_arch,
-    )
-    .map_err(|error| RuntimeError::internal(format!("compile command seccomp filter: {error}")))?;
-    filter
-        .try_into()
-        .map_err(|error| RuntimeError::internal(format!("build command seccomp filter: {error}")))
-}
-
-#[cfg(target_os = "linux")]
-fn process_group_seccomp_rules() -> std::collections::BTreeMap<i64, Vec<seccompiler::SeccompRule>> {
-    let mut rules = std::collections::BTreeMap::from([
-        (libc::SYS_setsid as i64, Vec::new()),
-        (libc::SYS_setpgid as i64, Vec::new()),
-    ]);
-    #[cfg(target_arch = "x86_64")]
-    {
-        const X32_SYSCALL_BIT: i64 = 0x4000_0000;
-        rules.insert((libc::SYS_setsid as i64) | X32_SYSCALL_BIT, Vec::new());
-        rules.insert((libc::SYS_setpgid as i64) | X32_SYSCALL_BIT, Vec::new());
+fn supervisor_runtime_error(error: SupervisorError) -> RuntimeError {
+    if error.is_timeout() {
+        RuntimeError::bad_request("command timed out")
+    } else if error.is_canceled() {
+        RuntimeError::bad_request("command canceled")
+    } else if error.is_unavailable() {
+        RuntimeError::unavailable(error.to_string())
+    } else {
+        RuntimeError::internal(format!("command failed: {error}"))
     }
-    rules
 }
 
+#[cfg(test)]
 const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 
+#[cfg(test)]
 struct CollectedOutput {
     bytes: Vec<u8>,
     truncated: bool,
 }
 
+#[cfg(test)]
 async fn collect_output<R>(mut reader: R, limit: usize) -> std::io::Result<CollectedOutput>
 where
     R: AsyncRead + Unpin,
@@ -1046,6 +1104,7 @@ where
     Ok(CollectedOutput { bytes, truncated })
 }
 
+#[cfg(test)]
 fn format_collected_output(output: CollectedOutput) -> String {
     let mut text = String::from_utf8_lossy(&output.bytes).into_owned();
     if !output.truncated {
@@ -1057,49 +1116,6 @@ fn format_collected_output(output: CollectedOutput) -> String {
     }
     text.push_str(TRUNCATION_MARKER);
     text
-}
-
-async fn cleanup_failed_command(child: &mut Child, child_id: Option<u32>) {
-    if let Err(error) = cleanup_command_process_group(child_id) {
-        warn!(%error, "failed to kill command process group during cleanup");
-    }
-    if let Err(error) = child.start_kill() {
-        warn!(%error, "failed to kill command during cleanup");
-    }
-    if let Err(error) = child.wait().await {
-        warn!(%error, "failed to reap command during cleanup");
-    }
-}
-
-#[cfg(unix)]
-fn cleanup_command_process_group(child_id: Option<u32>) -> Result<(), String> {
-    use rustix::{
-        io::Errno,
-        process::{Pid, Signal, kill_process_group},
-    };
-
-    let Some(child_id) = child_id else {
-        return Ok(());
-    };
-    let child_id = i32::try_from(child_id)
-        .map_err(|_| format!("command process id {child_id} exceeds i32"))?;
-    let pid = Pid::from_raw(child_id)
-        .ok_or_else(|| format!("command process id {child_id} is not positive"))?;
-    match kill_process_group(pid, Signal::KILL) {
-        Ok(()) | Err(Errno::SRCH) => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-#[cfg(not(unix))]
-fn cleanup_command_process_group(_child_id: Option<u32>) -> Result<(), String> {
-    Ok(())
-}
-
-async fn cleanup_shell_dir(cleanup_dir: Option<&Path>) {
-    if let Some(dir) = cleanup_dir {
-        let _ = fs::remove_dir_all(dir).await;
-    }
 }
 
 async fn reset_namespace(
@@ -1303,67 +1319,36 @@ fn sanitize_namespace(namespace: &str) -> String {
         .collect()
 }
 
-fn dangerous_command_reason(command: &str) -> Option<String> {
-    let normalized = command.to_ascii_lowercase();
-    let blocked = [
-        "rm -rf /", "mkfs", "dd if=", "shutdown", "reboot", "poweroff", ":(){", "curl ", "wget ",
-    ];
-    for item in blocked {
-        if normalized.contains(item) {
-            return Some(format!("dangerous command blocked: {item}"));
-        }
-    }
-    if normalized.contains("| sh") || normalized.contains("| bash") {
-        return Some("piped shell installer is blocked".to_string());
-    }
-    None
-}
-
-fn bash_path_escape_reason(state: &AppState, command: &str) -> Option<String> {
-    let normalized = command.replace('\\', "/").to_ascii_lowercase();
-    let has_parent_token = normalized
-        .split(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '`'))
-        .any(|token| token == "..");
-    if has_parent_token || normalized.contains("../") || normalized.contains("/..") {
-        return Some("parent directory traversal is blocked in bash".to_string());
-    }
-    if normalized.contains("/runtime/workspaces") || normalized.contains("/runtime/logs") {
-        return Some("runtime internal paths are blocked in bash".to_string());
-    }
-    let root = state
-        .workspace_root
-        .to_string_lossy()
-        .replace('\\', "/")
-        .to_ascii_lowercase();
-    if !root.is_empty() && normalized.contains(&root) {
-        return Some("real workspace root paths are blocked in bash".to_string());
-    }
-    None
-}
-
-async fn shell_command(
+async fn shell_exec_target(
     state: &AppState,
     common: &CommonRequest,
     command: &str,
     real_cwd: &Path,
     virtual_cwd: &str,
-) -> Result<(Command, Option<PathBuf>), RuntimeError> {
+) -> Result<(ExecTarget, Option<PathBuf>), RuntimeError> {
     if cfg!(windows) {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg(command);
-        cmd.current_dir(real_cwd);
-        return Ok((cmd, None));
+        return Ok((
+            ExecTarget {
+                program: PathBuf::from("cmd"),
+                args: vec!["/C".to_string(), command.to_string()],
+                cwd: real_cwd.to_path_buf(),
+            },
+            None,
+        ));
     }
     match state.bash_sandbox {
         BashSandboxMode::Proot => {
             sandboxed_shell_command(state, common, command, virtual_cwd).await
         }
-        BashSandboxMode::None => {
-            let mut cmd = Command::new("bash");
-            cmd.arg("-lc").arg(command);
-            cmd.current_dir(real_cwd);
-            Ok((cmd, None))
-        }
+        #[cfg(test)]
+        BashSandboxMode::None => Ok((
+            ExecTarget {
+                program: PathBuf::from("bash"),
+                args: vec!["-lc".to_string(), command.to_string()],
+                cwd: real_cwd.to_path_buf(),
+            },
+            None,
+        )),
     }
 }
 
@@ -1372,7 +1357,7 @@ async fn sandboxed_shell_command(
     common: &CommonRequest,
     command: &str,
     virtual_cwd: &str,
-) -> Result<(Command, Option<PathBuf>), RuntimeError> {
+) -> Result<(ExecTarget, Option<PathBuf>), RuntimeError> {
     let jail_root = state
         .workspace_root
         .join(".runtime-jails")
@@ -1385,20 +1370,28 @@ async fn sandboxed_shell_command(
         .await
         .map_err(|e| RuntimeError::internal(format!("create namespace failed: {e}")))?;
 
-    let mut cmd = Command::new("proot");
-    cmd.arg("-r").arg(&jail_root);
-    add_proot_bind(&mut cmd, Path::new("/bin"), "/bin", &jail_root).await?;
-    add_proot_bind(&mut cmd, Path::new("/usr"), "/usr", &jail_root).await?;
-    add_proot_bind(&mut cmd, Path::new("/lib"), "/lib", &jail_root).await?;
-    add_proot_bind_if_exists(&mut cmd, Path::new("/lib64"), "/lib64", &jail_root).await?;
-    add_proot_bind(&mut cmd, Path::new("/etc"), "/etc", &jail_root).await?;
-    add_proot_bind(&mut cmd, &workspace, "/workspace", &jail_root).await?;
-    add_proot_bind(&mut cmd, &state.skills_root, "/skills", &jail_root).await?;
-    add_proot_bind(&mut cmd, &jail_root.join("tmp"), "/tmp", &jail_root).await?;
-    add_proot_bind_if_exists(&mut cmd, Path::new("/dev/null"), "/dev/null", &jail_root).await?;
-    cmd.arg("-w").arg(virtual_cwd);
-    cmd.arg("/bin/bash").arg("-lc").arg(command);
-    Ok((cmd, Some(jail_root)))
+    let mut target = ExecTarget {
+        program: PathBuf::from("proot"),
+        args: vec!["-r".to_string(), jail_root.to_string_lossy().into_owned()],
+        cwd: PathBuf::from("/"),
+    };
+    add_proot_bind(&mut target, Path::new("/bin"), "/bin", &jail_root).await?;
+    add_proot_bind(&mut target, Path::new("/usr"), "/usr", &jail_root).await?;
+    add_proot_bind(&mut target, Path::new("/lib"), "/lib", &jail_root).await?;
+    add_proot_bind_if_exists(&mut target, Path::new("/lib64"), "/lib64", &jail_root).await?;
+    add_proot_bind(&mut target, Path::new("/etc"), "/etc", &jail_root).await?;
+    add_proot_bind(&mut target, &workspace, "/workspace", &jail_root).await?;
+    add_proot_bind(&mut target, &state.skills_root, "/skills", &jail_root).await?;
+    add_proot_bind(&mut target, &jail_root.join("tmp"), "/tmp", &jail_root).await?;
+    add_proot_bind_if_exists(&mut target, Path::new("/dev/null"), "/dev/null", &jail_root).await?;
+    target.args.extend([
+        "-w".to_string(),
+        virtual_cwd.to_string(),
+        "/bin/bash".to_string(),
+        "-lc".to_string(),
+        command.to_string(),
+    ]);
+    Ok((target, Some(jail_root)))
 }
 
 async fn prepare_proot_jail(root: &Path) -> Result<(), RuntimeError> {
@@ -1426,40 +1419,60 @@ async fn prepare_proot_jail(root: &Path) -> Result<(), RuntimeError> {
 }
 
 async fn add_proot_bind(
-    cmd: &mut Command,
+    target: &mut ExecTarget,
     host: &Path,
     guest: &str,
     jail_root: &Path,
 ) -> Result<(), RuntimeError> {
-    let target = jail_root.join(guest.trim_start_matches('/'));
-    if guest == "/dev/null" || host.is_file() {
-        if let Some(parent) = target.parent() {
+    let bind_target = jail_root.join(guest.trim_start_matches('/'));
+    if guest == "/dev/null" || bind_source_is_file(host) {
+        if let Some(parent) = bind_target.parent() {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| RuntimeError::internal(format!("create bind parent failed: {e}")))?;
         }
-        if fs::metadata(&target).await.is_err() {
-            fs::write(&target, b"")
+        if fs::metadata(&bind_target).await.is_err() {
+            fs::write(&bind_target, b"")
                 .await
                 .map_err(|e| RuntimeError::internal(format!("create bind file failed: {e}")))?;
         }
     } else {
-        fs::create_dir_all(&target)
+        fs::create_dir_all(&bind_target)
             .await
             .map_err(|e| RuntimeError::internal(format!("create bind target failed: {e}")))?;
     }
-    cmd.arg("-b").arg(format!("{}:{guest}", host.display()));
+    target
+        .args
+        .extend(["-b".to_string(), format!("{}:{guest}", host.display())]);
     Ok(())
 }
 
+fn bind_source_is_file(path: &Path) -> bool {
+    if path.is_file() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+        return path
+            .metadata()
+            .map(|metadata| metadata.file_type().is_socket())
+            .unwrap_or(false);
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 async fn add_proot_bind_if_exists(
-    cmd: &mut Command,
+    target: &mut ExecTarget,
     host: &Path,
     guest: &str,
     jail_root: &Path,
 ) -> Result<(), RuntimeError> {
     if host.exists() {
-        add_proot_bind(cmd, host, guest, jail_root).await?;
+        add_proot_bind(target, host, guest, jail_root).await?;
     }
     Ok(())
 }
@@ -1499,28 +1512,12 @@ fn validate_virtual_path(raw: &str) -> Result<(), RuntimeError> {
 }
 
 impl BashSandboxMode {
-    pub fn from_env(raw: &str) -> Self {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "none" | "off" | "false" | "0" => Self::None,
-            _ => Self::Proot,
-        }
-    }
-
     fn as_str(self) -> &'static str {
         match self {
+            #[cfg(test)]
             Self::None => "none",
             Self::Proot => "proot",
         }
-    }
-}
-
-fn default_path() -> &'static OsStr {
-    if cfg!(windows) {
-        OsStr::new(
-            "C:\\Windows\\System32;C:\\Windows;C:\\Windows\\System32\\WindowsPowerShell\\v1.0",
-        )
-    } else {
-        OsStr::new("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
     }
 }
 
@@ -1561,7 +1558,7 @@ async fn write_trace(
     truncated: bool,
 ) {
     let record = TraceRecord {
-        run_id: common.run_id.clone(),
+        run_id_hash: hash(&common.run_id),
         namespace_hash: hash(&common.namespace),
         op: op.to_string(),
         duration_ms: start.elapsed().as_millis(),
@@ -1575,9 +1572,9 @@ async fn write_trace(
             .as_millis(),
     };
     if err.is_some() {
-        warn!(run_id = %record.run_id, op = %record.op, error = %record.error, "runtime operation failed");
+        warn!(run_id_hash = %record.run_id_hash, op = %record.op, error = %record.error, "runtime operation failed");
     } else {
-        info!(run_id = %record.run_id, op = %record.op, duration_ms = record.duration_ms, "runtime operation completed");
+        info!(run_id_hash = %record.run_id_hash, op = %record.op, duration_ms = record.duration_ms, "runtime operation completed");
     }
     let Ok(line) = serde_json::to_vec(&record) else {
         return;
@@ -1635,6 +1632,7 @@ pub fn request_with_json(path: &str, body: serde_json::Value) -> Request<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime_security::RuntimeFetchSecurity;
     use axum::body::to_bytes;
     use serde_json::json;
     use tempfile::tempdir;
@@ -1643,6 +1641,24 @@ mod tests {
     fn test_state() -> AppState {
         let root = tempdir().unwrap().keep();
         let skills = tempdir().unwrap().keep();
+        let workspace_budget = WorkspaceBudget::new(&root, 64 * 1024 * 1024).unwrap();
+        let fetch_security = RuntimeFetchSecurity::new(
+            root.join("fetch.sock"),
+            b"a sufficiently long runtime unit test key",
+            crate::config::FetchClaimLimits {
+                protocol_version: crate::fetch_protocol::FETCH_PROTOCOL_VERSION,
+                policy_version: "policy-v1".to_string(),
+                max_concurrency: 2,
+                max_requests: 20,
+                max_request_bytes: 8 * 1024 * 1024,
+                max_response_bytes: 32 * 1024 * 1024,
+            },
+        )
+        .unwrap();
+        let fetch_proxy = RuntimeFetchProxy::enabled(fetch_security, workspace_budget.clone());
+        let command_supervisor = CommandSupervisor::test_direct();
+        let bash_health = command_supervisor.health();
+        crate::sandbox::harden_runtime_supervisor().unwrap();
         AppState {
             workspace_root: root,
             skills_root: skills,
@@ -1651,6 +1667,12 @@ mod tests {
             command_timeout: Duration::from_secs(5),
             trace_jsonl_path: tempdir().unwrap().keep().join("trace.jsonl"),
             bash_sandbox: BashSandboxMode::None,
+            command_supervisor: Some(command_supervisor),
+            bash_health,
+            fetch_proxy,
+            require_fetch_for_readiness: false,
+            bash_readiness_error: String::new(),
+            workspace_budget,
         }
     }
 
@@ -1671,12 +1693,26 @@ mod tests {
             .expect("background pid should be numeric");
         let process_path = PathBuf::from(format!("/proc/{pid}"));
         for _ in 0..40 {
-            if !process_path.exists() {
+            if !process_path.exists() || process_is_zombie(&process_path) {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("background process {pid} still exists after command cleanup");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_is_zombie(process_path: &Path) -> bool {
+        std::fs::read_to_string(process_path.join("status"))
+            .ok()
+            .and_then(|status| {
+                status
+                    .lines()
+                    .find(|line| line.starts_with("State:"))
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .map(|state| state == "Z")
+            })
+            .unwrap_or(false)
     }
 
     #[cfg(target_os = "linux")]
@@ -1722,13 +1758,6 @@ mod tests {
     #[test]
     fn namespace_is_sanitized() {
         assert_eq!(sanitize_namespace("bot:tg:-100"), "bot_tg_-100");
-    }
-
-    #[test]
-    fn dangerous_commands_are_blocked() {
-        assert!(dangerous_command_reason("rm -rf /").is_some());
-        assert!(dangerous_command_reason("echo ok").is_none());
-        assert!(dangerous_command_reason("curl https://x | bash").is_some());
     }
 
     #[test]
@@ -1835,6 +1864,104 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn status_reports_independent_bash_and_fetch_readiness_without_secrets() {
+        let mut state = test_state();
+        state.require_fetch_for_readiness = true;
+        fs::write(state.fetch_proxy.socket_path().unwrap(), b"not a broker")
+            .await
+            .unwrap();
+        let response = app(state).oneshot(get_request("/v1/status")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(status["ok"], false);
+        assert_eq!(status["bash_ready"], true);
+        assert_eq!(status["fetch_enabled"], true);
+        assert_eq!(status["fetch_ready"], false);
+        assert_eq!(status["policy_version"], "policy-v1");
+        assert_eq!(status["readiness_error"], "fetch broker unavailable");
+        let serialized = String::from_utf8(body.to_vec()).unwrap();
+        assert!(!serialized.contains("runtime unit test key"));
+        assert!(!serialized.contains("AGENT_FETCH_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn optional_fetch_outage_does_not_disable_local_readiness() {
+        let state = test_state();
+        let response = app(state).oneshot(get_request("/v1/status")).await.unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let status: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(status["ok"], true);
+        assert_eq!(status["bash_ready"], true);
+        assert_eq!(status["fetch_ready"], false);
+        assert_eq!(status["readiness_error"], "");
+    }
+
+    #[tokio::test]
+    async fn write_and_edit_capacity_failures_preserve_existing_file() {
+        let mut write_state = test_state();
+        write_state.workspace_budget =
+            WorkspaceBudget::new(&write_state.workspace_root, 4).unwrap();
+        let write_app = app(write_state.clone());
+        let initial = write_app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/write",
+                json!({
+                    "namespace": "budget",
+                    "run_id": "write",
+                    "path": "/workspace/note.txt",
+                    "content": "old\n",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(initial.status(), StatusCode::OK);
+        let rejected = write_app
+            .oneshot(request_with_json(
+                "/v1/write",
+                json!({
+                    "namespace": "budget",
+                    "run_id": "write",
+                    "path": "/workspace/note.txt",
+                    "content": "too large",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            fs::read_to_string(namespace_workspace(&write_state, "budget").join("note.txt"))
+                .await
+                .unwrap(),
+            "old\n"
+        );
+
+        let edit_app = app(write_state.clone());
+        let rejected = edit_app
+            .oneshot(request_with_json(
+                "/v1/edit",
+                json!({
+                    "namespace": "budget",
+                    "run_id": "edit",
+                    "path": "/workspace/note.txt",
+                    "patch": "@@ -1 +1 @@\n-old\n+expanded\n",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            fs::read_to_string(namespace_workspace(&write_state, "budget").join("note.txt"))
+                .await
+                .unwrap(),
+            "old\n"
+        );
     }
 
     #[tokio::test]
@@ -2359,6 +2486,156 @@ mod tests {
         assert!(parsed.stdout.contains("hello"));
         let trace = fs::read_to_string(trace_path).await.unwrap();
         assert!(trace.contains("\"op\":\"bash\""));
+        assert!(trace.contains("\"run_id_hash\":"));
+        assert!(!trace.contains("run_test"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn proot_target_does_not_bind_the_private_fetch_socket() {
+        let mut state = test_state();
+        state.bash_sandbox = BashSandboxMode::Proot;
+        let socket = state.fetch_proxy.socket_path().unwrap().to_path_buf();
+        let _listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let common = CommonRequest {
+            namespace: "socket-bind".to_string(),
+            run_id: "run-bind".to_string(),
+            cwd: "/workspace".to_string(),
+        };
+        let cwd = namespace_workspace(&state, &common.namespace);
+        fs::create_dir_all(&cwd).await.unwrap();
+
+        let (target, cleanup) = shell_exec_target(&state, &common, "true", &cwd, "/workspace")
+            .await
+            .unwrap();
+
+        assert!(
+            !target
+                .args
+                .contains(&format!("{}:{}", socket.display(), socket.display()))
+        );
+        fs::remove_dir_all(cleanup.unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn spawned_shell_receives_approved_environment_without_host_secrets() {
+        let mut state = test_state();
+        state.max_output_chars = 16 * 1024;
+        let req = BashRequest {
+            common: CommonRequest {
+                namespace: "environment".to_string(),
+                run_id: "run-environment".to_string(),
+                cwd: "/workspace".to_string(),
+            },
+            command: if cfg!(windows) {
+                "set".to_string()
+            } else {
+                "env".to_string()
+            },
+            timeout: "2s".to_string(),
+        };
+
+        let response = run_bash(&state, &req).await.unwrap();
+        assert_eq!(response.exit_code, 0, "{}", response.stderr);
+        let environment = response
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for required in ["AGENT_FETCH_CONTROL_FD", "HOME", "PATH"] {
+            assert!(environment.contains_key(required), "missing {required}");
+        }
+        for forbidden in [
+            "AGENT_FETCH_HMAC_KEY",
+            "AGENT_FETCH_HMAC_KEY_FILE",
+            "AGENT_RUNTIME_TOKEN",
+            "BOT_TOKEN",
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+        ] {
+            assert!(!environment.contains_key(forbidden), "leaked {forbidden}");
+        }
+        assert_eq!(environment["HOME"], "/tmp");
+        assert_eq!(environment["PATH"], crate::runtime_security::SHELL_PATH);
+        assert_eq!(environment["AGENT_FETCH_CONTROL_FD"], "4");
+        assert!(!environment.contains_key("AGENT_FETCH_TOKEN"));
+        assert!(!environment.contains_key("AGENT_FETCH_SOCKET"));
+    }
+
+    #[tokio::test]
+    async fn bash_fails_closed_when_cgroup_supervisor_is_unavailable() {
+        let mut state = test_state();
+        state.command_supervisor = None;
+        let app = app(state);
+
+        let response = app
+            .oneshot(request_with_json(
+                "/v1/bash",
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_unavailable",
+                    "command": "echo must-not-run",
+                    "cwd": "/workspace",
+                }),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({"error": "bash unavailable: cgroup v2 delegation is not ready"})
+        );
+    }
+
+    #[tokio::test]
+    async fn live_bash_health_fuse_updates_status_and_rejects_new_commands() {
+        let state = test_state();
+        state
+            .command_supervisor
+            .as_ref()
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
+        let app = app(state);
+
+        let status = app
+            .clone()
+            .oneshot(get_request("/v1/status"))
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::OK);
+        let status_body = to_bytes(status.into_body(), usize::MAX).await.unwrap();
+        let status_json = serde_json::from_slice::<serde_json::Value>(&status_body).unwrap();
+        assert_eq!(status_json["bash_ready"], false);
+        assert!(
+            status_json["readiness_error"]
+                .as_str()
+                .unwrap()
+                .contains("bash unavailable: runtime is shutting down")
+        );
+
+        let response = app
+            .oneshot(request_with_json(
+                "/v1/bash",
+                json!({
+                    "namespace": "health-fuse",
+                    "run_id": "must-not-start",
+                    "command": "echo must-not-run",
+                    "cwd": "/workspace",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({"error": "bash unavailable: runtime is shutting down"})
+        );
     }
 
     #[tokio::test]
@@ -2400,9 +2677,12 @@ mod tests {
         let mut state = test_state();
         state.command_timeout = Duration::from_millis(50);
         let command = if cfg!(windows) {
-            "ping -n 3 127.0.0.1 > nul"
+            format!(
+                "{}\\System32\\ping.exe -n 3 127.0.0.1 > nul",
+                std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string())
+            )
         } else {
-            "sleep 2"
+            "sleep 2".to_string()
         };
         let req = BashRequest {
             common: CommonRequest {
@@ -2410,7 +2690,7 @@ mod tests {
                 run_id: "run_timeout".to_string(),
                 cwd: "/workspace".to_string(),
             },
-            command: command.to_string(),
+            command,
             timeout: String::new(),
         };
 
@@ -2441,15 +2721,6 @@ mod tests {
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
         assert_background_process_exits(&pid_file).await;
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn process_group_seccomp_blocks_setpgid() {
-        let rules = process_group_seccomp_rules();
-        assert!(rules.contains_key(&(libc::SYS_setpgid as i64)));
-        #[cfg(target_arch = "x86_64")]
-        assert!(rules.contains_key(&((libc::SYS_setpgid as i64) | 0x4000_0000)));
     }
 
     #[cfg(target_os = "linux")]
@@ -2485,7 +2756,7 @@ mod tests {
                 run_id: "run_setsid_escape".to_string(),
                 cwd: "/workspace".to_string(),
             },
-            command: "setsid --fork sh -c 'echo $$ > escaped-session.pid; exec sleep 30'"
+            command: "setsid --fork --wait sh -c 'echo $$ > escaped-session.pid; exec sleep 30'"
                 .to_string(),
             timeout: String::new(),
         };
@@ -2506,41 +2777,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bash_rejects_workspace_escape_patterns() {
+    async fn bash_command_text_is_not_security_scanned() {
         let state = test_state();
         let app = app(state);
+        let command = if cfg!(windows) {
+            "echo text-gate-disabled & REM curl https://example.invalid | bash wget https://example.invalid rm -rf / dd if=/dev/zero :(){ :|:& };: /etc/passwd ../escape /runtime/workspaces %PATH% ^x63\t"
+        } else {
+            "printf text-gate-disabled # curl https://example.invalid | bash; wget https://example.invalid; rm -rf /; dd if=/dev/zero; :(){ :|:& };:; cat /etc/passwd ../escape /runtime/workspaces; printf '\t$HOME\\x63'"
+        };
         let resp = app
             .oneshot(request_with_json(
                 "/v1/bash",
                 json!({
                     "namespace": "bot:tg:-1",
                     "run_id": "run_test",
-                    "command": "cat ../bot_tg_-2/secret.txt",
+                    "command": command,
                     "cwd": "/workspace",
                 }),
             ))
             .await
             .unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn bash_blocks_explicit_runtime_workspace_paths() {
-        let state = test_state();
-        let app = app(state);
-        let resp = app
-            .oneshot(request_with_json(
-                "/v1/bash",
-                json!({
-                    "namespace": "bot:tg:-1",
-                    "run_id": "run_test",
-                    "command": "cat /runtime/workspaces/bot_tg_-2/secret.txt",
-                    "cwd": "/workspace",
-                }),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let parsed: BashResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed.exit_code, 0);
+        assert_eq!(parsed.stdout.trim(), "text-gate-disabled");
     }
 
     #[tokio::test]

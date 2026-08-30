@@ -1,0 +1,6 @@
+table inet agent_fetch {
+  chain forward {
+    iifname "br-agent-fetch" ip daddr @other4 reject
+    iifname "br-agent-fetch" ip6 daddr @deny6 counter reject
+  }
+}

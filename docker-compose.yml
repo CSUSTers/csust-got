@@ -1,8 +1,9 @@
-version: '3.8'
-
 x-common: &common
   restart: always
 
+# Operators must pre-create and validate the aggregate/delegated cgroups and
+# bounded Runtime filesystems. Compose and the validation scripts never
+# manufacture them.
 services:
 
   bot:
@@ -16,38 +17,89 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./logs:/app/logs
-    links:
-      - redis
-      - agent-runtime
     ports:
       - "7777:7777"
     environment:
       - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:?AGENT_RUNTIME_TOKEN must be set and non-empty}
     networks:
-      - bot-runtime
+      - bot-runtime-control
       - bot-data
+      - bot-egress
 
   agent-runtime:
     build:
       context: .
       dockerfile: agent-runtime/Dockerfile
+      target: runtime
     container_name: agent-runtime
     init: true
     <<: *common
+    # Sibling migration requires source and target to be reachable in one cgroup namespace.
+    cgroup: host
+    cgroup_parent: ${AGENT_RUNTIME_CGROUP_PARENT:?host aggregate cgroup parent is required}
+    pids_limit: 512
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 2.0
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 256
+        hard: 4096
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=64m,mode=1777
     environment:
       - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:?AGENT_RUNTIME_TOKEN must be set and non-empty}
       - AGENT_RUNTIME_WORKSPACE_ROOT=/runtime/workspaces
+      - AGENT_RUNTIME_WORKSPACE_MAX_BYTES=${AGENT_RUNTIME_WORKSPACE_MAX_BYTES:?logical workspace byte ceiling is required}
+      - AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES=${AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES:?workspace filesystem byte ceiling is required}
+      - AGENT_RUNTIME_LOG_FS_MAX_BYTES=${AGENT_RUNTIME_LOG_FS_MAX_BYTES:?Runtime log filesystem byte ceiling is required}
       - AGENT_RUNTIME_SKILLS_ROOT=/runtime/skills
       - AGENT_RUNTIME_TRACE_JSONL=/runtime/logs/runtime-traces.jsonl
       - AGENT_RUNTIME_BASH_SANDBOX=proot
+      - AGENT_RUNTIME_CGROUP_AGGREGATE_ROOT=/sys/fs/cgroup/${AGENT_RUNTIME_CGROUP_PARENT}
+      - AGENT_RUNTIME_CGROUP_ROOT=/sys/fs/cgroup/${AGENT_RUNTIME_CGROUP_PARENT}/commands
+      - AGENT_RUNTIME_COMMAND_TIMEOUT_SECS=120
+      - AGENT_RUNTIME_COMMAND_PIDS_MAX=64
+      - AGENT_RUNTIME_COMMAND_MEMORY_MAX_BYTES=268435456
+      - AGENT_RUNTIME_COMMAND_MEMORY_SWAP_MAX_BYTES=0
+      - AGENT_RUNTIME_COMMAND_CPU_QUOTA_US=100000
+      - AGENT_RUNTIME_COMMAND_CPU_PERIOD_US=100000
+      - AGENT_RUNTIME_COMMAND_CPU_BUDGET_SECS=120
+      - AGENT_RUNTIME_COMMAND_NPROC=480
+      - AGENT_RUNTIME_COMMAND_NOFILE=256
+      - AGENT_RUNTIME_COMMAND_FSIZE_BYTES=67108864
+      - AGENT_RUNTIME_FETCH_ENABLED=false
+      - AGENT_RUNTIME_REQUIRE_FETCH_FOR_READINESS=false
     expose:
       - "8080"
     volumes:
-      - ./agent-runtime/workspaces:/runtime/workspaces
-      - ./skills:/runtime/skills:ro
-      - ./logs:/runtime/logs
+      - type: bind
+        source: ${AGENT_RUNTIME_WORKSPACE_HOST_ROOT:?bounded workspace mount root is required}
+        target: /runtime/workspaces
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./skills
+        target: /runtime/skills
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_RUNTIME_LOG_HOST_ROOT:?bounded Runtime log mount root is required}
+        target: /runtime/logs
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_RUNTIME_CGROUP_HOST_ROOT:?delegated commands cgroup root is required}
+        target: ${AGENT_RUNTIME_CGROUP_HOST_ROOT:?delegated commands cgroup root is required}
+        bind:
+          create_host_path: false
     networks:
-      - bot-runtime
+      - bot-runtime-control
 
   redis:
     image: redis:alpine
@@ -64,5 +116,11 @@ services:
       - bot-data
 
 networks:
-  bot-runtime:
+  bot-runtime-control:
+    name: bot-runtime-control
+    internal: true
   bot-data:
+    name: bot-data
+    internal: true
+  bot-egress:
+    name: bot-egress

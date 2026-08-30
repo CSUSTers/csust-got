@@ -242,7 +242,7 @@ func TestChatConfigV1(t *testing.T) {
 	req.NotEmpty((*BotConfig.Chats)[0].Model.Model)
 }
 
-func TestAgentV3Config(t *testing.T) {
+func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	req := testInit(t)
 	configFile := isolatedConfigFile(t)
 
@@ -258,6 +258,8 @@ func TestAgentV3Config(t *testing.T) {
 	req.True(BotConfig.AgentV3.ContextCache.Enable)
 	req.Equal(12, BotConfig.AgentV3.ContextCache.RawTurns)
 	req.Equal("http://agent-runtime:8080", BotConfig.AgentV3.Runtime.Endpoint)
+	req.NotNil(BotConfig.AgentV3.Runtime.FetchEnabled)
+	req.False(BotConfig.AgentV3.RuntimeFetchEnabled())
 	req.Equal([]string{"read", "grep", "write", "edit", "bash"}, BotConfig.AgentV3.Tools.ExposeOnly)
 	req.Equal(30*24*time.Hour, BotConfig.AgentV3.ContextCacheTTL())
 	req.Equal(120*time.Second, BotConfig.AgentV3.RuntimeCommandTimeout())
