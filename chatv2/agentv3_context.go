@@ -549,38 +549,32 @@ func addAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int
 }
 
 func rebuildAgentV3MemorySnapshot(ctx context.Context, scope orm.AgentV3Scope, ttl time.Duration) error {
-	items, err := orm.AgentV3ListMemory(ctx, scope)
-	if err != nil {
-		return err
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt.Before(items[j].CreatedAt)
-	})
-	lines := make([]string, 0, len(items))
-	for _, item := range items {
-		if strings.TrimSpace(item.Content) == "" {
-			continue
+	return orm.AgentV3RebuildMemorySnapshot(ctx, scope, ttl, func(items []orm.AgentV3MemoryItem, current *orm.AgentV3MemorySnapshot) (*orm.AgentV3MemorySnapshot, error) {
+		sort.Slice(items, func(i, j int) bool {
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		})
+		lines := make([]string, 0, len(items))
+		for _, item := range items {
+			if strings.TrimSpace(item.Content) == "" {
+				continue
+			}
+			lines = append(lines, "- "+strings.TrimSpace(item.Content))
 		}
-		lines = append(lines, "- "+strings.TrimSpace(item.Content))
-	}
-	content := strings.Join(lines, "\n")
-	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
-		content = truncateAgentV3Text(content, approxAgentV3TokenCharLimit(config.BotConfig.AgentV3.Memory.SnapshotMaxTokens))
-	}
-	current, err := orm.AgentV3GetMemorySnapshot(ctx, scope)
-	if err != nil {
-		return err
-	}
-	version := int64(1)
-	if current != nil {
-		version = current.Version + 1
-	}
-	return orm.AgentV3SetMemorySnapshot(ctx, scope, orm.AgentV3MemorySnapshot{
-		Version:   version,
-		Hash:      hashString(content),
-		Content:   content,
-		UpdatedAt: time.Now(),
-	}, ttl)
+		content := strings.Join(lines, "\n")
+		if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+			content = truncateAgentV3Text(content, approxAgentV3TokenCharLimit(config.BotConfig.AgentV3.Memory.SnapshotMaxTokens))
+		}
+		version := int64(1)
+		if current != nil {
+			version = current.Version + 1
+		}
+		return &orm.AgentV3MemorySnapshot{
+			Version:   version,
+			Hash:      hashString(content),
+			Content:   content,
+			UpdatedAt: time.Now(),
+		}, nil
+	})
 }
 
 func agentV3ScopeFromContext(ctx tb.Context) orm.AgentV3Scope {
@@ -624,33 +618,29 @@ func rebuildAgentV3Summary(ctx context.Context, tc *TurnContext) error {
 	}
 	cfg := config.BotConfig.AgentV3
 	limit := cfg.ContextCache.SummaryTurns + cfg.ContextCache.RawTurns
-	turns, err := orm.AgentV3LoadRecentTurns(ctx, tc.V3.Scope, limit)
-	if err != nil {
-		return fmt.Errorf("agent v3 load summary turns: %w", err)
+	if err := orm.AgentV3UpdateSummary(ctx, tc.V3.Scope, limit, cfg.ContextCacheTTL(), func(turns []orm.AgentV3Turn, current *orm.AgentV3Summary) (*orm.AgentV3Summary, error) {
+		if len(turns) <= cfg.ContextCache.RawTurns {
+			return nil, nil
+		}
+		summaryTurns := turns[:len(turns)-cfg.ContextCache.RawTurns]
+		content := summarizeAgentV3Turns(summaryTurns, cfg.ContextCache.MaxSummaryTokens)
+		if current != nil && strings.TrimSpace(current.Content) == strings.TrimSpace(content) {
+			return nil, nil
+		}
+		version := int64(1)
+		if current != nil && current.Version > 0 {
+			version = current.Version + 1
+		}
+		return &orm.AgentV3Summary{
+			Version:   version,
+			Hash:      hashString(content),
+			Content:   content,
+			UpdatedAt: time.Now(),
+		}, nil
+	}); err != nil {
+		return fmt.Errorf("agent v3 update summary: %w", err)
 	}
-	if len(turns) <= cfg.ContextCache.RawTurns {
-		return nil
-	}
-	summaryTurns := turns[:len(turns)-cfg.ContextCache.RawTurns]
-	content := summarizeAgentV3Turns(summaryTurns, cfg.ContextCache.MaxSummaryTokens)
-	current, version, err := orm.AgentV3GetSummary(ctx, tc.V3.Scope)
-	if err != nil {
-		return fmt.Errorf("agent v3 get current summary: %w", err)
-	}
-	if strings.TrimSpace(current) == strings.TrimSpace(content) {
-		return nil
-	}
-	if version <= 0 {
-		version = 1
-	} else {
-		version++
-	}
-	return orm.AgentV3SetSummary(ctx, tc.V3.Scope, orm.AgentV3Summary{
-		Version:   version,
-		Hash:      hashString(content),
-		Content:   content,
-		UpdatedAt: time.Now(),
-	}, cfg.ContextCacheTTL())
+	return nil
 }
 
 func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
