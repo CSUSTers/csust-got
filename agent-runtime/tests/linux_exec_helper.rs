@@ -139,6 +139,69 @@ mod linux_exec_helper {
         assert_eq!(status.code(), Some(1));
     }
 
+    #[tokio::test]
+    async fn helper_closes_non_cloexec_fd_above_lowered_nofile() {
+        struct FdGuard(i32);
+
+        impl Drop for FdGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    libc::close(self.0);
+                }
+            }
+        }
+
+        let fixture = tempfile::tempdir().unwrap();
+        let cgroup_procs = fixture.path().join("cgroup.procs");
+        std::fs::write(&cgroup_procs, b"").unwrap();
+        let source_fd = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+        assert_ne!(
+            source_fd,
+            -1,
+            "open /dev/null failed: {}",
+            io::Error::last_os_error()
+        );
+        let inherited_fd = unsafe { libc::fcntl(source_fd, libc::F_DUPFD, 300) };
+        assert_eq!(unsafe { libc::close(source_fd) }, 0);
+        assert_eq!(inherited_fd, 300, "fixture fd 300 was already in use");
+        let _inherited_fd = FdGuard(inherited_fd);
+        let flags = unsafe { libc::fcntl(inherited_fd, libc::F_GETFD) };
+        assert_ne!(
+            flags,
+            -1,
+            "read fd 300 flags failed: {}",
+            io::Error::last_os_error()
+        );
+        assert_eq!(
+            unsafe { libc::fcntl(inherited_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) },
+            0,
+            "clear FD_CLOEXEC on fd 300 failed: {}",
+            io::Error::last_os_error()
+        );
+        let spec = ExecSpec {
+            cgroup_procs,
+            program: PathBuf::from("/bin/bash"),
+            args: vec!["-c".to_string(), "test ! -e /proc/self/fd/300".to_string()],
+            cwd: fixture.path().to_path_buf(),
+            env: vec![("PATH".to_string(), "/usr/bin:/bin".to_string())],
+            rlimits: RlimitSpec::approved_defaults(),
+        };
+
+        let mut spawned = spawn_exec_helper(
+            PathBuf::from(env!("CARGO_BIN_EXE_agent-runtime-exec")).as_path(),
+            &spec,
+        )
+        .unwrap();
+        assert_eq!(
+            spawned
+                .await_startup_status(Duration::from_secs(1))
+                .await
+                .unwrap(),
+            ExecStartupOutcome::TargetExecSucceeded
+        );
+        assert_eq!(spawned.child.wait().await.unwrap().code(), Some(0));
+    }
+
     fn verify_layout((config_target, control_target, status_target): (i32, i32, i32)) {
         close_range_for_fixture();
         let mut config_pipe = [-1; 2];
