@@ -51,14 +51,22 @@ where
             return Ok(());
         }
     };
-    drop(admission);
     let handshake::PreAuthOutcome::Authenticated(claims) = outcome else {
         return Ok(());
     };
-    let head = match read_client_frame(&mut reader).await {
-        Ok(ClientFrame::Request(head)) => head,
-        _ => return reject(&mut writer, Failure::Protocol).await,
-    };
+    let head =
+        match tokio::time::timeout_at(admission.deadline(), read_client_frame(&mut reader)).await {
+            Ok(Ok(ClientFrame::Request(head))) => head,
+            Ok(_) => return reject(&mut writer, Failure::Protocol).await,
+            Err(_) => {
+                state
+                    .metrics
+                    .handshake_timeouts
+                    .fetch_add(1, Ordering::Relaxed);
+                return Ok(());
+            }
+        };
+    drop(admission);
     let request = match review_request(&state, &claims, head) {
         Ok(request) => request,
         Err(failure) => return reject(&mut writer, failure).await,

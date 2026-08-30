@@ -38,7 +38,7 @@ use std::{
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream},
     sync::Notify,
-    time::{sleep, timeout},
+    time::{advance, sleep, timeout},
 };
 
 const KEY: &[u8] = b"a sufficiently long broker test signing key";
@@ -228,8 +228,54 @@ async fn silent_peer_is_closed_at_one_absolute_handshake_deadline() {
     assert!(records.lock().unwrap().is_empty());
 }
 
+#[tokio::test(start_paused = true)]
+async fn authenticated_idle_peer_is_closed_at_original_request_head_deadline_without_side_effects()
+{
+    let mut limited = config();
+    limited.pre_auth_connections = 1;
+    limited.handshake_timeout = Duration::from_millis(50);
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let resolver = ScriptedResolver::answers(vec![public_ip()]);
+    let resolver_calls = Arc::clone(&resolver.calls);
+    let connector = ScriptedConnector::successes([response(200, &[], [])]);
+    let connector_calls = Arc::clone(&connector.calls);
+    let broker = broker_with_config(
+        limited,
+        resolver,
+        connector,
+        JsonlAuditSink::with_writer(RecordingWriter::new(Arc::clone(&records))),
+    );
+    let (mut client, task) = start_state(Arc::clone(broker.state()), PEER);
+    authenticate_client(&mut client, valid_token()).await;
+
+    advance(Duration::from_millis(49)).await;
+    assert_eq!(broker.metrics().handshake_timeouts, 0);
+    assert!(!task.is_finished());
+
+    advance(Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        task.is_finished(),
+        "authenticated idle peer survived the original request head deadline"
+    );
+
+    let mut byte = [0_u8; 1];
+    assert_eq!(client.read(&mut byte).await.unwrap(), 0);
+    task.await.unwrap().unwrap();
+
+    let metrics = broker.metrics();
+    assert_eq!(metrics.active_pre_auth, 0);
+    assert_eq!(metrics.handshake_timeouts, 1);
+    assert_eq!(metrics.body_frames_read, 0);
+    assert_eq!(metrics.resolver_calls, 0);
+    assert_eq!(metrics.connector_calls, 0);
+    assert_eq!(resolver_calls.load(Ordering::Relaxed), 0);
+    assert!(connector_calls.lock().unwrap().is_empty());
+    assert!(records.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
-async fn preauth_permit_is_released_after_authentication() {
+async fn preauth_permit_is_released_after_request_head_decoding() {
     let mut limited = config();
     limited.pre_auth_connections = 1;
     let broker = broker_with_config(
@@ -241,6 +287,34 @@ async fn preauth_permit_is_released_after_authentication() {
     let state = Arc::clone(broker.state());
     let (mut authenticated, authenticated_task) = start_state(Arc::clone(&state), PEER);
     authenticate_client(&mut authenticated, valid_token()).await;
+    assert_eq!(broker.metrics().active_pre_auth, 1);
+
+    let (mut before_request_head, before_request_head_task) = start_state(Arc::clone(&state), PEER);
+    let mut byte = [0_u8; 1];
+    assert_eq!(
+        timeout(
+            Duration::from_millis(100),
+            before_request_head.read(&mut byte)
+        )
+        .await
+        .expect("authenticated connection released the permit before the request head")
+        .unwrap(),
+        0
+    );
+    before_request_head_task.await.unwrap().unwrap();
+    assert_eq!(broker.metrics().active_pre_auth, 1);
+    assert_eq!(broker.metrics().rejected_pre_auth, 1);
+
+    write_client_frame(
+        &mut authenticated,
+        &ClientFrame::Request(request_head("GET", "https://public.example/", &[], false)),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_broker_frame(&mut authenticated).await.unwrap(),
+        BrokerFrame::Continue
+    ));
     assert_eq!(broker.metrics().active_pre_auth, 0);
 
     let (silent, silent_task) = start_state(state, PEER);
@@ -250,8 +324,8 @@ async fn preauth_permit_is_released_after_authentication() {
         }
     })
     .await
-    .expect("authenticated connection retained the only pre-auth permit");
-    assert_eq!(broker.metrics().rejected_pre_auth, 0);
+    .expect("request-head decoding did not release the pre-auth permit");
+    assert_eq!(broker.metrics().rejected_pre_auth, 1);
 
     authenticated_task.abort();
     silent_task.abort();
@@ -413,7 +487,7 @@ async fn broker_accepts_only_runtime_peer_uid_gid_and_valid_internal_token() {
 
     let (mut valid, valid_task) = start_state(state, PEER);
     authenticate_client(&mut valid, token).await;
-    assert_eq!(broker.metrics().active_pre_auth, 0);
+    assert_eq!(broker.metrics().active_pre_auth, 1);
     valid_task.abort();
     drop(valid);
     let _ = valid_task.await;
