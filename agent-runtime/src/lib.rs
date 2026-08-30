@@ -1346,6 +1346,7 @@ fn supervisor_runtime_error(error: SupervisorError) -> RuntimeError {
 
 #[cfg(test)]
 const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
+#[cfg(test)]
 const TRUNCATION_MARKER: &str = "\n[truncated]";
 
 #[cfg(test)]
@@ -1799,6 +1800,7 @@ fn parse_timeout(raw: &str) -> Option<Duration> {
     raw.parse::<u64>().ok().map(Duration::from_secs)
 }
 
+#[cfg(test)]
 fn truncate_output(value: String, limit: usize) -> (String, bool) {
     if limit == 0 || value.len() <= limit {
         return (value, false);
