@@ -54,6 +54,7 @@ where
     let context = Arc::new(BindingContext {
         phase: Arc::new(Mutex::new(CommandBindingPhase::Active)),
         namespace: "c7".to_string(),
+        namespace_key: crate::identity::namespace_storage_key("c7"),
         workspace_budget: budget,
         health,
         issued: None,

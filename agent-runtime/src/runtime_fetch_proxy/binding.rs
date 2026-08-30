@@ -7,6 +7,8 @@ use super::{
 };
 use crate::exec::BashHealth;
 #[cfg(target_os = "linux")]
+use crate::identity::namespace_storage_key;
+#[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -75,6 +77,7 @@ impl RuntimeFetchProxy {
             let context = Arc::new(BindingContext {
                 phase: Arc::new(Mutex::new(CommandBindingPhase::Active)),
                 namespace: namespace.to_string(),
+                namespace_key: namespace_storage_key(namespace),
                 workspace_budget: self.inner.workspace_budget.clone(),
                 health,
                 issued,

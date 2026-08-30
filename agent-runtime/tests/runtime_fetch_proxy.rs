@@ -8,15 +8,29 @@ use agent_runtime::{
     },
     workspace_budget::WorkspaceBudget,
 };
+use sha2::{Digest as _, Sha256};
 use std::sync::{Arc, Mutex};
+
+fn storage_key(namespace: &str) -> String {
+    Sha256::digest(namespace.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 #[cfg(target_os = "linux")]
 mod linux_proxy {
     use super::*;
     use agent_runtime::{
+        audit::JsonlAuditSink,
         config::FetchClaimLimits,
         exec::BashHealth,
         fetch_auth::{BrokerAuthCaps, TokenVerifier},
+        fetch_broker::{
+            BodyStream, BrokerConfig, ConnectError, FetchBroker, PeerCred, PinnedConnector,
+            ResolveError, Resolver, ReviewedRequest, UpstreamResponse,
+        },
+        fetch_policy::ApprovedTarget,
         fetch_protocol::{
             BrokerFrame, BrokerHello, ClientFrame, ErrorCode, FetchProtocolErrorFrame,
             FetchResponseEnd, FetchResponseHead, LocalClientFrame, LocalRuntimeFrame,
@@ -29,16 +43,82 @@ mod linux_proxy {
         },
         runtime_security::RuntimeFetchSecurity,
     };
+    use async_trait::async_trait;
+    use http::{HeaderMap, StatusCode};
     use std::{
         io,
         mem::{MaybeUninit, size_of},
+        net::{IpAddr, Ipv4Addr, SocketAddr},
         os::fd::{AsRawFd, FromRawFd, OwnedFd},
+        path::PathBuf,
         process::Stdio,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::{Duration, SystemTime},
     };
 
     const KEY: &[u8] = b"runtime proxy integration key with enough entropy";
+
+    struct IdentityResolver;
+
+    #[async_trait]
+    impl Resolver for IdentityResolver {
+        async fn resolve_all(&self, _host: &str) -> Result<Vec<IpAddr>, ResolveError> {
+            Ok(vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))])
+        }
+    }
+
+    struct IdentityConnector;
+
+    #[async_trait]
+    impl PinnedConnector for IdentityConnector {
+        async fn execute(
+            &self,
+            _request: ReviewedRequest,
+            _target: ApprovedTarget,
+            _body: BodyStream,
+        ) -> Result<UpstreamResponse, ConnectError> {
+            Ok(UpstreamResponse::from_chunks(
+                StatusCode::OK,
+                HeaderMap::new(),
+                [Ok(bytes::Bytes::from_static(b"identity output"))],
+            ))
+        }
+    }
+
+    fn identity_broker_config(socket_path: PathBuf, audit_path: PathBuf) -> BrokerConfig {
+        BrokerConfig {
+            socket_path,
+            peer_uid: 1,
+            peer_gid: 2,
+            hmac_key_file: PathBuf::from("unused-key"),
+            deny_cidrs: Vec::new(),
+            dns_servers: vec![SocketAddr::from(([8, 8, 8, 8], 53))],
+            request_header_max_bytes: 32 * 1024,
+            request_body_max_bytes: 8 * 1024 * 1024,
+            response_header_max_bytes: 32 * 1024,
+            response_network_max_bytes: 16 * 1024 * 1024,
+            response_decoded_max_bytes: 32 * 1024 * 1024,
+            max_decompression_ratio: 20,
+            dns_timeout: Duration::from_millis(100),
+            connect_timeout: Duration::from_millis(100),
+            first_byte_timeout: Duration::from_millis(100),
+            total_timeout: Duration::from_millis(500),
+            pre_auth_connections: 1,
+            handshake_timeout: Duration::from_secs(2),
+            max_concurrency: 2,
+            max_requests: 20,
+            max_redirects: 5,
+            audit_path,
+            policy_version: "policy-v1".to_string(),
+        }
+    }
+
+    fn sha256_hex(value: &str) -> String {
+        storage_key(value)
+    }
 
     #[tokio::test]
     async fn copied_fd_number_is_bound_to_the_receiving_command_not_the_source_strings() {
@@ -143,6 +223,98 @@ mod linux_proxy {
         broker.await.unwrap();
         launch.lifecycle.revoke_and_wait().await.unwrap();
         assert_eq!(proxy.active_binding_count().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn command_bound_fetch_output_hashes_namespace_once_and_preserves_identity() {
+        let fixture = tempfile::tempdir().unwrap();
+        let workspace = fixture.path().join("workspaces");
+        std::fs::create_dir(&workspace).unwrap();
+        let socket = fixture.path().join("broker.sock");
+        let audit_path = fixture.path().join("audit.jsonl");
+        let broker = FetchBroker::with_components(
+            identity_broker_config(socket.clone(), audit_path.clone()),
+            KEY,
+            IdentityResolver,
+            IdentityConnector,
+            JsonlAuditSink::open(&audit_path).await.unwrap(),
+        )
+        .unwrap();
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let broker_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            broker
+                .serve_connection(stream, PeerCred { uid: 1, gid: 2 })
+                .await
+                .unwrap();
+        });
+        let namespace = "tenant/a:b";
+        let namespace_key = sha256_hex(namespace);
+        let proxy = enabled_proxy(&socket, &workspace);
+        let launch = proxy
+            .bind_command(
+                namespace,
+                "original-run",
+                "identity-output".to_string(),
+                Duration::from_secs(5),
+                BashHealth::ready(),
+            )
+            .unwrap()
+            .into_launch(proxy.shell_environment())
+            .unwrap();
+        let (mut local, transferred) = local_session_pair();
+        let mut control = packet();
+        control.output_path = Some("/workspace/result.txt".to_string());
+        send_control_packet(
+            launch.control_source.as_raw_fd(),
+            &serde_json::to_vec(&control).unwrap(),
+            &[transferred.as_raw_fd()],
+        )
+        .unwrap();
+        drop(transferred);
+
+        assert_eq!(
+            read_local_runtime_frame(&mut local).await.unwrap(),
+            LocalRuntimeFrame::Continue
+        );
+        write_local_client_frame(&mut local, &LocalClientFrame::BodyEnd)
+            .await
+            .unwrap();
+        assert!(matches!(
+            read_local_runtime_frame(&mut local).await.unwrap(),
+            LocalRuntimeFrame::ResponseHead(FetchResponseHead { status: 200, .. })
+        ));
+        assert!(matches!(
+            read_local_runtime_frame(&mut local).await.unwrap(),
+            LocalRuntimeFrame::ResponseEnd(end) if end.output_committed
+        ));
+        broker_task.await.unwrap();
+        launch.lifecycle.revoke_and_wait().await.unwrap();
+
+        let audit = std::fs::read_to_string(&audit_path).unwrap();
+        let start = audit
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|record| record["event"] == "start")
+            .expect("broker must write its token-derived audit start record");
+        assert_eq!(start["namespace_sha256"], sha256_hex(namespace));
+        assert_ne!(start["namespace_sha256"], sha256_hex(&namespace_key));
+
+        let destination = workspace.join(&namespace_key).join("result.txt");
+        assert_eq!(std::fs::read(&destination).unwrap(), b"identity output");
+        assert!(
+            !workspace
+                .join(sha256_hex(&namespace_key))
+                .join("result.txt")
+                .exists()
+        );
+        let workspace_directories = std::fs::read_dir(&workspace)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .count();
+        assert_eq!(workspace_directories, 1);
+        assert_no_output_temporary(destination.parent().unwrap());
     }
 
     #[tokio::test]
@@ -449,7 +621,7 @@ mod linux_proxy {
     async fn check_status_error_response_preserves_output_and_reports_uncommitted_end() {
         let fixture = tempfile::tempdir().unwrap();
         let workspace = fixture.path().join("workspaces");
-        let namespace = workspace.join("namespace");
+        let namespace = workspace.join(storage_key("namespace"));
         std::fs::create_dir_all(&namespace).unwrap();
         let destination = namespace.join("result.txt");
         std::fs::write(&destination, b"old-response").unwrap();
@@ -547,7 +719,7 @@ mod linux_proxy {
     async fn cli_output_quota_failure_is_one_policy_error_and_exit_65() {
         let fixture = tempfile::tempdir().unwrap();
         let workspace = fixture.path().join("workspaces");
-        let namespace = workspace.join("namespace");
+        let namespace = workspace.join(storage_key("namespace"));
         std::fs::create_dir_all(&namespace).unwrap();
         let destination = namespace.join("result.txt");
         std::fs::write(&destination, b"old").unwrap();
@@ -594,7 +766,7 @@ mod linux_proxy {
     async fn cli_precommit_actual_io_failure_is_one_internal_error_and_exit_70() {
         let fixture = tempfile::tempdir().unwrap();
         let workspace = fixture.path().join("workspaces");
-        let namespace = workspace.join("namespace");
+        let namespace = workspace.join(storage_key("namespace"));
         std::fs::create_dir_all(&namespace).unwrap();
         let destination = namespace.join("result.txt");
         std::fs::write(&destination, b"old").unwrap();
@@ -1088,7 +1260,7 @@ mod linux_proxy {
 
         let fixture = tempfile::tempdir().unwrap();
         let workspace = fixture.path().join("workspaces");
-        let namespace = workspace.join("ns");
+        let namespace = workspace.join(storage_key("ns"));
         let outside = fixture.path().join("outside");
         std::fs::create_dir_all(&namespace).unwrap();
         std::fs::create_dir(&outside).unwrap();
@@ -1517,7 +1689,7 @@ fn request() -> FetchRequestHead {
 #[test]
 fn output_commit_and_revoke_are_linearized_by_the_binding_phase() {
     let root = tempfile::tempdir().unwrap();
-    let namespace_root = root.path().join("ns");
+    let namespace_root = root.path().join(storage_key("ns"));
     std::fs::create_dir(&namespace_root).unwrap();
     let budget = WorkspaceBudget::new(root.path(), 32).unwrap();
 
@@ -1563,7 +1735,7 @@ fn output_commit_and_revoke_are_linearized_by_the_binding_phase() {
 #[test]
 fn output_budget_failure_preserves_old_file_and_removes_temporary() {
     let root = tempfile::tempdir().unwrap();
-    let namespace_root = root.path().join("ns");
+    let namespace_root = root.path().join(storage_key("ns"));
     std::fs::create_dir(&namespace_root).unwrap();
     let destination = namespace_root.join("result.txt");
     std::fs::write(&destination, b"old").unwrap();

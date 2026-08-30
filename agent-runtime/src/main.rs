@@ -2,6 +2,7 @@ use agent_runtime::{
     AppState, BashSandboxMode, app,
     config::{RuntimeConfig, RuntimeFetchConfig},
     exec::{BashHealth, CommandSupervisor},
+    namespace_gate::NamespaceGate,
     runtime_fetch_proxy::RuntimeFetchProxy,
     runtime_security::RuntimeFetchSecurity,
     workspace_budget::WorkspaceBudget,
@@ -64,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
         require_fetch_for_readiness,
         bash_readiness_error,
         workspace_budget,
+        namespace_gate: NamespaceGate::default(),
     };
 
     let listener = TcpListener::bind(config.listen_addr).await?;

@@ -40,13 +40,18 @@ pub mod fetch_broker;
 pub mod fetch_cli;
 pub mod fetch_policy;
 pub mod fetch_protocol;
+pub mod identity;
+pub mod namespace_gate;
 pub mod runtime_fetch_proxy;
 pub mod runtime_security;
 pub mod sandbox;
+pub mod scan;
 pub mod workspace_budget;
 
 use cgroup::CommandIdentity;
 use exec::{BashHealth, CommandSupervisor, ExecTarget, SupervisorError};
+use identity::{RuntimeIdentity, command_jail_root};
+use namespace_gate::{NamespaceGate, NamespaceGateError};
 use runtime_fetch_proxy::RuntimeFetchProxy;
 use workspace_budget::{Reservation, WorkspaceBudget};
 
@@ -65,6 +70,9 @@ pub struct AppState {
     pub require_fetch_for_readiness: bool,
     pub bash_readiness_error: String,
     pub workspace_budget: WorkspaceBudget,
+    pub namespace_gate: NamespaceGate,
+    #[cfg(test)]
+    namespace_use_test_hooks: namespace_gate::NamespaceUseTestHooks,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,6 +233,13 @@ impl RuntimeError {
             message: message.into(),
         }
     }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for RuntimeError {
@@ -253,8 +268,26 @@ async fn read_handler(
     Json(req): Json<ReadRequest>,
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let use_lease = state
+        .namespace_gate
+        .acquire_use(identity.namespace_key())
+        .await
+        .map_err(namespace_gate_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Read,
+            namespace_gate::Phase::LeaseAcquired,
+        )
+        .await;
     let start = Instant::now();
-    let result = read_file(&state, &req).await;
+    let result = read_file(&state, &req, &identity, use_lease).await;
+    let truncated = result
+        .as_ref()
+        .map(|response| response.truncated)
+        .unwrap_or(false);
     write_trace(
         &state,
         &req.common,
@@ -262,7 +295,7 @@ async fn read_handler(
         start,
         result.as_ref().err(),
         None,
-        false,
+        truncated,
     )
     .await;
     result.map(Json)
@@ -274,8 +307,22 @@ async fn grep_handler(
     Json(req): Json<GrepRequest>,
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let use_lease = state
+        .namespace_gate
+        .acquire_use(identity.namespace_key())
+        .await
+        .map_err(namespace_gate_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Grep,
+            namespace_gate::Phase::LeaseAcquired,
+        )
+        .await;
     let start = Instant::now();
-    let result = grep_files(&state, &req).await;
+    let result = grep_files(&state, &req, &identity, use_lease).await;
     let truncated = result.as_ref().map(|r| r.truncated).unwrap_or(false);
     write_trace(
         &state,
@@ -296,8 +343,22 @@ async fn write_handler(
     Json(req): Json<WriteRequest>,
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let _use_lease = state
+        .namespace_gate
+        .acquire_use(identity.namespace_key())
+        .await
+        .map_err(namespace_gate_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Write,
+            namespace_gate::Phase::LeaseAcquired,
+        )
+        .await;
     let start = Instant::now();
-    let result = write_file(&state, &req).await;
+    let result = write_file(&state, &req, &identity).await;
     write_trace(
         &state,
         &req.common,
@@ -317,8 +378,22 @@ async fn edit_handler(
     Json(req): Json<EditRequest>,
 ) -> Result<Json<TextResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let _use_lease = state
+        .namespace_gate
+        .acquire_use(identity.namespace_key())
+        .await
+        .map_err(namespace_gate_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Edit,
+            namespace_gate::Phase::LeaseAcquired,
+        )
+        .await;
     let start = Instant::now();
-    let result = edit_file(&state, &req).await;
+    let result = edit_file(&state, &req, &identity).await;
     write_trace(
         &state,
         &req.common,
@@ -338,8 +413,22 @@ async fn bash_handler(
     Json(req): Json<BashRequest>,
 ) -> Result<Json<BashResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let _use_lease = state
+        .namespace_gate
+        .acquire_use(identity.namespace_key())
+        .await
+        .map_err(namespace_gate_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Bash,
+            namespace_gate::Phase::LeaseAcquired,
+        )
+        .await;
     let start = Instant::now();
-    let result = run_bash(&state, &req).await;
+    let result = run_bash(&state, &req, &identity).await;
     let exit_code = result.as_ref().ok().map(|r| r.exit_code);
     let truncated = result.as_ref().map(|r| r.truncated).unwrap_or(false);
     write_trace(
@@ -403,8 +492,14 @@ async fn reset_handler(
     Json(req): Json<ResetRequest>,
 ) -> Result<Json<ResetResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let identity = RuntimeIdentity::from_common(&req.common)?;
+    let _reset_lease = state
+        .namespace_gate
+        .try_acquire_reset(identity.namespace_key())
+        .map_err(namespace_gate_runtime_error)?
+        .ok_or_else(|| RuntimeError::conflict("namespace is active"))?;
     let start = Instant::now();
-    let result = reset_namespace(&state, &req).await;
+    let result = reset_namespace(&state, &req, &identity).await;
     write_trace(
         &state,
         &req.common,
@@ -418,32 +513,58 @@ async fn reset_handler(
     result.map(Json)
 }
 
-async fn read_file(state: &AppState, req: &ReadRequest) -> Result<TextResponse, RuntimeError> {
-    let data = if let Some(components) = workspace_access_components(state, &req.common, &req.path)?
+fn namespace_gate_runtime_error(error: NamespaceGateError) -> RuntimeError {
+    RuntimeError::internal(format!("namespace gate failed: {error}"))
+}
+
+async fn read_file(
+    state: &AppState,
+    req: &ReadRequest,
+    identity: &RuntimeIdentity,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<TextResponse, RuntimeError> {
+    let data = if let Some(components) =
+        workspace_access_components(state, identity, &req.common, &req.path)?
     {
         if components.is_empty() {
             return Err(RuntimeError::bad_request(
                 "read failed: path is a directory",
             ));
         }
-        read_workspace_file_nofollow(state, &req.common.namespace, components, "read failed")
-            .await?
+        read_workspace_file_bounded_nofollow(
+            state,
+            identity.namespace_key(),
+            components,
+            state.max_output_chars,
+            use_lease,
+            "read failed",
+        )
+        .await?
     } else {
-        let path = resolve_virtual_path(state, &req.common, &req.path, AccessMode::Read).await?;
-        fs::read_to_string(&path)
-            .await
-            .map_err(|e| RuntimeError::bad_request(format!("read failed: {e}")))?
+        let path = resolve_virtual_path(
+            state,
+            identity,
+            &req.common.cwd,
+            &req.path,
+            AccessMode::Read,
+        )
+        .await?;
+        read_path_bounded(path, state.max_output_chars, use_lease, "read failed").await?
     };
-    let (content, truncated) = truncate_output(data, state.max_output_chars);
     Ok(TextResponse {
-        content,
+        content: data.text,
         ok: true,
-        truncated,
+        truncated: data.truncated,
         ..Default::default()
     })
 }
 
-async fn grep_files(state: &AppState, req: &GrepRequest) -> Result<TextResponse, RuntimeError> {
+async fn grep_files(
+    state: &AppState,
+    req: &GrepRequest,
+    identity: &RuntimeIdentity,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<TextResponse, RuntimeError> {
     if req.pattern.trim().is_empty() {
         return Err(RuntimeError::bad_request("pattern is empty"));
     }
@@ -455,68 +576,103 @@ async fn grep_files(state: &AppState, req: &GrepRequest) -> Result<TextResponse,
     let re = Regex::new(&req.pattern)
         .or_else(|_| Regex::new(&regex::escape(&req.pattern)))
         .map_err(|e| RuntimeError::bad_request(format!("invalid pattern: {e}")))?;
-    let output = if let Some(components) = workspace_access_components(state, &req.common, target)?
+    let output = if let Some(components) =
+        workspace_access_components(state, identity, &req.common, target)?
     {
-        grep_workspace_nofollow(state, &req.common.namespace, components, re).await?
+        grep_workspace_nofollow(state, identity.namespace_key(), components, re, use_lease).await?
     } else {
-        let path = resolve_virtual_path(state, &req.common, target, AccessMode::Read).await?;
-        let mut output = String::new();
-        if path.is_file() {
-            grep_one_file(state, &req.common.namespace, &path, &re, &mut output).await?;
-        } else {
-            for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                grep_one_file(state, &req.common.namespace, entry.path(), &re, &mut output).await?;
-                if output.len() > state.max_output_chars {
-                    break;
-                }
-            }
-        }
-        output
+        let path = resolve_virtual_path(state, identity, &req.common.cwd, target, AccessMode::Read)
+            .await?;
+        grep_path_bounded(
+            path,
+            state.skills_root.clone(),
+            re,
+            state.max_output_chars,
+            use_lease,
+        )
+        .await?
     };
-    let (output, truncated) = truncate_output(output, state.max_output_chars);
     Ok(TextResponse {
-        output,
+        output: output.text,
         ok: true,
-        truncated,
+        truncated: output.truncated,
         ..Default::default()
     })
 }
 
-async fn grep_one_file(
-    state: &AppState,
-    namespace: &str,
-    path: &Path,
-    re: &Regex,
-    output: &mut String,
-) -> Result<(), RuntimeError> {
-    let Ok(data) = fs::read_to_string(path).await else {
-        return Ok(());
-    };
-    let display_path = virtual_output_path(state, namespace, path);
-    append_grep_matches(&display_path, &data, re, output);
-    Ok(())
+async fn read_path_bounded(
+    path: PathBuf,
+    max_output_chars: usize,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+    error_prefix: &'static str,
+) -> Result<scan::BoundedText, RuntimeError> {
+    scan::spawn_cancellable_blocking(move |cancel| {
+        let _use_lease = use_lease;
+        let mut file = std::fs::File::open(path)
+            .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))?;
+        scan::read_text_bounded_cancellable(&mut file, max_output_chars, &cancel)
+            .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("read task failed: {error}")))?
 }
 
-fn append_grep_matches(display_path: &str, data: &str, re: &Regex, output: &mut String) {
-    for (idx, line) in data.lines().enumerate() {
-        if re.is_match(line) {
-            output.push_str(&format!("{display_path}:{}:{line}\n", idx + 1));
+async fn grep_path_bounded(
+    path: PathBuf,
+    skills_root: PathBuf,
+    re: Regex,
+    max_output_chars: usize,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<scan::BoundedText, RuntimeError> {
+    scan::spawn_cancellable_blocking(move |cancel| {
+        let _use_lease = use_lease;
+        let mut budget = scan::ScanBudget::new(scan::ScanLimits::grep(), cancel);
+        let mut output = String::new();
+        let mut truncated = !budget.check();
+        if !truncated {
+            for entry in WalkDir::new(&path).follow_links(false) {
+                if !budget.enter_entry() {
+                    truncated = true;
+                    break;
+                }
+                let Ok(entry) = entry else {
+                    continue;
+                };
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let Ok(mut file) = std::fs::File::open(entry.path()) else {
+                    continue;
+                };
+                let display_path = entry
+                    .path()
+                    .strip_prefix(&skills_root)
+                    .map(|relative| join_virtual_path("/skills", relative))
+                    .unwrap_or_else(|_| entry.path().display().to_string());
+                match scan::grep_reader_bounded(
+                    &mut file,
+                    &display_path,
+                    &re,
+                    &mut budget,
+                    &mut output,
+                    max_output_chars,
+                ) {
+                    Ok(true) => {
+                        truncated = true;
+                        break;
+                    }
+                    Ok(false) => {}
+                    Err(_) => continue,
+                }
+            }
         }
-    }
-}
-
-fn virtual_output_path(state: &AppState, namespace: &str, path: &Path) -> String {
-    let workspace = namespace_workspace(state, namespace);
-    if let Ok(rel) = path.strip_prefix(&workspace) {
-        return join_virtual_path("/workspace", rel);
-    }
-    if let Ok(rel) = path.strip_prefix(&state.skills_root) {
-        return join_virtual_path("/skills", rel);
-    }
-    path.display().to_string()
+        Ok::<_, RuntimeError>(scan::finish_bounded_text(
+            output,
+            truncated || budget.stopped(),
+        ))
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("grep task failed: {error}")))?
 }
 
 fn join_virtual_path(prefix: &str, rel: &Path) -> String {
@@ -528,13 +684,17 @@ fn join_virtual_path(prefix: &str, rel: &Path) -> String {
     }
 }
 
-async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse, RuntimeError> {
-    let components = workspace_write_components(state, &req.common, &req.path)?;
-    let target = workspace_host_path(state, &req.common.namespace, &components);
+async fn write_file(
+    state: &AppState,
+    req: &WriteRequest,
+    identity: &RuntimeIdentity,
+) -> Result<TextResponse, RuntimeError> {
+    let components = workspace_write_components(state, identity, &req.common, &req.path)?;
+    let target = workspace_host_path(state, identity.namespace_key(), &components);
     let reservation = reserve_workspace_replace(state, target, req.content.len()).await?;
     write_workspace_file_nofollow(
         state,
-        &req.common.namespace,
+        identity.namespace_key(),
         components,
         req.content.as_bytes().to_vec(),
         "write failed",
@@ -549,11 +709,15 @@ async fn write_file(state: &AppState, req: &WriteRequest) -> Result<TextResponse
     })
 }
 
-async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, RuntimeError> {
-    let components = workspace_write_components(state, &req.common, &req.path)?;
+async fn edit_file(
+    state: &AppState,
+    req: &EditRequest,
+    identity: &RuntimeIdentity,
+) -> Result<TextResponse, RuntimeError> {
+    let components = workspace_write_components(state, identity, &req.common, &req.path)?;
     let original = read_workspace_file_nofollow(
         state,
-        &req.common.namespace,
+        identity.namespace_key(),
         components.clone(),
         "read before edit failed",
     )
@@ -562,11 +726,11 @@ async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, 
         .map_err(|e| RuntimeError::bad_request(format!("invalid unified diff: {e}")))?;
     let edited = diffy::apply(&original, &patch)
         .map_err(|e| RuntimeError::bad_request(format!("apply patch failed: {e}")))?;
-    let target = workspace_host_path(state, &req.common.namespace, &components);
+    let target = workspace_host_path(state, identity.namespace_key(), &components);
     let reservation = reserve_workspace_replace(state, target, edited.len()).await?;
     write_workspace_file_nofollow(
         state,
-        &req.common.namespace,
+        identity.namespace_key(),
         components,
         edited.as_bytes().to_vec(),
         "write edited file failed",
@@ -583,10 +747,11 @@ async fn edit_file(state: &AppState, req: &EditRequest) -> Result<TextResponse, 
 
 fn workspace_write_components(
     state: &AppState,
+    identity: &RuntimeIdentity,
     common: &CommonRequest,
     raw: &str,
 ) -> Result<Vec<std::ffi::OsString>, RuntimeError> {
-    let Some(components) = workspace_access_components(state, common, raw)? else {
+    let Some(components) = workspace_access_components(state, identity, common, raw)? else {
         return Err(RuntimeError::forbidden("skills are read-only"));
     };
     if components.is_empty() {
@@ -597,10 +762,11 @@ fn workspace_write_components(
 
 fn workspace_access_components(
     state: &AppState,
+    identity: &RuntimeIdentity,
     common: &CommonRequest,
     raw: &str,
 ) -> Result<Option<Vec<std::ffi::OsString>>, RuntimeError> {
-    let workspace = namespace_workspace(state, &common.namespace);
+    let workspace = namespace_workspace(state, identity.namespace_key());
     let raw = if raw.trim().is_empty() {
         "/workspace"
     } else {
@@ -635,10 +801,10 @@ fn workspace_path_components(relative: &Path) -> Result<Vec<std::ffi::OsString>,
 
 fn workspace_host_path(
     state: &AppState,
-    namespace: &str,
+    namespace_key: &str,
     components: &[std::ffi::OsString],
 ) -> PathBuf {
-    let mut path = state.workspace_root.join(sanitize_namespace(namespace));
+    let mut path = state.workspace_root.join(namespace_key);
     for component in components {
         path.push(component);
     }
@@ -671,16 +837,50 @@ async fn reserve_workspace_replace(
 
 async fn read_workspace_file_nofollow(
     state: &AppState,
-    namespace: &str,
+    namespace_key: &str,
     components: Vec<std::ffi::OsString>,
     error_prefix: &'static str,
 ) -> Result<String, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
-    let namespace = sanitize_namespace(namespace);
+    let namespace_key = namespace_key.to_string();
     tokio::task::spawn_blocking(move || {
-        let (parent, file_name) =
-            open_workspace_file_parent_nofollow(&workspace_root, &namespace, &components, false)?;
+        let (parent, file_name) = open_workspace_file_parent_nofollow(
+            &workspace_root,
+            &namespace_key,
+            &components,
+            false,
+        )?;
         read_file_from_dir_nofollow(&parent, &file_name)
+            .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))
+    })
+    .await
+    .map_err(|error| RuntimeError::internal(format!("workspace read task failed: {error}")))?
+}
+
+async fn read_workspace_file_bounded_nofollow(
+    state: &AppState,
+    namespace_key: &str,
+    components: Vec<std::ffi::OsString>,
+    max_output_chars: usize,
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+    error_prefix: &'static str,
+) -> Result<scan::BoundedText, RuntimeError> {
+    let workspace_root = state.workspace_root.clone();
+    let namespace_key = namespace_key.to_string();
+    scan::spawn_cancellable_blocking(move |cancel| {
+        let _use_lease = use_lease;
+        let (parent, file_name) = open_workspace_file_parent_nofollow(
+            &workspace_root,
+            &namespace_key,
+            &components,
+            false,
+        )?;
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        let mut file = parent
+            .open_with(Path::new(&file_name), &options)
+            .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))?;
+        scan::read_text_bounded_cancellable(&mut file, max_output_chars, &cancel)
             .map_err(|error| RuntimeError::bad_request(format!("{error_prefix}: {error}")))
     })
     .await
@@ -689,22 +889,22 @@ async fn read_workspace_file_nofollow(
 
 async fn write_workspace_file_nofollow(
     state: &AppState,
-    namespace: &str,
+    namespace_key: &str,
     components: Vec<std::ffi::OsString>,
     content: Vec<u8>,
     error_prefix: &'static str,
     create_parents: bool,
 ) -> Result<usize, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
-    let namespace = sanitize_namespace(namespace);
+    let namespace_key = namespace_key.to_string();
     tokio::task::spawn_blocking(move || {
-        let mut host_parent = workspace_root.join(&namespace);
+        let mut host_parent = workspace_root.join(&namespace_key);
         for component in &components[..components.len().saturating_sub(1)] {
             host_parent.push(component);
         }
         let (parent, file_name) = open_workspace_file_parent_nofollow(
             &workspace_root,
-            &namespace,
+            &namespace_key,
             &components,
             create_parents,
         )?;
@@ -835,20 +1035,23 @@ fn open_or_create_dir_nofollow(
 
 async fn grep_workspace_nofollow(
     state: &AppState,
-    namespace: &str,
+    namespace_key: &str,
     components: Vec<std::ffi::OsString>,
     re: Regex,
-) -> Result<String, RuntimeError> {
+    use_lease: tokio::sync::OwnedRwLockReadGuard<()>,
+) -> Result<scan::BoundedText, RuntimeError> {
     let workspace_root = state.workspace_root.clone();
-    let namespace = sanitize_namespace(namespace);
+    let namespace_key = namespace_key.to_string();
     let max_output_chars = state.max_output_chars;
-    tokio::task::spawn_blocking(move || {
+    scan::spawn_cancellable_blocking(move |cancel| {
+        let _use_lease = use_lease;
         grep_workspace_nofollow_sync(
             &workspace_root,
-            &namespace,
+            &namespace_key,
             &components,
             &re,
             max_output_chars,
+            cancel,
         )
     })
     .await
@@ -861,19 +1064,29 @@ fn grep_workspace_nofollow_sync(
     components: &[std::ffi::OsString],
     re: &Regex,
     max_output_chars: usize,
-) -> Result<String, RuntimeError> {
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+) -> Result<scan::BoundedText, RuntimeError> {
     let mut output = String::new();
+    let mut budget = scan::ScanBudget::new(scan::ScanLimits::grep(), cancel);
+    let mut truncated = !budget.check();
     let relative = workspace_relative_path(components);
-    if components.is_empty() {
+    if components.is_empty() && !truncated {
         let directory = open_workspace_namespace_nofollow(workspace_root, namespace, false)?;
-        grep_workspace_directory_nofollow(
+        truncated = grep_workspace_directory_nofollow(
             &directory,
             &relative,
             re,
             &mut output,
             max_output_chars,
+            &mut budget,
         )?;
-        return Ok(output);
+        return Ok(scan::finish_bounded_text(
+            output,
+            truncated || budget.stopped(),
+        ));
+    }
+    if truncated || !budget.enter_entry() {
+        return Ok(scan::finish_bounded_text(output, true));
     }
 
     let (parent, file_name) =
@@ -893,25 +1106,38 @@ fn grep_workspace_nofollow_sync(
             .map_err(|error| {
                 RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
             })?;
-        grep_workspace_directory_nofollow(
+        truncated = grep_workspace_directory_nofollow(
             &directory,
             &relative,
             re,
             &mut output,
             max_output_chars,
+            &mut budget,
         )?;
     } else if file_type.is_file() {
-        let data = read_file_from_dir_nofollow(&parent, &file_name).map_err(|error| {
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        let mut file = parent
+            .open_with(Path::new(&file_name), &options)
+            .map_err(|error| {
+                RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
+            })?;
+        truncated = scan::grep_reader_bounded(
+            &mut file,
+            &join_virtual_path("/workspace", &relative),
+            re,
+            &mut budget,
+            &mut output,
+            max_output_chars,
+        )
+        .map_err(|error| {
             RuntimeError::forbidden(format!("grep target cannot be opened safely: {error}"))
         })?;
-        append_grep_matches(
-            &join_virtual_path("/workspace", &relative),
-            &data,
-            re,
-            &mut output,
-        );
     }
-    Ok(output)
+    Ok(scan::finish_bounded_text(
+        output,
+        truncated || budget.stopped(),
+    ))
 }
 
 fn grep_workspace_directory_nofollow(
@@ -920,11 +1146,21 @@ fn grep_workspace_directory_nofollow(
     re: &Regex,
     output: &mut String,
     max_output_chars: usize,
-) -> Result<(), RuntimeError> {
+    budget: &mut scan::ScanBudget,
+) -> Result<bool, RuntimeError> {
+    if !budget.check() {
+        return Ok(true);
+    }
     let entries = directory
         .entries()
         .map_err(|error| RuntimeError::internal(format!("grep directory failed: {error}")))?;
-    for entry in entries.filter_map(Result::ok) {
+    for entry in entries {
+        if !budget.enter_entry() {
+            return Ok(true);
+        }
+        let Ok(entry) = entry else {
+            continue;
+        };
         let file_type = match entry.file_type() {
             Ok(file_type) => file_type,
             Err(_) => continue,
@@ -938,29 +1174,37 @@ fn grep_workspace_directory_nofollow(
             let Ok(child) = directory.open_dir_nofollow(Path::new(&name)) else {
                 continue;
             };
-            grep_workspace_directory_nofollow(
+            if grep_workspace_directory_nofollow(
                 &child,
                 &child_relative,
                 re,
                 output,
                 max_output_chars,
-            )?;
+                budget,
+            )? {
+                return Ok(true);
+            }
         } else if file_type.is_file() {
-            let Ok(data) = read_file_from_dir_nofollow(directory, &name) else {
+            let mut options = OpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            let Ok(mut file) = directory.open_with(Path::new(&name), &options) else {
                 continue;
             };
-            append_grep_matches(
+            let stopped = scan::grep_reader_bounded(
+                &mut file,
                 &join_virtual_path("/workspace", &child_relative),
-                &data,
                 re,
+                budget,
                 output,
-            );
-        }
-        if output.len() > max_output_chars {
-            break;
+                max_output_chars,
+            )
+            .map_err(|error| RuntimeError::internal(format!("grep file failed: {error}")))?;
+            if stopped {
+                return Ok(true);
+            }
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 fn read_file_from_dir_nofollow(parent: &Dir, file_name: &std::ffi::OsString) -> io::Result<String> {
@@ -980,7 +1224,11 @@ fn workspace_relative_path(components: &[std::ffi::OsString]) -> PathBuf {
     path
 }
 
-async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, RuntimeError> {
+async fn run_bash(
+    state: &AppState,
+    req: &BashRequest,
+    runtime_identity: &RuntimeIdentity,
+) -> Result<BashResponse, RuntimeError> {
     if req.command.trim().is_empty() {
         return Err(RuntimeError::bad_request("command is empty"));
     }
@@ -990,7 +1238,14 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
     if !state.bash_health.is_ready() {
         return Err(RuntimeError::unavailable(state.bash_health.reason()));
     }
-    let cwd = resolve_virtual_path(state, &req.common, &req.common.cwd, AccessMode::Read).await?;
+    let cwd = resolve_virtual_path(
+        state,
+        runtime_identity,
+        &req.common.cwd,
+        &req.common.cwd,
+        AccessMode::Read,
+    )
+    .await?;
     let virtual_cwd = normalize_virtual_cwd(&req.common.cwd)?;
     if virtual_cwd == "/workspace" || virtual_cwd.starts_with("/workspace/") {
         fs::create_dir_all(&cwd)
@@ -1007,13 +1262,24 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
         .fetch_proxy
         .new_command_id()
         .map_err(|error| RuntimeError::internal(error.to_string()))?;
-    let identity = CommandIdentity::new(&req.common.namespace, &req.common.run_id, &command_id);
-    let (target, cleanup_dir) =
-        shell_exec_target(state, &req.common, &req.command, &cwd, &virtual_cwd).await?;
+    let identity = CommandIdentity::new(
+        runtime_identity.namespace(),
+        runtime_identity.run_id(),
+        &command_id,
+    );
+    let (target, cleanup_dir) = shell_exec_target(
+        state,
+        runtime_identity,
+        &command_id,
+        &req.command,
+        &cwd,
+        &virtual_cwd,
+    )
+    .await?;
     let fetch_proxy = state.fetch_proxy.clone();
     let fetch_health = supervisor.health();
-    let namespace = req.common.namespace.clone();
-    let run_id = req.common.run_id.clone();
+    let namespace = runtime_identity.namespace().to_string();
+    let run_id = runtime_identity.run_id().to_string();
     let failed_start_cleanup = cleanup_dir.clone();
     let handle = match supervisor.start_command_with_launch(
         identity,
@@ -1047,6 +1313,14 @@ async fn run_bash(state: &AppState, req: &BashRequest) -> Result<BashResponse, R
         }
     };
     let output = handle.wait().await.map_err(supervisor_runtime_error)?;
+    #[cfg(test)]
+    state
+        .namespace_use_test_hooks
+        .pause(
+            namespace_gate::Operation::Bash,
+            namespace_gate::Phase::BashWaitReturned,
+        )
+        .await;
     let duration_ms = started.elapsed().as_millis();
     Ok(BashResponse {
         exit_code: output.exit_code,
@@ -1121,11 +1395,9 @@ fn format_collected_output(output: CollectedOutput) -> String {
 async fn reset_namespace(
     state: &AppState,
     req: &ResetRequest,
+    identity: &RuntimeIdentity,
 ) -> Result<ResetResponse, RuntimeError> {
-    if req.common.namespace.trim().is_empty() {
-        return Err(RuntimeError::bad_request("namespace is empty"));
-    }
-    let workspace = namespace_workspace(state, &req.common.namespace);
+    let workspace = namespace_workspace(state, identity.namespace_key());
     ensure_reset_target(state, &workspace).await?;
     let removed = if fs::metadata(&workspace).await.is_ok() {
         fs::remove_dir_all(&workspace)
@@ -1138,7 +1410,7 @@ async fn reset_namespace(
     let jail_root = state
         .workspace_root
         .join(".runtime-jails")
-        .join(sanitize_namespace(&req.common.namespace));
+        .join(identity.namespace_key());
     if ensure_optional_reset_target(state, &jail_root).await?
         && fs::metadata(&jail_root).await.is_ok()
     {
@@ -1209,11 +1481,12 @@ enum AccessMode {
 
 async fn resolve_virtual_path(
     state: &AppState,
-    common: &CommonRequest,
+    identity: &RuntimeIdentity,
+    cwd: &str,
     raw: &str,
     mode: AccessMode,
 ) -> Result<PathBuf, RuntimeError> {
-    let workspace = namespace_workspace(state, &common.namespace);
+    let workspace = namespace_workspace(state, identity.namespace_key());
     fs::create_dir_all(&workspace)
         .await
         .map_err(|e| RuntimeError::internal(format!("create namespace failed: {e}")))?;
@@ -1223,7 +1496,7 @@ async fn resolve_virtual_path(
     } else {
         raw.trim()
     };
-    let (base, rel) = split_virtual_path(state, &workspace, &common.cwd, raw)?;
+    let (base, rel) = split_virtual_path(state, &workspace, cwd, raw)?;
     if mode == AccessMode::Write && base.as_path() == state.skills_root.as_path() {
         return Err(RuntimeError::forbidden("skills are read-only"));
     }
@@ -1302,26 +1575,14 @@ async fn ensure_within(path: &Path, base: &Path) -> Result<(), RuntimeError> {
     }
 }
 
-fn namespace_workspace(state: &AppState, namespace: &str) -> PathBuf {
-    state.workspace_root.join(sanitize_namespace(namespace))
-}
-
-fn sanitize_namespace(namespace: &str) -> String {
-    namespace
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+fn namespace_workspace(state: &AppState, namespace_key: &str) -> PathBuf {
+    state.workspace_root.join(namespace_key)
 }
 
 async fn shell_exec_target(
     state: &AppState,
-    common: &CommonRequest,
+    identity: &RuntimeIdentity,
+    command_id: &str,
     command: &str,
     real_cwd: &Path,
     virtual_cwd: &str,
@@ -1338,7 +1599,7 @@ async fn shell_exec_target(
     }
     match state.bash_sandbox {
         BashSandboxMode::Proot => {
-            sandboxed_shell_command(state, common, command, virtual_cwd).await
+            sandboxed_shell_command(state, identity, command_id, command, virtual_cwd).await
         }
         #[cfg(test)]
         BashSandboxMode::None => Ok((
@@ -1354,18 +1615,15 @@ async fn shell_exec_target(
 
 async fn sandboxed_shell_command(
     state: &AppState,
-    common: &CommonRequest,
+    identity: &RuntimeIdentity,
+    command_id: &str,
     command: &str,
     virtual_cwd: &str,
 ) -> Result<(ExecTarget, Option<PathBuf>), RuntimeError> {
-    let jail_root = state
-        .workspace_root
-        .join(".runtime-jails")
-        .join(sanitize_namespace(&common.namespace))
-        .join(sanitize_namespace(&common.run_id));
+    let jail_root = command_jail_root(&state.workspace_root, identity, command_id);
     prepare_proot_jail(&jail_root).await?;
 
-    let workspace = namespace_workspace(state, &common.namespace);
+    let workspace = namespace_workspace(state, identity.namespace_key());
     fs::create_dir_all(&workspace)
         .await
         .map_err(|e| RuntimeError::internal(format!("create namespace failed: {e}")))?;
@@ -1392,6 +1650,12 @@ async fn sandboxed_shell_command(
         command.to_string(),
     ]);
     Ok((target, Some(jail_root)))
+}
+
+#[cfg(test)]
+fn command_jail_path_under_test(root: &Path, common: &CommonRequest, command_id: &str) -> PathBuf {
+    let identity = RuntimeIdentity::from_common(common).expect("test identity must be valid");
+    command_jail_root(root, &identity, command_id)
 }
 
 async fn prepare_proot_jail(root: &Path) -> Result<(), RuntimeError> {
@@ -1673,6 +1937,8 @@ mod tests {
             require_fetch_for_readiness: false,
             bash_readiness_error: String::new(),
             workspace_budget,
+            namespace_gate: NamespaceGate::default(),
+            namespace_use_test_hooks: namespace_gate::NamespaceUseTestHooks::default(),
         }
     }
 
@@ -1682,6 +1948,22 @@ mod tests {
             .uri(path)
             .body(Body::empty())
             .unwrap()
+    }
+
+    fn common(namespace: &str, run_id: &str) -> CommonRequest {
+        CommonRequest {
+            namespace: namespace.to_string(),
+            run_id: run_id.to_string(),
+            cwd: "/workspace".to_string(),
+        }
+    }
+
+    fn test_workspace(state: &AppState, namespace: &str) -> PathBuf {
+        namespace_workspace(state, &crate::identity::namespace_storage_key(namespace))
+    }
+
+    fn valid_identity(common: &CommonRequest) -> RuntimeIdentity {
+        RuntimeIdentity::from_common(common).expect("test identity must be valid")
     }
 
     #[cfg(target_os = "linux")]
@@ -1756,8 +2038,94 @@ mod tests {
     }
 
     #[test]
-    fn namespace_is_sanitized() {
-        assert_eq!(sanitize_namespace("bot:tg:-100"), "bot_tg_-100");
+    fn caller_run_id_never_selects_the_jail_path() {
+        let first = common("namespace", "caller-a");
+        let second = common("namespace", "caller-b");
+        let root = Path::new("/runtime/workspaces");
+
+        assert_eq!(
+            command_jail_path_under_test(root, &first, "cmd-1"),
+            command_jail_path_under_test(root, &second, "cmd-1")
+        );
+        assert_ne!(
+            command_jail_path_under_test(root, &first, "cmd-1"),
+            command_jail_path_under_test(root, &first, "cmd-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_identity_rejects_empty_and_oversize_values_before_path_use() {
+        let state = test_state();
+        let workspace_root = state.workspace_root.clone();
+        let before = std::fs::read_dir(&workspace_root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        let app = app(state);
+
+        for (namespace, run_id) in [
+            ("   ".to_string(), "run".to_string()),
+            ("namespace".to_string(), "\t".to_string()),
+            ("n".repeat(257), "run".to_string()),
+            ("namespace".to_string(), "r".repeat(129)),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/write",
+                    json!({
+                        "namespace": namespace,
+                        "run_id": run_id,
+                        "path": "/workspace/should-not-exist.txt",
+                        "content": "side effect",
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let after = std::fs::read_dir(&workspace_root)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            assert_eq!(after, before);
+        }
+    }
+
+    #[tokio::test]
+    async fn path_significant_namespaces_use_distinct_storage_directories() {
+        let state = test_state();
+        let workspace_root = state.workspace_root.clone();
+        let app = app(state);
+
+        for (namespace, content) in [("a:b", "first"), ("a/b", "second")] {
+            let response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/write",
+                    json!({
+                        "namespace": namespace,
+                        "run_id": "run",
+                        "path": "/workspace/note.txt",
+                        "content": content,
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
+        let directories = std::fs::read_dir(workspace_root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        assert_eq!(directories.len(), 2);
+        assert!(
+            directories
+                .iter()
+                .all(|directory| directory.join("note.txt").is_file())
+        );
     }
 
     #[test]
@@ -1765,6 +2133,46 @@ mod tests {
         let (out, truncated) = truncate_output("你好hello".to_string(), 7);
         assert!(truncated);
         assert!(out.starts_with("你好h"));
+    }
+
+    #[tokio::test]
+    async fn read_bounds_workspace_and_skills_text_at_utf8_boundary() {
+        let mut state = test_state();
+        state.max_output_chars = 4;
+        let workspace = test_workspace(&state, "bounded-read");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(workspace.join("large.txt"), "你".repeat(16))
+            .await
+            .unwrap();
+        fs::write(state.skills_root.join("large.txt"), "你".repeat(16))
+            .await
+            .unwrap();
+        let app = app(state);
+
+        for path in ["/workspace/large.txt", "/skills/large.txt"] {
+            let response = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/read",
+                    json!({
+                        "namespace": "bounded-read",
+                        "run_id": "read",
+                        "path": path,
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let parsed: TextResponse = serde_json::from_slice(&body).unwrap();
+            assert!(parsed.truncated, "{path}");
+            assert_eq!(parsed.content, format!("你{TRUNCATION_MARKER}"), "{path}");
+            assert_eq!(
+                parsed.content.matches(TRUNCATION_MARKER).count(),
+                1,
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -1936,7 +2344,7 @@ mod tests {
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
-            fs::read_to_string(namespace_workspace(&write_state, "budget").join("note.txt"))
+            fs::read_to_string(test_workspace(&write_state, "budget").join("note.txt"))
                 .await
                 .unwrap(),
             "old\n"
@@ -1957,7 +2365,7 @@ mod tests {
             .unwrap();
         assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
-            fs::read_to_string(namespace_workspace(&write_state, "budget").join("note.txt"))
+            fs::read_to_string(test_workspace(&write_state, "budget").join("note.txt"))
                 .await
                 .unwrap(),
             "old\n"
@@ -2101,8 +2509,8 @@ mod tests {
     #[tokio::test]
     async fn reset_removes_only_target_namespace() {
         let state = test_state();
-        let current = namespace_workspace(&state, "bot:tg:-1");
-        let other = namespace_workspace(&state, "bot:tg:-2");
+        let current = test_workspace(&state, "bot:tg:-1");
+        let other = test_workspace(&state, "bot:tg:-2");
         fs::create_dir_all(&current).await.unwrap();
         fs::create_dir_all(&other).await.unwrap();
         fs::write(current.join("note.txt"), b"delete me")
@@ -2131,6 +2539,298 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn namespace_use_leases_block_reset_without_deleting_workspace() {
+        use namespace_gate::{Operation, Phase};
+
+        for (operation, path, body) in [
+            (
+                Operation::Read,
+                "/v1/read",
+                json!({
+                    "namespace": "gate",
+                    "run_id": "read",
+                    "path": "/workspace/source.txt",
+                }),
+            ),
+            (
+                Operation::Grep,
+                "/v1/grep",
+                json!({
+                    "namespace": "gate",
+                    "run_id": "grep",
+                    "pattern": "needle",
+                    "path": "/workspace",
+                }),
+            ),
+            (
+                Operation::Write,
+                "/v1/write",
+                json!({
+                    "namespace": "gate",
+                    "run_id": "write",
+                    "path": "/workspace/written.txt",
+                    "content": "written\n",
+                }),
+            ),
+            (
+                Operation::Edit,
+                "/v1/edit",
+                json!({
+                    "namespace": "gate",
+                    "run_id": "edit",
+                    "path": "/workspace/source.txt",
+                    "patch": "@@ -1,2 +1,2 @@\n needle\n-before\n+after\n",
+                }),
+            ),
+        ] {
+            let state = test_state();
+            let workspace = test_workspace(&state, "gate");
+            fs::create_dir_all(&workspace).await.unwrap();
+            fs::write(workspace.join("source.txt"), b"needle\nbefore\n")
+                .await
+                .unwrap();
+            fs::write(workspace.join("sentinel.txt"), b"do not delete")
+                .await
+                .unwrap();
+            let hooks = state.namespace_use_test_hooks.clone();
+            let mut hook = hooks.arm(operation, Phase::LeaseAcquired);
+            let app = app(state);
+            let operation_app = app.clone();
+            let operation_task = tokio::spawn(async move {
+                operation_app
+                    .oneshot(request_with_json(path, body))
+                    .await
+                    .unwrap()
+            });
+
+            hook.wait_until_reached().await;
+            let busy_reset = app
+                .clone()
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": "gate", "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                (
+                    busy_reset.status(),
+                    workspace.join("sentinel.txt").is_file(),
+                ),
+                (StatusCode::CONFLICT, true),
+                "{operation:?}"
+            );
+
+            hook.release();
+            assert_eq!(operation_task.await.unwrap().status(), StatusCode::OK);
+            let reset = app
+                .oneshot(request_with_json(
+                    "/v1/reset",
+                    json!({ "namespace": "gate", "run_id": "reset" }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(reset.status(), StatusCode::OK, "{operation:?}");
+            assert!(!workspace.exists(), "{operation:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_blocking_read_worker_keeps_namespace_busy_until_it_exits() {
+        let state = test_state();
+        let workspace = test_workspace(&state, "cancel-gate");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(workspace.join("sentinel.txt"), b"do not delete")
+            .await
+            .unwrap();
+        let gate = state.namespace_gate.clone();
+        let namespace_key = crate::identity::namespace_storage_key("cancel-gate");
+        let use_lease = gate.acquire_use(&namespace_key).await.unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
+        let (permit_exit_tx, permit_exit_rx) = std::sync::mpsc::sync_channel(1);
+        let (exited_tx, exited_rx) = tokio::sync::oneshot::channel();
+        let worker = scan::spawn_cancellable_blocking(move |cancel| {
+            let use_lease = use_lease;
+            started_tx.send(()).unwrap();
+            while !cancel.load(std::sync::atomic::Ordering::Acquire) {
+                std::thread::yield_now();
+            }
+            cancelled_tx.send(()).unwrap();
+            permit_exit_rx.recv().unwrap();
+            drop(use_lease);
+            exited_tx.send(()).unwrap();
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv().unwrap())
+            .await
+            .unwrap();
+        let app = app(state);
+
+        drop(worker);
+        cancelled_rx.await.unwrap();
+        let busy_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "cancel-gate", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(busy_reset.status(), StatusCode::CONFLICT);
+        assert!(workspace.join("sentinel.txt").is_file());
+
+        permit_exit_tx.send(()).unwrap();
+        exited_rx.await.unwrap();
+        let reset = app
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "cancel-gate", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reset.status(), StatusCode::OK);
+        assert!(!workspace.exists());
+    }
+
+    #[tokio::test]
+    async fn bash_use_lease_outlives_command_wait_and_binding_drain() {
+        use namespace_gate::{Operation, Phase};
+
+        let state = test_state();
+        let workspace = test_workspace(&state, "bash-gate");
+        fs::create_dir_all(&workspace).await.unwrap();
+        fs::write(workspace.join("sentinel.txt"), b"do not delete")
+            .await
+            .unwrap();
+        let hooks = state.namespace_use_test_hooks.clone();
+        let mut acquired = hooks.arm(Operation::Bash, Phase::LeaseAcquired);
+        let mut waited = hooks.arm(Operation::Bash, Phase::BashWaitReturned);
+        let app = app(state);
+        let bash_app = app.clone();
+        let bash_task = tokio::spawn(async move {
+            bash_app
+                .oneshot(request_with_json(
+                    "/v1/bash",
+                    json!({
+                        "namespace": "bash-gate",
+                        "run_id": "bash",
+                        "command": "printf complete",
+                    }),
+                ))
+                .await
+                .unwrap()
+        });
+
+        acquired.wait_until_reached().await;
+        let first_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "bash-gate", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(first_reset.status(), StatusCode::CONFLICT);
+        assert!(workspace.join("sentinel.txt").is_file());
+
+        acquired.release();
+        waited.wait_until_reached().await;
+        let second_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "bash-gate", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(second_reset.status(), StatusCode::CONFLICT);
+        assert!(workspace.join("sentinel.txt").is_file());
+
+        waited.release();
+        assert_eq!(bash_task.await.unwrap().status(), StatusCode::OK);
+        let reset = app
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "bash-gate", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(reset.status(), StatusCode::OK);
+        assert!(!workspace.exists());
+    }
+
+    #[tokio::test]
+    async fn namespace_use_lease_does_not_block_reset_for_another_namespace() {
+        use namespace_gate::{Operation, Phase};
+
+        let state = test_state();
+        let active_workspace = test_workspace(&state, "active");
+        let other_workspace = test_workspace(&state, "other");
+        fs::create_dir_all(&active_workspace).await.unwrap();
+        fs::create_dir_all(&other_workspace).await.unwrap();
+        fs::write(active_workspace.join("source.txt"), b"active")
+            .await
+            .unwrap();
+        fs::write(active_workspace.join("sentinel.txt"), b"do not delete")
+            .await
+            .unwrap();
+        fs::write(other_workspace.join("sentinel.txt"), b"delete")
+            .await
+            .unwrap();
+        let hooks = state.namespace_use_test_hooks.clone();
+        let mut hook = hooks.arm(Operation::Read, Phase::LeaseAcquired);
+        let app = app(state);
+        let active_app = app.clone();
+        let read_task = tokio::spawn(async move {
+            active_app
+                .oneshot(request_with_json(
+                    "/v1/read",
+                    json!({
+                        "namespace": "active",
+                        "run_id": "read",
+                        "path": "/workspace/source.txt",
+                    }),
+                ))
+                .await
+                .unwrap()
+        });
+
+        hook.wait_until_reached().await;
+        let other_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "other", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(other_reset.status(), StatusCode::OK);
+        assert!(!other_workspace.exists());
+        let active_reset = app
+            .clone()
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "active", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(active_reset.status(), StatusCode::CONFLICT);
+        assert!(active_workspace.join("sentinel.txt").is_file());
+
+        hook.release();
+        assert_eq!(read_task.await.unwrap().status(), StatusCode::OK);
+        let active_reset = app
+            .oneshot(request_with_json(
+                "/v1/reset",
+                json!({ "namespace": "active", "run_id": "reset" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(active_reset.status(), StatusCode::OK);
+        assert!(!active_workspace.exists());
+    }
+
+    #[tokio::test]
     async fn path_traversal_is_rejected() {
         let state = test_state();
         let app = app(state);
@@ -2151,8 +2851,8 @@ mod tests {
     #[tokio::test]
     async fn write_rejects_symlinked_missing_parent_escape() {
         let state = test_state();
-        let workspace = namespace_workspace(&state, "bot:tg:-1");
-        let other_workspace = namespace_workspace(&state, "bot:tg:-2");
+        let workspace = test_workspace(&state, "bot:tg:-1");
+        let other_workspace = test_workspace(&state, "bot:tg:-2");
         fs::create_dir_all(&workspace).await.unwrap();
         fs::create_dir_all(&other_workspace).await.unwrap();
         if let Err(error) = create_dir_symlink(&other_workspace, &workspace.join("escape")) {
@@ -2184,7 +2884,7 @@ mod tests {
     #[tokio::test]
     async fn write_and_edit_reject_final_symlink_escape() {
         let state = test_state();
-        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let workspace = test_workspace(&state, "bot:tg:-1");
         let outside = tempdir().unwrap().keep();
         let sentinel = outside.join("sentinel.txt");
         fs::create_dir_all(&workspace).await.unwrap();
@@ -2238,7 +2938,7 @@ mod tests {
     #[tokio::test]
     async fn read_and_grep_reject_final_and_parent_symlink_escapes() {
         let state = test_state();
-        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let workspace = test_workspace(&state, "bot:tg:-1");
         let outside = tempdir().unwrap().keep();
         let secret = outside.join("secret.txt");
         fs::create_dir_all(&workspace).await.unwrap();
@@ -2301,7 +3001,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let state = test_state();
-        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let workspace = test_workspace(&state, "bot:tg:-1");
         let outside = tempdir().unwrap().keep();
         let sentinel = outside.join("note");
         fs::create_dir_all(workspace.join("pivot")).await.unwrap();
@@ -2364,7 +3064,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let state = test_state();
-        let workspace = namespace_workspace(&state, "bot:tg:-1");
+        let workspace = test_workspace(&state, "bot:tg:-1");
         let outside = tempdir().unwrap().keep();
         let secret = "outside-only-secret";
         let outside_note = outside.join("note");
@@ -2502,12 +3202,20 @@ mod tests {
             run_id: "run-bind".to_string(),
             cwd: "/workspace".to_string(),
         };
-        let cwd = namespace_workspace(&state, &common.namespace);
+        let cwd = test_workspace(&state, &common.namespace);
         fs::create_dir_all(&cwd).await.unwrap();
 
-        let (target, cleanup) = shell_exec_target(&state, &common, "true", &cwd, "/workspace")
-            .await
-            .unwrap();
+        let identity = valid_identity(&common);
+        let (target, cleanup) = shell_exec_target(
+            &state,
+            &identity,
+            "socket-bind-command",
+            "true",
+            &cwd,
+            "/workspace",
+        )
+        .await
+        .unwrap();
 
         assert!(
             !target
@@ -2535,7 +3243,9 @@ mod tests {
             timeout: "2s".to_string(),
         };
 
-        let response = run_bash(&state, &req).await.unwrap();
+        let response = run_bash(&state, &req, &valid_identity(&req.common))
+            .await
+            .unwrap();
         assert_eq!(response.exit_code, 0, "{}", response.stderr);
         let environment = response
             .stdout
@@ -2658,10 +3368,13 @@ mod tests {
             timeout: "8s".to_string(),
         };
 
-        let response = timeout(Duration::from_secs(10), run_bash(&state, &req))
-            .await
-            .expect("large output command should not deadlock")
-            .unwrap();
+        let response = timeout(
+            Duration::from_secs(10),
+            run_bash(&state, &req, &valid_identity(&req.common)),
+        )
+        .await
+        .expect("large output command should not deadlock")
+        .unwrap();
 
         assert_eq!(response.exit_code, 7);
         assert!(response.truncated);
@@ -2694,7 +3407,9 @@ mod tests {
             timeout: String::new(),
         };
 
-        let error = run_bash(&state, &req).await.unwrap_err();
+        let error = run_bash(&state, &req, &valid_identity(&req.common))
+            .await
+            .unwrap_err();
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
@@ -2705,7 +3420,7 @@ mod tests {
     async fn bash_timeout_cleans_up_background_process_group() {
         let mut state = test_state();
         state.command_timeout = Duration::from_millis(100);
-        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("timeout-background.pid");
+        let pid_file = test_workspace(&state, "bot:tg:-1").join("timeout-background.pid");
         let req = BashRequest {
             common: CommonRequest {
                 namespace: "bot:tg:-1".to_string(),
@@ -2716,7 +3431,9 @@ mod tests {
             timeout: String::new(),
         };
 
-        let error = run_bash(&state, &req).await.unwrap_err();
+        let error = run_bash(&state, &req, &valid_identity(&req.common))
+            .await
+            .unwrap_err();
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(error.message, "command timed out");
@@ -2727,7 +3444,7 @@ mod tests {
     #[tokio::test]
     async fn bash_normal_exit_cleans_up_redirected_background_process() {
         let state = test_state();
-        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("normal-background.pid");
+        let pid_file = test_workspace(&state, "bot:tg:-1").join("normal-background.pid");
         let req = BashRequest {
             common: CommonRequest {
                 namespace: "bot:tg:-1".to_string(),
@@ -2739,7 +3456,9 @@ mod tests {
             timeout: String::new(),
         };
 
-        let response = run_bash(&state, &req).await.unwrap();
+        let response = run_bash(&state, &req, &valid_identity(&req.common))
+            .await
+            .unwrap();
 
         assert_eq!(response.exit_code, 0);
         assert_background_process_exits(&pid_file).await;
@@ -2749,7 +3468,7 @@ mod tests {
     #[tokio::test]
     async fn bash_blocks_setsid_process_group_escape() {
         let state = test_state();
-        let pid_file = namespace_workspace(&state, "bot:tg:-1").join("escaped-session.pid");
+        let pid_file = test_workspace(&state, "bot:tg:-1").join("escaped-session.pid");
         let req = BashRequest {
             common: CommonRequest {
                 namespace: "bot:tg:-1".to_string(),
@@ -2761,7 +3480,7 @@ mod tests {
             timeout: String::new(),
         };
 
-        let result = run_bash(&state, &req).await;
+        let result = run_bash(&state, &req, &valid_identity(&req.common)).await;
         let marker_created = pid_file.exists();
         if marker_created {
             kill_test_process_from_pid_file(&pid_file).await;
@@ -2815,7 +3534,7 @@ mod tests {
         }
         let mut state = test_state();
         state.bash_sandbox = BashSandboxMode::Proot;
-        let other = namespace_workspace(&state, "bot:tg:-2");
+        let other = test_workspace(&state, "bot:tg:-2");
         fs::create_dir_all(&other).await.unwrap();
         fs::write(other.join("secret.txt"), b"secret")
             .await
@@ -2850,11 +3569,10 @@ mod tests {
         }
         let mut state = test_state();
         state.bash_sandbox = BashSandboxMode::Proot;
-        let jail_root = state
+        let jail_parent = state
             .workspace_root
             .join(".runtime-jails")
-            .join(sanitize_namespace("bot:tg:-1"))
-            .join(sanitize_namespace("run_timeout"));
+            .join(crate::identity::namespace_storage_key("bot:tg:-1"));
         let app = app(state);
         let resp = app
             .oneshot(request_with_json(
@@ -2870,6 +3588,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-        assert!(!jail_root.exists());
+        assert!(std::fs::read_dir(jail_parent).unwrap().next().is_none());
     }
 }

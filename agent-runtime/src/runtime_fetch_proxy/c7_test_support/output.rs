@@ -5,6 +5,7 @@ use super::super::{
 use crate::{
     exec::BashHealth,
     fetch_protocol::{ErrorCode, LocalRuntimeFrame, read_local_runtime_frame},
+    identity::namespace_storage_key,
     workspace_budget::WorkspaceBudget,
 };
 use std::{
@@ -83,7 +84,7 @@ pub async fn internal_terminal_receipt() -> OutputTerminalReceipt {
 
 pub async fn pre_rename_receipt() -> PreRenameReceipt {
     let root = FixtureRoot::new("pre-rename");
-    let namespace = root.path().join("ns");
+    let namespace = root.path().join(namespace_storage_key("ns"));
     std::fs::create_dir(&namespace).unwrap();
     let destination = namespace.join("result");
     std::fs::write(&destination, b"old").unwrap();
@@ -124,7 +125,9 @@ pub fn post_rename_receipt() -> PostRenameReceipt {
     let committed = guard.commit_if_active().unwrap() == OutputCommitOutcome::Committed;
     PostRenameReceipt {
         committed,
-        new_visible: std::fs::read(root.path().join("ns/result")).unwrap() == b"new",
+        new_visible: std::fs::read(root.path().join(namespace_storage_key("ns")).join("result"))
+            .unwrap()
+            == b"new",
         health_ready: health.is_ready(),
         health_reason: health.reason(),
     }

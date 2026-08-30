@@ -32,6 +32,7 @@ pub(super) struct BindingEntry {
 pub(super) struct BindingContext {
     pub(super) phase: Arc<Mutex<CommandBindingPhase>>,
     pub(super) namespace: String,
+    pub(super) namespace_key: String,
     pub(super) workspace_budget: WorkspaceBudget,
     pub(super) health: BashHealth,
     pub(super) issued: Option<IssuedFetchCommand>,

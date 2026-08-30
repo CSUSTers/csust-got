@@ -220,8 +220,8 @@ fn c7_cpu_usage_read_and_parse_failure_latch() {
 #[tokio::test]
 async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     use agent_runtime::{
-        AppState, BashSandboxMode, app, runtime_fetch_proxy::RuntimeFetchProxy,
-        workspace_budget::WorkspaceBudget,
+        AppState, BashSandboxMode, app, namespace_gate::NamespaceGate,
+        runtime_fetch_proxy::RuntimeFetchProxy, workspace_budget::WorkspaceBudget,
     };
     use axum::{body::Body, http::Request};
     use std::time::Duration;
@@ -250,6 +250,7 @@ async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
         require_fetch_for_readiness: false,
         bash_readiness_error: health.reason(),
         workspace_budget: budget,
+        namespace_gate: NamespaceGate::default(),
     };
     let response = app(state.clone())
         .oneshot(

@@ -1,6 +1,7 @@
 use super::{CommandBindingPhase, RuntimeFetchProxyError, output_error};
 use crate::{
     exec::BashHealth,
+    identity::namespace_storage_key,
     workspace_budget::{ReplaceReservation, WorkspaceBudget},
 };
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
@@ -14,9 +15,7 @@ use std::{
 
 mod path;
 pub(super) use path::validate_workspace_output_path;
-use path::{
-    open_output_parent_nofollow, reject_cap_destination, sanitize_namespace, unique_temporary_name,
-};
+use path::{open_output_parent_nofollow, reject_cap_destination, unique_temporary_name};
 
 pub struct OutputCommitGuard {
     phase: Arc<Mutex<CommandBindingPhase>>,
@@ -74,9 +73,28 @@ impl OutputCommitGuard {
         phase: Arc<Mutex<CommandBindingPhase>>,
         health: BashHealth,
     ) -> Result<Self, RuntimeFetchProxyError> {
+        let namespace_key = namespace_storage_key(namespace);
+        Self::new_with_health_and_namespace_key(
+            workspace_root,
+            &namespace_key,
+            output_path,
+            budget,
+            phase,
+            health,
+        )
+    }
+
+    pub(crate) fn new_with_health_and_namespace_key(
+        workspace_root: &Path,
+        namespace_key: &str,
+        output_path: &str,
+        budget: &WorkspaceBudget,
+        phase: Arc<Mutex<CommandBindingPhase>>,
+        health: BashHealth,
+    ) -> Result<Self, RuntimeFetchProxyError> {
         Self::new_inner(
             workspace_root,
-            namespace,
+            namespace_key,
             output_path,
             budget,
             phase,
@@ -87,7 +105,7 @@ impl OutputCommitGuard {
 
     fn new_inner(
         workspace_root: &Path,
-        namespace: &str,
+        namespace_key: &str,
         output_path: &str,
         budget: &WorkspaceBudget,
         phase: Arc<Mutex<CommandBindingPhase>>,
@@ -95,10 +113,9 @@ impl OutputCommitGuard {
         directory_sync: Arc<DirectorySync>,
     ) -> Result<Self, RuntimeFetchProxyError> {
         let relative = validate_workspace_output_path(output_path)?;
-        let namespace = sanitize_namespace(namespace);
         let (parent, destination_name) =
-            open_output_parent_nofollow(workspace_root, &namespace, &relative)?;
-        let destination = workspace_root.join(namespace).join(&relative);
+            open_output_parent_nofollow(workspace_root, namespace_key, &relative)?;
+        let destination = workspace_root.join(namespace_key).join(&relative);
         reject_cap_destination(&parent, &destination_name)?;
         let reservation = budget
             .begin_replace(&destination)
@@ -213,9 +230,10 @@ impl OutputCommitGuard {
         phase: Arc<Mutex<CommandBindingPhase>>,
         health: BashHealth,
     ) -> Result<Self, RuntimeFetchProxyError> {
+        let namespace_key = namespace_storage_key(namespace);
         Self::new_inner(
             workspace_root,
-            namespace,
+            &namespace_key,
             output_path,
             budget,
             phase,
