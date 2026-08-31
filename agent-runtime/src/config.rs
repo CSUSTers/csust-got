@@ -12,8 +12,8 @@ pub(crate) use parse::{
     required_positive_number, required_string,
 };
 use parse::{
-    bounded_nonnegative_number, optional_bool, optional_path, optional_string,
-    optional_supplied_path,
+    bounded_nonnegative_number, optional_bool, optional_disableable_path, optional_path,
+    optional_string, optional_supplied_path,
 };
 
 const DEFAULT_WORKSPACE_ROOT: &str = "workspaces";
@@ -62,7 +62,7 @@ pub struct RuntimeConfig {
     pub listen_addr: SocketAddr,
     pub workspace_root: PathBuf,
     pub workspace_max_bytes: u64,
-    pub skills_root: PathBuf,
+    pub skills_root: Option<PathBuf>,
     pub cgroup: CgroupConfig,
     pub cgroup_topology: CgroupTopologyConfig,
     pub rlimits: RlimitSpec,
@@ -83,7 +83,8 @@ impl RuntimeConfig {
             .map_err(|_| ConfigError::new("AGENT_RUNTIME_ADDR must be a socket address"))?;
         let workspace_root =
             optional_path(&get, "AGENT_RUNTIME_WORKSPACE_ROOT", DEFAULT_WORKSPACE_ROOT)?;
-        let skills_root = optional_path(&get, "AGENT_RUNTIME_SKILLS_ROOT", DEFAULT_SKILLS_ROOT)?;
+        let skills_root =
+            optional_disableable_path(&get, "AGENT_RUNTIME_SKILLS_ROOT", DEFAULT_SKILLS_ROOT)?;
         let trace_jsonl_path =
             optional_path(&get, "AGENT_RUNTIME_TRACE_JSONL", DEFAULT_TRACE_PATH)?;
         let cgroup_root = required_absolute_path(&get, "AGENT_RUNTIME_CGROUP_ROOT")?;

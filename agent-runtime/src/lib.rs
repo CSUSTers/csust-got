@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::State,
+    extract::{OriginalUri, State},
     http::{HeaderMap, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -46,6 +46,7 @@ pub mod runtime_fetch_proxy;
 pub mod runtime_security;
 pub mod sandbox;
 pub mod scan;
+pub mod skills;
 pub mod trace;
 pub mod workspace_budget;
 
@@ -60,7 +61,8 @@ use workspace_budget::{Reservation, WorkspaceBudget};
 #[derive(Clone)]
 pub struct AppState {
     pub workspace_root: PathBuf,
-    pub skills_root: PathBuf,
+    pub skills_root: Option<PathBuf>,
+    pub skill_snapshot: skills::FrozenSkillSnapshot,
     pub auth_token: Option<String>,
     pub max_output_chars: usize,
     pub command_timeout: Duration,
@@ -279,6 +281,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/bash", post(bash_handler))
         .route("/v1/reset", post(reset_handler))
         .route("/v1/status", get(status_handler))
+        .route("/v1/skills", get(skills_handler))
         .with_state(state)
 }
 
@@ -499,7 +502,11 @@ async fn status_handler(
             && (!fetch_enabled || !state.require_fetch_for_readiness || fetch_ready),
         version: env!("CARGO_PKG_VERSION").to_string(),
         workspace_root: state.workspace_root.display().to_string(),
-        skills_root: state.skills_root.display().to_string(),
+        skills_root: state
+            .skills_root
+            .as_ref()
+            .map(|root| root.display().to_string())
+            .unwrap_or_default(),
         bash_sandbox: state.bash_sandbox.as_str().to_string(),
         bash_ready,
         fetch_enabled,
@@ -508,6 +515,24 @@ async fn status_handler(
         policy_version: state.fetch_proxy.policy_version().to_string(),
         readiness_error: readiness_errors.join("; "),
     }))
+}
+
+async fn skills_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    OriginalUri(uri): OriginalUri,
+) -> Result<Response, RuntimeError> {
+    authorize(&state, &headers)?;
+    if uri.query().is_some_and(|query| !query.is_empty()) {
+        return Err(RuntimeError::bad_request(
+            "skills snapshot does not accept query parameters",
+        ));
+    }
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        state.skill_snapshot.json_bytes(),
+    )
+        .into_response())
 }
 
 async fn reset_handler(
@@ -605,16 +630,13 @@ async fn grep_files(
     {
         grep_workspace_nofollow(state, identity.namespace_key(), components, re, use_lease).await?
     } else {
+        let skills_root = state
+            .skills_root
+            .clone()
+            .ok_or_else(|| RuntimeError::bad_request("skills root is disabled"))?;
         let path = resolve_virtual_path(state, identity, &req.common.cwd, target, AccessMode::Read)
             .await?;
-        grep_path_bounded(
-            path,
-            state.skills_root.clone(),
-            re,
-            state.max_output_chars,
-            use_lease,
-        )
-        .await?
+        grep_path_bounded(path, skills_root, re, state.max_output_chars, use_lease).await?
     };
     Ok(TextResponse {
         output: output.text,
@@ -830,7 +852,11 @@ fn workspace_access_components(
         raw.trim()
     };
     let (base, rel) = split_virtual_path(state, &workspace, &common.cwd, raw)?;
-    if base.as_path() == state.skills_root.as_path() {
+    if state
+        .skills_root
+        .as_deref()
+        .is_some_and(|skills_root| base.as_path() == skills_root)
+    {
         return Ok(None);
     }
     if base != workspace {
@@ -1655,7 +1681,12 @@ async fn resolve_virtual_path(
         raw.trim()
     };
     let (base, rel) = split_virtual_path(state, &workspace, cwd, raw)?;
-    if mode == AccessMode::Write && base.as_path() == state.skills_root.as_path() {
+    if mode == AccessMode::Write
+        && state
+            .skills_root
+            .as_deref()
+            .is_some_and(|skills_root| base.as_path() == skills_root)
+    {
         return Err(RuntimeError::forbidden("skills are read-only"));
     }
     let candidate = safe_join(&base, &rel)?;
@@ -1677,10 +1708,18 @@ fn split_virtual_path(
         return Ok((workspace.to_path_buf(), PathBuf::from(rest)));
     }
     if raw == "/skills" {
-        return Ok((state.skills_root.clone(), PathBuf::new()));
+        let skills_root = state
+            .skills_root
+            .clone()
+            .ok_or_else(|| RuntimeError::bad_request("skills root is disabled"))?;
+        return Ok((skills_root, PathBuf::new()));
     }
     if let Some(rest) = raw.strip_prefix("/skills/") {
-        return Ok((state.skills_root.clone(), PathBuf::from(rest)));
+        let skills_root = state
+            .skills_root
+            .clone()
+            .ok_or_else(|| RuntimeError::bad_request("skills root is disabled"))?;
+        return Ok((skills_root, PathBuf::from(rest)));
     }
     if raw.starts_with('/') {
         return Err(RuntimeError::forbidden(
@@ -1797,7 +1836,9 @@ async fn sandboxed_shell_command(
     add_proot_bind_if_exists(&mut target, Path::new("/lib64"), "/lib64", &jail_root).await?;
     add_proot_bind(&mut target, Path::new("/etc"), "/etc", &jail_root).await?;
     add_proot_bind(&mut target, &workspace, "/workspace", &jail_root).await?;
-    add_proot_bind(&mut target, &state.skills_root, "/skills", &jail_root).await?;
+    if let Some(skills_root) = &state.skills_root {
+        add_proot_bind(&mut target, skills_root, "/skills", &jail_root).await?;
+    }
     add_proot_bind(&mut target, &jail_root.join("tmp"), "/tmp", &jail_root).await?;
     add_proot_bind_if_exists(&mut target, Path::new("/dev/null"), "/dev/null", &jail_root).await?;
     target.args.extend([
@@ -2075,7 +2116,8 @@ mod tests {
         crate::sandbox::harden_runtime_supervisor().unwrap();
         AppState {
             workspace_root: root,
-            skills_root: skills,
+            skills_root: Some(skills),
+            skill_snapshot: skills::FrozenSkillSnapshot::empty().unwrap(),
             auth_token: None,
             max_output_chars: 128,
             command_timeout: Duration::from_secs(5),
@@ -2307,9 +2349,12 @@ mod tests {
         fs::write(workspace.join("large.txt"), "你".repeat(16))
             .await
             .unwrap();
-        fs::write(state.skills_root.join("large.txt"), "你".repeat(16))
-            .await
-            .unwrap();
+        fs::write(
+            state.skills_root.as_ref().unwrap().join("large.txt"),
+            "你".repeat(16),
+        )
+        .await
+        .unwrap();
         let app = app(state);
 
         for path in ["/workspace/large.txt", "/skills/large.txt"] {
@@ -2423,6 +2468,13 @@ mod tests {
             .unwrap();
         assert_eq!(denied.status(), StatusCode::FORBIDDEN);
 
+        let denied_with_query = app
+            .clone()
+            .oneshot(get_request("/v1/skills?refresh=true"))
+            .await
+            .unwrap();
+        assert_eq!(denied_with_query.status(), StatusCode::FORBIDDEN);
+
         let allowed = app
             .oneshot(
                 Request::builder()
@@ -2435,6 +2487,208 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(allowed.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn skills_snapshot_requires_existing_runtime_auth() {
+        let mut state = test_state();
+        state.auth_token = Some("secret".to_string());
+        let expected = state.skill_snapshot.json_bytes();
+        let app = app(state);
+
+        let denied = app
+            .clone()
+            .oneshot(get_request("/v1/skills"))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+        let allowed = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/skills")
+                    .header("authorization", "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allowed.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(allowed.into_body(), usize::MAX).await.unwrap(),
+            expected
+        );
+    }
+
+    #[tokio::test]
+    async fn skills_snapshot_returns_complete_sorted_startup_body_within_bound() {
+        let mut state = test_state();
+        let skills_root = state.skills_root.as_ref().unwrap();
+        fs::create_dir_all(skills_root.join("zeta")).await.unwrap();
+        fs::write(
+            skills_root.join("zeta/SKILL.md"),
+            b"# Zeta\nZeta skill content.\n",
+        )
+        .await
+        .unwrap();
+        fs::create_dir_all(skills_root.join("alpha")).await.unwrap();
+        fs::write(
+            skills_root.join("alpha/SKILL.md"),
+            b"# Alpha\nAlpha skill content.\n",
+        )
+        .await
+        .unwrap();
+        state.skill_snapshot =
+            skills::FrozenSkillSnapshot::load(state.skills_root.as_deref()).unwrap();
+        let expected = state.skill_snapshot.json_bytes();
+        let app = app(state);
+
+        let first = app
+            .clone()
+            .oneshot(get_request("/v1/skills"))
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(
+            first.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let first_body = to_bytes(first.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(first_body, expected);
+        assert!(first_body.len() <= skills::MAX_SKILLS_RESPONSE_BYTES);
+
+        let snapshot: skills::SkillSnapshot = serde_json::from_slice(&first_body).unwrap();
+        assert_eq!(
+            snapshot
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha", "zeta"]
+        );
+        assert_eq!(
+            snapshot.skills[0].content,
+            "# Alpha\nAlpha skill content.\n"
+        );
+        assert_eq!(snapshot.skills[1].content, "# Zeta\nZeta skill content.\n");
+        assert_eq!(
+            snapshot.skills[0].sha256,
+            format!(
+                "{:x}",
+                Sha256::digest(snapshot.skills[0].content.as_bytes())
+            )
+        );
+        assert_eq!(
+            snapshot.skills[1].sha256,
+            format!(
+                "{:x}",
+                Sha256::digest(snapshot.skills[1].content.as_bytes())
+            )
+        );
+        assert_eq!(
+            snapshot.snapshot_sha256,
+            skills::snapshot_sha256(snapshot.schema_version, &snapshot.skills)
+        );
+
+        let second = app.oneshot(get_request("/v1/skills")).await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(second.into_body(), usize::MAX).await.unwrap(),
+            first_body
+        );
+    }
+
+    #[tokio::test]
+    async fn skills_snapshot_does_not_change_after_live_skills_mutation() {
+        let mut state = test_state();
+        let skills_root = state.skills_root.as_ref().unwrap();
+        fs::create_dir_all(skills_root.join("alpha")).await.unwrap();
+        let skill_path = skills_root.join("alpha/SKILL.md");
+        fs::write(&skill_path, b"# Alpha\nBefore startup.\n")
+            .await
+            .unwrap();
+        state.skill_snapshot =
+            skills::FrozenSkillSnapshot::load(state.skills_root.as_deref()).unwrap();
+        let expected = state.skill_snapshot.json_bytes();
+        let app = app(state);
+
+        let before = app
+            .clone()
+            .oneshot(get_request("/v1/skills"))
+            .await
+            .unwrap();
+        assert_eq!(before.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(before.into_body(), usize::MAX).await.unwrap(),
+            expected
+        );
+
+        fs::write(&skill_path, b"# Alpha\nAfter startup.\n")
+            .await
+            .unwrap();
+
+        let after = app.oneshot(get_request("/v1/skills")).await.unwrap();
+        assert_eq!(after.status(), StatusCode::OK);
+        assert_eq!(
+            to_bytes(after.into_body(), usize::MAX).await.unwrap(),
+            expected
+        );
+    }
+
+    #[tokio::test]
+    async fn generic_skills_read_remains_live_after_snapshot_freeze() {
+        let mut state = test_state();
+        let skills_root = state.skills_root.as_ref().unwrap();
+        fs::create_dir_all(skills_root.join("alpha")).await.unwrap();
+        let skill_path = skills_root.join("alpha/SKILL.md");
+        fs::write(&skill_path, b"# Alpha\nBefore startup.\n")
+            .await
+            .unwrap();
+        state.skill_snapshot =
+            skills::FrozenSkillSnapshot::load(state.skills_root.as_deref()).unwrap();
+        let app = app(state);
+
+        fs::write(&skill_path, b"# Alpha\nAfter startup.\n")
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(request_with_json(
+                "/v1/read",
+                json!({
+                    "namespace": "live-skills",
+                    "run_id": "read",
+                    "path": "/skills/alpha/SKILL.md",
+                }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let parsed: TextResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(parsed.content, "# Alpha\nAfter startup.\n");
+    }
+
+    #[tokio::test]
+    async fn skills_snapshot_rejects_query_refresh_and_filter_parameters() {
+        let state = test_state();
+        let app = app(state);
+
+        for path in [
+            "/v1/skills?refresh=true",
+            "/v1/skills?name=alpha",
+            "/v1/skills?filter=runtime-global",
+        ] {
+            let response = app.clone().oneshot(get_request(path)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap()["error"],
+                "skills snapshot does not accept query parameters",
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -2536,14 +2790,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabled_skills_root_rejects_generic_skills_access() {
+        let mut state = test_state();
+        state.skills_root = None;
+        let app = app(state);
+
+        for path in ["/v1/read", "/v1/grep"] {
+            let body = if path == "/v1/read" {
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_test",
+                    "path": "/skills/demo/SKILL.md",
+                })
+            } else {
+                json!({
+                    "namespace": "bot:tg:-1",
+                    "run_id": "run_test",
+                    "pattern": "Demo",
+                    "path": "/skills",
+                })
+            };
+            let response = app
+                .clone()
+                .oneshot(request_with_json(path, body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert!(
+                String::from_utf8(body.to_vec())
+                    .unwrap()
+                    .contains("skills root is disabled")
+            );
+        }
+
+        let response = app.oneshot(get_request("/v1/status")).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap()["skills_root"],
+            ""
+        );
+    }
+
+    #[tokio::test]
     async fn skills_are_readable_but_not_writable() {
         let state = test_state();
-        fs::create_dir_all(state.skills_root.join("demo"))
+        fs::create_dir_all(state.skills_root.as_ref().unwrap().join("demo"))
             .await
             .unwrap();
-        fs::write(state.skills_root.join("demo/SKILL.md"), b"# Demo\n")
-            .await
-            .unwrap();
+        fs::write(
+            state.skills_root.as_ref().unwrap().join("demo/SKILL.md"),
+            b"# Demo\n",
+        )
+        .await
+        .unwrap();
         let app = app(state);
 
         let read_resp = app
@@ -2600,12 +2901,15 @@ mod tests {
     #[tokio::test]
     async fn edit_applies_patch_and_skills_stay_read_only() {
         let state = test_state();
-        fs::create_dir_all(state.skills_root.join("demo"))
+        fs::create_dir_all(state.skills_root.as_ref().unwrap().join("demo"))
             .await
             .unwrap();
-        fs::write(state.skills_root.join("demo/SKILL.md"), b"# Demo\n")
-            .await
-            .unwrap();
+        fs::write(
+            state.skills_root.as_ref().unwrap().join("demo/SKILL.md"),
+            b"# Demo\n",
+        )
+        .await
+        .unwrap();
         let app = app(state);
 
         let write_resp = app

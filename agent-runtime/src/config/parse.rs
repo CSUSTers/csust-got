@@ -152,6 +152,18 @@ pub(super) fn optional_path(
     Ok(PathBuf::from(optional_string(get, name, default)?))
 }
 
+pub(super) fn optional_disableable_path(
+    get: &impl Fn(&str) -> Option<String>,
+    name: &str,
+    default: &str,
+) -> Result<Option<PathBuf>, ConfigError> {
+    match get(name) {
+        Some(value) if value.trim().is_empty() => Ok(None),
+        Some(value) => Ok(Some(PathBuf::from(value.trim()))),
+        None => Ok(Some(PathBuf::from(default))),
+    }
+}
+
 pub(super) fn optional_supplied_path(
     get: &impl Fn(&str) -> Option<String>,
     name: &str,

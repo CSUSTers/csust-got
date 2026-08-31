@@ -221,7 +221,7 @@ fn c7_cpu_usage_read_and_parse_failure_latch() {
 async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     use agent_runtime::{
         AppState, BashSandboxMode, app, namespace_gate::NamespaceGate,
-        runtime_fetch_proxy::RuntimeFetchProxy, trace::JsonlTraceSink,
+        runtime_fetch_proxy::RuntimeFetchProxy, skills::FrozenSkillSnapshot, trace::JsonlTraceSink,
         workspace_budget::WorkspaceBudget,
     };
     use axum::{body::Body, http::Request};
@@ -239,7 +239,8 @@ async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     let budget = WorkspaceBudget::new(root.path(), 1024 * 1024).unwrap();
     let state = AppState {
         workspace_root: root.path().to_path_buf(),
-        skills_root: skills.path().to_path_buf(),
+        skills_root: Some(skills.path().to_path_buf()),
+        skill_snapshot: FrozenSkillSnapshot::empty().unwrap(),
         auth_token: None,
         max_output_chars: 1024,
         command_timeout: Duration::from_secs(1),
