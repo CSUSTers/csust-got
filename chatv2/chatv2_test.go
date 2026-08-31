@@ -92,6 +92,7 @@ func TestValidateAgentV3StartupConfig(t *testing.T) {
 		Name:  "agent-v2",
 		Agent: &config.AgentConfig{Enable: true},
 	}
+	injectBuiltin := false
 
 	tests := []struct {
 		name         string
@@ -146,6 +147,21 @@ func TestValidateAgentV3StartupConfig(t *testing.T) {
 					Enable:  true,
 					Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
 					Skills:  config.AgentV3SkillsConfig{Mode: "system_prompt"},
+				},
+			},
+		},
+		{
+			name: "invalid SearXNG ignored when built-ins disabled",
+			botConfig: &config.Config{
+				Agents: &config.ChatConfigV2{agentV3Chat},
+				AgentV3: &config.AgentV3Config{
+					Enable:  true,
+					Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
+					Skills: config.AgentV3SkillsConfig{
+						Mode:          "system_prompt",
+						InjectBuiltin: &injectBuiltin,
+						SearXNG:       config.AgentV3SearXNGConfig{Enable: true},
+					},
 				},
 			},
 		},

@@ -84,8 +84,10 @@ func validateAgentV3StartupConfig() error {
 		if err := validateAgentV3RuntimeConfig(&runtimeCfg); err != nil {
 			return fmt.Errorf("chatv2: agent v3 chat %q cannot use runtime: %w", chatCfg.Name, err)
 		}
-		if err := config.BotConfig.AgentV3.ValidateSearXNG(); err != nil {
-			return fmt.Errorf("chatv2: agent v3 chat %q has invalid SearXNG config: %w", chatCfg.Name, err)
+		if config.BotConfig.AgentV3.Skills.BuiltinInjectionEnabled() {
+			if err := config.BotConfig.AgentV3.ValidateSearXNG(); err != nil {
+				return fmt.Errorf("chatv2: agent v3 chat %q has invalid SearXNG config: %w", chatCfg.Name, err)
+			}
 		}
 		return nil
 	}
