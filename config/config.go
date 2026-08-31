@@ -83,6 +83,7 @@ type Config struct {
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	*GetVoiceConfig
+	// Deprecated: Use Agents with the chatv2 agent-v3 configuration instead.
 	Chats       *ChatConfigV1
 	Agents      *ChatConfigV2
 	ChatEngine  string

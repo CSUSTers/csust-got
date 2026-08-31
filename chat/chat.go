@@ -61,7 +61,7 @@ func getTemplate(c *config.ChatConfigSingle, cache bool) (chatTemplate, error) {
 	return ret, nil
 }
 
-// InitAiClients 初始化AI客户端
+// Deprecated: Use the chatv2 agent-v3 configuration and chat path instead.
 func InitAiClients(configs []*config.ChatConfigSingle) {
 	clients = make(map[string]*openai.Client)
 	// templates = make(map[string]*template.Template)
@@ -120,7 +120,7 @@ type promptData struct {
 	BotUsername     string // 添加 Bot 用户名字段
 }
 
-// Chat 处理聊天请求
+// Deprecated: Use the chatv2 agent-v3 configuration and chat path instead.
 func Chat(ctx tb.Context, v2 *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
 
 	// 检查白名单

@@ -73,8 +73,7 @@ func extractInput(msg *tb.Message, trigger ...*config.ChatTrigger) string {
 	return strings.TrimSpace(text)
 }
 
-// BuildMessages converts the turn context into eino schema.Message slice
-// for passing to the agent. Returns [system, ...history, user].
+// Deprecated: Use the chatv2 agent-v3 path instead.
 func BuildMessages(cc *CompiledChat, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
 	if history == nil {
 		history = &RichHistory{}

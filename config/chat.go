@@ -233,7 +233,7 @@ type ChatFilterSetting struct {
 	Filters []ChatFilterConfig `mapstructure:"filters"`
 }
 
-// ChatConfigV1 is the configuration for chat
+// Deprecated: Use ChatConfigV2 with the chatv2 agent-v3 path instead.
 type ChatConfigV1 []*ChatConfigSingle
 
 // ChatConfigV2 is the configuration for agent
