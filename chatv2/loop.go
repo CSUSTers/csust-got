@@ -448,7 +448,6 @@ func shouldEmitStageMarker(ctx context.Context) bool {
 func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *schema.Message {
 	name := tc.Function.Name
 	args := tc.Function.Arguments
-	var toolSeq int64
 	var finishSpan func(error, map[string]any)
 	if turn := GetTurnContext(ctx); turn != nil && turn.V3 != nil && turn.V3.Trace != nil {
 		turn.V3.Trace.RecordToolCall()
@@ -461,10 +460,6 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 		}
 		finishSpan = turn.V3.Trace.StartSpan("tool_call", attrs)
 	}
-	if turn := GetTurnContext(ctx); turn != nil {
-		toolSeq = turn.recordToolCall(name)
-	}
-
 	t, ok := a.invokables[name]
 	if !ok {
 		zap.L().Warn("chatv2/loop: model called unknown tool",
@@ -497,11 +492,6 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"[Tool Error] %s\nPlease try a different approach or adjust parameters.",
 			err.Error(),
 		)
-	}
-	if err == nil && name == agentV3ToolLoadSkill && isRichMessageLoadSkillArgs(args) && !strings.HasPrefix(result, "[Skill Error]") {
-		if turn := GetTurnContext(ctx); turn != nil {
-			turn.markRichMessageSkillLoaded(toolSeq)
-		}
 	}
 	if finishSpan != nil {
 		attrs := map[string]any{"result_chars": len(result)}

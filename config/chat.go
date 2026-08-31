@@ -1,12 +1,17 @@
 package config
 
 import (
+	"errors"
 	"log"
 	"math"
+	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/samber/lo"
 	"github.com/spf13/viper"
@@ -105,23 +110,45 @@ const (
 	// OutputFormatHTML is the HTML format type
 	OutputFormatHTML = "html"
 
-	defaultSubAgentMaxSteps            = 5
-	defaultAgentMaxSteps               = 12
-	defaultModelRetryNums              = 3
-	defaultModelRetryInitialInterval   = 500 * time.Millisecond
-	minToolAgentMaxSteps               = 4
-	agentV3DefaultScope                = "group"
-	agentV3DefaultMemoryWritePolicy    = "explicit_or_admin"
-	agentV3DefaultRuntimeMode          = "remote_http"
-	agentV3DefaultSkillsMode           = "system_prompt"
-	agentV3DefaultRuntimeEndpoint      = "http://agent-runtime:8080"
-	agentV3DefaultCommandTimeout       = "120s"
-	agentV3DefaultObservabilityJSONL   = "logs/agentv3-traces.jsonl"
-	agentV3DefaultCaptureContent       = "preview"
-	agentV3DefaultContextCacheRedisTTL = "30d"
+	defaultSubAgentMaxSteps             = 5
+	defaultAgentMaxSteps                = 12
+	defaultModelRetryNums               = 3
+	defaultModelRetryInitialInterval    = 500 * time.Millisecond
+	minToolAgentMaxSteps                = 4
+	agentV3DefaultScope                 = "group"
+	agentV3DefaultMemoryWritePolicy     = "explicit_or_admin"
+	agentV3DefaultRuntimeMode           = "remote_http"
+	agentV3DefaultSkillsMode            = "system_prompt"
+	agentV3DefaultRuntimeEndpoint       = "http://agent-runtime:8080"
+	agentV3DefaultCommandTimeout        = "120s"
+	agentV3DefaultObservabilityJSONL    = "logs/agentv3-traces.jsonl"
+	agentV3DefaultCaptureContent        = "preview"
+	agentV3DefaultContextCacheRedisTTL  = "30d"
+	agentV3DefaultSearXNGTimeout        = "10s"
+	agentV3DefaultSearXNGMaxBody        = int64(1024 * 1024)
+	agentV3DefaultSearXNGMaxResults     = 10
+	agentV3DefaultSearXNGMaxResultChars = 2000
+	agentV3DefaultSearXNGLanguage       = "zh-CN"
+	agentV3DefaultSearXNGFormat         = "text"
+	agentV3DefaultSearXNGUserAgent      = "csust-got-agent-v3"
 )
 
 var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
+
+var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+var (
+	errInvalidAgentV3SearXNGBaseURL                = errors.New("invalid agent_v3.skills.searxng.base_url")
+	errInvalidAgentV3SearXNGCredentialsEnvironment = errors.New("invalid agent_v3.skills.searxng credentials environment")
+	errInvalidAgentV3SearXNGTimeout                = errors.New("invalid agent_v3.skills.searxng.timeout")
+	errInvalidAgentV3SearXNGMaxResponseBytes       = errors.New("invalid agent_v3.skills.searxng.max_response_bytes")
+	errInvalidAgentV3SearXNGMaxResults             = errors.New("invalid agent_v3.skills.searxng.max_results")
+	errInvalidAgentV3SearXNGMaxResultChars         = errors.New("invalid agent_v3.skills.searxng.max_result_chars")
+	errInvalidAgentV3SearXNGDefaultLanguage        = errors.New("invalid agent_v3.skills.searxng.default_language")
+	errInvalidAgentV3SearXNGDefaultSafeSearch      = errors.New("invalid agent_v3.skills.searxng.default_safesearch")
+	errInvalidAgentV3SearXNGDefaultResponseFormat  = errors.New("invalid agent_v3.skills.searxng.default_response_format")
+	errInvalidAgentV3SearXNGUserAgent              = errors.New("invalid agent_v3.skills.searxng.user_agent")
+)
 
 // GetFormat get message format
 func (c *ChatOutputFormatConfig) GetFormat() string {
@@ -337,9 +364,27 @@ type AgentV3ToolsConfig struct {
 
 // AgentV3SkillsConfig configures agent-v3 system-prompt skill injection.
 type AgentV3SkillsConfig struct {
-	Mode          string `mapstructure:"mode"`
-	Root          string `mapstructure:"root"`
-	InjectBuiltin *bool  `mapstructure:"inject_builtin"`
+	Mode          string               `mapstructure:"mode"`
+	Root          string               `mapstructure:"root"`
+	InjectBuiltin *bool                `mapstructure:"inject_builtin"`
+	RuntimeGlobal bool                 `mapstructure:"runtime_global"`
+	SearXNG       AgentV3SearXNGConfig `mapstructure:"searxng"`
+}
+
+// AgentV3SearXNGConfig configures the built-in agent-v3 SearXNG skill.
+type AgentV3SearXNGConfig struct {
+	Enable                bool   `mapstructure:"enable"`
+	BaseURL               string `mapstructure:"base_url"`
+	UsernameEnv           string `mapstructure:"username_env"`
+	PasswordEnv           string `mapstructure:"password_env"`
+	Timeout               string `mapstructure:"timeout"`
+	MaxResponseBytes      int64  `mapstructure:"max_response_bytes"`
+	MaxResults            int    `mapstructure:"max_results"`
+	MaxResultChars        int    `mapstructure:"max_result_chars"`
+	DefaultLanguage       string `mapstructure:"default_language"`
+	DefaultSafeSearch     int    `mapstructure:"default_safesearch"`
+	DefaultResponseFormat string `mapstructure:"default_response_format"`
+	UserAgent             string `mapstructure:"user_agent"`
 }
 
 // AgentV3ObservabilityConfig controls agent-v3 trace capture.
@@ -551,13 +596,30 @@ func (c *AgentV3Config) checkConfig() {
 		zap.L().Warn("unsupported agent_v3 skills mode, reset to system_prompt", zap.String("mode", c.Skills.Mode))
 		c.Skills.Mode = agentV3DefaultSkillsMode
 	}
-	if c.Skills.Root != "" {
-		zap.L().Warn("agent_v3 skills.root is unused in system_prompt mode, reset to empty", zap.String("root", c.Skills.Root))
-		c.Skills.Root = ""
-	}
 	if c.Skills.InjectBuiltin == nil {
 		injectBuiltin := true
 		c.Skills.InjectBuiltin = &injectBuiltin
+	}
+	if c.Skills.SearXNG.Timeout == "" {
+		c.Skills.SearXNG.Timeout = agentV3DefaultSearXNGTimeout
+	}
+	if c.Skills.SearXNG.MaxResponseBytes == 0 {
+		c.Skills.SearXNG.MaxResponseBytes = agentV3DefaultSearXNGMaxBody
+	}
+	if c.Skills.SearXNG.MaxResults == 0 {
+		c.Skills.SearXNG.MaxResults = agentV3DefaultSearXNGMaxResults
+	}
+	if c.Skills.SearXNG.MaxResultChars == 0 {
+		c.Skills.SearXNG.MaxResultChars = agentV3DefaultSearXNGMaxResultChars
+	}
+	if c.Skills.SearXNG.DefaultLanguage == "" {
+		c.Skills.SearXNG.DefaultLanguage = agentV3DefaultSearXNGLanguage
+	}
+	if c.Skills.SearXNG.DefaultResponseFormat == "" {
+		c.Skills.SearXNG.DefaultResponseFormat = agentV3DefaultSearXNGFormat
+	}
+	if c.Skills.SearXNG.UserAgent == "" {
+		c.Skills.SearXNG.UserAgent = agentV3DefaultSearXNGUserAgent
 	}
 	if c.Observability.JSONLPath == "" {
 		c.Observability.JSONLPath = agentV3DefaultObservabilityJSONL
@@ -597,6 +659,76 @@ func (c *AgentV3Config) RuntimeRequestTimeout() time.Duration {
 // RuntimeFetchEnabled reports whether controlled external fetch guidance is enabled.
 func (c *AgentV3Config) RuntimeFetchEnabled() bool {
 	return c != nil && c.Runtime.FetchEnabled != nil && *c.Runtime.FetchEnabled
+}
+
+// ValidateSearXNG validates the enabled SearXNG skill configuration.
+func (c *AgentV3Config) ValidateSearXNG() error {
+	if c == nil || !c.Skills.SearXNG.Enable {
+		return nil
+	}
+
+	searxng := c.Skills.SearXNG
+	parsedBaseURL, err := url.Parse(searxng.BaseURL)
+	if err != nil || !parsedBaseURL.IsAbs() || parsedBaseURL.Opaque != "" || parsedBaseURL.Host == "" {
+		return errInvalidAgentV3SearXNGBaseURL
+	}
+	if scheme := strings.ToLower(parsedBaseURL.Scheme); scheme != "http" && scheme != "https" {
+		return errInvalidAgentV3SearXNGBaseURL
+	}
+	if parsedBaseURL.User != nil || parsedBaseURL.RawQuery != "" || parsedBaseURL.ForceQuery || parsedBaseURL.Fragment != "" {
+		return errInvalidAgentV3SearXNGBaseURL
+	}
+
+	hasUsername := searxng.UsernameEnv != ""
+	hasPassword := searxng.PasswordEnv != ""
+	if hasUsername != hasPassword || (hasUsername && (!agentV3EnvironmentName.MatchString(searxng.UsernameEnv) || !agentV3EnvironmentName.MatchString(searxng.PasswordEnv))) {
+		return errInvalidAgentV3SearXNGCredentialsEnvironment
+	}
+
+	timeout, err := time.ParseDuration(searxng.Timeout)
+	if err != nil || timeout < time.Millisecond || timeout > 30*time.Second {
+		return errInvalidAgentV3SearXNGTimeout
+	}
+	if searxng.MaxResponseBytes < 1 || searxng.MaxResponseBytes > 5*1024*1024 {
+		return errInvalidAgentV3SearXNGMaxResponseBytes
+	}
+	if searxng.MaxResults < 1 || searxng.MaxResults > 20 {
+		return errInvalidAgentV3SearXNGMaxResults
+	}
+	if searxng.MaxResultChars < 1 || searxng.MaxResultChars > 16384 || int64(searxng.MaxResultChars) > searxng.MaxResponseBytes {
+		return errInvalidAgentV3SearXNGMaxResultChars
+	}
+	if utf8.RuneCountInString(searxng.DefaultLanguage) < 1 || utf8.RuneCountInString(searxng.DefaultLanguage) > 64 || containsControlCharacter(searxng.DefaultLanguage) {
+		return errInvalidAgentV3SearXNGDefaultLanguage
+	}
+	if searxng.DefaultSafeSearch < 0 || searxng.DefaultSafeSearch > 2 {
+		return errInvalidAgentV3SearXNGDefaultSafeSearch
+	}
+	if searxng.DefaultResponseFormat != "text" && searxng.DefaultResponseFormat != "json" {
+		return errInvalidAgentV3SearXNGDefaultResponseFormat
+	}
+	if len(searxng.UserAgent) < 1 || len(searxng.UserAgent) > 512 || containsControlCharacter(searxng.UserAgent) {
+		return errInvalidAgentV3SearXNGUserAgent
+	}
+
+	return nil
+}
+
+// SearXNGTimeout returns the parsed SearXNG request timeout.
+func (c *AgentV3Config) SearXNGTimeout() time.Duration {
+	if c == nil {
+		return parseFlexibleDuration(agentV3DefaultSearXNGTimeout, 10*time.Second)
+	}
+	return parseFlexibleDuration(c.Skills.SearXNG.Timeout, 10*time.Second)
+}
+
+func containsControlCharacter(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // EffectiveModel returns the agent-v3 model override or the chat fallback.

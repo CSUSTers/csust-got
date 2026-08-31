@@ -263,8 +263,16 @@ func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	req.NotNil(BotConfig.AgentV3.Runtime.FetchEnabled)
 	req.False(BotConfig.AgentV3.RuntimeFetchEnabled())
 	req.Equal([]string{"read", "grep", "write", "edit", "bash"}, BotConfig.AgentV3.Tools.ExposeOnly)
+	req.Contains(BotConfig.McpoServer.Tools, "searxng")
 	req.Equal(30*24*time.Hour, BotConfig.AgentV3.ContextCacheTTL())
 	req.Equal(120*time.Second, BotConfig.AgentV3.RuntimeCommandTimeout())
+	req.Empty(BotConfig.AgentV3.Skills.Root)
+	req.False(BotConfig.AgentV3.Skills.RuntimeGlobal)
+	req.False(BotConfig.AgentV3.Skills.SearXNG.Enable)
+	req.Equal("https://search.example.org", BotConfig.AgentV3.Skills.SearXNG.BaseURL)
+	req.Equal("SEARXNG_USERNAME", BotConfig.AgentV3.Skills.SearXNG.UsernameEnv)
+	req.Equal("SEARXNG_PASSWORD", BotConfig.AgentV3.Skills.SearXNG.PasswordEnv)
+	req.Equal(10*time.Second, BotConfig.AgentV3.SearXNGTimeout())
 }
 
 func setupCustomConfigTest(t *testing.T) (*require.Assertions, *observer.ObservedLogs, string) {

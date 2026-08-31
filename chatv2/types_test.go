@@ -3,35 +3,38 @@
 package chatv2
 
 import (
-	"context"
 	"testing"
 
+	"csust-got/config"
+
 	"github.com/stretchr/testify/assert"
-	tb "gopkg.in/telebot.v3"
 )
 
-func TestWithTurnContext(t *testing.T) {
+func TestTurnContextTracksMultipleLoadedSkillNames(t *testing.T) {
+	tc := &TurnContext{V3: &AgentV3TurnState{loadedSkillNames: map[string]struct{}{}}}
+	tc.markSkillLoaded(" Repo_Inspect ")
+	tc.markSkillLoaded("rich-message")
+
+	assert.True(t, tc.hasLoadedSkill("repo-inspect"))
+	assert.True(t, tc.hasLoadedSkill("RICH_MESSAGE"))
+	assert.False(t, tc.hasLoadedSkill("missing"))
+}
+
+func TestRichMessageAuthorizationPersistsAfterOtherToolsButRejectsOrdinarySkill(t *testing.T) {
+	oldConfig := config.BotConfig
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+	t.Cleanup(func() { config.BotConfig = oldConfig })
 	tc := &TurnContext{
-		ChatID:  12345,
-		Message: &tb.Message{Text: "hello"},
+		Config: &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}},
+		V3:     &AgentV3TurnState{loadedSkillNames: map[string]struct{}{}},
 	}
 
-	ctx := WithTurnContext(t.Context(), tc)
-	got := GetTurnContext(ctx)
+	tc.markSkillLoaded("repo-inspect")
+	assert.False(t, tc.richMessageSkillLoadedForFinal())
 
-	assert.NotNil(t, got)
-	assert.Equal(t, int64(12345), got.ChatID)
-	assert.Equal(t, "hello", got.Message.Text)
-}
+	tc.markSkillLoaded("rich-message")
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
 
-func TestGetTurnContext_Missing(t *testing.T) {
-	ctx := t.Context()
-	got := GetTurnContext(ctx)
-	assert.Nil(t, got)
-}
-
-func TestGetTurnContext_WrongType(t *testing.T) {
-	ctx := context.WithValue(t.Context(), turnContextKey{}, "wrong type")
-	got := GetTurnContext(ctx)
-	assert.Nil(t, got)
+	tc.markSkillLoaded("another-skill")
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
 }

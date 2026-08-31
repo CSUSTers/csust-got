@@ -28,8 +28,16 @@ var (
 // Init compiles all agent-enabled chat configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
-	if err := validateAgentV3StartupConfig(); err != nil {
-		return err
+	var startup *agentV3StartupSkillSnapshots
+	if hasEnabledAgentV3Chat() {
+		if err := validateAgentV3StartupConfig(); err != nil {
+			return err
+		}
+		var err error
+		startup, err = loadAgentV3StartupSkillSnapshots(ctx, config.BotConfig.AgentV3, nil)
+		if err != nil {
+			return fmt.Errorf("chatv2: load agent v3 startup skills: %w", err)
+		}
 	}
 
 	mcpManager = NewMcpManager()
@@ -43,7 +51,7 @@ func Init(ctx context.Context) error {
 			continue
 		}
 
-		compiled, err := CompileChat(ctx, chatCfg, mcpManager)
+		compiled, err := CompileChat(ctx, chatCfg, mcpManager, startup)
 		if err != nil {
 			zap.L().Error("chatv2: failed to compile chat config",
 				zap.String("name", chatCfg.Name),
@@ -70,12 +78,31 @@ func validateAgentV3StartupConfig() error {
 		if !chatCfg.IsAgentV3Enabled() {
 			continue
 		}
-		if err := validateAgentV3RuntimeConfig(config.BotConfig.AgentV3); err != nil {
+
+		runtimeCfg := *config.BotConfig.AgentV3
+		runtimeCfg.Skills.Root = ""
+		if err := validateAgentV3RuntimeConfig(&runtimeCfg); err != nil {
 			return fmt.Errorf("chatv2: agent v3 chat %q cannot use runtime: %w", chatCfg.Name, err)
 		}
+		if err := config.BotConfig.AgentV3.ValidateSearXNG(); err != nil {
+			return fmt.Errorf("chatv2: agent v3 chat %q has invalid SearXNG config: %w", chatCfg.Name, err)
+		}
+		return nil
 	}
 
 	return nil
+}
+
+func hasEnabledAgentV3Chat() bool {
+	if config.BotConfig == nil || config.BotConfig.Agents == nil {
+		return false
+	}
+	for _, chatCfg := range *config.BotConfig.Agents {
+		if chatCfg.IsAgentV3Enabled() {
+			return true
+		}
+	}
+	return false
 }
 
 // HasCompiledChat reports whether a compiled chat config exists for the given name.

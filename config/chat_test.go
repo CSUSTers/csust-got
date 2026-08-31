@@ -207,9 +207,175 @@ func TestAgentV3CheckConfigNormalizesFixedRuntimeSurface(t *testing.T) {
 	assert.Equal(t, "group", cfg.Runtime.NamespaceScope)
 	assert.Equal(t, []string{"read", "grep", "write", "edit", "bash"}, cfg.Tools.ExposeOnly)
 	assert.Equal(t, "system_prompt", cfg.Skills.Mode)
-	assert.Empty(t, cfg.Skills.Root)
+	assert.Equal(t, "/tmp/skills", cfg.Skills.Root)
 	require.NotNil(t, cfg.Skills.InjectBuiltin)
 	assert.True(t, *cfg.Skills.InjectBuiltin)
+}
+
+func TestAgentV3SkillsDefaultsRemainClosedAndRootIsPreserved(t *testing.T) {
+	cfg := &AgentV3Config{
+		Skills: AgentV3SkillsConfig{Root: "/mounted/skills"},
+	}
+	cfg.checkConfig()
+
+	assert.Equal(t, "/mounted/skills", cfg.Skills.Root)
+	assert.False(t, cfg.Skills.RuntimeGlobal)
+	require.NotNil(t, cfg.Skills.InjectBuiltin)
+	assert.True(t, *cfg.Skills.InjectBuiltin)
+	assert.False(t, cfg.Skills.SearXNG.Enable)
+}
+
+func TestAgentV3SearXNGDefaults(t *testing.T) {
+	cfg := &AgentV3Config{}
+	cfg.checkConfig()
+
+	searxng := cfg.Skills.SearXNG
+	assert.False(t, searxng.Enable)
+	assert.Empty(t, searxng.BaseURL)
+	assert.Empty(t, searxng.UsernameEnv)
+	assert.Empty(t, searxng.PasswordEnv)
+	assert.Equal(t, "10s", searxng.Timeout)
+	assert.Equal(t, int64(1024*1024), searxng.MaxResponseBytes)
+	assert.Equal(t, 10, searxng.MaxResults)
+	assert.Equal(t, 2000, searxng.MaxResultChars)
+	assert.Equal(t, "zh-CN", searxng.DefaultLanguage)
+	assert.Zero(t, searxng.DefaultSafeSearch)
+	assert.Equal(t, "text", searxng.DefaultResponseFormat)
+	assert.Equal(t, "csust-got-agent-v3", searxng.UserAgent)
+	assert.Equal(t, 10*time.Second, cfg.SearXNGTimeout())
+}
+
+func TestAgentV3ValidateSearXNGSkipsDisabledConfiguration(t *testing.T) {
+	cfg := &AgentV3Config{
+		Skills: AgentV3SkillsConfig{
+			SearXNG: AgentV3SearXNGConfig{
+				BaseURL:               "ftp://user:password@example.org/?query#fragment",
+				UsernameEnv:           "1INVALID",
+				Timeout:               "0s",
+				MaxResponseBytes:      -1,
+				MaxResults:            -1,
+				MaxResultChars:        -1,
+				DefaultLanguage:       "\x00",
+				DefaultSafeSearch:     -1,
+				DefaultResponseFormat: "xml",
+				UserAgent:             "\r\n",
+			},
+		},
+	}
+
+	assert.NoError(t, cfg.ValidateSearXNG())
+}
+
+func TestAgentV3ValidateSearXNGAcceptsExactBoundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		searxng AgentV3SearXNGConfig
+	}{
+		{
+			name: "lower bounds with path prefix and credentials",
+			searxng: AgentV3SearXNGConfig{
+				Enable:                true,
+				BaseURL:               "https://search.example.org/prefix",
+				UsernameEnv:           "_",
+				PasswordEnv:           "PASSWORD_1",
+				Timeout:               "1ms",
+				MaxResponseBytes:      1,
+				MaxResults:            1,
+				MaxResultChars:        1,
+				DefaultLanguage:       "a",
+				DefaultSafeSearch:     0,
+				DefaultResponseFormat: "text",
+				UserAgent:             "a",
+			},
+		},
+		{
+			name: "upper bounds without credentials",
+			searxng: AgentV3SearXNGConfig{
+				Enable:                true,
+				BaseURL:               "http://search.example.org/prefix",
+				Timeout:               "30s",
+				MaxResponseBytes:      5 * 1024 * 1024,
+				MaxResults:            20,
+				MaxResultChars:        16384,
+				DefaultLanguage:       strings.Repeat("界", 64),
+				DefaultSafeSearch:     2,
+				DefaultResponseFormat: "json",
+				UserAgent:             strings.Repeat("a", 512),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &AgentV3Config{Skills: AgentV3SkillsConfig{SearXNG: tt.searxng}}
+			require.NoError(t, cfg.ValidateSearXNG())
+		})
+	}
+}
+
+func TestAgentV3ValidateSearXNGRejectsInvalidEnabledConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*AgentV3SearXNGConfig)
+	}{
+		{name: "unsupported URL scheme", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "ftp://search.example.org" }},
+		{name: "relative URL", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "/search" }},
+		{name: "opaque URL", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "https:search.example.org" }},
+		{name: "missing URL host", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "https:///search" }},
+		{name: "URL user info", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "https://user:password@search.example.org" }},
+		{name: "URL query", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "https://search.example.org?query=value" }},
+		{name: "URL fragment", mutate: func(c *AgentV3SearXNGConfig) { c.BaseURL = "https://search.example.org#fragment" }},
+		{name: "username without password", mutate: func(c *AgentV3SearXNGConfig) { c.UsernameEnv = "SEARXNG_USERNAME" }},
+		{name: "password without username", mutate: func(c *AgentV3SearXNGConfig) { c.PasswordEnv = "SEARXNG_PASSWORD" }},
+		{name: "invalid username environment name", mutate: func(c *AgentV3SearXNGConfig) { c.UsernameEnv, c.PasswordEnv = "1INVALID", "SEARXNG_PASSWORD" }},
+		{name: "invalid password environment name", mutate: func(c *AgentV3SearXNGConfig) { c.UsernameEnv, c.PasswordEnv = "SEARXNG_USERNAME", "INVALID-NAME" }},
+		{name: "timeout below minimum", mutate: func(c *AgentV3SearXNGConfig) { c.Timeout = "999us" }},
+		{name: "timeout above maximum", mutate: func(c *AgentV3SearXNGConfig) { c.Timeout = "30001ms" }},
+		{name: "invalid timeout", mutate: func(c *AgentV3SearXNGConfig) { c.Timeout = "invalid" }},
+		{name: "body below minimum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResponseBytes = 0 }},
+		{name: "body above maximum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResponseBytes = 5*1024*1024 + 1 }},
+		{name: "results below minimum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResults = 0 }},
+		{name: "results above maximum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResults = 21 }},
+		{name: "result characters below minimum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResultChars = 0 }},
+		{name: "result characters above maximum", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResultChars = 16385 }},
+		{name: "result characters exceed response budget", mutate: func(c *AgentV3SearXNGConfig) { c.MaxResponseBytes, c.MaxResultChars = 100, 101 }},
+		{name: "empty language", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultLanguage = "" }},
+		{name: "language exceeds rune limit", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultLanguage = strings.Repeat("界", 65) }},
+		{name: "language contains control character", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultLanguage = "zh\nCN" }},
+		{name: "safe search below minimum", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultSafeSearch = -1 }},
+		{name: "safe search above maximum", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultSafeSearch = 3 }},
+		{name: "unsupported response format", mutate: func(c *AgentV3SearXNGConfig) { c.DefaultResponseFormat = "xml" }},
+		{name: "empty user agent", mutate: func(c *AgentV3SearXNGConfig) { c.UserAgent = "" }},
+		{name: "user agent exceeds byte limit", mutate: func(c *AgentV3SearXNGConfig) { c.UserAgent = strings.Repeat("a", 513) }},
+		{name: "user agent contains carriage return", mutate: func(c *AgentV3SearXNGConfig) { c.UserAgent = "agent\rvalue" }},
+		{name: "user agent contains newline", mutate: func(c *AgentV3SearXNGConfig) { c.UserAgent = "agent\nvalue" }},
+		{name: "user agent contains control character", mutate: func(c *AgentV3SearXNGConfig) { c.UserAgent = "agent\tvalue" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			searxng := validAgentV3SearXNGConfig()
+			tt.mutate(&searxng)
+
+			cfg := &AgentV3Config{Skills: AgentV3SkillsConfig{SearXNG: searxng}}
+			require.Error(t, cfg.ValidateSearXNG())
+		})
+	}
+}
+
+func validAgentV3SearXNGConfig() AgentV3SearXNGConfig {
+	return AgentV3SearXNGConfig{
+		Enable:                true,
+		BaseURL:               "https://search.example.org",
+		Timeout:               "10s",
+		MaxResponseBytes:      1024 * 1024,
+		MaxResults:            10,
+		MaxResultChars:        2000,
+		DefaultLanguage:       "zh-CN",
+		DefaultSafeSearch:     0,
+		DefaultResponseFormat: "text",
+		UserAgent:             "csust-got-agent-v3",
+	}
 }
 
 func TestAgentV3RuntimeFetchDefaultsDisabled(t *testing.T) {

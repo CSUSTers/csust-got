@@ -19,6 +19,7 @@ import (
 	"csust-got/config"
 	"csust-got/orm"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +37,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 		{cfg: &config.AgentV3Config{Runtime: config.AgentV3RuntimeConfig{FetchEnabled: &disabled}}},
 		{cfg: &config.AgentV3Config{Runtime: config.AgentV3RuntimeConfig{FetchEnabled: &enabled}}, wantFetch: true},
 	} {
-		tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), tc.cfg)
+		tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), tc.cfg, agentV3SkillCatalog{})
 		require.Len(t, tools, 5)
 
 		names := make([]string, 0, len(tools))
@@ -64,6 +65,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	assert.NotContains(t, toolDefsText, "curl is available")
 	assert.Contains(t, agentV3RuntimeSkillRules(true), "fetch")
 	assert.Contains(t, agentV3RuntimeSkillRules(true), "jq")
+
 }
 
 func nonRichAgentV3ChatConfig() *config.ChatConfigSingle {
@@ -74,8 +76,13 @@ func richAgentV3ChatConfig() *config.ChatConfigSingle {
 	return &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}}
 }
 
-func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
-	richTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{})
+func TestBuildAgentV3ToolsAddsLoadSkillForNonEmptyCatalog(t *testing.T) {
+	catalog := mustAgentV3SkillCatalog(t, agentV3SkillSourceBuiltin, agentV3SkillDescriptor{
+		Name:        "rich-message",
+		Description: "Render rich output.",
+		Content:     agentV3RichMessageSkillContract(true),
+	})
+	richTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{}, catalog)
 	richNames := make([]string, 0, len(richTools))
 	for _, item := range richTools {
 		info, err := item.Info(t.Context())
@@ -87,16 +94,16 @@ func TestBuildAgentV3ToolsAddsLoadSkillOnlyForRich(t *testing.T) {
 	assert.Contains(t, agentV3ToolDefinitionsText(true, true), "before rich output")
 
 	disabled := false
-	noBuiltinTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
+	emptyCatalogTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
 		Skills: config.AgentV3SkillsConfig{InjectBuiltin: &disabled},
-	})
-	noBuiltinNames := make([]string, 0, len(noBuiltinTools))
-	for _, item := range noBuiltinTools {
+	}, agentV3SkillCatalog{})
+	emptyCatalogNames := make([]string, 0, len(emptyCatalogTools))
+	for _, item := range emptyCatalogTools {
 		info, err := item.Info(t.Context())
 		require.NoError(t, err)
-		noBuiltinNames = append(noBuiltinNames, info.Name)
+		emptyCatalogNames = append(emptyCatalogNames, info.Name)
 	}
-	assert.NotContains(t, noBuiltinNames, "load_skill")
+	assert.NotContains(t, emptyCatalogNames, "load_skill")
 }
 
 func TestAgentV3FetchGuidanceMatchesRuntimeContract(t *testing.T) {
@@ -224,21 +231,128 @@ func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
 	assert.Contains(t, info.Desc, "before rich output")
 	assert.NotContains(t, info.Desc, "LAST tool call")
 
-	tc := &TurnContext{Config: richAgentV3ChatConfig()}
+	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{}}
+	tc.V3.SkillCatalog = mustAgentV3SkillCatalog(t, agentV3SkillSourceBuiltin, buildAgentV3BuiltinSkillSnapshot(tc.Config, config.BotConfig.AgentV3).Skills[0])
 	ctx := WithTurnContext(t.Context(), tc)
 
 	out, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
 	require.NoError(t, err)
-	assert.Contains(t, out, "<loaded_skill name=\"rich-message\">")
+	assert.Contains(t, out, "<loaded_skill name=\"rich-message\" source=\"builtin\"")
 	assert.Contains(t, out, "telegram_rich_message")
 	assert.Contains(t, out, "ACTIVATION RULE")
 	assert.Contains(t, out, "final answer")
 	assert.NotContains(t, out, "very next assistant response")
 
-	tc.Config = nonRichAgentV3ChatConfig()
-	out, err = (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
+}
+
+func TestLoadSkillNormalizesAndReadsOnlyTurnCatalog(t *testing.T) {
+	catalog := mustAgentV3SkillCatalog(t, agentV3SkillSourceBotLocal, agentV3SkillDescriptor{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n\nimmutable instructions\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	})
+	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
+
+	out, err := (&loadSkillTool{}).InvokableRun(WithTurnContext(t.Context(), tc), `{"name":" Repo_Inspect "}`)
 	require.NoError(t, err)
-	assert.Contains(t, out, "[Skill Error]")
+	assert.Contains(t, out, `<loaded_skill name="repo-inspect" source="bot-local" sha256="`+catalog.ByName["repo-inspect"].SHA256+`" virtual_path="/skills/repo-inspect/SKILL.md">`)
+	assert.Contains(t, out, "immutable instructions")
+	assert.True(t, tc.hasLoadedSkill("repo-inspect"))
+}
+
+func TestIsRichMessageLoadSkillArgs(t *testing.T) {
+	assert.True(t, isRichMessageLoadSkillArgs(`{"name":"  RICH_MESSAGE  "}`))
+	assert.False(t, isRichMessageLoadSkillArgs(`{"name":`))
+	assert.False(t, isRichMessageLoadSkillArgs(`{"name":"searxng"}`))
+}
+
+func TestLoadSkillActivationTextOnlyEnablesRichForRichMessage(t *testing.T) {
+	oldConfig := config.BotConfig
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+	t.Cleanup(func() { config.BotConfig = oldConfig })
+	rich := testSkillSnapshot(agentV3SkillSourceBuiltin, []agentV3SkillDescriptor{{
+		Name:        "rich-message",
+		Description: "Render rich output.",
+		Content:     agentV3RichMessageSkillContract(true),
+	}})
+	repository := testSkillSnapshot(agentV3SkillSourceBotLocal, []agentV3SkillDescriptor{{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n\nImmutable instructions.\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	}})
+	catalog, _, err := mergeAgentV3SkillSnapshots(rich, repository)
+	require.NoError(t, err)
+	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
+	ctx := WithTurnContext(t.Context(), tc)
+
+	ordinary, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"repo-inspect"}`)
+	require.NoError(t, err)
+	assert.Contains(t, ordinary, "This skill is active for this turn.")
+	assert.NotContains(t, ordinary, "telegram_rich_message")
+	assert.NotContains(t, ordinary, "rich output")
+	assert.False(t, tc.richMessageSkillLoadedForFinal())
+
+	richOutput, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"rich-message"}`)
+	require.NoError(t, err)
+	assert.Contains(t, richOutput, "telegram_rich_message")
+	assert.Contains(t, richOutput, "If you choose rich output")
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
+
+	laterOrdinary, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"repo-inspect"}`)
+	require.NoError(t, err)
+	assert.NotContains(t, laterOrdinary, "telegram_rich_message")
+	assert.True(t, tc.richMessageSkillLoadedForFinal())
+}
+
+func TestLoadSkillUnavailableNeverFallsBackToDiskOrRuntime(t *testing.T) {
+	tc := &TurnContext{
+		Config: richAgentV3ChatConfig(),
+		RuntimeClient: &RemoteRuntimeClient{HTTPClient: &http.Client{Transport: testRoundTripper(func(*http.Request) (*http.Response, error) {
+			t.Fatal("load_skill contacted the runtime")
+			return nil, nil
+		})}},
+		V3: &AgentV3TurnState{SkillCatalog: agentV3SkillCatalog{ByName: map[string]agentV3SkillDescriptor{}}, loadedSkillNames: map[string]struct{}{}},
+	}
+	ctx := WithTurnContext(t.Context(), tc)
+
+	for _, args := range []string{`{"name":"rich-message"}`, `{"name":"../../disk"}`} {
+		out, err := (&loadSkillTool{}).InvokableRun(ctx, args)
+		require.NoError(t, err)
+		assert.Equal(t, "[Skill Error] requested skill is not available.", out)
+	}
+	assert.False(t, tc.hasLoadedSkill("rich-message"))
+}
+
+func TestLoadSkillIsExposedForAnyNonEmptyCompiledCatalog(t *testing.T) {
+	catalog := mustAgentV3SkillCatalog(t, agentV3SkillSourceBotLocal, agentV3SkillDescriptor{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n\ninstructions\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	})
+	tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, catalog)
+	names := make([]string, 0, len(tools))
+	for _, item := range tools {
+		info, err := item.Info(t.Context())
+		require.NoError(t, err)
+		names = append(names, info.Name)
+	}
+	assert.Contains(t, names, agentV3ToolLoadSkill)
+}
+
+type testRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func mustAgentV3SkillCatalog(t *testing.T, source agentV3SkillSource, descriptor agentV3SkillDescriptor) agentV3SkillCatalog {
+	t.Helper()
+	catalog, _, err := mergeAgentV3SkillSnapshots(testSkillSnapshot(source, []agentV3SkillDescriptor{descriptor}))
+	require.NoError(t, err)
+	return catalog
 }
 
 func TestRichMessageAuthorizationAllowsLoadedSkillDuringCurrentTurn(t *testing.T) {
@@ -246,14 +360,13 @@ func TestRichMessageAuthorizationAllowsLoadedSkillDuringCurrentTurn(t *testing.T
 	defer func() { config.BotConfig = old }()
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
 
-	tc := &TurnContext{Config: richAgentV3ChatConfig()}
+	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{}}
 	assert.False(t, tc.richMessageSkillLoadedForFinal())
 
-	seq := tc.recordToolCall(agentV3ToolLoadSkill)
-	tc.markRichMessageSkillLoaded(seq)
+	tc.markSkillLoaded("rich-message")
 	assert.True(t, tc.richMessageSkillLoadedForFinal())
 
-	tc.recordToolCall(agentV3ToolRead)
+	tc.markSkillLoaded("ordinary-skill")
 	assert.True(t, tc.richMessageSkillLoadedForFinal())
 }
 
@@ -420,7 +533,7 @@ func TestBuildAgentV3ToolsExposeRuntimeTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}),
+		Tools:    buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)
@@ -444,7 +557,7 @@ func TestAgentV3ToolSurfacePreservesConfiguredTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    append(buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}), configuredTools...),
+		Tools:    append(buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}), configuredTools...),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)
@@ -607,6 +720,55 @@ func TestPrepareAgentV3TurnLeavesTraceOnContextBuildError(t *testing.T) {
 	assert.Contains(t, tc.V3.Trace.Spans[0].Error, "soul_path")
 }
 
+func TestPrepareAgentV3TurnUsesFrozenBotLocalSnapshotWithoutRootReread(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "agent-v3-turn-test:"
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	root := t.TempDir()
+	const content = "# Local skill\nInitial description.\n\nFrozen instructions.\n"
+	writeAgentV3SkillFile(t, root, "local-skill", content)
+	soulPath := filepath.Join(t.TempDir(), "soul.md")
+	require.NoError(t, os.WriteFile(soulPath, []byte("static soul"), 0o644))
+	testConfig.AgentV3 = &config.AgentV3Config{
+		Enable:   true,
+		SoulPath: soulPath,
+		Runtime:  config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http", Endpoint: "http://runtime.invalid"},
+		Skills:   config.AgentV3SkillsConfig{Mode: "system_prompt", Root: root},
+	}
+	startup, err := loadAgentV3StartupSkillSnapshots(t.Context(), testConfig.AgentV3, nil)
+	require.NoError(t, err)
+	require.Len(t, startup.BotLocal.Skills, 1)
+	require.NoError(t, os.RemoveAll(root))
+
+	chatCfg := &config.ChatConfigSingle{
+		Name:  "agent",
+		Model: &config.Model{BaseUrl: "http://model.invalid/v1", ApiKey: "test", Model: "test-model"},
+		Agent: &config.AgentConfig{Enable: true, V3: true},
+	}
+	cc, err := CompileChat(t.Context(), chatCfg, nil, startup)
+	require.NoError(t, err)
+
+	tc := &TurnContext{Message: &tb.Message{ID: 42, Text: "current input"}, ChatID: -100, Config: chatCfg, BotUser: &tb.User{Username: "bot"}}
+	messages, err := prepareAgentV3Turn(t.Context(), cc, tc, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, messages)
+	require.NotNil(t, tc.V3)
+	assert.Equal(t, content, tc.V3.SkillCatalog.ByName["local-skill"].Content)
+	assert.Equal(t, agentV3SkillSourceBotLocal, tc.V3.SkillCatalog.ByName["local-skill"].Source)
+	assert.Contains(t, messages[0].Content, `name="local-skill"`)
+}
+
 func TestValidateAgentV3RuntimeConfig(t *testing.T) {
 	assert.ErrorContains(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{}), "runtime is disabled")
 	assert.ErrorContains(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
@@ -620,10 +782,10 @@ func TestValidateAgentV3RuntimeConfig(t *testing.T) {
 		Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
 		Skills:  config.AgentV3SkillsConfig{Mode: "runtime_filesystem"},
 	}), "expected system_prompt")
-	assert.ErrorContains(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
+	assert.NoError(t, validateAgentV3RuntimeConfig(&config.AgentV3Config{
 		Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
 		Skills:  config.AgentV3SkillsConfig{Mode: "system_prompt", Root: "/skills"},
-	}), "expected empty")
+	}))
 }
 
 func TestAgentV3TracePreviewRespectsConfig(t *testing.T) {
@@ -731,11 +893,11 @@ func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
 
 	tc := &TurnContext{Config: &config.ChatConfigSingle{Agent: &config.AgentConfig{Enable: true, V3: true, Rich: true}}}
 	cfg := &config.AgentV3Config{}
-	require.Len(t, buildAgentV3BuiltinSkills(tc, cfg), 1)
+	require.Len(t, buildAgentV3BuiltinSkillSnapshot(tc.Config, cfg).Skills, 1)
 
 	disabled := false
 	cfg.Skills.InjectBuiltin = &disabled
-	assert.Empty(t, buildAgentV3BuiltinSkills(tc, cfg))
+	assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(tc.Config, cfg).Skills)
 }
 
 func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *testing.T) {
@@ -745,18 +907,21 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 	assert.NotContains(t, withoutRich, "\n<agent_v3_skills>\n")
 	assert.NotContains(t, withoutRich, "<tool_definitions>")
 
-	skillBlock := buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{
+	skillBlock := buildAgentV3SkillPromptBlock([]agentV3SkillDescriptor{{
 		Name:        "rich-message",
 		Description: "Rich output",
 		Content:     "rich rules",
+		SHA256:      agentV3SkillContentSHA256("rich rules"),
+		Source:      agentV3SkillSourceBuiltin,
 	}})
 	withRich := buildAgentV3StablePrefix("soul", skillBlock, true)
 	assert.NotContains(t, withRich, "<group_memory_snapshot>")
 	assert.NotContains(t, withRich, "<rich_message_skill>")
 	assert.Contains(t, withRich, "<agent_v3_skills>")
-	assert.Contains(t, withRich, "Do not use read/grep to load skills from /skills")
+	assert.Contains(t, withRich, "load_skill is the only content path")
 	assert.Contains(t, withRich, "load_skill")
-	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" status=\"available\" activation=\"call_load_skill_before_final_output\" />")
+	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" source=\"builtin\" sha256=\"")
+	assert.Contains(t, withRich, "status=\"available\" activation=\"load_skill\"")
 	assert.NotContains(t, withRich, "rich rules")
 	assert.NotContains(t, withRich, "<tool_definitions>")
 
@@ -777,7 +942,7 @@ func TestBuildAgentV3StablePrefixHashIncludesRuntimeRules(t *testing.T) {
 	emptySkillsHash := hashString("")
 	withoutRich := buildAgentV3PrefixHash(soulHash, fetchRulesHash, emptySkillsHash)
 	withChangedMemoryAndTools := buildAgentV3PrefixHash(soulHash, fetchRulesHash, emptySkillsHash)
-	withRich := buildAgentV3PrefixHash(soulHash, fetchRulesHash, hashString(buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
+	withRich := buildAgentV3PrefixHash(soulHash, fetchRulesHash, hashString(buildAgentV3SkillPromptBlock([]agentV3SkillDescriptor{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
 	withoutFetch := buildAgentV3PrefixHash(soulHash, noFetchRulesHash, emptySkillsHash)
 
 	assert.Equal(t, withoutRich, withChangedMemoryAndTools)

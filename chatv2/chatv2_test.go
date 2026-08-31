@@ -3,7 +3,7 @@
 package chatv2
 
 import (
-	"context"
+	"path/filepath"
 	"testing"
 
 	"csust-got/config"
@@ -32,7 +32,7 @@ func TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation(t *testing.T) {
 	clearCompiledChats()
 	compiledChats.Store("existing", &CompiledChat{})
 
-	err := Init(context.Background())
+	err := Init(t.Context())
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, `agent v3 chat "invalid-agent-v3" cannot use runtime`)
@@ -41,6 +41,43 @@ func TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation(t *testing.T) {
 	assert.Nil(t, mcpManager)
 	assert.True(t, HasCompiledChat("existing"))
 	assert.False(t, HasCompiledChat("invalid-agent-v3"))
+}
+
+func TestInitRejectsInvalidSkillSourcesBeforeMCPAndCompilation(t *testing.T) {
+	oldConfig := config.BotConfig
+	oldMcpManager := mcpManager
+	oldCompiledChats := snapshotCompiledChats()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		mcpManager = oldMcpManager
+		restoreCompiledChats(oldCompiledChats)
+	})
+
+	existingManager := NewMcpManager()
+	config.BotConfig = &config.Config{
+		Agents: &config.ChatConfigV2{
+			{Name: "invalid-skills", Agent: &config.AgentConfig{Enable: true, V3: true}},
+		},
+		AgentV3: &config.AgentV3Config{
+			Enable:  true,
+			Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
+			Skills: config.AgentV3SkillsConfig{
+				Mode: "system_prompt",
+				Root: filepath.Join(t.TempDir(), "missing-skills"),
+			},
+		},
+	}
+	mcpManager = existingManager
+	clearCompiledChats()
+	compiledChats.Store("existing", &CompiledChat{})
+
+	err := Init(t.Context())
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "lstat skills root")
+	assert.Same(t, existingManager, mcpManager)
+	assert.True(t, HasCompiledChat("existing"))
+	assert.False(t, HasCompiledChat("invalid-skills"))
 }
 
 func TestValidateAgentV3StartupConfig(t *testing.T) {
@@ -129,6 +166,22 @@ func TestValidateAgentV3StartupConfig(t *testing.T) {
 			assert.ErrorContains(t, err, tt.wantContains)
 		})
 	}
+
+	config.BotConfig = &config.Config{
+		Agents: &config.ChatConfigV2{agentV3Chat},
+		AgentV3: &config.AgentV3Config{
+			Enable:  true,
+			Runtime: config.AgentV3RuntimeConfig{Enable: true, Mode: "remote_http"},
+			Skills: config.AgentV3SkillsConfig{
+				Mode:    "system_prompt",
+				SearXNG: config.AgentV3SearXNGConfig{Enable: true},
+			},
+		},
+	}
+	err := validateAgentV3StartupConfig()
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "invalid SearXNG config")
+	assert.ErrorContains(t, err, "agent_v3.skills.searxng.base_url")
 }
 
 func snapshotCompiledChats() map[string]*CompiledChat {
