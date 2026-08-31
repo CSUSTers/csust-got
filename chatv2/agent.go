@@ -170,7 +170,12 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		if config.BotConfig != nil {
 			cfg = config.BotConfig.AgentV3
 		}
-		allTools = append(buildAgentV3Tools(chatCfg, cfg, skillCatalog), allTools...)
+		var searxng *searXNGClient
+		if startup != nil {
+			searxng = startup.SearXNG
+		}
+		warnAgentV3SearXNGToolCollisions(ctx, chatCfg.Name, searxng, allTools)
+		allTools = append(buildAgentV3Tools(chatCfg, cfg, skillCatalog, searxng), allTools...)
 	}
 	allTools = wrapToolsWithErrorHandler(allTools)
 
@@ -446,6 +451,35 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 		AgentV3SkillSources:  sources,
 		AgentV3SkillCatalog:  catalog,
 	}, nil
+}
+
+func warnAgentV3SearXNGToolCollisions(ctx context.Context, chat string, searxng *searXNGClient, configured []tool.BaseTool) {
+	if searxng == nil {
+		return
+	}
+	native := map[string]struct{}{
+		agentV3ToolSearXNGWebSearch:    {},
+		agentV3ToolSearXNGSuggestions:  {},
+		agentV3ToolSearXNGInstanceInfo: {},
+	}
+	warned := make(map[string]struct{})
+	for _, candidate := range configured {
+		info, err := candidate.Info(ctx)
+		if err != nil {
+			continue
+		}
+		if _, ok := native[info.Name]; !ok {
+			continue
+		}
+		if _, ok := warned[info.Name]; ok {
+			continue
+		}
+		warned[info.Name] = struct{}{}
+		zap.L().Warn("chatv2/agent: native SearXNG tool selected by native-first registration",
+			zap.String("chat", chat),
+			zap.String("tool", info.Name),
+		)
+	}
 }
 
 func compileAgentV3SkillCatalog(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config, startup *agentV3StartupSkillSnapshots) ([]agentV3SkillSnapshot, agentV3SkillCatalog, []agentV3SkillShadow, error) {

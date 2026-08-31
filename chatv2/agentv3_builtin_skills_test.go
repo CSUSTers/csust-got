@@ -77,6 +77,19 @@ func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
 	})
 }
 
+func TestBuildAgentV3BuiltinSkillsSearXNGIsIndependentOfRich(t *testing.T) {
+	cfg := &config.AgentV3Config{Skills: config.AgentV3SkillsConfig{SearXNG: testSearXNGConfig("https://search.example.org")}}
+	skills := buildAgentV3BuiltinSkillSnapshot(nonRichAgentV3ChatConfig(), cfg).Skills
+	require.Len(t, skills, 1)
+	assert.Equal(t, "searxng", skills[0].Name)
+}
+
+func TestAgentV3SearXNGSkillContractDescribesMinScoreAsFinite(t *testing.T) {
+	contract := agentV3SearXNGSkillContract()
+	assert.Contains(t, contract, "min_score (finite number)")
+	assert.NotContains(t, contract, "min_score (0..1)")
+}
+
 func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 	t.Run("empty input returns empty string", func(t *testing.T) {
 		assert.Empty(t, buildAgentV3SkillPromptBlock(nil))

@@ -455,8 +455,10 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"tool":      name,
 			"args_hash": hashString(args),
 		}
-		if preview, ok := agentV3TracePreview(args); ok {
-			attrs["args_preview"] = preview
+		if agentV3TraceToolPreviewAllowed(name) {
+			if preview, ok := agentV3TracePreview(args); ok {
+				attrs["args_preview"] = preview
+			}
 		}
 		finishSpan = turn.V3.Trace.StartSpan("tool_call", attrs)
 	}
@@ -495,13 +497,27 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 	}
 	if finishSpan != nil {
 		attrs := map[string]any{"result_chars": len(result)}
-		if preview, ok := agentV3TracePreview(result); ok {
-			attrs["result_preview"] = preview
+		if agentV3TraceToolPreviewAllowed(name) {
+			if preview, ok := agentV3TracePreview(result); ok {
+				attrs["result_preview"] = preview
+			}
 		}
 		finishSpan(err, attrs)
 	}
 
 	return schema.ToolMessage(result, tc.ID, schema.WithToolName(name))
+}
+
+func agentV3TraceToolPreviewAllowed(name string) bool {
+	switch name {
+	case agentV3ToolLoadSkill,
+		agentV3ToolSearXNGWebSearch,
+		agentV3ToolSearXNGSuggestions,
+		agentV3ToolSearXNGInstanceInfo:
+		return false
+	default:
+		return true
+	}
 }
 
 func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, dupWarn bool) string {

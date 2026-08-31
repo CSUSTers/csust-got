@@ -349,10 +349,12 @@ func truncateForModel(s string, limit int, already bool) (string, bool) {
 	return s[:end] + "\n[truncated by bot]", true
 }
 
-func buildAgentV3Tools(_ *config.ChatConfigSingle, cfg *config.AgentV3Config, catalog agentV3SkillCatalog) []tool.BaseTool {
+func buildAgentV3Tools(_ *config.ChatConfigSingle, cfg *config.AgentV3Config, catalog agentV3SkillCatalog, searxng *searXNGClient) []tool.BaseTool {
 	fetchEnabled := cfg != nil && cfg.RuntimeFetchEnabled()
-	tools := make([]tool.BaseTool, 0, 6)
-
+	tools := make([]tool.BaseTool, 0, 9)
+	if searxng != nil {
+		tools = append(tools, &searXNGWebSearchTool{client: searxng}, &searXNGSuggestionsTool{client: searxng}, &searXNGInstanceInfoTool{client: searxng})
+	}
 	tools = append(tools,
 		&remoteReadTool{},
 		&remoteGrepTool{},
@@ -366,7 +368,7 @@ func buildAgentV3Tools(_ *config.ChatConfigSingle, cfg *config.AgentV3Config, ca
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
@@ -374,7 +376,13 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled bool) string {
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: agentV3BashToolDescription(fetchEnabled)},
 	}
-
+	if searxngEnabled {
+		infos = append([]map[string]any{
+			{agentV3ToolNameField: agentV3ToolSearXNGWebSearch, agentV3ToolArgsField: "query,pageno?,time_range?,language?,safesearch?,min_score?,num_results?,categories?,engines?,response_format?,result_detail?", agentV3ToolDescField: "Search the configured SearXNG instance after loading searxng."},
+			{agentV3ToolNameField: agentV3ToolSearXNGSuggestions, agentV3ToolArgsField: "query,language?", agentV3ToolDescField: "Get configured SearXNG search suggestions after loading searxng."},
+			{agentV3ToolNameField: agentV3ToolSearXNGInstanceInfo, agentV3ToolArgsField: "include_engines?,include_disabled?,category?", agentV3ToolDescField: "Get bounded configured SearXNG instance metadata after loading searxng."},
+		}, infos...)
+	}
 	if includeLoadSkill {
 		infos = append(infos, map[string]any{
 			agentV3ToolNameField: agentV3ToolLoadSkill,

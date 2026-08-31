@@ -37,7 +37,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 		{cfg: &config.AgentV3Config{Runtime: config.AgentV3RuntimeConfig{FetchEnabled: &disabled}}},
 		{cfg: &config.AgentV3Config{Runtime: config.AgentV3RuntimeConfig{FetchEnabled: &enabled}}, wantFetch: true},
 	} {
-		tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), tc.cfg, agentV3SkillCatalog{})
+		tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), tc.cfg, agentV3SkillCatalog{}, nil)
 		require.Len(t, tools, 5)
 
 		names := make([]string, 0, len(tools))
@@ -57,7 +57,7 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 		}
 	}
 
-	toolDefsText := agentV3ToolDefinitionsText(false, true)
+	toolDefsText := agentV3ToolDefinitionsText(false, true, false)
 	assert.NotContains(t, toolDefsText, "load_skill")
 	assert.NotContains(t, toolDefsText, "/skills")
 	assert.Contains(t, toolDefsText, "fetch")
@@ -66,6 +66,11 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 	assert.Contains(t, agentV3RuntimeSkillRules(true), "fetch")
 	assert.Contains(t, agentV3RuntimeSkillRules(true), "jq")
 
+	searxngToolDefs := agentV3ToolDefinitionsText(false, false, true)
+	for _, name := range []string{agentV3ToolSearXNGWebSearch, agentV3ToolSearXNGSuggestions, agentV3ToolSearXNGInstanceInfo} {
+		assert.Contains(t, searxngToolDefs, name)
+	}
+	assert.NotEqual(t, hashString(agentV3ToolDefinitionsText(false, false, false)), hashString(searxngToolDefs))
 }
 
 func nonRichAgentV3ChatConfig() *config.ChatConfigSingle {
@@ -82,7 +87,7 @@ func TestBuildAgentV3ToolsAddsLoadSkillForNonEmptyCatalog(t *testing.T) {
 		Description: "Render rich output.",
 		Content:     agentV3RichMessageSkillContract(true),
 	})
-	richTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{}, catalog)
+	richTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{}, catalog, nil)
 	richNames := make([]string, 0, len(richTools))
 	for _, item := range richTools {
 		info, err := item.Info(t.Context())
@@ -90,13 +95,13 @@ func TestBuildAgentV3ToolsAddsLoadSkillForNonEmptyCatalog(t *testing.T) {
 		richNames = append(richNames, info.Name)
 	}
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash", "load_skill"}, richNames)
-	assert.Contains(t, agentV3ToolDefinitionsText(true, true), "load_skill")
-	assert.Contains(t, agentV3ToolDefinitionsText(true, true), "before rich output")
+	assert.Contains(t, agentV3ToolDefinitionsText(true, true, false), "load_skill")
+	assert.Contains(t, agentV3ToolDefinitionsText(true, true, false), "before rich output")
 
 	disabled := false
 	emptyCatalogTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
 		Skills: config.AgentV3SkillsConfig{InjectBuiltin: &disabled},
-	}, agentV3SkillCatalog{})
+	}, agentV3SkillCatalog{}, nil)
 	emptyCatalogNames := make([]string, 0, len(emptyCatalogTools))
 	for _, item := range emptyCatalogTools {
 		info, err := item.Info(t.Context())
@@ -144,7 +149,7 @@ func TestAgentV3FetchGuidanceMatchesRuntimeContract(t *testing.T) {
 func TestAgentV3FetchGuidanceIsOmittedWhenDisabled(t *testing.T) {
 	rules := agentV3RuntimeSkillRules(false)
 	prefix := buildAgentV3StablePrefix("soul", "", false)
-	toolDefs := agentV3ToolDefinitionsText(false, false)
+	toolDefs := agentV3ToolDefinitionsText(false, false, false)
 	desc := agentV3BashToolDescription(false)
 	commandDesc := agentV3BashCommandDescription(false)
 	for name, text := range map[string]string{
@@ -163,7 +168,7 @@ func TestAgentV3FetchGuidanceIsOmittedWhenDisabled(t *testing.T) {
 	assert.Contains(t, rules, "curl")
 	assert.Contains(t, rules, "cannot connect")
 
-	enabledToolDefs := agentV3ToolDefinitionsText(false, true)
+	enabledToolDefs := agentV3ToolDefinitionsText(false, true, false)
 	assert.NotEqual(t, hashString(enabledToolDefs), hashString(toolDefs))
 	for _, want := range []string{"fetch", "curl", "wget", "remote git", "/dev/tcp", "other socket clients", "cannot connect"} {
 		assert.Contains(t, enabledToolDefs, want)
@@ -187,7 +192,7 @@ func TestRemoteBashToolDocumentsMethodsExceptCONNECT(t *testing.T) {
 	mcpFetchContract := "An MCP tool also named fetch is distinct and must not be substituted when instructions require the Bash CLI"
 	for name, text := range map[string]string{
 		"stable prefix":     buildAgentV3StablePrefix("soul", "", true),
-		"JSON definitions":  agentV3ToolDefinitionsText(false, true),
+		"JSON definitions":  agentV3ToolDefinitionsText(false, true, false),
 		"tool description":  info.Desc,
 		"command parameter": string(paramsJSON),
 	} {
@@ -332,7 +337,7 @@ func TestLoadSkillIsExposedForAnyNonEmptyCompiledCatalog(t *testing.T) {
 		Content:     "# Repo inspect\nInspect repository files.\n\ninstructions\n",
 		VirtualPath: "/skills/repo-inspect/SKILL.md",
 	})
-	tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, catalog)
+	tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, catalog, nil)
 	names := make([]string, 0, len(tools))
 	for _, item := range tools {
 		info, err := item.Info(t.Context())
@@ -533,7 +538,7 @@ func TestBuildAgentV3ToolsExposeRuntimeTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}),
+		Tools:    buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}, nil),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)
@@ -557,7 +562,7 @@ func TestAgentV3ToolSurfacePreservesConfiguredTools(t *testing.T) {
 	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{
 		Name:     "v3",
 		Model:    &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ok", nil)}}},
-		Tools:    append(buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}), configuredTools...),
+		Tools:    append(buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}, nil), configuredTools...),
 		MaxSteps: 4,
 	})
 	require.NoError(t, err)

@@ -125,8 +125,9 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 
 	includeLoadSkill := len(catalog.Sorted) > 0
 	fetchEnabled := cfg.RuntimeFetchEnabled()
+	searxngEnabled := cc.AgentV3StartupSkills != nil && cc.AgentV3StartupSkills.SearXNG != nil
 	runtimeRules := agentV3RuntimeSkillRules(fetchEnabled)
-	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled)
+	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled)
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
 	runtimeRulesHash := hashString(runtimeRules)

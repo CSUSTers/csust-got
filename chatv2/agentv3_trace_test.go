@@ -3,6 +3,7 @@
 package chatv2
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -13,6 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"csust-got/config"
+	"csust-got/orm"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -156,4 +163,130 @@ func mustAgentV3TraceMode(t *testing.T, path string) fs.FileMode {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	return info.Mode()
+}
+
+type tracePreviewTestTool struct {
+	result string
+}
+
+func (tracePreviewTestTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{}, nil
+}
+
+func (t tracePreviewTestTool) InvokableRun(context.Context, string, ...tool.Option) (string, error) {
+	return t.result, nil
+}
+
+func TestAgentV3TracePersistsSensitiveToolPreviewPolicy(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "agent-v3-trace-preview:"
+	tracePath := filepath.Join(t.TempDir(), "agentv3.jsonl")
+	testConfig.AgentV3 = &config.AgentV3Config{
+		Observability: config.AgentV3ObservabilityConfig{
+			Enable:         true,
+			JSONLPath:      tracePath,
+			CaptureContent: "preview",
+			PreviewChars:   512,
+		},
+	}
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	calls := []struct {
+		name   string
+		args   string
+		result string
+	}{
+		{agentV3ToolLoadSkill, `{"name":"fixture-skill","token":"fixture-secret-token"}`, "fixture-skill-body fixture-secret-token"},
+		{agentV3ToolSearXNGWebSearch, `{"query":"fixture-private-query","token":"fixture-secret-token"}`, "fixture-private-result https://search.fixture.invalid/private-result fixture-secret-token"},
+		{agentV3ToolSearXNGSuggestions, `{"query":"fixture-private-query","token":"fixture-secret-token"}`, "fixture-private-query-suggestion fixture-secret-token"},
+		{agentV3ToolSearXNGInstanceInfo, `{"include_engines":true,"token":"fixture-secret-token"}`, "fixture-instance-result https://search.fixture.invalid/instance fixture-secret-token"},
+		{"fixture_generic_tool", `{"query":"fixture-generic-args"}`, "fixture-generic-result"},
+	}
+	trace := NewAgentV3Trace("trace-preview-test", -100, 42)
+	agent := &CustomAgent{invokables: make(map[string]tool.InvokableTool, len(calls))}
+	for _, call := range calls {
+		agent.invokables[call.name] = tracePreviewTestTool{result: call.result}
+	}
+	scope := orm.AgentV3Scope{Bot: "test-bot", Platform: agentV3Platform, ChatID: -100}
+	ctx := WithTurnContext(t.Context(), &TurnContext{V3: &AgentV3TurnState{Trace: trace}})
+
+	for _, call := range calls {
+		msg := agent.executeToolCall(ctx, schema.ToolCall{
+			ID: "call-" + call.name,
+			Function: schema.FunctionCall{
+				Name:      call.name,
+				Arguments: call.args,
+			},
+		})
+		require.Equal(t, call.result, msg.Content)
+	}
+	trace.Finish(ctx, scope)
+
+	data, err := os.ReadFile(tracePath)
+	require.NoError(t, err)
+	var persisted AgentV3Trace
+	require.NoError(t, json.Unmarshal(data, &persisted))
+	assert.Equal(t, len(calls), persisted.ToolCallCount)
+
+	for _, marker := range []string{
+		"fixture-skill-body",
+		"fixture-private-query",
+		"fixture-private-result",
+		"fixture-secret-token",
+		"https://search.fixture.invalid/",
+	} {
+		assert.NotContains(t, string(data), marker)
+	}
+
+	for _, call := range calls[:4] {
+		attrs := persistedAgentV3ToolSpanAttrs(t, persisted.Spans, call.name)
+		assert.Equal(t, call.name, attrs["tool"])
+		assert.NotEmpty(t, attrs["args_hash"])
+		assert.Equal(t, float64(len(call.result)), attrs["result_chars"])
+		assert.NotContains(t, attrs, "args_preview")
+		assert.NotContains(t, attrs, "result_preview")
+	}
+
+	generic := calls[len(calls)-1]
+	genericAttrs := persistedAgentV3ToolSpanAttrs(t, persisted.Spans, generic.name)
+	assert.Equal(t, generic.args, genericAttrs["args_preview"])
+	assert.Equal(t, generic.result, genericAttrs["result_preview"])
+	assert.NotEmpty(t, genericAttrs["args_hash"])
+	assert.Equal(t, float64(len(generic.result)), genericAttrs["result_chars"])
+
+	summary, err := orm.AgentV3GetTraceSummary(t.Context(), scope)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+	summaryPayload, err := json.Marshal(summary)
+	require.NoError(t, err)
+	for _, marker := range []string{
+		"fixture-skill-body",
+		"fixture-private-query",
+		"fixture-private-result",
+		"fixture-secret-token",
+		"https://search.fixture.invalid/",
+	} {
+		assert.NotContains(t, string(summaryPayload), marker)
+	}
+}
+
+func persistedAgentV3ToolSpanAttrs(t *testing.T, spans []AgentV3TraceSpan, toolName string) map[string]any {
+	t.Helper()
+	for _, span := range spans {
+		if span.Name == "tool_call" && span.Attrs["tool"] == toolName {
+			return span.Attrs
+		}
+	}
+	t.Fatalf("missing persisted tool trace span for %q", toolName)
+	return nil
 }
