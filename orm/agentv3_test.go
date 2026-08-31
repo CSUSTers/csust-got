@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -207,6 +208,29 @@ func TestAgentV3AppendTurnPairConcurrentKeepsPairsAdjacent(t *testing.T) {
 		require.NoError(t, err)
 		assert.Positive(t, remaining)
 	}
+}
+
+func TestAgentV3TurnImageRefsRoundTripAndLegacyJSON(t *testing.T) {
+	setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	refs := []AgentV3ImageRef{{MessageID: 42, FileID: "telegram-file-id"}}
+
+	require.NoError(t, AgentV3AppendTurn(ctx, scope, AgentV3Turn{
+		Role:      "user",
+		Content:   "inspect this image",
+		MessageID: 42,
+		ImageRefs: refs,
+	}, 12, time.Hour))
+	turns, err := AgentV3LoadTurns(ctx, scope, 12)
+	require.NoError(t, err)
+	require.Len(t, turns, 1)
+	assert.Equal(t, refs, turns[0].ImageRefs)
+
+	var legacy AgentV3Turn
+	require.NoError(t, json.Unmarshal([]byte(`{"role":"user","content":"legacy","message_id":7,"created_at":"2026-09-01T00:00:00Z"}`), &legacy))
+	assert.Equal(t, "legacy", legacy.Content)
+	assert.Empty(t, legacy.ImageRefs)
 }
 
 func TestAgentV3UpdateSummaryRetriesWholeReadComputeCAS(t *testing.T) {

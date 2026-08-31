@@ -41,12 +41,19 @@ type AgentV3PrefixRecord struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
+// AgentV3ImageRef identifies a Telegram image that an agent-v3 turn can download.
+type AgentV3ImageRef struct {
+	MessageID int    `json:"message_id"`
+	FileID    string `json:"file_id"`
+}
+
 // AgentV3Turn stores one user or assistant turn.
 type AgentV3Turn struct {
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	MessageID int       `json:"message_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Role      string            `json:"role"`
+	Content   string            `json:"content"`
+	MessageID int               `json:"message_id,omitempty"`
+	ImageRefs []AgentV3ImageRef `json:"image_refs,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // AgentV3MemoryItem stores one chat-scoped memory item.

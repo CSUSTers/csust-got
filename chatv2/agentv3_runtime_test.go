@@ -674,7 +674,7 @@ func TestAgentV3UserMessageRendersPromptWithHistoryContext(t *testing.T) {
 		BotUser: &tb.User{Username: "bot"},
 	}
 
-	msg, err := buildAgentV3UserMessage(cc, tc, history)
+	msg, err := buildAgentV3UserMessage(cc, tc, history, nil)
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 	assert.Equal(t, schema.User, msg.Role)

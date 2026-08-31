@@ -46,6 +46,7 @@ type AgentV3TurnState struct {
 	SummaryVersion        int64
 	RawTurnCount          int
 	ToolDefsHash          string
+	ImageRefs             []orm.AgentV3ImageRef
 	Trace                 *AgentV3Trace
 	SkillCatalog          agentV3SkillCatalog
 	loadedSkillNames      map[string]struct{}
@@ -239,7 +240,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledChat, tc *TurnContext, 
 		loadedSkillNames:      loadedSkillNames,
 	}
 
-	userMsg, err := buildAgentV3UserMessage(cc, tc, history)
+	userMsg, err := buildAgentV3UserMessage(cc, tc, history, rawTurns)
 	if err != nil {
 		finishContextSpan(err, nil)
 		return nil, err
@@ -293,7 +294,7 @@ func agentV3FallbackHistoryMessages(rawTurns []orm.AgentV3Turn, history *RichHis
 	return contextToSchemaMessages(history.ContextMessages, tc)
 }
 
-func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext, history *RichHistory) (*schema.Message, error) {
+func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext, history *RichHistory, rawTurns []orm.AgentV3Turn) (*schema.Message, error) {
 	if history == nil {
 		history = &RichHistory{}
 	}
@@ -319,7 +320,12 @@ func buildAgentV3UserMessage(cc *CompiledChat, tc *TurnContext, history *RichHis
 		dynamic.WriteString(userText)
 	}
 	dynamic.WriteString("\n</dynamic_suffix>")
-	return buildUserMessage(dynamic.String(), tc, history), nil
+
+	imageRefs := collectAgentV3ImageRefs(tc, history, rawTurns)
+	if tc != nil && tc.V3 != nil {
+		tc.V3.ImageRefs = imageRefs
+	}
+	return appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs), nil
 }
 
 func renderAgentV3Soul(cc *CompiledChat, tc *TurnContext) (string, error) {
@@ -417,14 +423,18 @@ func agentV3RuntimeSkillRules(fetchEnabled bool) string {
 func agentV3TurnsToMessages(turns []orm.AgentV3Turn) []*schema.Message {
 	out := make([]*schema.Message, 0, len(turns))
 	for _, turn := range turns {
-		content := strings.TrimSpace(turn.Content)
-		if content == "" {
-			continue
-		}
 		switch turn.Role {
 		case string(schema.Assistant):
+			content := strings.TrimSpace(turn.Content)
+			if content == "" {
+				continue
+			}
 			out = append(out, schema.AssistantMessage(content, nil))
 		default:
+			content := agentV3UserTurnPromptContent(turn)
+			if content == "" {
+				continue
+			}
 			out = append(out, schema.UserMessage(content))
 		}
 	}
@@ -462,6 +472,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: now,
 		}, orm.AgentV3Turn{
 			Role:      string(schema.Assistant),
@@ -484,6 +495,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: time.Now(),
 		}, maxTurns, ttl); err != nil {
 			err = fmt.Errorf("agent v3 append user turn: %w", err)
@@ -659,6 +671,9 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 	if len(turns) == 0 {
 		return ""
 	}
+	if agentV3TurnsHaveImageRefs(turns) {
+		return summarizeAgentV3TurnsWithImageRefs(turns, maxTokens)
+	}
 	lines := make([]string, 0, len(turns))
 	for _, turn := range turns {
 		content := compactAgentV3Text(turn.Content)
@@ -681,7 +696,7 @@ func trimAgentV3TurnsByMaxChars(turns []orm.AgentV3Turn, maxChars int) []orm.Age
 	total := 0
 	start := len(turns) - 1
 	for i := len(turns) - 1; i >= 0; i-- {
-		nextTotal := total + len(turns[i].Content)
+		nextTotal := total + len(agentV3TurnPromptContent(turns[i]))
 		if nextTotal > maxChars && i != len(turns)-1 {
 			break
 		}
