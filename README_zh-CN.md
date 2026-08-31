@@ -160,6 +160,101 @@ validator、Compose/static 测试和攻击矩阵都是部署检查，而不是 R
 
 Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。
 
+### Skills、原生 SearXNG 与 Fetch User-Agent
+
+新的 skill 来源默认关闭：
+
+```yaml
+agent_v3:
+  skills:
+    root: ""
+    runtime_global: false
+    searxng:
+      enable: false
+```
+
+`agent_v3.skills.root` 是 Bot-local root，`runtime_global` 控制可选的
+Runtime-global snapshot。三个来源按固定优先级
+`builtin > bot-local > runtime-global` 合并。同一来源中 malformed 或重复的
+skill 会令拥有该来源的进程启动失败。跨来源重名不会失败，优先级较高的 skill
+获胜，并记录不含 skill 正文的 shadow warning。
+
+每个 filesystem skill 必须恰好位于 `<root>/<canonical-name>/SKILL.md`，名称
+匹配 `^[a-z0-9][a-z0-9-]{0,63}$`。loader 会忽略 root 中的普通文件，例如
+`README.md`，但 malformed 的直接子目录会使该来源失败。它不递归、不跟随
+symlink，也不要求 YAML/frontmatter。`SKILL.md` 必须是非空 UTF-8，单个上限
+64 KiB；每个来源最多 128 个 skill、最多 1 MiB 正文。description 取第一条
+非空、非 ATX heading 的 prose line，去除首尾空白并限制为 200 个 Unicode rune。
+
+snapshot 在启动后不可变。要刷新内容，必须重启拥有它的 Bot 或 Runtime。模型
+只能通过 `load_skill` 获取正文，不能用 generic `read` 或 `grep` 读取
+`/skills`。generic read-only Runtime `/skills` 文件系统和 scripts 仍供运维人员
+与 Runtime 使用，但它们不授权或激活 skill，也不会注册 tool schema。
+
+#### Runtime-global 上线与挂载
+
+先升级并启动能提供已认证 `GET /v1/skills` 的 Runtime，然后才在 Bot 中启用
+`agent_v3.skills.runtime_global: true`。Bot 只会在启动时获取并验证一次完整
+snapshot。请求失败或 snapshot 无效会令 Bot 启动失败，重启是唯一的刷新方式。
+
+已提交的 Compose 部署只挂载 Runtime skill root：
+
+```text
+./skills:/runtime/skills:ro
+```
+
+它没有挂载 Bot-local root。当 `agent_v3.skills.root` 非空时，运维人员必须单独
+把该目录挂载到 Bot 可读的配置路径。Runtime 挂载不会被复制或自动共享给 Bot。
+
+#### 原生 SearXNG
+
+只有 `agent_v3.skills.inject_builtin` 和
+`agent_v3.skills.searxng.enable` 都为 true 时，Agent v3 才会加入 `searxng`
+builtin skill，并为一个固定配置实例注册以下且仅以下原生 tools：
+
+- `searxng_web_search`
+- `searxng_search_suggestions`
+- `searxng_instance_info`
+
+模型每一轮都必须先成功调用 `load_skill("searxng")`，才可使用其中任何 tool。
+激活前不会进行任何 HTTP I/O，包括 DNS、连接和读取凭据。若 MCPO tool 同名，
+原生 tool 获胜并记录 warning。MCPO 保留，其他 tools 仍可用。
+
+配置位于 `agent_v3.skills.searxng`：`enable`、`base_url`、`username_env`、
+`password_env`、`timeout`、`max_response_bytes`、`max_results`、
+`max_result_chars`、`default_language`、`default_safesearch`、
+`default_response_format` 和 `user_agent`。已提交的默认值是 10s timeout、
+1,048,576 response bytes、10 个结果、每个结果 2,000 个字符、`zh-CN`、
+safesearch `1`、response format `text` 和 user agent `csust-got-agent-v3`。
+`agent_v3.skills.mode` 为 `system_prompt`，`inject_builtin` 默认是 true。启用时，
+`base_url` 必须是没有 userinfo、query 或 fragment 的绝对 `http` 或 `https` URL。
+`username_env` 和 `password_env` 可选，但必须成对命名，且必须是合法环境变量名。
+限制分别为 1ms 到 30s、1 byte 到 5 MiB、1 到 20 个结果、1 到 16,384 个且不超过
+response limit 的 result characters、非空且无控制字符的 64-rune language、
+safesearch 0、1 或 2，以及非空、无控制字符且最多 512 bytes 的 user agent。
+response format 只能是 `text` 或 `json`。
+
+SearXNG 不支持多实例、failover、fanout、cache、HTML fallback、proxy 或 browser
+solver。它不会新增 generic URL reader。本工作不会移除 MCPO。
+
+#### Fetch Broker User-Agent
+
+在最终 wire-budget 检查前，如 caller 没有提供 `User-Agent`，Fetch Broker 会加入
+以下默认值：
+
+```text
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+```
+
+caller 的 `User-Agent` 名称按大小写不敏感匹配。若 caller 提供多个值，最后一个
+caller 值获胜，且不会加入默认值。这不会加入更广泛的 browser headers 或 browser
+emulation：不会注入 `Accept`、`Accept-Language`、Client Hints、cookies 或其他
+browser 行为。
+
+host validator、Compose/static checks 和 attack matrix 只是推荐的部署证据，绝不
+成为 Bot 或 Runtime 的基础启动、readiness 或 activation gate。主机条件不满足时，
+运维人员仍可运行基础部署，但不得声称这些部署检查已通过。
+
 ### Runtime 工作区存储与旧工作区迁移
 
 新版 Runtime 使用完整命名空间的全小写 SHA-256 值作为命名空间目录键，不会自动打开旧版有损工作区目录。旧映射可能发生碰撞，因此自动迁移可能会将数据关联到错误的命名空间。

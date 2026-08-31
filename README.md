@@ -160,6 +160,113 @@ The validator, Compose/static test, and attack matrix are deployment checks, not
 
 The Agent Runtime workflow publishes `ghcr.io/csusters/agent-runtime:<tag>` and `ghcr.io/csusters/agent-fetch-broker:<tag>`. The `dev` branch publishes `dev` and `latest-dev`; a published release publishes its release tag and `latest`.
 
+### Skills, native SearXNG, and Fetch User-Agent
+
+The new skill sources are closed by default:
+
+```yaml
+agent_v3:
+  skills:
+    root: ""
+    runtime_global: false
+    searxng:
+      enable: false
+```
+
+`agent_v3.skills.root` is a Bot-local root. `runtime_global` controls the
+optional Runtime-global snapshot. The three sources merge with the fixed
+precedence `builtin > bot-local > runtime-global`. A malformed or duplicate
+skill in one source fails the startup of the process that owns it. A collision
+between sources is not fatal: the higher-precedence skill wins and a shadow
+warning is logged without skill content.
+
+Each filesystem skill is exactly `<root>/<canonical-name>/SKILL.md`, where the
+name matches `^[a-z0-9][a-z0-9-]{0,63}$`. The loader ignores ordinary root
+files such as `README.md`, but a malformed direct-child directory fails the
+source. It does not recurse, follow symlinks, or require YAML/frontmatter.
+`SKILL.md` must be nonempty UTF-8, is limited to 64 KiB, and a source is limited
+to 128 skills and 1 MiB of content. Its description is the first nonempty
+non-ATX-heading prose line, trimmed and capped at 200 Unicode runes.
+
+Snapshots are immutable after startup. Restart the owning Bot or Runtime to
+refresh them. The model obtains content only through `load_skill`, never by
+using generic `read` or `grep` on `/skills`. The generic read-only Runtime
+`/skills` filesystem and scripts remain available to operators and the Runtime,
+but they do not authorize or activate a skill and do not register tool schemas.
+
+#### Runtime-global rollout and mounts
+
+First upgrade and start a Runtime that exposes authenticated `GET /v1/skills`.
+Only then enable `agent_v3.skills.runtime_global: true` in the Bot. The Bot
+fetches and validates that complete snapshot once during startup. A failed
+request or invalid snapshot fails Bot startup, and restarting is the only
+refresh mechanism.
+
+The checked-in Compose deployment mounts only the Runtime skill root:
+
+```text
+./skills:/runtime/skills:ro
+```
+
+It does not mount a Bot-local root. When `agent_v3.skills.root` is nonempty,
+the operator must separately mount the configured directory where the Bot can
+read it. The Runtime mount is not copied or automatically shared with the Bot.
+
+#### Native SearXNG
+
+When both `agent_v3.skills.inject_builtin` and
+`agent_v3.skills.searxng.enable` are true, Agent v3 adds the `searxng` builtin
+skill and exactly these native tools for one fixed configured instance:
+
+- `searxng_web_search`
+- `searxng_search_suggestions`
+- `searxng_instance_info`
+
+The model must successfully call `load_skill("searxng")` in every turn before
+using any of those tools. Before activation they perform zero HTTP I/O,
+including DNS, connections, and credential reads. If an MCPO tool has the same
+name, the native tool wins and logs a warning. MCPO remains enabled for its
+other tools.
+
+The configuration is under `agent_v3.skills.searxng`: `enable`, `base_url`,
+`username_env`, `password_env`, `timeout`, `max_response_bytes`,
+`max_results`, `max_result_chars`, `default_language`, `default_safesearch`,
+`default_response_format`, and `user_agent`. The checked-in defaults are a 10s
+timeout, 1,048,576 response bytes, 10 results, 2,000 characters per result,
+`zh-CN`, safesearch `1`, response format `text`, and user agent
+`csust-got-agent-v3`. `agent_v3.skills.mode` is `system_prompt`, and
+`inject_builtin` defaults to true. When enabled, `base_url` must be an absolute
+`http` or `https` URL without userinfo, query, or fragment. `username_env` and
+`password_env` are optional, but must be named together and hold a valid
+environment-variable name. Limits are 1ms to 30s, 1 byte to 5 MiB, 1 to 20
+results, 1 to 16,384 result characters that do not exceed the response limit,
+a nonempty 64-rune language with no control characters, safesearch 0, 1, or 2,
+and a nonempty 512-byte user agent with no control characters. Response format
+is `text` or `json`.
+
+SearXNG does not support multiple instances, failover, fanout, caching, HTML
+fallback, a proxy, or a browser solver. It does not add a generic URL reader.
+This work does not remove MCPO.
+
+#### Fetch Broker User-Agent
+
+Before its final wire-budget check, the Fetch Broker adds this default
+`User-Agent` when the caller supplied none:
+
+```text
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+```
+
+Caller `User-Agent` names are matched case-insensitively. If callers provide
+more than one, the last caller value wins and no default is added. This does
+not add browser headers or browser emulation: no `Accept`, `Accept-Language`,
+Client Hints, cookies, or other browser behavior is injected.
+
+The host validator, Compose/static checks, and attack matrix are recommended
+deployment evidence only. They never become a Bot or Runtime base startup,
+readiness, or activation gate. If host conditions are not met, an operator may
+still run the base deployment but must not claim those deployment checks passed.
+
 ### Runtime workspace storage and legacy migration
 
 New Runtime releases use the complete namespace as a full lowercase SHA-256 namespace directory key. They do not automatically open legacy lossy workspace directories. The old mapping could collide, so automatic migration could attach data to the wrong namespace.

@@ -906,6 +906,10 @@ check_base_json 'runtime-cgroup-paths-preserve-canonical-host-ancestry' '
   any(.services["agent-runtime"].volumes[];
     .type == "bind" and .source == $cgroup_host and .target == .source and
     (.read_only // false) == false)'
+check_base_json 'base Compose has no Bot-local or SearXNG-specific environment variables' '
+  (.services.bot.environment | keys | sort) == ["AGENT_RUNTIME_TOKEN"] and
+  all(.services[];
+    [(.environment // {}) | keys[] | select(test("SEARXNG"; "i"))] | length == 0)'
 
 check_json() {
   description=$1
@@ -1044,9 +1048,15 @@ check_json 'workspace, runtime log, and broker audit bind roots stay separate' '
   any(.services["agent-runtime"].volumes[]; .type == "bind" and .source == $workspace_host and .target == "/runtime/workspaces") and
   any(.services["agent-runtime"].volumes[]; .type == "bind" and .source == $runtime_log_host and .target == "/runtime/logs") and
   any(.services["agent-fetch-broker"].volumes[]; .type == "bind" and .source == $audit_host and .target == "/var/log/agent-fetch")'
-check_json 'repository skills are mounted read-only' '
-  any(.services["agent-runtime"].volumes[];
-    .target == "/runtime/skills" and .read_only == true)'
+check_json 'Runtime has exactly one read-only repository skills mount' '
+  [.services["agent-runtime"].volumes[] | select(.target == "/runtime/skills")] as $skills |
+  ($skills | length) == 1 and $skills[0].read_only == true'
+check_json 'Bot neither mounts nor shares the Runtime skills source' '
+  ([.services["agent-runtime"].volumes[] | select(.target == "/runtime/skills")] | .[0].source) as $runtime_skills_source |
+  all(.services.bot.volumes[]?;
+    .target != "/runtime/skills" and .source != $runtime_skills_source)'
+check_json 'rendered services do not define SearXNG' '
+  (.services | has("searxng") | not)'
 check_json 'logical and filesystem capacity ceilings are required in services' '
   .services["agent-runtime"].environment.AGENT_RUNTIME_WORKSPACE_MAX_BYTES == $workspace_max and
   .services["agent-runtime"].environment.AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES == $workspace_fs_max and
