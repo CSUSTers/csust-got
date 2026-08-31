@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,7 +24,10 @@ import (
 
 const agentV3TraceSaveTimeout = 5 * time.Second
 
-var agentV3TraceSinkMu sync.Mutex
+var (
+	agentV3TraceSinkMu             sync.Mutex
+	errAgentV3TracePayloadTooLarge = errors.New("agent v3 trace payload is too large")
+)
 
 // AgentV3Trace records one agent-v3 run.
 type AgentV3Trace struct {
@@ -207,7 +211,11 @@ func appendAgentV3TraceJSONL(path string, payload []byte) error {
 	if path == "" || len(payload) == 0 {
 		return nil
 	}
-	record := make([]byte, len(payload)+1)
+	recordSize, err := checkedAgentV3TraceRecordSize(len(payload))
+	if err != nil {
+		return err
+	}
+	record := make([]byte, recordSize)
 	copy(record, payload)
 	record[len(payload)] = '\n'
 
@@ -231,6 +239,13 @@ func appendAgentV3TraceJSONL(path string, payload []byte) error {
 	writeErr := writeAgentV3TraceRecord(f, record)
 	closeErr := f.Close()
 	return errors.Join(writeErr, closeErr)
+}
+
+func checkedAgentV3TraceRecordSize(payloadSize int) (int, error) {
+	if payloadSize > math.MaxInt-1 {
+		return 0, errAgentV3TracePayloadTooLarge
+	}
+	return payloadSize + 1, nil
 }
 
 func writeAgentV3TraceRecord(w io.Writer, record []byte) error {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -156,6 +157,16 @@ func TestAppendAgentV3TraceJSONLTightensPermissions(t *testing.T) {
 	require.NoError(t, appendAgentV3TraceJSONL(tracePath, []byte(`{"id":1}`)))
 	assert.Equal(t, fs.FileMode(0o700), mustAgentV3TraceMode(t, traceDir).Perm())
 	assert.Equal(t, fs.FileMode(0o600), mustAgentV3TraceMode(t, tracePath).Perm())
+}
+
+func TestCheckedAgentV3TraceRecordSizeRejectsOverflow(t *testing.T) {
+	size, err := checkedAgentV3TraceRecordSize(math.MaxInt - 1)
+	require.NoError(t, err)
+	assert.Equal(t, math.MaxInt, size)
+
+	size, err = checkedAgentV3TraceRecordSize(math.MaxInt)
+	assert.Zero(t, size)
+	assert.ErrorIs(t, err, errAgentV3TracePayloadTooLarge)
 }
 
 func mustAgentV3TraceMode(t *testing.T, path string) fs.FileMode {
