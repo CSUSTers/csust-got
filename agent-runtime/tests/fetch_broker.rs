@@ -43,6 +43,7 @@ use tokio::{
 
 const KEY: &[u8] = b"a sufficiently long broker test signing key";
 const PEER: PeerCred = PeerCred { uid: 101, gid: 102 };
+const EXPECTED_DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 #[test]
 fn broker_config_requires_enable_security_inputs_and_bounds_optional_numbers() {
@@ -919,6 +920,49 @@ async fn retries_and_redirects_reresolve_and_strip_cross_origin_credentials() {
     assert!(!calls[2].has_authorization);
     assert_eq!(resolver_calls.load(Ordering::Relaxed), 3);
     assert_eq!(body, b"ok");
+}
+
+#[tokio::test]
+async fn broker_writes_the_reviewed_user_agent_on_every_redirect_hop() {
+    let connector = ScriptedConnector::steps([
+        Step::Response(response(
+            302,
+            &[("location", "https://other.example/final")],
+            [],
+        )),
+        Step::Response(response(200, &[], [b"ok".as_slice()])),
+    ]);
+    let calls = Arc::clone(&connector.calls);
+    let broker = broker(
+        ScriptedResolver::answers(vec![public_ip()]),
+        connector,
+        healthy_audit(),
+    );
+    let (mut client, task) = start(broker);
+
+    begin_request(
+        &mut client,
+        valid_token(),
+        "GET",
+        "https://public.example/start",
+        &[],
+        true,
+    )
+    .await;
+    write_client_frame(&mut client, &ClientFrame::BodyEnd)
+        .await
+        .unwrap();
+    let (_, body) = read_success(&mut client).await;
+    task.await.unwrap().unwrap();
+
+    assert_eq!(body, b"ok");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.user_agent.as_deref() == Some(EXPECTED_DEFAULT_USER_AGENT))
+    );
 }
 
 #[tokio::test]
@@ -2040,6 +2084,7 @@ enum Step {
 struct ConnectorCall {
     approved_ip: IpAddr,
     has_authorization: bool,
+    user_agent: Option<String>,
 }
 
 impl ScriptedConnector {
@@ -2066,6 +2111,12 @@ impl PinnedConnector for ScriptedConnector {
         self.calls.lock().unwrap().push(ConnectorCall {
             approved_ip: target.addresses[0].ip(),
             has_authorization: request.headers.contains("authorization"),
+            user_agent: request
+                .headers
+                .headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
         });
         let step = self
             .steps
