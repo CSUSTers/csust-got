@@ -38,8 +38,6 @@ var agentV3UpdateSummaryUnderTest = AgentV3UpdateSummary
 
 var errAgentV3StateConflictUnderTest = ErrAgentV3StateConflict
 
-type agentV3MemorySnapshotBuilderUnderTest = AgentV3MemorySnapshotBuilder
-
 var agentV3RebuildMemorySnapshotUnderTest = AgentV3RebuildMemorySnapshot
 
 func buildAgentV3MemorySnapshotForTest(items []AgentV3MemoryItem, current *AgentV3MemorySnapshot) (*AgentV3MemorySnapshot, error) {

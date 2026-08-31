@@ -134,7 +134,11 @@ func TestLoadAgentV3FilesystemSkillSnapshotRejectsSymlinksAndMalformedEntries(t 
 		root := t.TempDir()
 		target := filepath.Join(root, "target.md")
 		writeSkillTestFile(t, target, alphaSkillContent)
-		createSkillTestSymlink(t, target, filepath.Join(root, "alpha", "SKILL.md"))
+		link := filepath.Join(root, "alpha", "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatalf("make skill directory: %v", err)
+		}
+		createSkillTestSymlink(t, target, link)
 		if _, err := loadAgentV3FilesystemSkillSnapshot(root, agentV3SkillSourceBotLocal); err == nil {
 			t.Fatal("SKILL.md symlink was accepted")
 		}

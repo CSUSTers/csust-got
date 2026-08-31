@@ -4,6 +4,7 @@ package chatv2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 )
 
 var errToolNodeBadFileID = fmt.Errorf("[NodeRunError] %w\n------------------------\nnode path: [tools]", errTestBadTelegramFile)
+
+var errAgentFailureUnderTest = errors.New("agent failure")
 
 func TestCalcGuidanceLevel(t *testing.T) {
 	toolCallMsg := &schema.Message{
@@ -116,7 +119,7 @@ func TestFriendlyAgentErrorMessage(t *testing.T) {
 		internalURL := "http://redis.internal:6379/runtime"
 		windowsPath := `C:\\agent\\secrets\\config.yaml`
 		unixPath := "/var/lib/redis/dump.rdb"
-		err := fmt.Errorf("[NodeRunError] tool failed: %s %s %s %s\n------------------------\nnode path: [tools]\nstack detail", secret, internalURL, windowsPath, unixPath)
+		err := fmt.Errorf("%w: [NodeRunError] tool failed: %s %s %s %s\n------------------------\nnode path: [tools]\nstack detail", errAgentFailureUnderTest, secret, internalURL, windowsPath, unixPath)
 
 		msg := friendlyAgentErrorMessage(err)
 
@@ -128,7 +131,7 @@ func TestFriendlyAgentErrorMessage(t *testing.T) {
 
 	t.Run("answer errors do not expose internal details", func(t *testing.T) {
 		secret := "Bearer secret-token"
-		err := fmt.Errorf("[GraphRunError] generation failed: %s\n------------------------\nstack detail", secret)
+		err := fmt.Errorf("%w: [GraphRunError] generation failed: %s\n------------------------\nstack detail", errAgentFailureUnderTest, secret)
 
 		msg := friendlyAgentErrorMessage(err)
 
