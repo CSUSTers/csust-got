@@ -1114,9 +1114,50 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 **Interfaces:**
 - Consumes: the complete GREEN working tree from Tasks 1–10, the full new `PLAN_BASE_SHA` of the `HEAD` whose latest commit contains only this separately committed authoritative plan revision and no A–F implementation content, and pending (not yet committed) groups A–F. The plan is byte-unchanged after that base.
-- Produces: one final acceptance packet bound to the `requesting-code-review` skill's canonical working-tree identity, a NUL-safe tracked-plus-untracked inventory covering all implementation since `PLAN_BASE_SHA`, task/review receipts, verification matrix, deployment evidence status, residual risks, worker Git-write status, approved working-tree content-equivalence evidence, and—only after review approval—the authorized orchestrator's A–F commit/range/push delivery evidence.
+- Produces: one final acceptance packet bound to the `requesting-code-review` skill's canonical working-tree identity, a NUL-safe tracked-plus-untracked inventory covering all implementation since `PLAN_BASE_SHA`, task/review receipts, zero-new-lint evidence when a full-repository lint command remains nonzero, verification matrix, deployment evidence status, residual risks, worker Git-write status, approved working-tree content-equivalence evidence, and—only after review approval—the authorized orchestrator's A–F commit/range/push delivery evidence.
 
 **Recommended executor:** `normal-task`
+
+**Task 11 lint acceptance invariant:** the mandatory Step 2 harness always runs `golangci-lint run --output.json.path=stdout --output.text.path=NUL --show-stats=false --fix=false --uniq-by-line=false --max-issues-per-linter=0 --max-same-issues=0` on Windows (`/dev/null` replaces `NUL` on non-Windows) and `cargo clippy --manifest-path agent-runtime/Cargo.toml --all-targets --all-features --message-format=json -- -D warnings` against the complete current working tree. The Go overrides defeat repository `fix: true`, line deduplication, and issue ceilings while preserving machine-only output; each tool receives one byte-identical argument vector for current and baseline, with only `WorkingDirectory` changed. The harness hashes every tracked and non-ignored untracked working-tree entry immediately before and after current Go lint, and every entry in the Git archive export immediately before and after baseline Go lint; any path, type, mode, metadata, symlink target, or file-content change fails before baseline comparison. A clean status/diagnostic combination passes immediately. Otherwise, on the same machine, platform, exact executable paths, and reported tool versions, export the actual full `PLAN_BASE_SHA` to a GUID-named OS-temp directory, run the identical argument vectors against that export, require the baseline's case-sensitive identity/count dictionary to equal the embedded expected dictionary exactly, and prove that the current normalized diagnostic multiset is a subset of that exact baseline multiset. Every current diagnostic must also point to a pre-existing file and a primary line outside every `git diff --unified=0 PLAN_BASE_SHA` added/modified hunk. At harness start, bind the baseline to current `HEAD` and the committed, byte-unchanged authoritative plan; no literal historical commit is a valid baseline. A test, build, format, process, mutation, JSON/schema, stream-classification, archive, binding, tool-version, multiplicity, comparison, or cleanup failure is never baseline-eligible.
+
+With deduplication and issue ceilings explicitly disabled, the known Go baseline is exactly this case-sensitive identity/count dictionary. The new plan-only `PLAN_BASE_SHA` must reproduce it byte-for-byte at the normalized identity/count level before a nonzero Go lint result can pass:
+
+| Path | Lint code | Construct | Exact count |
+|---|---|---|---:|
+| `chatv2/agent_test.go` | `err113` | dynamic `[NodeRunError]` fixture error | 1 |
+| `chatv2/agent_test.go` | `err113` | dynamic `[GraphRunError]` fixture error | 1 |
+| `chatv2/chatv2_test.go` | `usetesting` | `context.Background()` in `TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation` | 1 |
+| `orm/agentv3_test.go` | `unused` | `agentV3MemorySnapshotBuilderUnderTest` alias | 1 |
+
+The known Rust baseline is the following case-sensitive repo-relative identity/count dictionary. Target overlap repeats identities and is intentionally preserved in the exact counts. The `fetch_policy/header.rs` entry is baseline-only and may disappear from current output; no entry authorizes remediation or suppression.
+
+| Path | Construct/headline | Lint code | Exact count |
+|---|---|---|---:|
+| `agent-runtime/src/exec/launch.rs` | unused `identity` parameter | `unused_variables` | 1 |
+| `agent-runtime/src/cgroup.rs` | `fixture_kill_log` | `dead_code` | 1 |
+| `agent-runtime/src/exec/deferred.rs` | `len` | `dead_code` | 1 |
+| `agent-runtime/src/exec/deferred.rs` | `process_group_calls`, `cgroup_calls`, `jail_calls` | `dead_code` | 1 |
+| `agent-runtime/src/exec/supervisor.rs` | `deferred_cleanup_count_for_tests` | `dead_code` | 1 |
+| `agent-runtime/src/exec/supervisor.rs` | non-Linux error return | `clippy::needless_return` | 2 |
+| `agent-runtime/src/exec/supervisor/test_support.rs` | `test_direct_with_trace`, `test_direct_with_cleanup_probe` | `dead_code` | 1 |
+| `agent-runtime/src/runtime_fetch_proxy/binding.rs` | `with_lifecycle_for_tests` | `dead_code` | 1 |
+| `agent-runtime/src/runtime_fetch_proxy/binding.rs` | `CommandBindingLease` return | `clippy::needless_return` | 2 |
+| `agent-runtime/src/runtime_fetch_proxy/output.rs` | `OutputFault::{Write, FileSync, Rename}` | `dead_code` | 2 |
+| `agent-runtime/src/runtime_fetch_proxy/output.rs` | `set_fault`, `with_directory_sync_failure` | `dead_code` | 2 |
+| `agent-runtime/src/audit/records.rs` | `AuditRecord` variant size | `clippy::large_enum_variant` | 2 |
+| `agent-runtime/src/exec/spawn/api.rs` | non-Linux error return | `clippy::needless_return` | 2 |
+| `agent-runtime/src/fetch_auth/crypto.rs` | constant-size `chunks_exact(4)` | `clippy::chunks_exact_to_as_chunks` | 2 |
+| `agent-runtime/src/fetch_broker/session/attempt.rs` | `follow_redirects` 8 arguments | `clippy::too_many_arguments` | 2 |
+| `agent-runtime/src/fetch_broker/session/handshake.rs` | `PreAuthOutcome` variant size | `clippy::large_enum_variant` | 2 |
+| `agent-runtime/src/fetch_cli/client.rs` | non-Linux error return | `clippy::needless_return` | 2 |
+| `agent-runtime/src/lib.rs` | manual `Default for TextResponse` | `clippy::derivable_impls` | 2 |
+| `agent-runtime/src/lib.rs` | test-only `write_workspace_file_nofollow` 9 arguments | `clippy::too_many_arguments` | 1 |
+| `agent-runtime/src/namespace_gate.rs` | `HookRegistry.slots` type | `clippy::type_complexity` | 1 |
+| `agent-runtime/src/runtime_fetch_proxy/lifecycle.rs` | `ControlReport::default()` unit struct | `clippy::default_constructed_unit_structs` | 1 |
+| `agent-runtime/src/scan/tests.rs` | `then_some(...).unwrap_or(...)` conditional | `clippy::obfuscated_if_else` | 1 |
+| `agent-runtime/src/fetch_policy/header.rs` | `map(|name| HeaderName::from_static(name))` baseline-only closure | `clippy::redundant_closure` | 2 |
+
+Do not add `nolint`, `allow`, `expect`, lint configuration, or out-of-scope fixes to change either baseline. Nonzero accepted baseline diagnostics must remain explicit in the acceptance packet; call the result `zero new lint relative to same-tool PLAN_BASE`, never `lint clean` or `warning-free`.
 
 - [ ] **Step 1: Build the NUL-safe scope inventory and verify all changed Go files without writing files**
 
@@ -1256,29 +1297,715 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
   if ($LASTEXITCODE -ne 0) { throw "NUL-safe inventory or gofmt check failed" }
   $inventoryLines
   go test -race ./config ./chatv2 -count=1
+  if ($LASTEXITCODE -ne 0) { throw "focused Go race tests failed" }
   go test -race -short ./... -count=1
+  if ($LASTEXITCODE -ne 0) { throw "full short Go race tests failed" }
   go build ./...
-  golangci-lint run
+  if ($LASTEXITCODE -ne 0) { throw "Go build failed" }
   ```
 
   Before commits, this combines tracked added/modified paths from `git diff --name-only --diff-filter=ACM -z HEAD --` with non-ignored untracked paths from `git ls-files --others --exclude-standard -z`, deduplicates and bytewise sorts raw path bytes, rejects unsupported/deleted/renamed/out-of-scope entries, and formats only allowlisted changed `.go` regular files. Its post-approval range mode is reserved for Step 6 and changes only the tracked inventory target to `PLAN_BASE_SHA..HEAD`; it is not an artifact-identity scheme. Ignored build output is absent by construction; tracked or unignored vendor/build output fails scope instead of being passed to `gofmt`.
 
-  Expected: the manifest includes every tracked and untracked implementation path and excludes the plan because the plan is already unchanged in `PLAN_BASE_SHA`; an untracked or modified plan is out of scope and fails. No `gofmt` output appears; all Go tests/build/lint exit 0. The focused run must include filesystem, snapshot, startup, per-turn, rich, SearXNG, and zero-I/O tests.
+  Expected: the manifest includes every tracked and untracked implementation path and excludes the plan because the plan is already unchanged in `PLAN_BASE_SHA`; an untracked or modified plan is out of scope and fails. No `gofmt` output appears, and every Go test/build command exits 0 without baseline fallback. The focused run includes filesystem, snapshot, startup, per-turn, rich, SearXNG, and zero-I/O tests. The authoritative full-repository Go lint result is produced by the mandatory fail-closed harness in Step 2, not by an unparsed text command; only the locked four-identity/exact-count dictionary above may occur in its baseline and no current item may be new or owned by an implementation file/hunk.
 
 - [ ] **Step 2: Verify Rust format, lint, focused boundaries, and full crate**
 
   ```powershell
   cargo fmt --manifest-path "agent-runtime/Cargo.toml" -- --check
-  cargo clippy --manifest-path "agent-runtime/Cargo.toml" --all-targets --all-features -- -D warnings
+  if ($LASTEXITCODE -ne 0) { throw "Rust format check failed" }
   cargo test --manifest-path "agent-runtime/Cargo.toml" runtime_skill_snapshot_ -- --nocapture
+  if ($LASTEXITCODE -ne 0) { throw "Runtime skill snapshot tests failed" }
   cargo test --manifest-path "agent-runtime/Cargo.toml" skills_snapshot_ -- --nocapture
+  if ($LASTEXITCODE -ne 0) { throw "Runtime skills API tests failed" }
   cargo test --manifest-path "agent-runtime/Cargo.toml" --test fetch_policy -- --nocapture
+  if ($LASTEXITCODE -ne 0) { throw "Fetch policy tests failed" }
   cargo test --manifest-path "agent-runtime/Cargo.toml" --test fetch_broker -- --nocapture
+  if ($LASTEXITCODE -ne 0) { throw "Fetch Broker tests failed" }
   cargo test --manifest-path "agent-runtime/Cargo.toml" --all-features -- --nocapture
+  if ($LASTEXITCODE -ne 0) { throw "full Rust tests failed" }
   cargo build --manifest-path "agent-runtime/Cargo.toml" --locked --release --bins
+  if ($LASTEXITCODE -ne 0) { throw "locked Rust release build failed" }
   ```
 
-  Expected: every command exits 0 with no format/clippy warning; authenticated snapshot, generic `/skills`, User-Agent, redirect, protocol, and security regressions all pass.
+  Run this complete acceptance harness unconditionally once from the repository root after the commands above. It binds `HEAD` and the authoritative plan to `PLAN_BASE_SHA`, runs exactly one machine-readable full-repository invocation per current tool, validates every stdout/stderr record and exit relationship, proves the current Go invocation is read-only over all tracked and non-ignored untracked content, creates a baseline export only when current diagnostics exist, runs the byte-equivalent argument vectors there, proves the baseline Go invocation is read-only over the complete export, requires exact ordinal identity/count equality for the baseline, preserves target-overlap multiplicities, checks current primary lines against new files and zero-context diff hunks, reports the bound SHA/manifests/counts, and cleans only its verified GUID-named temp root:
+
+  ```powershell
+  function Invoke-CapturedProcess {
+    param(
+      [Parameter(Mandatory)][string]$FilePath,
+      [Parameter(Mandatory)][string[]]$ArgumentList,
+      [Parameter(Mandatory)][string]$WorkingDirectory
+    )
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    foreach ($argument in $ArgumentList) { [void]$startInfo.ArgumentList.Add($argument) }
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    $startInfo.Environment["CARGO_TERM_COLOR"] = "never"
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "failed to start $FilePath" }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $exitCode = $process.ExitCode
+    $process.Dispose()
+    [pscustomobject]@{ ExitCode = $exitCode; Stdout = $stdout; Stderr = $stderr }
+  }
+
+  function Resolve-Executable {
+    param([Parameter(Mandatory)][string]$Name)
+    $commands = @(Get-Command $Name -CommandType Application -ErrorAction Stop)
+    if ($commands.Count -lt 1) { throw "executable is unavailable: $Name" }
+    $resolved = [IO.Path]::GetFullPath([string]$commands[0].Source)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) { throw "resolved executable is not a file: $resolved" }
+    $resolved
+  }
+
+  function Assert-NoDuplicateJSONProperties {
+    param([Parameter(Mandatory)][System.Text.Json.JsonElement]$Element, [Parameter(Mandatory)][string]$JSONPath)
+    if ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+      $names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+      foreach ($property in $Element.EnumerateObject()) {
+        if (-not $names.Add($property.Name)) { throw "duplicate JSON property at $JSONPath.$($property.Name)" }
+        Assert-NoDuplicateJSONProperties $property.Value "$JSONPath.$($property.Name)"
+      }
+    } elseif ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Array) {
+      $index = 0
+      foreach ($item in $Element.EnumerateArray()) {
+        Assert-NoDuplicateJSONProperties $item "$JSONPath[$index]"
+        $index += 1
+      }
+    }
+  }
+
+  function Convert-StrictJSON {
+    param([Parameter(Mandatory)][string]$Text, [Parameter(Mandatory)][string]$Label)
+    if ([string]::IsNullOrWhiteSpace($Text)) { throw "$Label produced empty JSON" }
+    try {
+      $document = [System.Text.Json.JsonDocument]::Parse($Text)
+      try { Assert-NoDuplicateJSONProperties $document.RootElement '$' } finally { $document.Dispose() }
+      $Text | ConvertFrom-Json -Depth 100 -ErrorAction Stop
+    } catch {
+      throw "$Label produced malformed or duplicate-property JSON: $($_.Exception.Message)"
+    }
+  }
+
+  function Assert-ObjectShape {
+    param(
+      [Parameter(Mandatory)]$Object,
+      [Parameter(Mandatory)][string[]]$Required,
+      [string[]]$Optional = @(),
+      [Parameter(Mandatory)][string]$Label
+    )
+    if ($null -eq $Object) { throw "$Label is null" }
+    $allowed = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($name in @($Required) + @($Optional)) { [void]$allowed.Add($name) }
+    $actual = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($property in $Object.PSObject.Properties) {
+      if (-not $allowed.Contains($property.Name)) { throw "$Label has unknown property: $($property.Name)" }
+      [void]$actual.Add($property.Name)
+    }
+    foreach ($name in $Required) {
+      if (-not $actual.Contains($name)) { throw "$Label is missing property: $name" }
+    }
+  }
+
+  function Normalize-RepoPath {
+    param([Parameter(Mandatory)][string]$Path, [switch]$Rust)
+    $normalized = $Path.Replace('\', '/')
+    while ($normalized.StartsWith('./', [StringComparison]::Ordinal)) { $normalized = $normalized.Substring(2) }
+    if ($Rust -and -not $normalized.StartsWith('agent-runtime/', [StringComparison]::Ordinal)) {
+      $normalized = "agent-runtime/$normalized"
+    }
+    $normalized
+  }
+
+  $contentManifestProgram = @'
+  const { execFileSync } = require("node:child_process");
+  const { createHash } = require("node:crypto");
+  const { lstatSync, readFileSync, readdirSync, readlinkSync } = require("node:fs");
+  const { join } = require("node:path");
+
+  function nulFields(bytes) {
+    const fields = [];
+    let start = 0;
+    for (let index = 0; index < bytes.length; index += 1) {
+      if (bytes[index] !== 0) continue;
+      if (index === start) throw new Error("git NUL output contained an empty field");
+      fields.push(bytes.subarray(start, index));
+      start = index + 1;
+    }
+    if (start !== bytes.length) throw new Error("git NUL output was not terminated");
+    return fields;
+  }
+
+  function assertUtf8(pathBytes) {
+    const path = pathBytes.toString("utf8");
+    if (!Buffer.from(path, "utf8").equals(pathBytes)) throw new Error("manifest path is not valid UTF-8");
+    return path;
+  }
+
+  function addFramed(hash, value) {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(String(value), "utf8");
+    hash.update(Buffer.from(`${bytes.length}:`, "ascii"));
+    hash.update(bytes);
+  }
+
+  function addEntry(hash, scope, pathBytes, stat, type, payload) {
+    addFramed(hash, scope);
+    addFramed(hash, pathBytes);
+    addFramed(hash, type);
+    if (stat === null) {
+      for (let index = 0; index < 5; index += 1) addFramed(hash, "missing");
+    } else {
+      addFramed(hash, stat.mode.toString());
+      addFramed(hash, stat.size.toString());
+      addFramed(hash, stat.mtimeNs.toString());
+      addFramed(hash, stat.ctimeNs.toString());
+      addFramed(hash, payload);
+    }
+  }
+
+  function workingTreeEntries() {
+    const runGit = (...args) => execFileSync("git", args, { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024 });
+    const entries = [
+      ...nulFields(runGit("ls-files", "--cached", "-z")).map((path) => ({ path, scope: "tracked" })),
+      ...nulFields(runGit("ls-files", "--others", "--exclude-standard", "-z")).map((path) => ({ path, scope: "untracked" })),
+    ];
+    const unique = new Map();
+    for (const entry of entries) {
+      const key = entry.path.toString("hex");
+      if (unique.has(key)) throw new Error("manifest path appeared in multiple scopes");
+      unique.set(key, entry);
+    }
+    return [...unique.values()].sort((left, right) => Buffer.compare(left.path, right.path));
+  }
+
+  function hashWorkingTree() {
+    const hash = createHash("sha256");
+    const entries = workingTreeEntries();
+    for (const entry of entries) {
+      assertUtf8(entry.path);
+      let stat;
+      try {
+        stat = lstatSync(entry.path, { bigint: true });
+      } catch (error) {
+        if (error.code !== "ENOENT" || entry.scope !== "tracked") throw error;
+        addEntry(hash, entry.scope, entry.path, null, "missing", Buffer.alloc(0));
+        continue;
+      }
+      if (stat.isFile()) {
+        addEntry(hash, entry.scope, entry.path, stat, "file", readFileSync(entry.path));
+      } else if (stat.isSymbolicLink()) {
+        addEntry(hash, entry.scope, entry.path, stat, "symlink", readlinkSync(entry.path, { encoding: "buffer" }));
+      } else {
+        throw new Error(`unsupported working-tree entry type: ${assertUtf8(entry.path)}`);
+      }
+    }
+    return { algorithm: "sha256", entries: entries.length, digest: hash.digest("hex") };
+  }
+
+  function hashExportTree() {
+    const hash = createHash("sha256");
+    let entries = 0;
+    function walk(directory, relativeDirectory) {
+      const names = readdirSync(directory, { encoding: "buffer" }).sort(Buffer.compare);
+      for (const nameBytes of names) {
+        const name = assertUtf8(nameBytes);
+        const relative = relativeDirectory.length === 0 ? name : `${relativeDirectory}/${name}`;
+        const relativeBytes = Buffer.from(relative, "utf8");
+        const absolute = join(directory, name);
+        const stat = lstatSync(absolute, { bigint: true });
+        entries += 1;
+        if (stat.isDirectory()) {
+          addEntry(hash, "export", relativeBytes, stat, "directory", Buffer.alloc(0));
+          walk(absolute, relative);
+        } else if (stat.isFile()) {
+          addEntry(hash, "export", relativeBytes, stat, "file", readFileSync(absolute));
+        } else if (stat.isSymbolicLink()) {
+          addEntry(hash, "export", relativeBytes, stat, "symlink", readlinkSync(absolute, { encoding: "buffer" }));
+        } else {
+          throw new Error(`unsupported export entry type: ${relative}`);
+        }
+      }
+    }
+    walk(process.cwd(), "");
+    return { algorithm: "sha256", entries, digest: hash.digest("hex") };
+  }
+
+  const mode = process.argv[1];
+  if (mode !== "working" && mode !== "export") throw new Error("manifest mode must be working or export");
+  process.stdout.write(JSON.stringify(mode === "working" ? hashWorkingTree() : hashExportTree()));
+  '@
+
+  function Get-ContentManifest {
+    param(
+      [Parameter(Mandatory)][ValidateSet('working', 'export')][string]$Mode,
+      [Parameter(Mandatory)][string]$WorkingDirectory,
+      [Parameter(Mandatory)][string]$NodeExecutable,
+      [Parameter(Mandatory)][string]$Label
+    )
+    $result = Invoke-CapturedProcess $NodeExecutable @('-e', $contentManifestProgram, $Mode) $WorkingDirectory
+    if ($result.ExitCode -ne 0 -or $result.Stderr.Length -ne 0) { throw "$Label content manifest failed or emitted stderr" }
+    $manifest = Convert-StrictJSON $result.Stdout "$Label content manifest"
+    Assert-ObjectShape $manifest @('algorithm', 'entries', 'digest') @() "$Label content manifest"
+    if ([string]$manifest.algorithm -ne 'sha256' -or [int]$manifest.entries -lt 1 -or [string]$manifest.digest -notmatch '^[0-9a-f]{64}$') {
+      throw "$Label content manifest is invalid"
+    }
+    $manifest
+  }
+
+  function Assert-ContentManifestUnchanged {
+    param([Parameter(Mandatory)]$Before, [Parameter(Mandatory)]$After, [Parameter(Mandatory)][string]$Label)
+    if ([string]$Before.algorithm -cne [string]$After.algorithm -or
+        [int]$Before.entries -ne [int]$After.entries -or
+        [string]$Before.digest -cne [string]$After.digest) {
+      throw "$Label modified the lint input tree"
+    }
+    "$Label read-only manifest entries=$($After.entries) sha256=$($After.digest)"
+  }
+
+  function Convert-GoLintJSON {
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][string]$Label)
+    if ($Result.Stderr.Length -ne 0) { throw "$Label emitted unclassified stderr" }
+    if ($Result.ExitCode -notin @(0, 1)) { throw "$Label exited with operation-failure status $($Result.ExitCode)" }
+    $report = Convert-StrictJSON $Result.Stdout $Label
+    Assert-ObjectShape $report @('Issues', 'Report') @() "$Label root"
+    Assert-ObjectShape $report.Report @('Linters') @() "$Label Report"
+    $linterNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($linter in @($report.Report.Linters)) {
+      Assert-ObjectShape $linter @('Name') @('Enabled') "$Label Report.Linters[]"
+      if ([string]::IsNullOrWhiteSpace([string]$linter.Name)) { throw "$Label contains an empty linter name" }
+      if (-not $linterNames.Add([string]$linter.Name)) { throw "$Label contains duplicate linter metadata: $($linter.Name)" }
+      if ($linter.PSObject.Properties.Name -contains 'Enabled' -and $linter.Enabled -isnot [bool]) { throw "$Label linter Enabled is not boolean" }
+    }
+    if ($linterNames.Count -eq 0) { throw "$Label contains no linter metadata" }
+
+    $diagnostics = @()
+    foreach ($issue in @($report.Issues)) {
+      Assert-ObjectShape $issue @('FromLinter', 'Text', 'Severity', 'SourceLines', 'Pos', 'ExpectNoLint', 'ExpectedNoLintLinter') @('SuggestedFixes') "$Label Issues[]"
+      Assert-ObjectShape $issue.Pos @('Filename', 'Offset', 'Line', 'Column') @() "$Label Issues[].Pos"
+      if ($issue.PSObject.Properties.Name -contains 'SuggestedFixes') {
+        $suggestedFixes = @($issue.SuggestedFixes)
+        if ($suggestedFixes.Count -lt 1) { throw "$Label issue has an empty SuggestedFixes array" }
+        foreach ($suggestedFix in $suggestedFixes) {
+          Assert-ObjectShape $suggestedFix @('Message', 'TextEdits') @() "$Label Issues[].SuggestedFixes[]"
+          if ($suggestedFix.Message -isnot [string]) { throw "$Label suggested-fix Message is not a string" }
+          $textEdits = @($suggestedFix.TextEdits)
+          if ($textEdits.Count -lt 1) { throw "$Label suggested fix has no TextEdits" }
+          foreach ($textEdit in $textEdits) {
+            Assert-ObjectShape $textEdit @('Pos', 'End', 'NewText') @() "$Label Issues[].SuggestedFixes[].TextEdits[]"
+            $editStart = [int64]$textEdit.Pos
+            $editEnd = [int64]$textEdit.End
+            if ($editStart -lt 0 -or $editEnd -lt $editStart -or [string]::IsNullOrWhiteSpace([string]$textEdit.NewText)) { throw "$Label suggested text edit is invalid" }
+            try { [void][Convert]::FromBase64String([string]$textEdit.NewText) } catch { throw "$Label suggested text edit NewText is not base64" }
+          }
+        }
+      }
+      if ([string]::IsNullOrWhiteSpace([string]$issue.FromLinter) -or [string]::IsNullOrWhiteSpace([string]$issue.Text)) { throw "$Label issue has empty identity fields" }
+      if ([string]$issue.Severity -ne 'error') { throw "$Label issue severity is not error" }
+      if ($issue.ExpectNoLint -isnot [bool] -or $issue.ExpectNoLint -or -not [string]::IsNullOrEmpty([string]$issue.ExpectedNoLintLinter)) { throw "$Label issue contains unexpected nolint state" }
+      $sourceLines = @($issue.SourceLines)
+      if ($sourceLines.Count -lt 1) { throw "$Label issue has no SourceLines" }
+      foreach ($sourceLine in $sourceLines) { if ($sourceLine -isnot [string]) { throw "$Label issue SourceLines entry is not a string" } }
+      $line = [int]$issue.Pos.Line
+      $column = [int]$issue.Pos.Column
+      $offset = [int64]$issue.Pos.Offset
+      if ($line -lt 1 -or $column -lt 1 -or $offset -lt 0 -or [string]::IsNullOrWhiteSpace([string]$issue.Pos.Filename)) { throw "$Label issue position is invalid" }
+      $path = Normalize-RepoPath ([string]$issue.Pos.Filename)
+      $code = [string]$issue.FromLinter
+      $message = ([string]$issue.Text -replace '\s+', ' ').Trim()
+      $sourceText = $sourceLines -join "`n"
+      $symbol = if ($path -eq 'chatv2/agent_test.go' -and $code -eq 'err113' -and $sourceText.Contains('[NodeRunError]', [StringComparison]::Ordinal)) {
+        'NodeRunError fixture'
+      } elseif ($path -eq 'chatv2/agent_test.go' -and $code -eq 'err113' -and $sourceText.Contains('[GraphRunError]', [StringComparison]::Ordinal)) {
+        'GraphRunError fixture'
+      } elseif ($path -eq 'orm/agentv3_test.go' -and $code -eq 'unused' -and $sourceText.Contains('agentV3MemorySnapshotBuilderUnderTest', [StringComparison]::Ordinal)) {
+        'agentV3MemorySnapshotBuilderUnderTest alias'
+      } elseif ($path -eq 'chatv2/chatv2_test.go' -and $code -eq 'usetesting' -and
+                $sourceText.Contains('context.Background()', [StringComparison]::Ordinal) -and
+                $message.Contains('TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation', [StringComparison]::Ordinal)) {
+        'TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation context fixture'
+      } else {
+        "unclassified:$message"
+      }
+      $identity = "$path|$code|$symbol"
+      $diagnostics += [pscustomobject]@{ Path = $path; Line = $line; Column = $column; Code = $code; Message = $message; Identity = $identity }
+    }
+    if ($Result.ExitCode -eq 0 -and $diagnostics.Count -ne 0) { throw "$Label exited 0 while reporting issues" }
+    if ($Result.ExitCode -eq 1 -and $diagnostics.Count -eq 0) { throw "$Label exited 1 without issues" }
+    @($diagnostics)
+  }
+
+  function Convert-ClippyJSON {
+    param([Parameter(Mandatory)]$Result, [Parameter(Mandatory)][string]$Label)
+    if ($Result.ExitCode -notin @(0, 101)) { throw "$Label exited with Cargo operation-failure status $($Result.ExitCode)" }
+    $diagnostics = @()
+    $reasonCounts = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+    $buildFinished = @()
+    $stdoutLines = @($Result.Stdout -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($stdoutLines.Count -eq 0) { throw "$Label produced no Cargo JSON records" }
+    foreach ($line in $stdoutLines) {
+      $record = Convert-StrictJSON $line "$Label stdout record"
+      Assert-ObjectShape $record @('reason') @('package_id', 'manifest_path', 'target', 'profile', 'features', 'filenames', 'executable', 'fresh', 'linked_libs', 'linked_paths', 'cfgs', 'env', 'out_dir', 'message', 'success') "$Label Cargo record"
+      $reason = [string]$record.reason
+      if ([string]::IsNullOrWhiteSpace($reason)) { throw "$Label Cargo record has empty reason" }
+      $reasonCounts[$reason] = 1 + $(if ($reasonCounts.ContainsKey($reason)) { [int]$reasonCounts[$reason] } else { 0 })
+      switch ($reason) {
+        'compiler-artifact' {
+          Assert-ObjectShape $record @('reason', 'package_id', 'manifest_path', 'target', 'profile', 'features', 'filenames', 'executable', 'fresh') @() "$Label compiler-artifact"
+          if ([string]::IsNullOrWhiteSpace([string]$record.package_id) -or [string]::IsNullOrWhiteSpace([string]$record.manifest_path) -or $null -eq $record.target -or $null -eq $record.profile -or $record.fresh -isnot [bool]) { throw "$Label malformed compiler-artifact" }
+        }
+        'build-script-executed' {
+          Assert-ObjectShape $record @('reason', 'package_id', 'linked_libs', 'linked_paths', 'cfgs', 'env', 'out_dir') @() "$Label build-script-executed"
+          if ([string]::IsNullOrWhiteSpace([string]$record.package_id) -or [string]::IsNullOrWhiteSpace([string]$record.out_dir)) { throw "$Label malformed build-script-executed" }
+        }
+        'build-finished' {
+          Assert-ObjectShape $record @('reason', 'success') @() "$Label build-finished"
+          if ($record.success -isnot [bool]) { throw "$Label build-finished success is not boolean" }
+          $buildFinished += $record
+        }
+        'compiler-message' {
+          Assert-ObjectShape $record @('reason', 'package_id', 'manifest_path', 'target', 'message') @() "$Label compiler-message"
+          Assert-ObjectShape $record.message @('rendered', '$message_type', 'children', 'level', 'message', 'spans', 'code') @() "$Label compiler-message.message"
+          if ([string]$record.message.level -ne 'error') { throw "$Label contains non-error compiler-message level: $($record.message.level)" }
+          if ($null -eq $record.message.code) { throw "$Label contains an error without a lint code" }
+          Assert-ObjectShape $record.message.code @('code', 'explanation') @() "$Label compiler-message.code"
+          $code = [string]$record.message.code.code
+          $message = ([string]$record.message.message -replace '\s+', ' ').Trim()
+          if ([string]::IsNullOrWhiteSpace($code) -or [string]::IsNullOrWhiteSpace($message)) { throw "$Label contains an empty lint code/message" }
+          $spans = @($record.message.spans)
+          if ($spans.Count -lt 1) { throw "$Label lint has no spans" }
+          foreach ($span in $spans) {
+            Assert-ObjectShape $span @('byte_end', 'byte_start', 'column_end', 'column_start', 'expansion', 'file_name', 'is_primary', 'label', 'line_end', 'line_start', 'suggested_replacement', 'suggestion_applicability', 'text') @() "$Label compiler-message.span"
+            if ($span.is_primary -isnot [bool]) { throw "$Label span is_primary is not boolean" }
+          }
+          $primarySpans = @($spans | Where-Object { $_.is_primary })
+          if ($primarySpans.Count -lt 1) { throw "$Label lint must have at least one primary span" }
+          $locations = @()
+          $primaryPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          $locationKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          foreach ($primary in $primarySpans) {
+            $lineNumber = [int]$primary.line_start
+            $columnNumber = [int]$primary.column_start
+            if ($lineNumber -lt 1 -or $columnNumber -lt 1 -or [string]::IsNullOrWhiteSpace([string]$primary.file_name)) { throw "$Label primary span is invalid" }
+            $primaryPath = Normalize-RepoPath ([string]$primary.file_name) -Rust
+            $locationKey = "$primaryPath|$lineNumber|$columnNumber"
+            if (-not $locationKeys.Add($locationKey)) { throw "$Label lint repeats a primary location" }
+            [void]$primaryPaths.Add($primaryPath)
+            $locations += [pscustomobject]@{ Path = $primaryPath; Line = $lineNumber; Column = $columnNumber }
+          }
+          if ($primaryPaths.Count -ne 1) { throw "$Label lint spans multiple primary files and cannot be normalized" }
+          $locations = @($locations | Sort-Object Path, Line, Column)
+          $path = [string]$locations[0].Path
+          $identity = "$path|$code|$message"
+          $diagnostics += [pscustomobject]@{ Path = $path; Line = [int]$locations[0].Line; Column = [int]$locations[0].Column; Locations = $locations; Code = $code; Message = $message; Identity = $identity }
+        }
+        default { throw "$Label contains unknown Cargo JSON reason: $reason" }
+      }
+    }
+    if ($buildFinished.Count -ne 1) { throw "$Label must contain exactly one build-finished record" }
+
+    $summaryTotal = 0
+    $summaryLines = 0
+    $buildFailedWarnings = 0
+    foreach ($stderrLine in ($Result.Stderr -split "`r?`n")) {
+      if ([string]::IsNullOrWhiteSpace($stderrLine)) { continue }
+      if ($stderrLine -match '^\s*(?:Checking|Compiling|Fresh|Finished)\s+.+$' -or $stderrLine -match '^\s*Blocking waiting for file lock on .+$') { continue }
+      if ($stderrLine -match '^error: could not compile `agent-runtime` \((?:lib|lib test)\) due to (?<count>\d+) previous errors?$') {
+        $summaryLines += 1
+        $summaryTotal += [int]$Matches['count']
+        continue
+      }
+      if ($stderrLine -eq 'warning: build failed, waiting for other jobs to finish...') {
+        $buildFailedWarnings += 1
+        if ($buildFailedWarnings -gt 1) { throw "$Label repeated Cargo build-failed warning" }
+        continue
+      }
+      throw "$Label emitted unclassified stderr: $stderrLine"
+    }
+
+    if ($Result.ExitCode -eq 0) {
+      if (-not $buildFinished[0].success -or $diagnostics.Count -ne 0 -or $summaryLines -ne 0 -or $buildFailedWarnings -ne 0) { throw "$Label clean exit disagrees with JSON/stderr" }
+    } else {
+      if ($buildFinished[0].success -or $diagnostics.Count -eq 0 -or $summaryLines -eq 0 -or $summaryTotal -ne $diagnostics.Count) { throw "$Label lint-failure exit disagrees with JSON/stderr diagnostic counts" }
+    }
+    [pscustomobject]@{ Diagnostics = @($diagnostics); ReasonCounts = $reasonCounts; ExitCode = $Result.ExitCode }
+  }
+
+  function Get-IdentityCountMap {
+    param([object[]]$Diagnostics)
+    $counts = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+    foreach ($diagnostic in $Diagnostics) {
+      $identity = [string]$diagnostic.Identity
+      if ([string]::IsNullOrWhiteSpace($identity)) { throw "diagnostic identity is empty" }
+      $counts[$identity] = 1 + $(if ($counts.ContainsKey($identity)) { [int]$counts[$identity] } else { 0 })
+    }
+    ,$counts
+  }
+
+  function Assert-ExactBaselineAndCurrentSubset {
+    param(
+      [System.Collections.Generic.Dictionary[string, int]]$CurrentCounts,
+      [System.Collections.Generic.Dictionary[string, int]]$BaselineCounts,
+      [System.Collections.Generic.Dictionary[string, int]]$ExpectedCounts,
+      [string]$Label
+    )
+    foreach ($map in @($CurrentCounts, $BaselineCounts, $ExpectedCounts)) {
+      if ($map.Comparer.Compare('A', 'a') -eq 0) { throw "$Label identity dictionary is not ordinal case-sensitive" }
+    }
+    if ($BaselineCounts.Count -ne $ExpectedCounts.Count) {
+      throw "$Label PLAN_BASE identity cardinality differs from the exact expected dictionary"
+    }
+    foreach ($identity in $ExpectedCounts.Keys) {
+      $expectedCount = [int]$ExpectedCounts[$identity]
+      if ($expectedCount -le 0) { throw "$Label expected dictionary has a non-positive count: $identity" }
+      if (-not $BaselineCounts.ContainsKey($identity)) { throw "$Label PLAN_BASE is missing expected identity: $identity" }
+      if ([int]$BaselineCounts[$identity] -ne $expectedCount) {
+        throw "$Label PLAN_BASE count differs from exact expected count for: $identity"
+      }
+    }
+    foreach ($identity in $BaselineCounts.Keys) {
+      if (-not $ExpectedCounts.ContainsKey($identity)) { throw "$Label PLAN_BASE contains unknown identity: $identity" }
+    }
+    foreach ($identity in $CurrentCounts.Keys) {
+      if (-not $ExpectedCounts.ContainsKey($identity)) { throw "$Label current output contains unknown identity: $identity" }
+      if (-not $BaselineCounts.ContainsKey($identity) -or [int]$CurrentCounts[$identity] -gt [int]$BaselineCounts[$identity]) {
+        throw "$Label current multiplicity exceeds PLAN_BASE for: $identity"
+      }
+    }
+  }
+
+  function Write-DiagnosticCountComparison {
+    param(
+      [System.Collections.Generic.Dictionary[string, int]]$CurrentCounts,
+      [System.Collections.Generic.Dictionary[string, int]]$BaselineCounts,
+      [string]$Label
+    )
+    $identities = [string[]]@($BaselineCounts.Keys)
+    [Array]::Sort($identities, [StringComparer]::Ordinal)
+    foreach ($identity in $identities) {
+      $currentCount = if ($CurrentCounts.ContainsKey($identity)) { [int]$CurrentCounts[$identity] } else { 0 }
+      $baselineCount = if ($BaselineCounts.ContainsKey($identity)) { [int]$BaselineCounts[$identity] } else { 0 }
+      "$Label`tbaseline=$baselineCount`tcurrent=$currentCount`t$identity"
+    }
+  }
+
+  function Write-ReasonCounts {
+    param([System.Collections.Generic.Dictionary[string, int]]$Counts, [string]$Label)
+    $reasons = [string[]]@($Counts.Keys)
+    [Array]::Sort($reasons, [StringComparer]::Ordinal)
+    foreach ($reason in $reasons) { "$Label`treason=$reason`tcount=$($Counts[$reason])" }
+  }
+
+  function Assert-OutsideImplementationHunks {
+    param(
+      [object[]]$Diagnostics,
+      [string]$PlanBaseSHA,
+      [string]$RepoRoot,
+      [string]$GitExecutable
+    )
+    $addedResult = Invoke-CapturedProcess $GitExecutable @('diff', '--name-only', '--diff-filter=A', $PlanBaseSHA, '--') $RepoRoot
+    if ($addedResult.ExitCode -ne 0 -or $addedResult.Stderr.Length -ne 0) { throw "cannot enumerate tracked added files" }
+    $untrackedResult = Invoke-CapturedProcess $GitExecutable @('ls-files', '--others', '--exclude-standard') $RepoRoot
+    if ($untrackedResult.ExitCode -ne 0 -or $untrackedResult.Stderr.Length -ne 0) { throw "cannot enumerate untracked files" }
+    $newFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($pathLine in (($addedResult.Stdout + "`n" + $untrackedResult.Stdout) -split "`r?`n")) {
+      if (-not [string]::IsNullOrWhiteSpace($pathLine)) { [void]$newFiles.Add((Normalize-RepoPath $pathLine.Trim())) }
+    }
+    foreach ($diagnostic in $Diagnostics) {
+      $locations = if ($diagnostic.PSObject.Properties.Name -contains 'Locations') { @($diagnostic.Locations) } else { @([pscustomobject]@{ Path = $diagnostic.Path; Line = $diagnostic.Line; Column = $diagnostic.Column }) }
+      foreach ($location in $locations) {
+        if ($newFiles.Contains($location.Path)) { throw "lint diagnostic is in an implementation-added file: $($location.Path)" }
+        $diffResult = Invoke-CapturedProcess $GitExecutable @('diff', '--unified=0', '--no-ext-diff', $PlanBaseSHA, '--', $location.Path) $RepoRoot
+        if ($diffResult.ExitCode -ne 0 -or $diffResult.Stderr.Length -ne 0) { throw "cannot inspect modified hunks for $($location.Path)" }
+        foreach ($diffLine in ($diffResult.Stdout -split "`r?`n")) {
+          if ($diffLine -match '^@@ -\d+(?:,\d+)? \+(?<start>\d+)(?:,(?<count>\d+))? @@') {
+            $start = [int]$Matches.start
+            $countText = $Matches['count']
+            $count = if ($countText) { [int]$countText } else { 1 }
+            if ($count -gt 0 -and $location.Line -ge $start -and $location.Line -lt ($start + $count)) {
+              throw "lint diagnostic is inside an implementation-modified hunk: $($location.Path):$($location.Line)"
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if ($env:PLAN_BASE_SHA -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') { throw "PLAN_BASE_SHA must be a full lowercase object ID" }
+  $planBaseSha = $env:PLAN_BASE_SHA
+  $gitExecutable = Resolve-Executable 'git'
+  $goLintExecutable = Resolve-Executable 'golangci-lint'
+  $cargoExecutable = Resolve-Executable 'cargo'
+  $rustcExecutable = Resolve-Executable 'rustc'
+  $tarExecutable = Resolve-Executable 'tar'
+  $nodeExecutable = Resolve-Executable 'node'
+  $repoResult = Invoke-CapturedProcess $gitExecutable @('rev-parse', '--show-toplevel') (Get-Location).Path
+  if ($repoResult.ExitCode -ne 0 -or $repoResult.Stderr.Length -ne 0) { throw "cannot resolve repository root" }
+  $repoRoot = [IO.Path]::GetFullPath($repoResult.Stdout.Trim())
+  $headResult = Invoke-CapturedProcess $gitExecutable @('rev-parse', 'HEAD') $repoRoot
+  if ($headResult.ExitCode -ne 0 -or $headResult.Stderr.Length -ne 0) { throw "cannot resolve HEAD" }
+  $headSha = $headResult.Stdout.Trim()
+  if ($headSha -notmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' -or $headSha -ne $planBaseSha) { throw "HEAD must exactly equal PLAN_BASE_SHA before lint baseline capture" }
+  $planPath = 'docs/superpowers/plans/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua.md'
+  $planObjectCheck = Invoke-CapturedProcess $gitExecutable @('cat-file', '-e', "$planBaseSha`:$planPath") $repoRoot
+  if ($planObjectCheck.ExitCode -ne 0 -or $planObjectCheck.Stdout.Length -ne 0 -or $planObjectCheck.Stderr.Length -ne 0) { throw "PLAN_BASE_SHA does not contain the authoritative plan" }
+  $planDiffCheck = Invoke-CapturedProcess $gitExecutable @('diff', '--quiet', $planBaseSha, '--', $planPath) $repoRoot
+  if ($planDiffCheck.ExitCode -ne 0 -or $planDiffCheck.Stdout.Length -ne 0 -or $planDiffCheck.Stderr.Length -ne 0) { throw "working-tree authoritative plan differs from PLAN_BASE_SHA" }
+  "lint baseline PLAN_BASE_SHA=$planBaseSha"
+  $statusResult = Invoke-CapturedProcess $gitExecutable @('status', '--short') $repoRoot
+  if ($statusResult.ExitCode -ne 0 -or $statusResult.Stderr.Length -ne 0) { throw "cannot capture working-tree status" }
+  $statusResult.Stdout
+
+  $nullDevice = if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { 'NUL' } else { '/dev/null' }
+  $goArgs = @(
+    'run',
+    '--output.json.path=stdout',
+    "--output.text.path=$nullDevice",
+    '--show-stats=false',
+    '--fix=false',
+    '--uniq-by-line=false',
+    '--max-issues-per-linter=0',
+    '--max-same-issues=0'
+  )
+  $clippyArgs = @('clippy', '--manifest-path', 'agent-runtime/Cargo.toml', '--all-targets', '--all-features', '--message-format=json', '--', '-D', 'warnings')
+  $currentGoManifestBefore = Get-ContentManifest 'working' $repoRoot $nodeExecutable 'golangci-lint current before'
+  $currentGo = Invoke-CapturedProcess $goLintExecutable $goArgs $repoRoot
+  $currentGoManifestAfter = Get-ContentManifest 'working' $repoRoot $nodeExecutable 'golangci-lint current after'
+  Assert-ContentManifestUnchanged $currentGoManifestBefore $currentGoManifestAfter 'golangci-lint current'
+  $currentClippy = Invoke-CapturedProcess $cargoExecutable $clippyArgs $repoRoot
+  "golangci-lint current exit=$($currentGo.ExitCode)"
+  "cargo clippy current exit=$($currentClippy.ExitCode)"
+  $currentGoDiagnostics = @(Convert-GoLintJSON $currentGo 'golangci-lint current')
+  $currentClippyAnalysis = Convert-ClippyJSON $currentClippy 'cargo clippy current'
+  $currentRustDiagnostics = @($currentClippyAnalysis.Diagnostics)
+  Write-ReasonCounts $currentClippyAnalysis.ReasonCounts 'cargo-clippy-current-json'
+  $goLintVersion = Invoke-CapturedProcess $goLintExecutable @('version') $repoRoot
+  $clippyVersion = Invoke-CapturedProcess $cargoExecutable @('clippy', '--version') $repoRoot
+  $rustcVersion = Invoke-CapturedProcess $rustcExecutable @('-vV') $repoRoot
+  if ($goLintVersion.ExitCode -ne 0 -or $clippyVersion.ExitCode -ne 0 -or $rustcVersion.ExitCode -ne 0 -or
+      $goLintVersion.Stderr.Length -ne 0 -or $clippyVersion.Stderr.Length -ne 0 -or $rustcVersion.Stderr.Length -ne 0) { throw "cannot capture lint tool versions without stderr" }
+  "golangci-lint version: $(($goLintVersion.Stdout + $goLintVersion.Stderr).Trim())"
+  "cargo clippy version: $(($clippyVersion.Stdout + $clippyVersion.Stderr).Trim())"
+  "rustc version: $(($rustcVersion.Stdout + $rustcVersion.Stderr).Trim())"
+  "platform: $([Runtime.InteropServices.RuntimeInformation]::OSDescription); architecture: $([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+  "golangci-lint argv: $($goArgs | ConvertTo-Json -Compress)"
+  "cargo clippy argv: $($clippyArgs | ConvertTo-Json -Compress)"
+
+  if ($currentGoDiagnostics.Count -eq 0 -and $currentRustDiagnostics.Count -eq 0) {
+    "zero-new-lint: both current full-repository lint commands exited 0"
+  } else {
+    $tempParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $tempParent -PathType Container)) { throw "approved OS temp parent is unavailable" }
+    $tempName = "csust-got-agent-v3-lint-$([Guid]::NewGuid().ToString('N'))"
+    if ($tempName -notmatch '^csust-got-agent-v3-lint-[0-9a-f]{32}$') { throw "invalid lint temp name" }
+    $lintTempRoot = [IO.Path]::GetFullPath((Join-Path $tempParent $tempName))
+    if ([IO.Path]::GetDirectoryName($lintTempRoot) -ne $tempParent) { throw "lint temp root escaped approved parent" }
+    if (Test-Path -LiteralPath $lintTempRoot) { throw "lint temp root already exists" }
+    try {
+      [void](New-Item -ItemType Directory -Path $lintTempRoot -ErrorAction Stop)
+      $baselineRoot = Join-Path $lintTempRoot 'baseline'
+      [void](New-Item -ItemType Directory -Path $baselineRoot -ErrorAction Stop)
+      $archivePath = Join-Path $lintTempRoot 'plan-base.tar'
+      $archiveResult = Invoke-CapturedProcess $gitExecutable @('archive', '--format=tar', "--output=$archivePath", $planBaseSha) $repoRoot
+      if ($archiveResult.ExitCode -ne 0 -or $archiveResult.Stdout.Length -ne 0 -or $archiveResult.Stderr.Length -ne 0 -or -not (Test-Path -LiteralPath $archivePath -PathType Leaf)) { throw "git archive PLAN_BASE_SHA failed or emitted unexpected output" }
+      $extractResult = Invoke-CapturedProcess $tarExecutable @('-xf', $archivePath, '-C', $baselineRoot) $repoRoot
+      if ($extractResult.ExitCode -ne 0 -or $extractResult.Stdout.Length -ne 0 -or $extractResult.Stderr.Length -ne 0) { throw "PLAN_BASE_SHA archive extraction failed or emitted unexpected output" }
+      if (-not (Test-Path -LiteralPath (Join-Path $baselineRoot 'agent-runtime/Cargo.toml') -PathType Leaf)) { throw "baseline export is incomplete" }
+      $baselineGoLintVersion = Invoke-CapturedProcess $goLintExecutable @('version') $baselineRoot
+      $baselineClippyVersion = Invoke-CapturedProcess $cargoExecutable @('clippy', '--version') $baselineRoot
+      $baselineRustcVersion = Invoke-CapturedProcess $rustcExecutable @('-vV') $baselineRoot
+      if ($baselineGoLintVersion.ExitCode -ne 0 -or $baselineClippyVersion.ExitCode -ne 0 -or $baselineRustcVersion.ExitCode -ne 0 -or
+          $baselineGoLintVersion.Stderr.Length -ne 0 -or $baselineClippyVersion.Stderr.Length -ne 0 -or $baselineRustcVersion.Stderr.Length -ne 0) {
+        throw "cannot capture PLAN_BASE lint tool versions without stderr"
+      }
+      if (($baselineGoLintVersion.Stdout + $baselineGoLintVersion.Stderr).Trim() -ne ($goLintVersion.Stdout + $goLintVersion.Stderr).Trim() -or
+          ($baselineClippyVersion.Stdout + $baselineClippyVersion.Stderr).Trim() -ne ($clippyVersion.Stdout + $clippyVersion.Stderr).Trim() -or
+          ($baselineRustcVersion.Stdout + $baselineRustcVersion.Stderr).Trim() -ne ($rustcVersion.Stdout + $rustcVersion.Stderr).Trim()) {
+        throw "current and PLAN_BASE lint tool versions differ"
+      }
+
+      $baselineGoManifestBefore = Get-ContentManifest 'export' $baselineRoot $nodeExecutable 'golangci-lint PLAN_BASE before'
+      $baselineGo = Invoke-CapturedProcess $goLintExecutable $goArgs $baselineRoot
+      $baselineGoManifestAfter = Get-ContentManifest 'export' $baselineRoot $nodeExecutable 'golangci-lint PLAN_BASE after'
+      Assert-ContentManifestUnchanged $baselineGoManifestBefore $baselineGoManifestAfter 'golangci-lint PLAN_BASE'
+      $baselineClippy = Invoke-CapturedProcess $cargoExecutable $clippyArgs $baselineRoot
+      "golangci-lint PLAN_BASE exit=$($baselineGo.ExitCode)"
+      "cargo clippy PLAN_BASE exit=$($baselineClippy.ExitCode)"
+      $baselineGoDiagnostics = @(Convert-GoLintJSON $baselineGo 'golangci-lint PLAN_BASE')
+      $baselineClippyAnalysis = Convert-ClippyJSON $baselineClippy 'cargo clippy PLAN_BASE'
+      $baselineRustDiagnostics = @($baselineClippyAnalysis.Diagnostics)
+      Write-ReasonCounts $baselineClippyAnalysis.ReasonCounts 'cargo-clippy-plan-base-json'
+
+      $expectedGo = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+      $expectedGo.Add('chatv2/agent_test.go|err113|NodeRunError fixture', 1)
+      $expectedGo.Add('chatv2/agent_test.go|err113|GraphRunError fixture', 1)
+      $expectedGo.Add('chatv2/chatv2_test.go|usetesting|TestInitRejectsInvalidAgentV3RuntimeBeforeCompilation context fixture', 1)
+      $expectedGo.Add('orm/agentv3_test.go|unused|agentV3MemorySnapshotBuilderUnderTest alias', 1)
+      $expectedRust = [System.Collections.Generic.Dictionary[string, int]]::new([StringComparer]::Ordinal)
+      $expectedRust.Add('agent-runtime/src/exec/launch.rs|unused_variables|unused variable: `identity`', 1)
+      $expectedRust.Add('agent-runtime/src/cgroup.rs|dead_code|method `fixture_kill_log` is never used', 1)
+      $expectedRust.Add('agent-runtime/src/exec/deferred.rs|dead_code|method `len` is never used', 1)
+      $expectedRust.Add('agent-runtime/src/exec/deferred.rs|dead_code|methods `process_group_calls`, `cgroup_calls`, and `jail_calls` are never used', 1)
+      $expectedRust.Add('agent-runtime/src/exec/supervisor.rs|dead_code|method `deferred_cleanup_count_for_tests` is never used', 1)
+      $expectedRust.Add('agent-runtime/src/exec/supervisor.rs|clippy::needless_return|unneeded `return` statement', 2)
+      $expectedRust.Add('agent-runtime/src/exec/supervisor/test_support.rs|dead_code|associated functions `test_direct_with_trace` and `test_direct_with_cleanup_probe` are never used', 1)
+      $expectedRust.Add('agent-runtime/src/runtime_fetch_proxy/binding.rs|dead_code|associated function `with_lifecycle_for_tests` is never used', 1)
+      $expectedRust.Add('agent-runtime/src/runtime_fetch_proxy/binding.rs|clippy::needless_return|unneeded `return` statement', 2)
+      $expectedRust.Add('agent-runtime/src/runtime_fetch_proxy/output.rs|dead_code|variants `Write`, `FileSync`, and `Rename` are never constructed', 2)
+      $expectedRust.Add('agent-runtime/src/runtime_fetch_proxy/output.rs|dead_code|associated items `set_fault` and `with_directory_sync_failure` are never used', 2)
+      $expectedRust.Add('agent-runtime/src/audit/records.rs|clippy::large_enum_variant|large size difference between variants', 2)
+      $expectedRust.Add('agent-runtime/src/exec/spawn/api.rs|clippy::needless_return|unneeded `return` statement', 2)
+      $expectedRust.Add('agent-runtime/src/fetch_auth/crypto.rs|clippy::chunks_exact_to_as_chunks|using `chunks_exact` with a constant chunk size', 2)
+      $expectedRust.Add('agent-runtime/src/fetch_broker/session/attempt.rs|clippy::too_many_arguments|this function has too many arguments (8/7)', 2)
+      $expectedRust.Add('agent-runtime/src/fetch_broker/session/handshake.rs|clippy::large_enum_variant|large size difference between variants', 2)
+      $expectedRust.Add('agent-runtime/src/fetch_cli/client.rs|clippy::needless_return|unneeded `return` statement', 2)
+      $expectedRust.Add('agent-runtime/src/lib.rs|clippy::derivable_impls|this `impl` can be derived', 2)
+      $expectedRust.Add('agent-runtime/src/lib.rs|clippy::too_many_arguments|this function has too many arguments (9/7)', 1)
+      $expectedRust.Add('agent-runtime/src/namespace_gate.rs|clippy::type_complexity|very complex type used. Consider factoring parts into `type` definitions', 1)
+      $expectedRust.Add('agent-runtime/src/runtime_fetch_proxy/lifecycle.rs|clippy::default_constructed_unit_structs|use of `default` to create a unit struct', 1)
+      $expectedRust.Add('agent-runtime/src/scan/tests.rs|clippy::obfuscated_if_else|this method chain can be written more clearly with `if .. else ..`', 1)
+      $expectedRust.Add('agent-runtime/src/fetch_policy/header.rs|clippy::redundant_closure|redundant closure', 2)
+      $currentGoCounts = Get-IdentityCountMap $currentGoDiagnostics
+      $baselineGoCounts = Get-IdentityCountMap $baselineGoDiagnostics
+      $currentRustCounts = Get-IdentityCountMap $currentRustDiagnostics
+      $baselineRustCounts = Get-IdentityCountMap $baselineRustDiagnostics
+      Assert-ExactBaselineAndCurrentSubset $currentGoCounts $baselineGoCounts $expectedGo 'golangci-lint'
+      Assert-ExactBaselineAndCurrentSubset $currentRustCounts $baselineRustCounts $expectedRust 'cargo clippy'
+      Write-DiagnosticCountComparison $currentGoCounts $baselineGoCounts 'golangci-lint'
+      Write-DiagnosticCountComparison $currentRustCounts $baselineRustCounts 'cargo-clippy'
+      $allCurrentDiagnostics = @($currentGoDiagnostics) + @($currentRustDiagnostics)
+      Assert-OutsideImplementationHunks $allCurrentDiagnostics $planBaseSha $repoRoot $gitExecutable
+      "golangci-lint baseline instances=$($baselineGoDiagnostics.Count) current instances=$($currentGoDiagnostics.Count)"
+      "cargo clippy baseline instances=$($baselineRustDiagnostics.Count) current instances=$($currentRustDiagnostics.Count)"
+      "zero-new-lint relative to same-tool PLAN_BASE: GREEN; current diagnostics are baseline subsets and outside implementation files/hunks"
+    } finally {
+      $cleanupRoot = [IO.Path]::GetFullPath($lintTempRoot)
+      $cleanupName = [IO.Path]::GetFileName($cleanupRoot)
+      $cleanupParent = [IO.Path]::GetDirectoryName($cleanupRoot)
+      if ($cleanupParent -ne $tempParent -or $cleanupName -notmatch '^csust-got-agent-v3-lint-[0-9a-f]{32}$') {
+        throw "refusing unsafe lint temp cleanup"
+      }
+      if (Test-Path -LiteralPath $cleanupRoot) {
+        $cleanupItem = Get-Item -LiteralPath $cleanupRoot -Force -ErrorAction Stop
+        if (-not $cleanupItem.PSIsContainer -or ($cleanupItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+          throw "refusing lint temp cleanup for non-directory or reparse-point root"
+        }
+        Remove-Item -LiteralPath $cleanupRoot -Recurse -Force -ErrorAction Stop
+      }
+      if (Test-Path -LiteralPath $cleanupRoot) { throw "lint temp cleanup left residue" }
+    }
+  }
+  ```
+
+  Expected: format, every focused/full test, and the locked release build exit 0 without baseline downgrade; authenticated snapshot, generic `/skills`, User-Agent, redirect, protocol, and security regressions pass. The harness first prints the literal prefix `lint baseline PLAN_BASE_SHA=` followed by the current full `HEAD` only after plan binding succeeds. Each full-repository JSON lint command has a fully classified stdout/stderr/exit relationship; any malformed/unknown record, truncated output, operation failure, or current/baseline Go manifest mutation stops. If diagnostics exist, the harness reproduces the embedded ordinal identity/count dictionaries exactly with the same executable/version/platform and byte-equivalent argv, preserves target-overlap counts, proves every current count is no greater, and checks every current primary location is outside implementation-added files and modified hunks. Report the two read-only manifests, all baseline/current counts, and removed/surviving baseline diagnostics explicitly; do not describe a nonzero result as lint-clean.
 
 - [ ] **Step 3: Run native-Linux and deployment evidence lanes at the same code identity**
 
@@ -1382,18 +2109,18 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
   Before any implementation Git write, include exactly these sections:
 
-  1. `Code identity`: branch, `PLAN_BASE_SHA`, raw pre-commit `HEAD` object ID, approved canonical working-tree `sha256:` identity, and dirty status.
+  1. `Code identity`: branch, `PLAN_BASE_SHA`, raw pre-commit `HEAD` object ID, the exact `lint baseline PLAN_BASE_SHA=` receipt value matching both, approved canonical working-tree `sha256:` identity, and dirty status.
   2. `Changed files`: the bytewise-sorted NUL-safe tracked/untracked implementation manifest, one line per path/type/owning Task; flag the plan or any unexpected path as failure because the unchanged plan already belongs to `PLAN_BASE_SHA`.
-  3. `TDD receipts`: every Task's RED assertion and matching GREEN command.
-  4. `Go matrix`: focused/race/full/build/lint results.
-  5. `Rust matrix`: snapshot/API/Fetch/full/format/clippy/release results and native-Linux status.
+  3. `TDD receipts`: every Task's RED assertion and matching GREEN command; tests, builds, and format checks must have literal zero exits, while lint is GREEN only by literal zero or the separate zero-new-lint receipt below.
+  4. `Go matrix`: focused/race/full/build results plus the `golangci-lint` current exit. Include the four completeness/read-only overrides, current and baseline content-manifest receipts, and, if nonzero, tool version/platform, exact current and baseline diagnostic identities/counts, exact ordinal four-identity baseline-dictionary equality, strict multiset-subset result, new-file/hunk exclusion, and removed/surviving baseline items under the label `zero new lint relative to same-tool PLAN_BASE`.
+  5. `Rust matrix`: snapshot/API/Fetch/full/format/release results and native-Linux status plus the Clippy current exit. If nonzero, include Cargo/Clippy/Rust versions and platform, exact current and baseline diagnostic identities/counts including target-overlap multiplicity, exact ordinal baseline-dictionary equality, strict multiset-subset result, new-file/hunk exclusion, and removed/surviving baseline items under the same zero-new-lint label.
   6. `Real-surface QA`: Runtime one-response immutability, Bot zero/one HTTP call, per-turn load/rich behavior, three SearXNG endpoints and zero-I/O gate, UA wire/redirect behavior, Compose mount separation.
   7. `Deployment evidence`: Compose/static result; host validator and attack matrix recorded separately as recommended evidence.
   8. `Compatibility/non-goals`: generic `/skills`, MCPO/MCP, non-v3 `SkillConfig`, fixed Runtime tools, no new dependencies, and every excluded web/discovery feature unchanged.
   9. `Residual risks`: only concrete unverified environment-specific items; no vague follow-up language.
   10. `Review receipts and Git boundaries`: identity-matched approved receipts; explicit confirmation that workers performed no Git writes; the plan commit ID (`PLAN_BASE_SHA`); and groups A–F recorded only as pending, with no implementation commit IDs yet.
 
-  Stop before any implementation Git write if a required base command is not GREEN, an inventory entry falls outside the allowlist, a source is unreadable/unsupported, a secret appears in evidence, canonical identity changes between evidence/review receipts, or a selected receipt is absent/rejected. Do not claim acceptance from partial output.
+  Stop before any implementation Git write if any required test/build/format command is nonzero; if lint baseline binding does not prove full lowercase `HEAD == PLAN_BASE_SHA`, the plan object at that commit, byte-unchanged working-tree plan, and the printed SHA receipt; if any lint process exit/stdout/stderr/JSON reason/schema cannot be completely classified; if either Go invocation changes its pre/post tracked-plus-untracked or complete-export manifest; if diagnostics exist without a complete successful same-tool `PLAN_BASE_SHA` export, exact ordinal expected/baseline dictionary equality, current strict count-subset proof, and new-file/hunk exclusion; if archive/extraction/parser/version/mutation/comparison/cleanup fails; if an inventory entry falls outside the allowlist; if a source is unreadable/unsupported; if a secret appears in evidence; if canonical identity changes between evidence/review receipts; or if a selected receipt is absent/rejected. A successfully proven nonzero baseline lint delta is GREEN but must remain reported as nonzero baseline debt; do not claim lint-clean acceptance or acceptance from partial output.
 
   Only after the complete packet and all required receipts approve the common working-tree identity, hand control to the explicitly authorized orchestrator—not an implementation worker—to stage and create exactly six semantic commits in A, B, C, D, E, F order. Use the task ownership below and the six suggested titles already recorded by Tasks 1–10; do not mix paths across boundaries. Push remains forbidden at this point.
 
@@ -1484,6 +2211,7 @@ pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 | Exact native schemas, activation zero-I/O, native-over-MCPO warning | `agentv3_searxng_tools_test.go` | Go full/race |
 | Fetch exact default/custom UA, final-map budget, redirect retention | `fetch_policy.rs`, `fetch_broker.rs` | Fetch protocol/security/full Rust |
 | Defaults, rollout, independent mounts, no service, validator evidence class | config tests, README/skills assertions, Compose static script | Docker render/native deployment lane |
+| Full-repository Go/Rust lint regression | Always run strict JSON `golangci-lint run` with fix/dedup/ceilings disabled and full-target/full-feature JSON `cargo clippy -D warnings`; parser validates complete stdout/stderr/exit relationships and Go pre/post content manifests | For diagnostics only: `HEAD`/plan-bound same-executable/version/platform `PLAN_BASE_SHA` temp export, exact ordinal expected/baseline identity-count equality, strict current multiset subset, no implementation-added file/hunk diagnostic, explicit SHA/baseline-debt report; tests/build/fmt never use delta semantics |
 | Final scope, review identity, and delayed Git delivery | `PLAN_BASE_SHA` guard, NUL-safe tracked/untracked inventory, and canonical working-tree wrapper before A–F commits | Identity-matched approved receipts, six-commit range inventory/blob equivalence, clean status/log/range, then push |
 
 ## Suggested Review/Commit Boundaries (Pending Until Final Review Approval)
