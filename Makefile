@@ -34,7 +34,7 @@ test:
 	go test -v -race -covermode=atomic -short ./...
 
 test-json-performance:
-	go test ./chatv2 -run '^TestJSONBackendPerformanceGate$' -count=1
+	go test ./chatv2 -run '^TestJSONBackendPerformanceGate$$' -count=1
 
 fmt:
 	gofmt -l -w . && golangci-lint run --fix=false
