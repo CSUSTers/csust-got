@@ -29,7 +29,7 @@
 
 ## 系统要求
 
-- Go 1.26+
+- Go 1.27+
 - Rust 1.95+（仅在从源码构建或验证 Agent Runtime 时需要）
 - Redis
 - Docker Engine 与 Docker Compose v2（推荐）
@@ -340,7 +340,7 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 
 ## 技术栈
 
-- **语言**: Go 1.26+
+- **语言**: Go 1.27+
 - **框架**: [telebot.v3](https://github.com/tucnak/telebot)
 - **数据库**: Redis
 - **AI**: OpenAI API 兼容接口
@@ -361,7 +361,7 @@ make test
 make build
 
 # 代码检查
-golangci-lint run
+golangci-lint run --fix=false
 ```
 
 ## 许可证

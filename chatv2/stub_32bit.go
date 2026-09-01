@@ -10,7 +10,7 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-// Init is a no-op on 386: eino/sonic does not support 32-bit.
+// Init is a no-op on the existing 32-bit chatv2 stub.
 func Init(_ context.Context) error { return nil }
 
 // Close is a no-op on 386.
