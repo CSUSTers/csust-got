@@ -25,7 +25,7 @@ pub(super) async fn relay_response(
     output_path: Option<String>,
     check_status: bool,
     phase: Arc<Mutex<CommandBindingPhase>>,
-    namespace: &str,
+    namespace_key: &str,
     budget: &WorkspaceBudget,
     context_health: BashHealth,
     cancel: CancellationToken,
@@ -33,9 +33,9 @@ pub(super) async fn relay_response(
     let mut response_state = LocalResponseState::default();
     let mut output = output_path
         .map(|path| {
-            OutputCommitGuard::new_with_health(
+            OutputCommitGuard::new_with_health_and_namespace_key(
                 budget.root(),
-                namespace,
+                namespace_key,
                 &path,
                 budget,
                 Arc::clone(&phase),

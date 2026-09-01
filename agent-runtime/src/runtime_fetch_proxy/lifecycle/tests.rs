@@ -144,6 +144,7 @@ fn test_proxy_lease(
         context: Arc::new(BindingContext {
             phase: Arc::new(Mutex::new(CommandBindingPhase::Active)),
             namespace: "test-namespace".to_string(),
+            namespace_key: crate::identity::namespace_storage_key("test-namespace"),
             workspace_budget,
             health: crate::exec::BashHealth::ready(),
             issued: None,

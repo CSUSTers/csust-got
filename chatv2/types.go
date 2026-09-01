@@ -42,8 +42,6 @@ type TurnContext struct {
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
 	toolMu           sync.Mutex
-	toolSeq          int64
-	richSkillToolSeq int64
 }
 
 type progressStep struct {
@@ -73,32 +71,47 @@ func (tc *TurnContext) MarkEdited() {
 	tc.lastEditAt.Store(time.Now().UnixNano())
 }
 
-func (tc *TurnContext) recordToolCall(_ string) int64 {
-	if tc == nil {
-		return 0
-	}
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
-	tc.toolSeq++
-	return tc.toolSeq
-}
-
-func (tc *TurnContext) markRichMessageSkillLoaded(seq int64) {
-	if tc == nil || seq <= 0 {
-		return
-	}
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
-	tc.richSkillToolSeq = seq
-}
-
 func (tc *TurnContext) richMessageSkillLoadedForFinal() bool {
 	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() {
 		return false
 	}
+	return tc.hasLoadedSkill("rich-message")
+}
+
+func (tc *TurnContext) markSkillLoaded(name string) {
+	if tc == nil {
+		return
+	}
+	canonical, err := parseAgentV3CanonicalSkillName(name)
+	if err != nil {
+		return
+	}
 	tc.toolMu.Lock()
 	defer tc.toolMu.Unlock()
-	return tc.richSkillToolSeq > 0
+	if tc.V3 == nil {
+		return
+	}
+	if tc.V3.loadedSkillNames == nil {
+		tc.V3.loadedSkillNames = make(map[string]struct{})
+	}
+	tc.V3.loadedSkillNames[canonical] = struct{}{}
+}
+
+func (tc *TurnContext) hasLoadedSkill(name string) bool {
+	if tc == nil {
+		return false
+	}
+	canonical, err := parseAgentV3CanonicalSkillName(name)
+	if err != nil {
+		return false
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	if tc.V3 == nil {
+		return false
+	}
+	_, ok := tc.V3.loadedSkillNames[canonical]
+	return ok
 }
 
 // WithTurnContext stores TurnContext in a Go context.
@@ -144,12 +157,15 @@ func (tc *TurnContext) GetOrBuildProgressModel(ctx context.Context) (model.ToolC
 // CompiledChat is a pre-compiled chat configuration ready for concurrent reuse.
 // Created once at init time, used for every incoming request matching this chat config.
 type CompiledChat struct {
-	Name              string
-	Config            *config.ChatConfigSingle
-	Agent             *CustomAgent
-	SystemTemplate    *template.Template
-	PromptTemplate    *template.Template
-	SkillPromptAddons string
+	Name                 string
+	Config               *config.ChatConfigSingle
+	Agent                *CustomAgent
+	SystemTemplate       *template.Template
+	PromptTemplate       *template.Template
+	SkillPromptAddons    string
+	AgentV3StartupSkills *agentV3StartupSkillSnapshots
+	AgentV3SkillSources  []agentV3SkillSnapshot
+	AgentV3SkillCatalog  agentV3SkillCatalog
 }
 
 // RichHistory keeps both the rendered text context and the underlying Telegram

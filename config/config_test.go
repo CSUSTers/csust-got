@@ -9,7 +9,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 var (
@@ -261,32 +263,105 @@ func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	req.NotNil(BotConfig.AgentV3.Runtime.FetchEnabled)
 	req.False(BotConfig.AgentV3.RuntimeFetchEnabled())
 	req.Equal([]string{"read", "grep", "write", "edit", "bash"}, BotConfig.AgentV3.Tools.ExposeOnly)
+	req.Contains(BotConfig.McpoServer.Tools, "searxng")
 	req.Equal(30*24*time.Hour, BotConfig.AgentV3.ContextCacheTTL())
 	req.Equal(120*time.Second, BotConfig.AgentV3.RuntimeCommandTimeout())
+	req.Empty(BotConfig.AgentV3.Skills.Root)
+	req.False(BotConfig.AgentV3.Skills.RuntimeGlobal)
+	req.False(BotConfig.AgentV3.Skills.SearXNG.Enable)
+	req.Equal("https://search.example.org", BotConfig.AgentV3.Skills.SearXNG.BaseURL)
+	req.Equal("SEARXNG_USERNAME", BotConfig.AgentV3.Skills.SearXNG.UsernameEnv)
+	req.Equal("SEARXNG_PASSWORD", BotConfig.AgentV3.Skills.SearXNG.PasswordEnv)
+	req.Equal(10*time.Second, BotConfig.AgentV3.SearXNGTimeout())
 }
 
-func TestCustomConfig(t *testing.T) {
-	req := testInit(t)
+func setupCustomConfigTest(t *testing.T) (*require.Assertions, *observer.ObservedLogs, string) {
+	t.Helper()
 
-	// 创建临时配置文件
-	tempDir := t.TempDir()
+	viper.Reset()
+	t.Cleanup(viper.Reset)
 
-	// 创建基础配置文件
-	baseConfigPath := filepath.Join(tempDir, "config.yaml")
-	err := os.WriteFile(baseConfigPath, []byte("debug: false\ntoken: base-token"), 0644)
-	req.NoError(err)
+	logger := zap.L()
+	core, logs := observer.New(zap.WarnLevel)
+	zap.ReplaceGlobals(zap.New(core))
+	t.Cleanup(func() { zap.ReplaceGlobals(logger) })
 
-	// 创建自定义配置文件
-	customConfigPath := filepath.Join(tempDir, "custom.yaml")
-	err = os.WriteFile(customConfigPath, []byte("debug: true\ntoken: custom-token"), 0644)
-	req.NoError(err)
+	return require.New(t), logs, filepath.Join(t.TempDir(), "config.yaml")
+}
 
-	// 初始化配置
+func writeCustomConfigBase(t *testing.T, configFile string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(configFile, []byte("debug: false\ntoken: base-token\n"), 0o644))
+}
+
+func customConfigWarnings(logs *observer.ObservedLogs) []observer.LoggedEntry {
+	return logs.FilterMessage("an error was produced when reading custom config!").All()
+}
+
+func requireCustomConfigWarning(t *testing.T, logs *observer.ObservedLogs, customConfigFile string) {
+	t.Helper()
+
+	warnings := customConfigWarnings(logs)
+	require.Len(t, warnings, 1)
+	require.Equal(t, customConfigFile, warnings[0].ContextMap()["customConfigFile"])
+	errorValue, ok := warnings[0].ContextMap()["error"]
+	require.True(t, ok)
+	require.NotEmpty(t, errorValue)
+
+	hasErrorField := false
+	for _, field := range warnings[0].Context {
+		if field.Key == "error" && field.Type == zapcore.ErrorType {
+			hasErrorField = true
+			break
+		}
+	}
+	require.True(t, hasErrorField)
+}
+
+func TestCustomConfigMissingIsSilent(t *testing.T) {
+	req, logs, configFile := setupCustomConfigTest(t)
+	writeCustomConfigBase(t, configFile)
+
+	InitViper(configFile, "")
+
+	req.Empty(customConfigWarnings(logs))
+	req.False(viper.GetBool("debug"))
+	req.Equal("base-token", viper.GetString("token"))
+}
+
+func TestCustomConfigMalformedLogsDiagnostic(t *testing.T) {
+	req, logs, configFile := setupCustomConfigTest(t)
+	writeCustomConfigBase(t, configFile)
+	customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	req.NoError(os.WriteFile(customConfigFile, []byte("debug: [unterminated"), 0o644))
+
+	InitViper(configFile, "")
+
+	requireCustomConfigWarning(t, logs, customConfigFile)
+}
+
+func TestCustomConfigUnreadableLogsDiagnostic(t *testing.T) {
+	req, logs, configFile := setupCustomConfigTest(t)
+	writeCustomConfigBase(t, configFile)
+	customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	req.NoError(os.Mkdir(customConfigFile, 0o755))
+
+	InitViper(configFile, "")
+
+	requireCustomConfigWarning(t, logs, customConfigFile)
+}
+
+func TestCustomConfigValidOverridesBase(t *testing.T) {
+	req, logs, configFile := setupCustomConfigTest(t)
+	writeCustomConfigBase(t, configFile)
+	customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	req.NoError(os.WriteFile(customConfigFile, []byte("debug: true\ntoken: custom-token\n"), 0o644))
+
 	BotConfig = NewBotConfig()
-	InitViper(baseConfigPath, "")
+	InitViper(configFile, "")
 	readConfig()
 
-	// 检查custom.yaml是否覆盖了config.yaml中的配置
+	req.Empty(customConfigWarnings(logs))
 	req.True(BotConfig.DebugMode)
 	req.Equal("custom-token", BotConfig.Token)
 }

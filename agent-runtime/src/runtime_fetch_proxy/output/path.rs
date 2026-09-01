@@ -39,11 +39,11 @@ pub(in crate::runtime_fetch_proxy) fn validate_workspace_output_path(
 
 pub(super) fn open_output_parent_nofollow(
     workspace_root: &Path,
-    namespace: &str,
+    namespace_key: &str,
     relative: &Path,
 ) -> Result<(Dir, OsString), RuntimeFetchProxyError> {
     let root = Dir::open_ambient_dir(workspace_root, ambient_authority()).map_err(output_error)?;
-    let mut directory = open_or_create_output_dir(&root, Path::new(namespace))?;
+    let mut directory = open_or_create_output_dir(&root, Path::new(namespace_key))?;
     let mut components = relative.components();
     let name = components
         .next_back()
@@ -125,19 +125,6 @@ pub(super) fn unique_temporary_name(
         ".{}.agent-runtime-{suffix}.tmp",
         destination.to_string_lossy()
     )))
-}
-
-pub(super) fn sanitize_namespace(namespace: &str) -> String {
-    namespace
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

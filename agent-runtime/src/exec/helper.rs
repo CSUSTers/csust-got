@@ -10,8 +10,9 @@ trait ExecInitOps {
     fn config_decode(&mut self, payload: &[u8]) -> Result<ExecSpec, ()>;
     fn config_close(&mut self) -> Result<(), ()>;
     fn cgroup_join(&mut self, spec: &ExecSpec) -> Result<(), ()>;
+    fn capture_hard_nofile(&mut self) -> Result<libc::rlim_t, ()>;
+    fn close_inherited_fds(&mut self, hard_nofile: libc::rlim_t) -> Result<(), ()>;
     fn rlimit(&mut self, spec: &ExecSpec) -> Result<(), ()>;
-    fn close_inherited_fds(&mut self) -> Result<(), ()>;
     fn no_new_privs(&mut self) -> Result<(), ()>;
     fn seccomp(&mut self) -> Result<(), ()>;
     fn target_exec(&mut self, spec: ExecSpec) -> Result<std::convert::Infallible, ()>;
@@ -41,9 +42,12 @@ fn run_exec_init<O: ExecInitOps>(ops: &mut O) -> Result<std::convert::Infallible
         .map_err(|()| ExecInitStage::ConfigClose)?;
     ops.cgroup_join(&spec)
         .map_err(|()| ExecInitStage::CgroupJoin)?;
-    ops.rlimit(&spec).map_err(|()| ExecInitStage::Rlimit)?;
-    ops.close_inherited_fds()
+    let hard_nofile = ops
+        .capture_hard_nofile()
         .map_err(|()| ExecInitStage::CloseInheritedFds)?;
+    ops.close_inherited_fds(hard_nofile)
+        .map_err(|()| ExecInitStage::CloseInheritedFds)?;
+    ops.rlimit(&spec).map_err(|()| ExecInitStage::Rlimit)?;
     ops.no_new_privs().map_err(|()| ExecInitStage::NoNewPrivs)?;
     ops.seccomp().map_err(|()| ExecInitStage::Seccomp)?;
     ops.target_exec(spec)
@@ -79,14 +83,17 @@ impl ExecInitOps for RealExecInitOps {
         join_cgroup(&spec.cgroup_procs).map_err(|_| ())
     }
 
-    fn rlimit(&mut self, spec: &ExecSpec) -> Result<(), ()> {
-        apply_rlimits(&spec.rlimits).map_err(|_| ())
+    fn capture_hard_nofile(&mut self) -> Result<libc::rlim_t, ()> {
+        sandbox::capture_hard_nofile().map_err(|_| ())
     }
 
-    fn close_inherited_fds(&mut self) -> Result<(), ()> {
-        let hard_nofile = sandbox::capture_hard_nofile().map_err(|_| ())?;
+    fn close_inherited_fds(&mut self, hard_nofile: libc::rlim_t) -> Result<(), ()> {
         sandbox::close_inherited_fds_except(hard_nofile, &[COMMAND_CONTROL_FD, EXEC_STATUS_FD])
             .map_err(|_| ())
+    }
+
+    fn rlimit(&mut self, spec: &ExecSpec) -> Result<(), ()> {
+        apply_rlimits(&spec.rlimits).map_err(|_| ())
     }
 
     fn no_new_privs(&mut self) -> Result<(), ()> {

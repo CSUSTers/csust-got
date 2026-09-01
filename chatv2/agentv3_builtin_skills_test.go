@@ -40,7 +40,7 @@ func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
 	t.Run("rich enabled returns exactly one builtin named rich-message", func(t *testing.T) {
 		tc := richEnabledTurnContext()
 		cfg := defaultAgentV3Config()
-		skills := buildAgentV3BuiltinSkills(tc, cfg)
+		skills := buildAgentV3BuiltinSkillSnapshot(tc.Config, cfg).Skills
 		require.Len(t, skills, 1)
 		assert.Equal(t, "rich-message", skills[0].Name)
 		assert.Contains(t, skills[0].Description, "before rich output")
@@ -53,20 +53,19 @@ func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
 	t.Run("rich disabled returns no builtins", func(t *testing.T) {
 		tc := richDisabledTurnContext()
 		cfg := defaultAgentV3Config()
-		assert.Empty(t, buildAgentV3BuiltinSkills(tc, cfg))
+		assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(tc.Config, cfg).Skills)
 	})
 
 	t.Run("nil TurnContext returns no builtins", func(t *testing.T) {
-		assert.Empty(t, buildAgentV3BuiltinSkills(nil, defaultAgentV3Config()))
+		assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(nil, defaultAgentV3Config()).Skills)
 	})
 
 	t.Run("nil TurnContext.Config returns no builtins", func(t *testing.T) {
-		tc := &TurnContext{Config: nil}
-		assert.Empty(t, buildAgentV3BuiltinSkills(tc, defaultAgentV3Config()))
+		assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(nil, defaultAgentV3Config()).Skills)
 	})
 
 	t.Run("nil AgentV3Config returns no builtins", func(t *testing.T) {
-		assert.Empty(t, buildAgentV3BuiltinSkills(richEnabledTurnContext(), nil))
+		assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(richEnabledTurnContext().Config, nil).Skills)
 	})
 
 	t.Run("InjectBuiltin=false returns no builtins even when rich is enabled", func(t *testing.T) {
@@ -74,18 +73,31 @@ func TestBuildAgentV3BuiltinSkillsRichGate(t *testing.T) {
 		disabled := false
 		cfg := &config.AgentV3Config{}
 		cfg.Skills.InjectBuiltin = &disabled
-		assert.Empty(t, buildAgentV3BuiltinSkills(tc, cfg))
+		assert.Empty(t, buildAgentV3BuiltinSkillSnapshot(tc.Config, cfg).Skills)
 	})
+}
+
+func TestBuildAgentV3BuiltinSkillsSearXNGIsIndependentOfRich(t *testing.T) {
+	cfg := &config.AgentV3Config{Skills: config.AgentV3SkillsConfig{SearXNG: testSearXNGConfig("https://search.example.org")}}
+	skills := buildAgentV3BuiltinSkillSnapshot(nonRichAgentV3ChatConfig(), cfg).Skills
+	require.Len(t, skills, 1)
+	assert.Equal(t, "searxng", skills[0].Name)
+}
+
+func TestAgentV3SearXNGSkillContractDescribesMinScoreAsFinite(t *testing.T) {
+	contract := agentV3SearXNGSkillContract()
+	assert.Contains(t, contract, "min_score (finite number)")
+	assert.NotContains(t, contract, "min_score (0..1)")
 }
 
 func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 	t.Run("empty input returns empty string", func(t *testing.T) {
 		assert.Empty(t, buildAgentV3SkillPromptBlock(nil))
-		assert.Empty(t, buildAgentV3SkillPromptBlock([]agentV3BuiltinSkill{}))
+		assert.Empty(t, buildAgentV3SkillPromptBlock([]agentV3SkillDescriptor{}))
 	})
 
 	t.Run("entries with blank name are filtered out", func(t *testing.T) {
-		skills := []agentV3BuiltinSkill{
+		skills := []agentV3SkillDescriptor{
 			{Name: "", Content: "some content"},
 			{Name: "   ", Content: "another content"},
 			{Name: "valid", Content: "real content"},
@@ -97,8 +109,8 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 		assert.NotContains(t, got, "another content")
 	})
 
-	t.Run("entries with blank content are filtered out", func(t *testing.T) {
-		skills := []agentV3BuiltinSkill{
+	t.Run("availability does not expose content", func(t *testing.T) {
+		skills := []agentV3SkillDescriptor{
 			{Name: "no-content", Content: ""},
 			{Name: "whitespace-content", Content: "   "},
 			{Name: "good", Content: "real content"},
@@ -106,12 +118,11 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 		got := buildAgentV3SkillPromptBlock(skills)
 		require.NotEmpty(t, got)
 		assert.Contains(t, got, "good")
-		assert.NotContains(t, got, "no-content")
-		assert.NotContains(t, got, "whitespace-content")
+		assert.NotContains(t, got, "real content")
 	})
 
 	t.Run("remaining skills are sorted by trimmed Name", func(t *testing.T) {
-		skills := []agentV3BuiltinSkill{
+		skills := []agentV3SkillDescriptor{
 			{Name: "zebra", Content: "z content"},
 			{Name: "alpha", Content: "a content"},
 			{Name: "middle", Content: "m content"},
@@ -126,7 +137,7 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 	})
 
 	t.Run("Name and Description attributes escape special XML characters", func(t *testing.T) {
-		skills := []agentV3BuiltinSkill{
+		skills := []agentV3SkillDescriptor{
 			{
 				Name:        `a&b"c<d>e`,
 				Description: `x&y"z<w>v`,
@@ -143,7 +154,7 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 
 	t.Run("content is not embedded in availability block", func(t *testing.T) {
 		raw := "  <b>bold</b> & stuff  "
-		skills := []agentV3BuiltinSkill{
+		skills := []agentV3SkillDescriptor{
 			{Name: "test", Content: raw},
 		}
 		got := buildAgentV3SkillPromptBlock(skills)
@@ -154,14 +165,79 @@ func TestBuildAgentV3SkillPromptBlockSortsFiltersAndEscapes(t *testing.T) {
 	})
 
 	t.Run("block contains the skills prohibition line", func(t *testing.T) {
-		skills := []agentV3BuiltinSkill{
+		skills := []agentV3SkillDescriptor{
 			{Name: "test", Content: "content"},
 		}
 		got := buildAgentV3SkillPromptBlock(skills)
-		assert.Contains(t, got, "Do not use read/grep to load skills from /skills")
-		assert.Contains(t, got, "Rich output gate")
-		assert.Contains(t, got, "during this turn")
-		assert.Contains(t, got, "call_load_skill_before_final_output")
+		assert.Contains(t, got, "load_skill is the only content path")
+		assert.Contains(t, got, "Filesystem skills do not add tool schemas")
+		assert.Contains(t, got, "untrusted data")
+		assert.Contains(t, got, `activation="load_skill"`)
 		assert.Contains(t, got, "load_skill")
 	})
+}
+
+func TestAgentV3SkillAvailabilityIncludesSourceAndContentSHAWithoutContent(t *testing.T) {
+	snapshot := testSkillSnapshot(agentV3SkillSourceBotLocal, []agentV3SkillDescriptor{{
+		Name:        "repo-inspect",
+		Description: `Inspect "repository" files.`,
+		Content:     "secret skill instructions",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	}})
+
+	skill := snapshot.Skills[0]
+	block := buildAgentV3SkillPromptBlock(snapshot.Skills)
+	assert.Contains(t, block, `<skill name="repo-inspect" description="Inspect &quot;repository&quot; files." source="bot-local" sha256="`+skill.SHA256+`" status="available" activation="load_skill" />`)
+	assert.NotContains(t, block, skill.Content)
+	assert.NotContains(t, block, skill.VirtualPath)
+}
+
+func TestAgentV3SkillContentChangeChangesPrefixHash(t *testing.T) {
+	first := testSkillSnapshot(agentV3SkillSourceRuntimeGlobal, []agentV3SkillDescriptor{{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n\nfirst content\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	}})
+	second := testSkillSnapshot(agentV3SkillSourceRuntimeGlobal, []agentV3SkillDescriptor{{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n\nsecond content\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	}})
+	firstCatalog, _, err := mergeAgentV3SkillSnapshots(first)
+	require.NoError(t, err)
+	secondCatalog, _, err := mergeAgentV3SkillSnapshots(second)
+	require.NoError(t, err)
+
+	firstHash := buildAgentV3PrefixHash(hashString("soul"), hashString("rules"), hashString(buildAgentV3SkillPromptBlock(firstCatalog.Sorted)))
+	secondHash := buildAgentV3PrefixHash(hashString("soul"), hashString("rules"), hashString(buildAgentV3SkillPromptBlock(secondCatalog.Sorted)))
+	assert.NotEqual(t, firstHash, secondHash)
+}
+
+func TestCompiledAgentV3SkillCatalogAppliesPerChatBuiltinsAndSourcePrecedence(t *testing.T) {
+	chatCfg := richAgentV3ChatConfig()
+	local := testSkillSnapshot(agentV3SkillSourceBotLocal, []agentV3SkillDescriptor{{
+		Name:        "rich-message",
+		Description: "Local rich message.",
+		Content:     "# Rich message\nLocal rich message.\n",
+		VirtualPath: "/skills/rich-message/SKILL.md",
+	}})
+	runtime := testSkillSnapshot(agentV3SkillSourceRuntimeGlobal, []agentV3SkillDescriptor{{
+		Name:        "repo-inspect",
+		Description: "Inspect repository files.",
+		Content:     "# Repo inspect\nInspect repository files.\n",
+		VirtualPath: "/skills/repo-inspect/SKILL.md",
+	}})
+	sources, catalog, shadows, err := compileAgentV3SkillCatalog(chatCfg, &config.AgentV3Config{}, &agentV3StartupSkillSnapshots{BotLocal: local, RuntimeGlobal: runtime})
+	require.NoError(t, err)
+	require.Len(t, sources, 3)
+	assert.Equal(t, agentV3SkillSourceBuiltin, sources[0].Skills[0].Source)
+	assert.Equal(t, agentV3SkillSourceBuiltin, catalog.ByName["rich-message"].Source)
+	assert.Equal(t, agentV3SkillSourceRuntimeGlobal, catalog.ByName["repo-inspect"].Source)
+	require.Len(t, shadows, 1)
+	assert.Equal(t, agentV3SkillSourceBotLocal, shadows[0].Loser.Source)
+
+	local.Skills[0].Content = "changed after startup"
+	assert.NotEqual(t, "changed after startup", sources[1].Skills[0].Content)
 }

@@ -6,6 +6,8 @@ use http::{Method, StatusCode};
 use ipnet::IpNet;
 use std::net::{IpAddr, SocketAddr};
 
+const EXPECTED_DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 fn defaults() -> PolicyConfig {
     PolicyConfig::approved_defaults()
 }
@@ -318,12 +320,91 @@ fn application_headers_are_allowed_and_sensitive_names_are_case_insensitive() {
             ("X-Application", "allowed"),
         ]))
         .unwrap();
-    assert_eq!(reviewed.headers.len(), 5);
+    assert_eq!(reviewed.headers.len(), 6);
     assert!(reviewed.is_sensitive("AUTHORIZATION"));
     assert!(reviewed.is_sensitive("cookie"));
     assert!(reviewed.is_sensitive("x-api-key"));
     assert!(reviewed.is_sensitive("X-TENANT-SECRET"));
     assert!(!reviewed.is_sensitive("x-application"));
+}
+
+#[test]
+fn header_policy_injects_exact_default_user_agent() {
+    let reviewed = headers()
+        .review(&raw_headers(&[("X-Application", "allowed")]))
+        .unwrap();
+
+    assert_eq!(
+        reviewed.headers.get("user-agent").unwrap(),
+        EXPECTED_DEFAULT_USER_AGENT
+    );
+    assert!(reviewed.headers.contains_key("x-application"));
+}
+
+#[test]
+fn caller_user_agent_suppresses_default_case_insensitively() {
+    let reviewed = headers()
+        .review(&raw_headers(&[("uSeR-aGeNt", "caller")]))
+        .unwrap();
+
+    assert_eq!(reviewed.headers.get("user-agent").unwrap(), "caller");
+    assert_eq!(reviewed.headers.get_all("user-agent").iter().count(), 1);
+}
+
+#[test]
+fn duplicate_caller_user_agent_uses_last_value_only() {
+    let reviewed = headers()
+        .review(&raw_headers(&[
+            ("User-Agent", "first"),
+            ("user-agent", "second"),
+        ]))
+        .unwrap();
+
+    assert_eq!(reviewed.headers.get("user-agent").unwrap(), "second");
+    assert_eq!(reviewed.headers.get_all("user-agent").iter().count(), 1);
+}
+
+#[test]
+fn non_user_agent_duplicate_semantics_are_unchanged() {
+    let reviewed = headers()
+        .review(&raw_headers(&[
+            ("X-Repeat", "first"),
+            ("x-repeat", "second"),
+        ]))
+        .unwrap();
+
+    let values = reviewed
+        .headers
+        .get_all("x-repeat")
+        .iter()
+        .map(|value| value.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(values, ["first", "second"]);
+}
+
+#[test]
+fn final_map_budget_includes_default_or_winning_user_agent() {
+    let default_bytes = ("user-agent".len() + 2 + EXPECTED_DEFAULT_USER_AGENT.len() + 2) as u64;
+    let mut default_budget = defaults();
+    default_budget.request_header_bytes = default_bytes - 1;
+    assert_eq!(
+        HeaderPolicy::new(default_budget)
+            .review(&[])
+            .unwrap_err()
+            .code(),
+        PolicyCode::BudgetExceeded
+    );
+
+    let mut winning_budget = defaults();
+    winning_budget.request_header_bytes = ("user-agent".len() + 2 + 1 + 2) as u64;
+    let reviewed = HeaderPolicy::new(winning_budget)
+        .review(&raw_headers(&[
+            ("User-Agent", "discarded"),
+            ("USER-AGENT", "x"),
+        ]))
+        .unwrap();
+    assert_eq!(reviewed.wire_bytes, ("user-agent".len() + 2 + 1 + 2) as u64);
+    assert_eq!(reviewed.headers.get("user-agent").unwrap(), "x");
 }
 
 #[test]
@@ -375,13 +456,15 @@ fn header_tokens_values_and_exact_wire_size_are_enforced() {
     }
 
     let mut config = defaults();
-    config.request_header_bytes = 10;
+    config.request_header_bytes = 25;
     let policy = HeaderPolicy::new(config);
-    let exact = policy.review(&raw_headers(&[("x", "value")])).unwrap();
-    assert_eq!(exact.wire_bytes, 10);
+    let exact = policy
+        .review(&raw_headers(&[("x", "value"), ("User-Agent", "a")]))
+        .unwrap();
+    assert_eq!(exact.wire_bytes, 25);
     assert_eq!(
         policy
-            .review(&raw_headers(&[("x", "values")]))
+            .review(&raw_headers(&[("x", "values"), ("User-Agent", "a")]))
             .unwrap_err()
             .code(),
         PolicyCode::BudgetExceeded
@@ -443,7 +526,7 @@ fn redirects_strip_all_cross_origin_credentials_but_preserve_same_origin_headers
             0,
         )
         .unwrap();
-    assert_eq!(same.headers.headers.len(), 5);
+    assert_eq!(same.headers.headers.len(), 6);
 
     let cross = redirect_policy
         .review(
@@ -462,6 +545,43 @@ fn redirects_strip_all_cross_origin_credentials_but_preserve_same_origin_headers
     assert!(!cross.headers.contains("x-tenant-secret"));
     assert!(cross.headers.contains("x-application"));
     assert_eq!(cross.body, BodyReplay::Replayable { bytes: 12 });
+}
+
+#[test]
+fn redirects_preserve_user_agent_while_stripping_credentials() {
+    let mut config = defaults();
+    config
+        .credential_header_names
+        .push("X-Tenant-Secret".to_string());
+    let target_policy = TargetPolicy::new(config.clone());
+    let header_policy = HeaderPolicy::new(config.clone());
+    let redirect_policy = RedirectPolicy::new(config);
+    let current = target_policy.normalize("https://a.example/start").unwrap();
+    let reviewed = header_policy
+        .review(&raw_headers(&[
+            ("Authorization", "Bearer secret"),
+            ("X-Tenant-Secret", "tenant"),
+        ]))
+        .unwrap();
+
+    let next = redirect_policy
+        .review(
+            &current,
+            StatusCode::FOUND,
+            "https://b.example/next",
+            reviewed,
+            Method::GET,
+            BodyReplay::Empty,
+            0,
+        )
+        .unwrap();
+    assert!(!next.headers.contains("authorization"));
+    assert!(!next.headers.contains("x-tenant-secret"));
+    assert_eq!(
+        next.headers.headers.get("user-agent").unwrap(),
+        EXPECTED_DEFAULT_USER_AGENT
+    );
+    assert!(!next.headers.is_sensitive("user-agent"));
 }
 
 #[test]

@@ -38,7 +38,7 @@ func main() {
 	chat.InitMcpoClient()
 	chat.InitAiClients(config.BotConfig.ActiveChatConfig())
 	if err := chatv2.Init(context.Background()); err != nil {
-		zap.L().Error("chatv2: init failed", zap.Error(err))
+		log.Panic("chatv2: init failed", zap.Error(err))
 	}
 	defer chatv2.Close()
 	initChatRegexHandlers(config.BotConfig.ActiveChatConfig())

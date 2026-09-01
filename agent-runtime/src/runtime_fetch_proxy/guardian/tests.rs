@@ -25,6 +25,7 @@ async fn real_guardian_session_panic_and_error_block_success_receipt() {
         let context = Arc::new(BindingContext {
             phase: Arc::new(Mutex::new(CommandBindingPhase::Active)),
             namespace: "guardian-test".to_string(),
+            namespace_key: crate::identity::namespace_storage_key("guardian-test"),
             workspace_budget: budget,
             health: BashHealth::ready(),
             issued: None,
@@ -76,6 +77,7 @@ async fn real_guardian_holds_two_permits_until_join_receipts_are_consumed() {
     let context = Arc::new(BindingContext {
         phase: Arc::new(Mutex::new(CommandBindingPhase::Active)),
         namespace: "guardian-permits".to_string(),
+        namespace_key: crate::identity::namespace_storage_key("guardian-permits"),
         workspace_budget: budget,
         health: BashHealth::ready(),
         issued: None,

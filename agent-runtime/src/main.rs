@@ -2,8 +2,11 @@ use agent_runtime::{
     AppState, BashSandboxMode, app,
     config::{RuntimeConfig, RuntimeFetchConfig},
     exec::{BashHealth, CommandSupervisor},
+    namespace_gate::NamespaceGate,
     runtime_fetch_proxy::RuntimeFetchProxy,
     runtime_security::RuntimeFetchSecurity,
+    skills::FrozenSkillSnapshot,
+    trace::JsonlTraceSink,
     workspace_budget::WorkspaceBudget,
 };
 use std::env;
@@ -20,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let config = RuntimeConfig::from_env(|name| env::var(name).ok())?;
+    let skill_snapshot = FrozenSkillSnapshot::load(config.skills_root.as_deref())?;
     let workspace_budget =
         WorkspaceBudget::new(&config.workspace_root, config.workspace_max_bytes)?;
     let (fetch_proxy, require_fetch_for_readiness) = match &config.fetch {
@@ -53,10 +57,11 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         workspace_root: workspace_budget.root().to_path_buf(),
         skills_root: config.skills_root.clone(),
+        skill_snapshot,
         auth_token: Some(config.auth_token.expose_secret().to_owned()),
         max_output_chars: config.max_output_chars,
         command_timeout: config.command_timeout,
-        trace_jsonl_path: config.trace_jsonl_path.clone(),
+        trace_sink: JsonlTraceSink::new(config.trace_jsonl_path.clone()),
         bash_sandbox: BashSandboxMode::Proot,
         command_supervisor: command_supervisor.clone(),
         bash_health,
@@ -64,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         require_fetch_for_readiness,
         bash_readiness_error,
         workspace_budget,
+        namespace_gate: NamespaceGate::default(),
     };
 
     let listener = TcpListener::bind(config.listen_addr).await?;

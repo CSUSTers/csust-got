@@ -38,7 +38,7 @@ fn runtime_config_has_exact_approved_defaults() {
         "0.0.0.0:8080".parse::<SocketAddr>().unwrap()
     );
     assert_eq!(config.workspace_root, PathBuf::from("workspaces"));
-    assert_eq!(config.skills_root, PathBuf::from("skills"));
+    assert_eq!(config.skills_root, Some(PathBuf::from("skills")));
     assert_eq!(config.workspace_max_bytes, 512 * 1024 * 1024);
     assert_eq!(config.cgroup.limits.pids_max, 64);
     assert_eq!(config.cgroup.limits.memory_max_bytes, 256 * 1024 * 1024);
@@ -72,6 +72,14 @@ fn runtime_config_requires_every_unbounded_security_input() {
         let error = parse_runtime(&blank).unwrap_err();
         assert!(error.contains(name), "{name}: {error}");
     }
+}
+
+#[test]
+fn runtime_config_accepts_explicitly_disabled_skills_root() {
+    let mut values = runtime_env();
+    values.insert("AGENT_RUNTIME_SKILLS_ROOT", " \t ".to_string());
+
+    assert_eq!(parse_runtime(&values).unwrap().skills_root, None);
 }
 
 #[test]
@@ -189,7 +197,6 @@ fn runtime_config_rejects_invalid_addresses_paths_and_boolean() {
     for (name, invalid) in [
         ("AGENT_RUNTIME_ADDR", "not-an-address"),
         ("AGENT_RUNTIME_WORKSPACE_ROOT", ""),
-        ("AGENT_RUNTIME_SKILLS_ROOT", ""),
         ("AGENT_RUNTIME_TRACE_JSONL", ""),
         ("AGENT_RUNTIME_CGROUP_ROOT", "relative/cgroup"),
         ("AGENT_RUNTIME_CGROUP_AGGREGATE_ROOT", "relative/aggregate"),

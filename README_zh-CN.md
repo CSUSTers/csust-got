@@ -30,14 +30,15 @@
 ## 系统要求
 
 - Go 1.26+
+- Rust 1.95+（仅在从源码构建或验证 Agent Runtime 时需要）
 - Redis
-- Docker & Docker Compose（推荐）
+- Docker Engine 与 Docker Compose v2（推荐）
 
 ## 快速部署
 
 ### 使用 Docker Compose（推荐）
 
-您需要先安装 Docker。
+请先安装 Docker Engine 与 Docker Compose v2。
 
 克隆项目：
 
@@ -46,10 +47,16 @@ git clone git@github.com:CSUSTers/csust-got.git
 cd csust-got
 ```
 
-然后使用 Docker Compose 运行：
+启动仓库中已提交的 Compose 部署前，请在部署环境中设置以下必需的基础输入：
+
+`AGENT_RUNTIME_TOKEN`、`AGENT_RUNTIME_CGROUP_PARENT`、`AGENT_RUNTIME_WORKSPACE_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES`、`AGENT_RUNTIME_LOG_FS_MAX_BYTES`、`AGENT_RUNTIME_WORKSPACE_HOST_ROOT`、`AGENT_RUNTIME_LOG_HOST_ROOT` 和 `AGENT_RUNTIME_CGROUP_HOST_ROOT`。
+
+主机上的聚合/委派 cgroup，以及受限的工作区和 Runtime 日志挂载根目录必须预先存在。Compose 不会创建它们。完整主机验证属于下文受控 Fetch 的预检；只有这些基础输入时，不要声称主机已通过验证。
+
+然后启动基础部署。Fetch 保持禁用：
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 从源码构建
@@ -69,13 +76,36 @@ make build
 ./got
 ```
 
-## 升级
-
-克隆最新版本：
+如需直接验证源码，请使用受支持的 Linux 构建环境。生产用 Agent Runtime 构建仅支持 Linux：
 
 ```bash
-docker-compose pull
-docker-compose up -d
+go build ./...
+cargo build --manifest-path agent-runtime/Cargo.toml --locked --release --bins
+```
+
+## 升级
+
+已提交的 Compose 文件会从源码构建 Runtime；启用 Fetch 覆盖文件时也会从源码构建 Broker。请先更新源码检出，再重新构建并启动基础部署：
+
+```bash
+git pull --ff-only
+docker compose build --pull agent-runtime
+docker compose up -d
+```
+
+对于受控 Fetch 部署，请使用覆盖文件重建两个从源码构建的服务：
+
+```bash
+git pull --ff-only
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml build --pull agent-runtime agent-fetch-broker
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
+```
+
+`docker compose pull` 不会更新从源码构建的 Runtime 或 Broker。对于由运维人员维护镜像的部署，请将仅限该部署的 `build:` 条目替换为匹配的 Bot、Runtime，以及启用 Fetch 时的 Broker 镜像标签。拉取这些匹配的镜像标签后，再启动同一部署：
+
+```bash
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml pull
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
 ```
 
 ## 配置
@@ -98,7 +128,19 @@ agent_v3:
     fetch_enabled: true
 ```
 
-这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile，并满足所需的环境变量、密钥、受限挂载、网络和 cgroup 前置条件。
+这些机器人配置开关本身不会启用生产环境的出站访问。基础 `docker-compose.yml` 保持 Fetch 禁用。受控 Fetch 需要 `docker-compose.fetch.yml` 覆盖文件及其 `agent-fetch` profile。除非运维人员设置 `AGENT_FETCH_ENABLE=true`，并提供 `AGENT_FETCH_POLICY_VERSION`、`AGENT_FETCH_EXTRA_DENY_CIDRS`、`AGENT_FETCH_DNS_SERVERS`、`AGENT_FETCH_AUDIT_FS_MAX_BYTES`、`AGENT_FETCH_AUDIT_HOST_ROOT` 和 `AGENT_FETCH_HMAC_SECRET_FILE`，否则请保持禁用。
+
+首次运行 validator 前，必须提供完整的 Runtime 与受控 Fetch 主机约定。即使基础 Fetch 默认关闭，validator 仍会无条件要求 `AGENT_FETCH_AUDIT_HOST_ROOT`、`AGENT_FETCH_HMAC_SECRET_FILE`、`AGENT_FETCH_AUDIT_FS_MAX_BYTES`、`AGENT_FETCH_DNS_SERVERS` 和 `AGENT_FETCH_EXTRA_DENY_CIDRS`，以及上文列出的 Runtime 输入。`AGENT_FETCH_ENABLE` 和 `AGENT_FETCH_POLICY_VERSION` 不是 validator 输入。主机上的聚合/委派 cgroup 和全部受限挂载根目录（包括 Fetch 审计根目录）必须预先存在。Compose 和 validator 都不会创建主机路径或迁移数据。
+
+请以 root 身份在目标原生 Linux 主机上运行只读 validator，然后仅使用覆盖文件和 profile 启动受控 Fetch：
+
+```bash
+bash scripts/validate-agent-runtime-host.sh
+```
+
+```bash
+docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fetch.yml up -d
+```
 
 模型和 MCP 工具是通过已注册 schema 直接发起的模型工具调用。Runtime Fetch 则在 Bash 环境中运行 `/usr/local/bin/fetch`，并通过 `bash` 工具调用，概念上为 `bash(command="fetch GET ...")`。名为 `fetch` 的 MCP/MCPO 工具是独立能力，不经过 Runtime Egress Broker。若要求 Runtime Broker 成为唯一的 Web 出站策略边界，请为该 Agent 移除或禁用 fetch 类 MCP 工具。
 
@@ -116,7 +158,108 @@ bash scripts/agent-runtime-attack-matrix.sh
 
 validator、Compose/static 测试和攻击矩阵都是部署检查，而不是 Runtime gate：Runtime 不会动态读取或根据其回执进行 gate。每个命令应以 0 退出，攻击矩阵应报告 `fail=0 skipped=0`，且清理后不应留下任何残留物。主机 validator 接受等价的 nftables reject 渲染，例如 `iifname "br-agent-fetch" reject with icmp port-unreachable`；但它仍要求精确的 bridge 匹配、所需 deny set、hook/priority/policy，以及紧跟预期匹配后的 reject verdict。不要为规避 PRoot 问题而使用 `privileged`、Docker `seccomp=unconfined`、AppArmor unconfined 或 `SYS_PTRACE`，除非已单独接受其风险。目标原生 Linux 的生产启用回执仍在等待中，在满足这些条件前请勿启用生产 Fetch。完整威胁模型和部署约定见 [Agent Runtime Fetch Egress 设计](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md)。
 
-Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。当前 Compose 文件默认从源码构建 `runtime` 和 `broker` target。若要使用 GHCR，请将部署专用的 `build:` 条目替换为匹配的 `image:` 引用，基础 Compose 文件不会自动拉取这些镜像。
+Agent Runtime 工作流会发布 `ghcr.io/csusters/agent-runtime:<tag>` 和 `ghcr.io/csusters/agent-fetch-broker:<tag>`。`dev` 分支发布 `dev` 和 `latest-dev`，已发布的 release 发布其 release tag 和 `latest`。
+
+### Skills、原生 SearXNG 与 Fetch User-Agent
+
+新的 skill 来源默认关闭：
+
+```yaml
+agent_v3:
+  skills:
+    root: ""
+    runtime_global: false
+    searxng:
+      enable: false
+```
+
+`agent_v3.skills.root` 是 Bot-local root，`runtime_global` 控制可选的
+Runtime-global snapshot。三个来源按固定优先级
+`builtin > bot-local > runtime-global` 合并。同一来源中 malformed 或重复的
+skill 会令拥有该来源的进程启动失败。跨来源重名不会失败，优先级较高的 skill
+获胜，并记录不含 skill 正文的 shadow warning。
+
+每个 filesystem skill 必须恰好位于 `<root>/<canonical-name>/SKILL.md`，名称
+匹配 `^[a-z0-9][a-z0-9-]{0,63}$`。loader 会忽略 root 中的普通文件，例如
+`README.md`，但 malformed 的直接子目录会使该来源失败。它不递归、不跟随
+symlink，也不要求 YAML/frontmatter。`SKILL.md` 必须是非空 UTF-8，单个上限
+64 KiB；每个来源最多 128 个 skill、最多 1 MiB 正文。description 取第一条
+非空、非 ATX heading 的 prose line，去除首尾空白并限制为 200 个 Unicode rune。
+
+snapshot 在启动后不可变。要刷新内容，必须重启拥有它的 Bot 或 Runtime。模型
+只能通过 `load_skill` 获取正文，不能用 generic `read` 或 `grep` 读取
+`/skills`。generic read-only Runtime `/skills` 文件系统和 scripts 仍供运维人员
+与 Runtime 使用，但它们不授权或激活 skill，也不会注册 tool schema。
+
+#### Runtime-global 上线与挂载
+
+先升级并启动能提供已认证 `GET /v1/skills` 的 Runtime，然后才在 Bot 中启用
+`agent_v3.skills.runtime_global: true`。Bot 只会在启动时获取并验证一次完整
+snapshot。请求失败或 snapshot 无效会令 Bot 启动失败，重启是唯一的刷新方式。
+
+已提交的 Compose 部署只挂载 Runtime skill root：
+
+```text
+./skills:/runtime/skills:ro
+```
+
+它没有挂载 Bot-local root。当 `agent_v3.skills.root` 非空时，运维人员必须单独
+把该目录挂载到 Bot 可读的配置路径。Runtime 挂载不会被复制或自动共享给 Bot。
+
+#### 原生 SearXNG
+
+只有 `agent_v3.skills.inject_builtin` 和
+`agent_v3.skills.searxng.enable` 都为 true 时，Agent v3 才会加入 `searxng`
+builtin skill，并为一个固定配置实例注册以下且仅以下原生 tools：
+
+- `searxng_web_search`
+- `searxng_search_suggestions`
+- `searxng_instance_info`
+
+模型每一轮都必须先成功调用 `load_skill("searxng")`，才可使用其中任何 tool。
+激活前不会进行任何 HTTP I/O，包括 DNS、连接和读取凭据。若 MCPO tool 同名，
+原生 tool 获胜并记录 warning。MCPO 保留，其他 tools 仍可用。
+
+配置位于 `agent_v3.skills.searxng`：`enable`、`base_url`、`username_env`、
+`password_env`、`timeout`、`max_response_bytes`、`max_results`、
+`max_result_chars`、`default_language`、`default_safesearch`、
+`default_response_format` 和 `user_agent`。已提交的默认值是 10s timeout、
+1,048,576 response bytes、10 个结果、每个结果 2,000 个字符、`zh-CN`、
+safesearch `1`、response format `text` 和 user agent `csust-got-agent-v3`。
+`agent_v3.skills.mode` 为 `system_prompt`，`inject_builtin` 默认是 true。启用时，
+`base_url` 必须是没有 userinfo、query 或 fragment 的绝对 `http` 或 `https` URL。
+`username_env` 和 `password_env` 可选，但必须成对命名，且必须是合法环境变量名。
+限制分别为 1ms 到 30s、1 byte 到 5 MiB、1 到 20 个结果、1 到 16,384 个且不超过
+response limit 的 result characters、非空且无控制字符的 64-rune language、
+safesearch 0、1 或 2，以及非空、无控制字符且最多 512 bytes 的 user agent。
+response format 只能是 `text` 或 `json`。
+
+SearXNG 不支持多实例、failover、fanout、cache、HTML fallback、proxy 或 browser
+solver。它不会新增 generic URL reader。本工作不会移除 MCPO。
+
+#### Fetch Broker User-Agent
+
+在最终 wire-budget 检查前，如 caller 没有提供 `User-Agent`，Fetch Broker 会加入
+以下默认值：
+
+```text
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36
+```
+
+caller 的 `User-Agent` 名称按大小写不敏感匹配。若 caller 提供多个值，最后一个
+caller 值获胜，且不会加入默认值。这不会加入更广泛的 browser headers 或 browser
+emulation：不会注入 `Accept`、`Accept-Language`、Client Hints、cookies 或其他
+browser 行为。
+
+host validator、Compose/static checks 和 attack matrix 只是推荐的部署证据，绝不
+成为 Bot 或 Runtime 的基础启动、readiness 或 activation gate。主机条件不满足时，
+运维人员仍可运行基础部署，但不得声称这些部署检查已通过。
+
+### Runtime 工作区存储与旧工作区迁移
+
+新版 Runtime 使用完整命名空间的全小写 SHA-256 值作为命名空间目录键，不会自动打开旧版有损工作区目录。旧映射可能发生碰撞，因此自动迁移可能会将数据关联到错误的命名空间。
+
+如需保留旧工作区，请停止 Runtime、备份工作区卷，然后执行经运维人员审查的显式离线迁移。不要使用自动重命名算法。
 
 ## 命令列表
 

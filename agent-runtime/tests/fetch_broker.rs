@@ -38,11 +38,12 @@ use std::{
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _, DuplexStream},
     sync::Notify,
-    time::{sleep, timeout},
+    time::{advance, sleep, timeout},
 };
 
 const KEY: &[u8] = b"a sufficiently long broker test signing key";
 const PEER: PeerCred = PeerCred { uid: 101, gid: 102 };
+const EXPECTED_DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 #[test]
 fn broker_config_requires_enable_security_inputs_and_bounds_optional_numbers() {
@@ -228,8 +229,54 @@ async fn silent_peer_is_closed_at_one_absolute_handshake_deadline() {
     assert!(records.lock().unwrap().is_empty());
 }
 
+#[tokio::test(start_paused = true)]
+async fn authenticated_idle_peer_is_closed_at_original_request_head_deadline_without_side_effects()
+{
+    let mut limited = config();
+    limited.pre_auth_connections = 1;
+    limited.handshake_timeout = Duration::from_millis(50);
+    let records = Arc::new(Mutex::new(Vec::new()));
+    let resolver = ScriptedResolver::answers(vec![public_ip()]);
+    let resolver_calls = Arc::clone(&resolver.calls);
+    let connector = ScriptedConnector::successes([response(200, &[], [])]);
+    let connector_calls = Arc::clone(&connector.calls);
+    let broker = broker_with_config(
+        limited,
+        resolver,
+        connector,
+        JsonlAuditSink::with_writer(RecordingWriter::new(Arc::clone(&records))),
+    );
+    let (mut client, task) = start_state(Arc::clone(broker.state()), PEER);
+    authenticate_client(&mut client, valid_token()).await;
+
+    advance(Duration::from_millis(49)).await;
+    assert_eq!(broker.metrics().handshake_timeouts, 0);
+    assert!(!task.is_finished());
+
+    advance(Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        task.is_finished(),
+        "authenticated idle peer survived the original request head deadline"
+    );
+
+    let mut byte = [0_u8; 1];
+    assert_eq!(client.read(&mut byte).await.unwrap(), 0);
+    task.await.unwrap().unwrap();
+
+    let metrics = broker.metrics();
+    assert_eq!(metrics.active_pre_auth, 0);
+    assert_eq!(metrics.handshake_timeouts, 1);
+    assert_eq!(metrics.body_frames_read, 0);
+    assert_eq!(metrics.resolver_calls, 0);
+    assert_eq!(metrics.connector_calls, 0);
+    assert_eq!(resolver_calls.load(Ordering::Relaxed), 0);
+    assert!(connector_calls.lock().unwrap().is_empty());
+    assert!(records.lock().unwrap().is_empty());
+}
+
 #[tokio::test]
-async fn preauth_permit_is_released_after_authentication() {
+async fn preauth_permit_is_released_after_request_head_decoding() {
     let mut limited = config();
     limited.pre_auth_connections = 1;
     let broker = broker_with_config(
@@ -241,6 +288,34 @@ async fn preauth_permit_is_released_after_authentication() {
     let state = Arc::clone(broker.state());
     let (mut authenticated, authenticated_task) = start_state(Arc::clone(&state), PEER);
     authenticate_client(&mut authenticated, valid_token()).await;
+    assert_eq!(broker.metrics().active_pre_auth, 1);
+
+    let (mut before_request_head, before_request_head_task) = start_state(Arc::clone(&state), PEER);
+    let mut byte = [0_u8; 1];
+    assert_eq!(
+        timeout(
+            Duration::from_millis(100),
+            before_request_head.read(&mut byte)
+        )
+        .await
+        .expect("authenticated connection released the permit before the request head")
+        .unwrap(),
+        0
+    );
+    before_request_head_task.await.unwrap().unwrap();
+    assert_eq!(broker.metrics().active_pre_auth, 1);
+    assert_eq!(broker.metrics().rejected_pre_auth, 1);
+
+    write_client_frame(
+        &mut authenticated,
+        &ClientFrame::Request(request_head("GET", "https://public.example/", &[], false)),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_broker_frame(&mut authenticated).await.unwrap(),
+        BrokerFrame::Continue
+    ));
     assert_eq!(broker.metrics().active_pre_auth, 0);
 
     let (silent, silent_task) = start_state(state, PEER);
@@ -250,8 +325,8 @@ async fn preauth_permit_is_released_after_authentication() {
         }
     })
     .await
-    .expect("authenticated connection retained the only pre-auth permit");
-    assert_eq!(broker.metrics().rejected_pre_auth, 0);
+    .expect("request-head decoding did not release the pre-auth permit");
+    assert_eq!(broker.metrics().rejected_pre_auth, 1);
 
     authenticated_task.abort();
     silent_task.abort();
@@ -413,7 +488,7 @@ async fn broker_accepts_only_runtime_peer_uid_gid_and_valid_internal_token() {
 
     let (mut valid, valid_task) = start_state(state, PEER);
     authenticate_client(&mut valid, token).await;
-    assert_eq!(broker.metrics().active_pre_auth, 0);
+    assert_eq!(broker.metrics().active_pre_auth, 1);
     valid_task.abort();
     drop(valid);
     let _ = valid_task.await;
@@ -845,6 +920,49 @@ async fn retries_and_redirects_reresolve_and_strip_cross_origin_credentials() {
     assert!(!calls[2].has_authorization);
     assert_eq!(resolver_calls.load(Ordering::Relaxed), 3);
     assert_eq!(body, b"ok");
+}
+
+#[tokio::test]
+async fn broker_writes_the_reviewed_user_agent_on_every_redirect_hop() {
+    let connector = ScriptedConnector::steps([
+        Step::Response(response(
+            302,
+            &[("location", "https://other.example/final")],
+            [],
+        )),
+        Step::Response(response(200, &[], [b"ok".as_slice()])),
+    ]);
+    let calls = Arc::clone(&connector.calls);
+    let broker = broker(
+        ScriptedResolver::answers(vec![public_ip()]),
+        connector,
+        healthy_audit(),
+    );
+    let (mut client, task) = start(broker);
+
+    begin_request(
+        &mut client,
+        valid_token(),
+        "GET",
+        "https://public.example/start",
+        &[],
+        true,
+    )
+    .await;
+    write_client_frame(&mut client, &ClientFrame::BodyEnd)
+        .await
+        .unwrap();
+    let (_, body) = read_success(&mut client).await;
+    task.await.unwrap().unwrap();
+
+    assert_eq!(body, b"ok");
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.user_agent.as_deref() == Some(EXPECTED_DEFAULT_USER_AGENT))
+    );
 }
 
 #[tokio::test]
@@ -1966,6 +2084,7 @@ enum Step {
 struct ConnectorCall {
     approved_ip: IpAddr,
     has_authorization: bool,
+    user_agent: Option<String>,
 }
 
 impl ScriptedConnector {
@@ -1992,6 +2111,12 @@ impl PinnedConnector for ScriptedConnector {
         self.calls.lock().unwrap().push(ConnectorCall {
             approved_ip: target.addresses[0].ip(),
             has_authorization: request.headers.contains("authorization"),
+            user_agent: request
+                .headers
+                .headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
         });
         let step = self
             .steps

@@ -5,13 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-const agentV3MaxStoredTurns = 1000
+const (
+	agentV3MaxStoredTurns = 1000
+	agentV3CASMaxAttempts = 5
+)
+
+// ErrAgentV3StateConflict reports that bounded optimistic retries were exhausted.
+var ErrAgentV3StateConflict = errors.New("agent v3 state changed during bounded retry")
 
 // AgentV3Scope identifies one agent-v3 chat namespace.
 type AgentV3Scope struct {
@@ -34,12 +41,19 @@ type AgentV3PrefixRecord struct {
 	UpdatedAt             time.Time `json:"updated_at"`
 }
 
+// AgentV3ImageRef identifies a Telegram image that an agent-v3 turn can download.
+type AgentV3ImageRef struct {
+	MessageID int    `json:"message_id"`
+	FileID    string `json:"file_id"`
+}
+
 // AgentV3Turn stores one user or assistant turn.
 type AgentV3Turn struct {
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	MessageID int       `json:"message_id,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Role      string            `json:"role"`
+	Content   string            `json:"content"`
+	MessageID int               `json:"message_id,omitempty"`
+	ImageRefs []AgentV3ImageRef `json:"image_refs,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // AgentV3MemoryItem stores one chat-scoped memory item.
@@ -65,6 +79,12 @@ type AgentV3Summary struct {
 	Content   string    `json:"content"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
+
+// AgentV3SummaryBuilder builds a replacement rolling summary from watched state.
+type AgentV3SummaryBuilder func(turns []AgentV3Turn, current *AgentV3Summary) (*AgentV3Summary, error)
+
+// AgentV3MemorySnapshotBuilder builds a replacement memory snapshot from watched state.
+type AgentV3MemorySnapshotBuilder func(items []AgentV3MemoryItem, current *AgentV3MemorySnapshot) (*AgentV3MemorySnapshot, error)
 
 // AgentV3TraceSummary stores compact trace metadata for the last run.
 type AgentV3TraceSummary struct {
@@ -252,6 +272,42 @@ func AgentV3SetSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3S
 	return rc.Set(ctx, agentV3SummaryCurrentKey(scope), data, ttl).Err()
 }
 
+// AgentV3UpdateSummary atomically rebuilds the current conversation summary from recent turns.
+func AgentV3UpdateSummary(ctx context.Context, scope AgentV3Scope, maxTurns int, ttl time.Duration, builder AgentV3SummaryBuilder) error {
+	if builder == nil {
+		return nil
+	}
+	if maxTurns <= 0 {
+		maxTurns = 80
+	}
+
+	summaryKey := agentV3SummaryCurrentKey(scope)
+	turnsKey := agentV3TurnsKey(scope)
+	return agentV3WatchRetry(ctx, []string{summaryKey, turnsKey}, func(tx *redis.Tx) error {
+		current, err := agentV3GetSummaryFromTx(ctx, tx, summaryKey)
+		if err != nil {
+			return err
+		}
+		turns, err := agentV3LoadRecentTurnsFromTx(ctx, tx, turnsKey, maxTurns)
+		if err != nil {
+			return err
+		}
+		next, err := builder(turns, current)
+		if err != nil || next == nil {
+			return err
+		}
+		data, err := json.Marshal(next)
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, summaryKey, data, ttl)
+			return nil
+		})
+		return err
+	})
+}
+
 // AgentV3AddMemory stores one active memory item.
 func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration) error {
 	if item.ID == "" {
@@ -324,6 +380,92 @@ func AgentV3SetMemorySnapshot(ctx context.Context, scope AgentV3Scope, snapshot 
 	return err
 }
 
+// AgentV3RebuildMemorySnapshot atomically rebuilds a memory snapshot from active memory items.
+func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl time.Duration, builder AgentV3MemorySnapshotBuilder) error {
+	if builder == nil {
+		return nil
+	}
+
+	activeKey := agentV3MemoryActiveKey(scope)
+	currentKey := agentV3MemorySnapshotCurrentKey(scope)
+	for range agentV3CASMaxAttempts {
+		activeIDs, err := agentV3LoadMemoryActiveIDs(ctx, rc, activeKey)
+		if err != nil {
+			return err
+		}
+		watchKeys := make([]string, 0, len(activeIDs)+2)
+		watchKeys = append(watchKeys, currentKey, activeKey)
+		for _, id := range activeIDs {
+			watchKeys = append(watchKeys, agentV3MemoryItemKey(scope, id))
+		}
+
+		err = rc.Watch(ctx, func(tx *redis.Tx) error {
+			currentIDs, err := agentV3LoadMemoryActiveIDs(ctx, tx, activeKey)
+			if err != nil {
+				return err
+			}
+			if !agentV3MemoryActiveIDsEqual(activeIDs, currentIDs) {
+				return redis.TxFailedErr
+			}
+
+			items := make([]AgentV3MemoryItem, 0, len(currentIDs))
+			liveIDs := make([]string, 0, len(currentIDs))
+			staleIDs := make([]string, 0)
+			for _, id := range currentIDs {
+				data, err := tx.Get(ctx, agentV3MemoryItemKey(scope, id)).Result()
+				switch {
+				case errors.Is(err, redis.Nil):
+					staleIDs = append(staleIDs, id)
+				case err != nil:
+					return err
+				default:
+					var item AgentV3MemoryItem
+					if err := json.Unmarshal([]byte(data), &item); err != nil {
+						return err
+					}
+					items = append(items, item)
+					liveIDs = append(liveIDs, id)
+				}
+			}
+
+			current, err := agentV3GetMemorySnapshotFromTx(ctx, tx, currentKey)
+			if err != nil {
+				return err
+			}
+			next, err := builder(items, current)
+			if err != nil || next == nil {
+				return err
+			}
+			data, err := json.Marshal(next)
+			if err != nil {
+				return err
+			}
+			staleMembers := make([]interface{}, len(staleIDs))
+			for i, id := range staleIDs {
+				staleMembers[i] = id
+			}
+
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				if len(staleIDs) > 0 {
+					pipe.SRem(ctx, activeKey, staleMembers...)
+				}
+				for _, id := range liveIDs {
+					pipe.Expire(ctx, agentV3MemoryItemKey(scope, id), ttl)
+				}
+				pipe.Expire(ctx, activeKey, ttl)
+				pipe.Set(ctx, currentKey, data, ttl)
+				pipe.Set(ctx, agentV3MemorySnapshotVersionKey(scope, next.Version), data, ttl)
+				return nil
+			})
+			return err
+		}, watchKeys...)
+		if !errors.Is(err, redis.TxFailedErr) {
+			return err
+		}
+	}
+	return ErrAgentV3StateConflict
+}
+
 // AgentV3GetMemorySnapshot loads the current memory snapshot.
 func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3MemorySnapshot, error) {
 	data, err := rc.Get(ctx, agentV3MemorySnapshotCurrentKey(scope)).Result()
@@ -342,11 +484,33 @@ func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3
 
 // AgentV3SaveTraceSummary stores the latest trace summary.
 func AgentV3SaveTraceSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3TraceSummary, ttl time.Duration) error {
-	data, err := json.Marshal(summary)
-	if err != nil {
+	key := agentV3TraceLastKey(scope)
+	return agentV3WatchRetry(ctx, []string{key}, func(tx *redis.Tx) error {
+		currentData, err := tx.Get(ctx, key).Result()
+		var current AgentV3TraceSummary
+		switch {
+		case errors.Is(err, redis.Nil):
+		case err != nil:
+			return err
+		default:
+			if err := json.Unmarshal([]byte(currentData), &current); err != nil {
+				return err
+			}
+			if !agentV3TraceSummaryAfter(summary, current) {
+				return nil
+			}
+		}
+
+		data, err := json.Marshal(summary)
+		if err != nil {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.Set(ctx, key, data, ttl)
+			return nil
+		})
 		return err
-	}
-	return rc.Set(ctx, agentV3TraceLastKey(scope), data, ttl).Err()
+	})
 }
 
 // AgentV3GetTraceSummary loads the latest trace summary.
@@ -387,6 +551,86 @@ func decodeAgentV3Turns(items []string) []AgentV3Turn {
 		turns = append(turns, turn)
 	}
 	return turns
+}
+
+func agentV3WatchRetry(ctx context.Context, keys []string, callback func(*redis.Tx) error) error {
+	for range agentV3CASMaxAttempts {
+		err := rc.Watch(ctx, callback, keys...)
+		if !errors.Is(err, redis.TxFailedErr) {
+			return err
+		}
+	}
+	return ErrAgentV3StateConflict
+}
+
+func agentV3GetSummaryFromTx(ctx context.Context, tx *redis.Tx, key string) (*AgentV3Summary, error) {
+	data, err := tx.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var summary AgentV3Summary
+	if err := json.Unmarshal([]byte(data), &summary); err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
+func agentV3LoadMemoryActiveIDs(ctx context.Context, client redis.Cmdable, key string) ([]string, error) {
+	ids, err := client.SMembers(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+func agentV3MemoryActiveIDsEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func agentV3GetMemorySnapshotFromTx(ctx context.Context, tx *redis.Tx, key string) (*AgentV3MemorySnapshot, error) {
+	data, err := tx.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var snapshot AgentV3MemorySnapshot
+	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
+}
+
+func agentV3LoadRecentTurnsFromTx(ctx context.Context, tx *redis.Tx, key string, maxTurns int) ([]AgentV3Turn, error) {
+	items, err := tx.LRange(ctx, key, int64(-maxTurns), -1).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeAgentV3Turns(items), nil
+}
+
+func agentV3TraceSummaryAfter(candidate, current AgentV3TraceSummary) bool {
+	return candidate.FinishedAt.After(current.FinishedAt) ||
+		(candidate.FinishedAt.Equal(current.FinishedAt) && candidate.RunID > current.RunID)
 }
 
 func marshalAgentV3Turn(turn AgentV3Turn) ([]byte, error) {

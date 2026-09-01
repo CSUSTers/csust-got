@@ -53,25 +53,93 @@ pub(crate) fn close_inherited_fds_except(
     hard_nofile: libc::rlim_t,
     retained: &[i32],
 ) -> anyhow::Result<()> {
-    if retained.is_empty() {
-        let result = unsafe { libc::syscall(libc::SYS_close_range, 3_u32, u32::MAX, 0_u32) };
-        if result == 0 {
-            return Ok(());
-        }
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ENOSYS) {
-            return Err(anyhow::anyhow!("close inherited file descriptors: {error}"));
+    close_inherited_fds_except_with(&mut RealCloseRangeSyscalls, hard_nofile, retained)
+}
+
+#[cfg(target_os = "linux")]
+trait CloseRangeSyscalls {
+    fn close_range(&mut self, first: u32, last: u32) -> io::Result<()>;
+    fn close(&mut self, fd: i32) -> io::Result<()>;
+}
+
+#[cfg(target_os = "linux")]
+struct RealCloseRangeSyscalls;
+
+#[cfg(target_os = "linux")]
+impl CloseRangeSyscalls for RealCloseRangeSyscalls {
+    fn close_range(&mut self, first: u32, last: u32) -> io::Result<()> {
+        if unsafe { libc::syscall(libc::SYS_close_range, first, last, 0_u32) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
         }
     }
 
+    fn close(&mut self, fd: i32) -> io::Result<()> {
+        if unsafe { libc::close(fd) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn close_inherited_fds_except_with<S: CloseRangeSyscalls>(
+    syscalls: &mut S,
+    hard_nofile: libc::rlim_t,
+    retained: &[i32],
+) -> anyhow::Result<()> {
+    let mut retained = retained
+        .iter()
+        .copied()
+        .filter(|fd| *fd >= 3)
+        .collect::<Vec<_>>();
+    retained.sort_unstable();
+    retained.dedup();
+
+    match close_inherited_fds_with_close_range(syscalls, &retained) {
+        Ok(()) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => {
+            close_inherited_fds_with_loop(syscalls, hard_nofile, &retained)
+        }
+        Err(error) => Err(anyhow::anyhow!("close inherited file descriptors: {error}")),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn close_inherited_fds_with_close_range<S: CloseRangeSyscalls>(
+    syscalls: &mut S,
+    retained: &[i32],
+) -> io::Result<()> {
+    let mut first = 3_u32;
+    for retained_fd in retained {
+        let retained_fd = *retained_fd as u32;
+        if first < retained_fd {
+            syscalls.close_range(first, retained_fd - 1)?;
+        }
+        first = retained_fd.saturating_add(1);
+    }
+    syscalls.close_range(first, u32::MAX)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn close_inherited_fds_with_loop<S: CloseRangeSyscalls>(
+    syscalls: &mut S,
+    hard_nofile: libc::rlim_t,
+    retained: &[i32],
+) -> anyhow::Result<()> {
+    if hard_nofile == libc::RLIM_INFINITY {
+        anyhow::bail!("hard RLIMIT_NOFILE must be finite");
+    }
     let upper = i32::try_from(hard_nofile)
         .map_err(|_| anyhow::anyhow!("hard RLIMIT_NOFILE exceeds the file descriptor range"))?;
     for fd in 3..upper {
-        if retained.contains(&fd) {
+        if retained.binary_search(&fd).is_ok() {
             continue;
         }
-        if unsafe { libc::close(fd) } != 0 {
-            let error = io::Error::last_os_error();
+        if let Err(error) = syscalls.close(fd) {
             if error.raw_os_error() != Some(libc::EBADF) {
                 return Err(anyhow::anyhow!(
                     "close inherited file descriptor {fd}: {error}"
@@ -211,7 +279,89 @@ fn insert_syscall(
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{clone3_seccomp_rules, untrusted_seccomp_rules};
+    use super::{
+        CloseRangeSyscalls, clone3_seccomp_rules, close_inherited_fds_except_with,
+        untrusted_seccomp_rules,
+    };
+    use std::{collections::VecDeque, io};
+
+    struct FakeCloseRangeSyscalls {
+        close_range_results: VecDeque<i32>,
+        close_results: VecDeque<i32>,
+        close_range_calls: Vec<(u32, u32)>,
+        close_calls: Vec<i32>,
+    }
+
+    impl FakeCloseRangeSyscalls {
+        fn result(results: &mut VecDeque<i32>) -> io::Result<()> {
+            match results.pop_front().unwrap_or(0) {
+                0 => Ok(()),
+                error => Err(io::Error::from_raw_os_error(error)),
+            }
+        }
+    }
+
+    impl CloseRangeSyscalls for FakeCloseRangeSyscalls {
+        fn close_range(&mut self, first: u32, last: u32) -> io::Result<()> {
+            self.close_range_calls.push((first, last));
+            Self::result(&mut self.close_range_results)
+        }
+
+        fn close(&mut self, fd: i32) -> io::Result<()> {
+            self.close_calls.push(fd);
+            Self::result(&mut self.close_results)
+        }
+    }
+
+    #[test]
+    fn close_range_splits_around_sorted_unique_retained_descriptors() {
+        let mut syscalls = FakeCloseRangeSyscalls {
+            close_range_results: VecDeque::from(vec![0, 0]),
+            close_results: VecDeque::new(),
+            close_range_calls: Vec::new(),
+            close_calls: Vec::new(),
+        };
+
+        close_inherited_fds_except_with(&mut syscalls, 512, &[5, 4, 5, 2, -1]).unwrap();
+
+        assert_eq!(syscalls.close_range_calls, [(3, 3), (6, u32::MAX)]);
+        assert!(syscalls.close_calls.is_empty());
+    }
+
+    #[test]
+    fn close_range_enosys_falls_back_to_the_captured_hard_limit() {
+        let mut syscalls = FakeCloseRangeSyscalls {
+            close_range_results: VecDeque::from(vec![libc::ENOSYS]),
+            close_results: VecDeque::from(vec![libc::EBADF, 0, 0]),
+            close_range_calls: Vec::new(),
+            close_calls: Vec::new(),
+        };
+
+        close_inherited_fds_except_with(&mut syscalls, 8, &[4, 5]).unwrap();
+
+        assert_eq!(syscalls.close_range_calls, [(3, 3)]);
+        assert_eq!(syscalls.close_calls, [3, 6, 7]);
+    }
+
+    #[test]
+    fn close_range_non_enosys_failure_fails_closed() {
+        let mut syscalls = FakeCloseRangeSyscalls {
+            close_range_results: VecDeque::from(vec![libc::EPERM]),
+            close_results: VecDeque::new(),
+            close_range_calls: Vec::new(),
+            close_calls: Vec::new(),
+        };
+
+        let error = close_inherited_fds_except_with(&mut syscalls, 8, &[4, 5]).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("close inherited file descriptors")
+        );
+        assert_eq!(syscalls.close_range_calls, [(3, 3)]);
+        assert!(syscalls.close_calls.is_empty());
+    }
 
     #[test]
     fn rules_cover_native_and_x32_without_blocking_proot_syscalls() {

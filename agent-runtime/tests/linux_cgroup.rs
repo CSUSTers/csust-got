@@ -220,7 +220,8 @@ fn c7_cpu_usage_read_and_parse_failure_latch() {
 #[tokio::test]
 async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     use agent_runtime::{
-        AppState, BashSandboxMode, app, runtime_fetch_proxy::RuntimeFetchProxy,
+        AppState, BashSandboxMode, app, namespace_gate::NamespaceGate,
+        runtime_fetch_proxy::RuntimeFetchProxy, skills::FrozenSkillSnapshot, trace::JsonlTraceSink,
         workspace_budget::WorkspaceBudget,
     };
     use axum::{body::Body, http::Request};
@@ -238,11 +239,12 @@ async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
     let budget = WorkspaceBudget::new(root.path(), 1024 * 1024).unwrap();
     let state = AppState {
         workspace_root: root.path().to_path_buf(),
-        skills_root: skills.path().to_path_buf(),
+        skills_root: Some(skills.path().to_path_buf()),
+        skill_snapshot: FrozenSkillSnapshot::empty().unwrap(),
         auth_token: None,
         max_output_chars: 1024,
         command_timeout: Duration::from_secs(1),
-        trace_jsonl_path: root.path().join("trace.jsonl"),
+        trace_sink: JsonlTraceSink::new(root.path().join("trace.jsonl")),
         bash_sandbox: BashSandboxMode::Proot,
         command_supervisor: None,
         bash_health: health.clone(),
@@ -250,6 +252,7 @@ async fn c7_enforcement_latch_is_irreversible_but_local_apis_remain() {
         require_fetch_for_readiness: false,
         bash_readiness_error: health.reason(),
         workspace_budget: budget,
+        namespace_gate: NamespaceGate::default(),
     };
     let response = app(state.clone())
         .oneshot(

@@ -144,7 +144,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 
 // buildMainAgent creates the main react.Agent from a ChatConfigSingle with agent config.
 // It assembles all tools: built-in + MCP + subagent tools + skill tools.
-func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*CustomAgent, error) {
+func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager, skillCatalog agentV3SkillCatalog, startup *agentV3StartupSkillSnapshots) (*CustomAgent, error) {
 	agentCfg := chatCfg.Agent
 	if agentCfg == nil {
 		return nil, fmt.Errorf("%w for chat %q", errAgentConfigNil, chatCfg.Name)
@@ -166,7 +166,16 @@ func buildMainAgent(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMg
 		return nil, err
 	}
 	if chatCfg.IsAgentV3Enabled() {
-		allTools = append(buildAgentV3Tools(chatCfg, config.BotConfig.AgentV3), allTools...)
+		var cfg *config.AgentV3Config
+		if config.BotConfig != nil {
+			cfg = config.BotConfig.AgentV3
+		}
+		var searxng *searXNGClient
+		if startup != nil {
+			searxng = startup.SearXNG
+		}
+		warnAgentV3SearXNGToolCollisions(ctx, chatCfg.Name, searxng, allTools)
+		allTools = append(buildAgentV3Tools(chatCfg, cfg, skillCatalog, searxng), allTools...)
 	}
 	allTools = wrapToolsWithErrorHandler(allTools)
 
@@ -381,7 +390,7 @@ func GetSkillPromptAddons(agentCfg *config.AgentConfig) string {
 
 // CompileChat pre-compiles templates and builds the main agent for a chat configuration.
 // Called at Init() time; the returned CompiledChat is reused for every request.
-func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager) (*CompiledChat, error) {
+func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *McpManager, startup *agentV3StartupSkillSnapshots) (*CompiledChat, error) {
 	// Compile system prompt template
 	var systemTpl *template.Template
 	if s := chatCfg.SystemPrompt.String(); s != "" {
@@ -402,8 +411,29 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 		}
 	}
 
+	var sources []agentV3SkillSnapshot
+	var catalog agentV3SkillCatalog
+	if chatCfg.IsAgentV3Enabled() && config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		var shadows []agentV3SkillShadow
+		var err error
+		sources, catalog, shadows, err = compileAgentV3SkillCatalog(chatCfg, config.BotConfig.AgentV3, startup)
+		if err != nil {
+			return nil, fmt.Errorf("compile agent v3 skills for %q: %w", chatCfg.Name, err)
+		}
+		for _, shadow := range shadows {
+			zap.L().Warn("chatv2/agent: agent v3 skill shadowed",
+				zap.String("chat", chatCfg.Name),
+				zap.String("name", shadow.Name),
+				zap.String("winner_source", string(shadow.Winner.Source)),
+				zap.String("loser_source", string(shadow.Loser.Source)),
+				zap.String("winner_sha256", shadow.Winner.SHA256),
+				zap.String("loser_sha256", shadow.Loser.SHA256),
+			)
+		}
+	}
+
 	// Build the main agent
-	agent, err := buildMainAgent(ctx, chatCfg, mcpMgr)
+	agent, err := buildMainAgent(ctx, chatCfg, mcpMgr, catalog, startup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build main agent for %q: %w", chatCfg.Name, err)
 	}
@@ -411,13 +441,76 @@ func CompileChat(ctx context.Context, chatCfg *config.ChatConfigSingle, mcpMgr *
 	skillAddons := GetSkillPromptAddons(chatCfg.Agent)
 
 	return &CompiledChat{
-		Name:              chatCfg.Name,
-		Config:            chatCfg,
-		Agent:             agent,
-		SystemTemplate:    systemTpl,
-		PromptTemplate:    promptTpl,
-		SkillPromptAddons: skillAddons,
+		Name:                 chatCfg.Name,
+		Config:               chatCfg,
+		Agent:                agent,
+		SystemTemplate:       systemTpl,
+		PromptTemplate:       promptTpl,
+		SkillPromptAddons:    skillAddons,
+		AgentV3StartupSkills: startup,
+		AgentV3SkillSources:  sources,
+		AgentV3SkillCatalog:  catalog,
 	}, nil
+}
+
+func warnAgentV3SearXNGToolCollisions(ctx context.Context, chat string, searxng *searXNGClient, configured []tool.BaseTool) {
+	if searxng == nil {
+		return
+	}
+	native := map[string]struct{}{
+		agentV3ToolSearXNGWebSearch:    {},
+		agentV3ToolSearXNGSuggestions:  {},
+		agentV3ToolSearXNGInstanceInfo: {},
+	}
+	warned := make(map[string]struct{})
+	for _, candidate := range configured {
+		info, err := candidate.Info(ctx)
+		if err != nil {
+			continue
+		}
+		if _, ok := native[info.Name]; !ok {
+			continue
+		}
+		if _, ok := warned[info.Name]; ok {
+			continue
+		}
+		warned[info.Name] = struct{}{}
+		zap.L().Warn("chatv2/agent: native SearXNG tool selected by native-first registration",
+			zap.String("chat", chat),
+			zap.String("tool", info.Name),
+		)
+	}
+}
+
+func compileAgentV3SkillCatalog(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config, startup *agentV3StartupSkillSnapshots) ([]agentV3SkillSnapshot, agentV3SkillCatalog, []agentV3SkillShadow, error) {
+	botLocal := emptyAgentV3SkillSnapshot(agentV3SkillSourceBotLocal)
+	runtimeGlobal := emptyAgentV3SkillSnapshot(agentV3SkillSourceRuntimeGlobal)
+	if startup != nil {
+		botLocal = cloneAgentV3SkillSnapshotForChat(startup.BotLocal)
+		runtimeGlobal = cloneAgentV3SkillSnapshotForChat(startup.RuntimeGlobal)
+	}
+	sources := []agentV3SkillSnapshot{
+		buildAgentV3BuiltinSkillSnapshot(chatCfg, cfg),
+		botLocal,
+		runtimeGlobal,
+	}
+	catalog, shadows, err := mergeAgentV3SkillSnapshots(sources...)
+	if err != nil {
+		return nil, agentV3SkillCatalog{}, nil, err
+	}
+	return sources, catalog, shadows, nil
+}
+
+func cloneAgentV3SkillSnapshotForChat(snapshot agentV3SkillSnapshot) agentV3SkillSnapshot {
+	clone := agentV3SkillSnapshot{
+		SchemaVersion:  snapshot.SchemaVersion,
+		SnapshotSHA256: strings.Clone(snapshot.SnapshotSHA256),
+		Skills:         make([]agentV3SkillDescriptor, len(snapshot.Skills)),
+	}
+	for i, descriptor := range snapshot.Skills {
+		clone.Skills[i] = cloneAgentV3SkillDescriptor(descriptor)
+	}
+	return clone
 }
 
 // newUnknownToolsHandler returns a handler that reports available tool names when the model

@@ -1052,7 +1052,7 @@ unset AGENT_FETCH_TEST_AUDIT_PATH || true
 unset AGENT_RUNTIME_TEST_CGROUP_ROOT || true
 
 validator_log=$(new_artifact host-validator.log)
-if "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" >"$validator_log" 2>&1; then
+if bash "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" >"$validator_log" 2>&1; then
   pass_case preflight-host-validator 'delegation, aggregate limits, bounded mounts, secret, DNS, and loaded nft table validate read-only'
 else
   fail_case preflight-host-validator 'read-only host validator rejected delegation, mounts, secret, DNS, or preloaded nftables'
@@ -1122,15 +1122,8 @@ production_activation_default_off() {
     test "$(sed -n "s/^AGENT_FETCH_CONTROL_FD=//p" /tmp/initial-env)" = 4;
     test ! -e /run/agent-fetch;
     test ! -e /run/secrets/agent-fetch-hmac-key;
-    python3 - <<"PY"
-import errno
-import socket
-try:
-    socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-except OSError as error:
-    raise SystemExit(0 if error.errno == errno.EPERM else 3)
-raise SystemExit(2)
-PY
+    test "$(agent-runtime-net-probe socket inet)" = errno=1;
+    test "$(agent-runtime-net-probe socket inet6)" = errno=1
   ' task9-rollback base-local-only 5s || result=1
 
   dc_base down --volumes --remove-orphans --rmi local --timeout 10 >/dev/null 2>&1 || result=1

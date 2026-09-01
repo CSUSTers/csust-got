@@ -253,6 +253,9 @@ check_file_contains_all 'host validator delegates semantic reject matching to th
 check_file_excludes 'host validator does not revert input reject validation to byte-exact matching' \
   "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" \
   "chain_has_exact_rule input 'iifname \"br-agent-fetch\" reject'"
+check_file_contains 'attack matrix invokes the mode-100644 host validator through Bash with its existing log capture' \
+  "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" \
+  'if bash "$REPO_ROOT/scripts/validate-agent-runtime-host.sh" >"$validator_log" 2>&1; then'
 check_file_contains 'semantic reject matcher requires reject immediately after the expected prefix' \
   "$REPO_ROOT/scripts/nft-agent-fetch-reject.awk" \
   'remainder ~ /^[[:space:]]+reject([[:space:]]+with[[:space:]].+)?$/'
@@ -260,6 +263,37 @@ check_file_contains 'Runtime Dockerfile defines the approved security-test-only 
   "$REPO_ROOT/agent-runtime/Dockerfile" 'FROM runtime-base AS runtime-security-test'
 check_file_contains 'Runtime security-test target has the approved image label' \
   "$REPO_ROOT/agent-runtime/Dockerfile" 'LABEL org.csusters.agent-runtime.security-test-only="true"'
+probe_copy='COPY --from=build /src/target/release/agent-runtime-net-probe /usr/local/bin/agent-runtime-net-probe'
+if awk -v probe_copy="$probe_copy" '
+  /^FROM debian:bookworm-slim AS runtime-base$/ { runtime_base = 1; next }
+  runtime_base && /^FROM / { runtime_base = 0 }
+  runtime_base && $0 == probe_copy { runtime_base_probe_copy = NR }
+  runtime_base && /^USER runtime$/ { runtime_base_user = NR }
+  /^FROM runtime-base AS runtime-security-test$/ { security_test = 1; next }
+  security_test && /^FROM / { security_test = 0 }
+  security_test && $0 == probe_copy { security_test_probe_copy = NR }
+  END {
+    exit(runtime_base_probe_copy > 0 && runtime_base_user > runtime_base_probe_copy &&
+      security_test_probe_copy == 0 ? 0 : 1)
+  }
+' "$REPO_ROOT/agent-runtime/Dockerfile"; then
+  printf 'ok - Runtime network probe is copied into runtime-base before dropping privileges without a security-test duplicate\n'
+else
+  printf 'not ok - Runtime network probe is copied into runtime-base before dropping privileges without a security-test duplicate\n' >&2
+  failures=$((failures + 1))
+fi
+production_activation_source=$(awk '/^production_activation_default_off\(\)/,/^}/' \
+  "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh")
+if ! printf '%s\n' "$production_activation_source" | grep -F -- 'python3' >/dev/null 2>&1 \
+  && printf '%s\n' "$production_activation_source" | grep -F -- \
+    'test "$(agent-runtime-net-probe socket inet)" = errno=1;' >/dev/null 2>&1 \
+  && printf '%s\n' "$production_activation_source" | grep -F -- \
+    'test "$(agent-runtime-net-probe socket inet6)" = errno=1' >/dev/null 2>&1; then
+  printf 'ok - production activation default-off probes IPv4 and IPv6 sockets with the Runtime binary\n'
+else
+  printf 'not ok - production activation default-off probes IPv4 and IPv6 sockets with the Runtime binary\n' >&2
+  failures=$((failures + 1))
+fi
 if awk '
   /^FROM runtime-base AS runtime-security-test$/ { security = NR }
   /^FROM runtime-base AS runtime$/ { production = NR }
@@ -872,6 +906,10 @@ check_base_json 'runtime-cgroup-paths-preserve-canonical-host-ancestry' '
   any(.services["agent-runtime"].volumes[];
     .type == "bind" and .source == $cgroup_host and .target == .source and
     (.read_only // false) == false)'
+check_base_json 'base Compose has no Bot-local or SearXNG-specific environment variables' '
+  (.services.bot.environment | keys | sort) == ["AGENT_RUNTIME_TOKEN"] and
+  all(.services[];
+    [(.environment // {}) | keys[] | select(test("SEARXNG"; "i"))] | length == 0)'
 
 check_json() {
   description=$1
@@ -1010,9 +1048,15 @@ check_json 'workspace, runtime log, and broker audit bind roots stay separate' '
   any(.services["agent-runtime"].volumes[]; .type == "bind" and .source == $workspace_host and .target == "/runtime/workspaces") and
   any(.services["agent-runtime"].volumes[]; .type == "bind" and .source == $runtime_log_host and .target == "/runtime/logs") and
   any(.services["agent-fetch-broker"].volumes[]; .type == "bind" and .source == $audit_host and .target == "/var/log/agent-fetch")'
-check_json 'repository skills are mounted read-only' '
-  any(.services["agent-runtime"].volumes[];
-    .target == "/runtime/skills" and .read_only == true)'
+check_json 'Runtime has exactly one read-only repository skills mount' '
+  [.services["agent-runtime"].volumes[] | select(.target == "/runtime/skills")] as $skills |
+  ($skills | length) == 1 and $skills[0].read_only == true'
+check_json 'Bot neither mounts nor shares the Runtime skills source' '
+  ([.services["agent-runtime"].volumes[] | select(.target == "/runtime/skills")] | .[0].source) as $runtime_skills_source |
+  all(.services.bot.volumes[]?;
+    .target != "/runtime/skills" and .source != $runtime_skills_source)'
+check_json 'rendered services do not define SearXNG' '
+  (.services | has("searxng") | not)'
 check_json 'logical and filesystem capacity ceilings are required in services' '
   .services["agent-runtime"].environment.AGENT_RUNTIME_WORKSPACE_MAX_BYTES == $workspace_max and
   .services["agent-runtime"].environment.AGENT_RUNTIME_WORKSPACE_FS_MAX_BYTES == $workspace_fs_max and

@@ -26,7 +26,11 @@ var (
 	errRuntimeEndpointEmpty     = errors.New("agent v3 runtime endpoint is empty")
 	errRuntimeHTTPStatus        = errors.New("agent v3 runtime returned non-success status")
 	errRuntimeClientUnspecified = errors.New("runtime client is not configured")
+	errRuntimeSkillsInvalid     = errors.New("agent v3 runtime skills response is invalid")
+	errRuntimeSkillsTooLarge    = errors.New("agent v3 runtime skills response exceeds size limit")
 )
+
+const agentV3RuntimeSkillsResponseMaxBytes = int64(8 * 1024 * 1024)
 
 // RemoteRuntimeClient calls the agent-v3 remote runtime service.
 type RemoteRuntimeClient struct {
@@ -192,6 +196,70 @@ func (c *RemoteRuntimeClient) Status(ctx context.Context) (runtimeStatusResponse
 	return out, err
 }
 
+// SkillsSnapshot returns the validated runtime-global skill snapshot captured at startup.
+func (c *RemoteRuntimeClient) SkillsSnapshot(ctx context.Context) (agentV3SkillSnapshot, error) {
+	if c == nil || c.Endpoint == "" {
+		return agentV3SkillSnapshot{}, errRuntimeEndpointEmpty
+	}
+
+	u, err := url.JoinPath(c.Endpoint, "v1/skills")
+	if err != nil {
+		return agentV3SkillSnapshot{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return agentV3SkillSnapshot{}, err
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+
+	client := c.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	snapshotClient := *client
+	snapshotClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := snapshotClient.Do(req)
+	if err != nil {
+		return agentV3SkillSnapshot{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return agentV3SkillSnapshot{}, fmt.Errorf("%w: runtime /v1/skills returned %d", errRuntimeHTTPStatus, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, agentV3RuntimeSkillsResponseMaxBytes+1))
+	if err != nil {
+		return agentV3SkillSnapshot{}, err
+	}
+	if int64(len(body)) > agentV3RuntimeSkillsResponseMaxBytes {
+		return agentV3SkillSnapshot{}, errRuntimeSkillsTooLarge
+	}
+	if !utf8.Valid(body) {
+		return agentV3SkillSnapshot{}, errRuntimeSkillsInvalid
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var snapshot agentV3SkillSnapshot
+	if err := decoder.Decode(&snapshot); err != nil {
+		return agentV3SkillSnapshot{}, errRuntimeSkillsInvalid
+	}
+	var extra json.RawMessage
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return agentV3SkillSnapshot{}, errRuntimeSkillsInvalid
+	}
+
+	validated, err := validateAgentV3SkillSnapshot(snapshot, agentV3SkillSourceRuntimeGlobal)
+	if err != nil {
+		return agentV3SkillSnapshot{}, errRuntimeSkillsInvalid
+	}
+	return validated, nil
+}
+
 // Reset removes the runtime workspace for a namespace.
 func (c *RemoteRuntimeClient) Reset(ctx context.Context, req runtimeResetRequest) (runtimeResetResponse, error) {
 	var out runtimeResetResponse
@@ -281,22 +349,26 @@ func truncateForModel(s string, limit int, already bool) (string, bool) {
 	return s[:end] + "\n[truncated by bot]", true
 }
 
-func buildAgentV3Tools(chatCfg *config.ChatConfigSingle, cfg *config.AgentV3Config) []tool.BaseTool {
-	fetchEnabled := cfg.RuntimeFetchEnabled()
-	tools := []tool.BaseTool{
+func buildAgentV3Tools(_ *config.ChatConfigSingle, cfg *config.AgentV3Config, catalog agentV3SkillCatalog, searxng *searXNGClient) []tool.BaseTool {
+	fetchEnabled := cfg != nil && cfg.RuntimeFetchEnabled()
+	tools := make([]tool.BaseTool, 0, 9)
+	if searxng != nil {
+		tools = append(tools, &searXNGWebSearchTool{client: searxng}, &searXNGSuggestionsTool{client: searxng}, &searXNGInstanceInfoTool{client: searxng})
+	}
+	tools = append(tools,
 		&remoteReadTool{},
 		&remoteGrepTool{},
 		&remoteWriteTool{},
 		&remoteEditTool{},
 		&remoteBashTool{fetchEnabled: fetchEnabled},
-	}
-	if agentV3RichSkillAvailable(chatCfg, cfg) {
+	)
+	if len(catalog.Sorted) > 0 {
 		tools = append(tools, &loadSkillTool{})
 	}
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
@@ -304,11 +376,18 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled bool) string {
 		{agentV3ToolNameField: agentV3ToolEdit, agentV3ToolArgsField: "path,patch", agentV3ToolDescField: "Apply a unified diff patch to a file under /workspace."},
 		{agentV3ToolNameField: agentV3ToolBash, agentV3ToolArgsField: "command,cwd?,timeout?", agentV3ToolDescField: agentV3BashToolDescription(fetchEnabled)},
 	}
+	if searxngEnabled {
+		infos = append([]map[string]any{
+			{agentV3ToolNameField: agentV3ToolSearXNGWebSearch, agentV3ToolArgsField: "query,pageno?,time_range?,language?,safesearch?,min_score?,num_results?,categories?,engines?,response_format?,result_detail?", agentV3ToolDescField: "Search the configured SearXNG instance after loading searxng."},
+			{agentV3ToolNameField: agentV3ToolSearXNGSuggestions, agentV3ToolArgsField: "query,language?", agentV3ToolDescField: "Get configured SearXNG search suggestions after loading searxng."},
+			{agentV3ToolNameField: agentV3ToolSearXNGInstanceInfo, agentV3ToolArgsField: "include_engines?,include_disabled?,category?", agentV3ToolDescField: "Get bounded configured SearXNG instance metadata after loading searxng."},
+		}, infos...)
+	}
 	if includeLoadSkill {
 		infos = append(infos, map[string]any{
 			agentV3ToolNameField: agentV3ToolLoadSkill,
 			agentV3ToolArgsField: "name",
-			agentV3ToolDescField: "Load an agent-v3 built-in skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
+			agentV3ToolDescField: "Load an available agent-v3 skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
 		})
 	}
 	data, _ := json.Marshal(infos)
@@ -582,9 +661,9 @@ type loadSkillArgs struct {
 func (t *loadSkillTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolLoadSkill,
-		Desc: "Load one built-in agent-v3 skill by name. Use name=\"rich-message\" before rich output, then finish with one <telegram_rich_message> answer.",
+		Desc: "Load one available agent-v3 skill by name for the current turn. Use name=\"rich-message\" before rich output, then finish with one <telegram_rich_message> answer.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			agentV3ToolSkillNameField: {Type: "string", Desc: "Built-in skill name. For Telegram rich output use exactly rich-message before the final rich envelope.", Required: true},
+			agentV3ToolSkillNameField: {Type: "string", Desc: "Available skill name. For Telegram rich output use exactly rich-message before the final rich envelope.", Required: true},
 		}),
 	}, nil
 }
@@ -598,17 +677,33 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("load_skill: invalid arguments: %w", err)
 	}
-	skill, ok := agentV3BuiltinSkillByName(args.Name, tc)
-	if !ok {
-		return fmt.Sprintf("[Skill Error] Skill %q is not available in this chat.", strings.TrimSpace(args.Name)), nil
+	name, err := parseAgentV3CanonicalSkillName(args.Name)
+	if err != nil || tc.V3 == nil {
+		return "[Skill Error] requested skill is not available.", nil
 	}
+	skill, ok := tc.V3.SkillCatalog.ByName[name]
+	if !ok {
+		return "[Skill Error] requested skill is not available.", nil
+	}
+	tc.markSkillLoaded(skill.Name)
 	var b strings.Builder
 	b.WriteString("<loaded_skill name=\"")
 	b.WriteString(escapeAgentV3SkillAttr(skill.Name))
+	b.WriteString("\" source=\"")
+	b.WriteString(escapeAgentV3SkillAttr(string(skill.Source)))
+	b.WriteString("\" sha256=\"")
+	b.WriteString(escapeAgentV3SkillAttr(skill.SHA256))
+	if skill.VirtualPath != "" {
+		b.WriteString("\" virtual_path=\"")
+		b.WriteString(escapeAgentV3SkillAttr(skill.VirtualPath))
+	}
 	b.WriteString("\">\n")
 	b.WriteString(skill.Content)
 	b.WriteString("\n</loaded_skill>\n")
-	b.WriteString("ACTIVATION RULE: This skill is active for this turn. If you choose rich output, make the final answer exactly one <telegram_rich_message> envelope with no surrounding prose.")
+	b.WriteString("ACTIVATION RULE: This skill is active for this turn.")
+	if skill.Name == agentV3RichMessageSkillName {
+		b.WriteString(" If you choose rich output, make the final answer exactly one <telegram_rich_message> envelope with no surrounding prose.")
+	}
 	return b.String(), nil
 }
 

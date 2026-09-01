@@ -534,6 +534,6 @@ func authorizeRichMessageForFinal(t *testing.T, tc *TurnContext) {
 	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
 	t.Cleanup(func() { config.BotConfig = old })
 	tc.Config = richAgentV3ChatConfig()
-	seq := tc.recordToolCall(agentV3ToolLoadSkill)
-	tc.markRichMessageSkillLoaded(seq)
+	tc.V3 = &AgentV3TurnState{}
+	tc.markSkillLoaded("rich-message")
 }

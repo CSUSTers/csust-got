@@ -2,6 +2,8 @@ use super::{PolicyCode, PolicyConfig, PolicyError, policy_error};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashSet;
 
+pub const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 #[derive(Clone, Debug)]
 pub struct ReviewedHeaders {
     pub headers: HeaderMap,
@@ -50,7 +52,6 @@ impl HeaderPolicy {
     pub fn review(&self, raw: &[(String, String)]) -> Result<ReviewedHeaders, PolicyError> {
         let sensitive = sensitive_names(&self.config)?;
         let mut headers = HeaderMap::new();
-        let mut wire_bytes = 0_u64;
         for (raw_name, raw_value) in raw {
             let name = parse_name(raw_name)?;
             if is_forbidden(&name) {
@@ -60,14 +61,24 @@ impl HeaderPolicy {
                 ));
             }
             let value = parse_value(raw_value)?;
-            wire_bytes = checked_wire_add(wire_bytes, &name, &value)?;
-            if wire_bytes > self.config.request_header_bytes {
-                return Err(policy_error(
-                    PolicyCode::BudgetExceeded,
-                    "request headers exceed the byte limit",
-                ));
+            if name.as_str() == "user-agent" {
+                headers.insert(name, value);
+            } else {
+                headers.append(name, value);
             }
-            headers.append(name, value);
+        }
+        if !headers.contains_key("user-agent") {
+            headers.insert(
+                HeaderName::from_static("user-agent"),
+                HeaderValue::from_static(DEFAULT_USER_AGENT),
+            );
+        }
+        let wire_bytes = map_wire_bytes(&headers)?;
+        if wire_bytes > self.config.request_header_bytes {
+            return Err(policy_error(
+                PolicyCode::BudgetExceeded,
+                "request headers exceed the byte limit",
+            ));
         }
         Ok(ReviewedHeaders {
             headers,
@@ -110,7 +121,7 @@ fn parse_value(raw: &str) -> Result<HeaderValue, PolicyError> {
 fn sensitive_names(config: &PolicyConfig) -> Result<HashSet<HeaderName>, PolicyError> {
     let mut sensitive = ["authorization", "cookie", "x-api-key"]
         .into_iter()
-        .map(|name| HeaderName::from_static(name))
+        .map(HeaderName::from_static)
         .collect::<HashSet<_>>();
     for raw in &config.credential_header_names {
         sensitive.insert(parse_name(raw)?);
