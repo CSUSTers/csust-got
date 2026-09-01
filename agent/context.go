@@ -22,6 +22,7 @@ const (
 // ContextMessage 用于存储格式化后的上下文消息
 type ContextMessage struct {
 	ID          int // 消息ID
+	Unixtime    int64
 	ReplyTo     *int
 	User        string
 	UserNames   userNames
@@ -64,9 +65,10 @@ func contextMessageFromTelegram(msg *tb.Message) *ContextMessage {
 	}
 
 	contextMsg := &ContextMessage{
-		ID:   msg.ID,
-		Text: getMessageTextWithEntities(msg, false),
-		Type: contextMessageTypeText,
+		ID:       msg.ID,
+		Unixtime: msg.Unixtime,
+		Text:     getMessageTextWithEntities(msg, false),
+		Type:     contextMessageTypeText,
 	}
 	if msg.ReplyTo != nil {
 		contextMsg.ReplyTo = &msg.ReplyTo.ID

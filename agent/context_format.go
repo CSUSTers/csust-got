@@ -1,10 +1,12 @@
 package agentv3
 
 import (
+	"csust-got/util"
 	"fmt"
 	"html"
 	"strconv"
 	"strings"
+	"time"
 
 	tb "gopkg.in/telebot.v3"
 )
@@ -16,6 +18,7 @@ func FormatContextMessages(messages []*ContextMessage) string {
 	}
 
 	var result strings.Builder
+	now := time.Now()
 
 	for i, msg := range messages {
 		// 添加序号而不是用户名
@@ -32,6 +35,10 @@ func FormatContextMessages(messages []*ContextMessage) string {
 			result.WriteString(" reply to ")
 			result.WriteString(strconv.Itoa(*msg.ReplyTo))
 		}
+		if messageTime := formatContextMessageTime(msg.Unixtime, now); messageTime != "" {
+			result.WriteString(" time ")
+			result.WriteString(messageTime)
+		}
 		result.WriteString("]: ")
 		result.WriteString(msg.Text)
 
@@ -41,6 +48,21 @@ func FormatContextMessages(messages []*ContextMessage) string {
 	}
 
 	return result.String()
+}
+
+func formatContextMessageTime(unixtime int64, now time.Time) string {
+	if unixtime == 0 {
+		return ""
+	}
+
+	messageTime := time.Unix(unixtime, 0).In(util.TimeZoneCST)
+	now = now.In(util.TimeZoneCST)
+	messageYear, messageMonth, messageDay := messageTime.Date()
+	nowYear, nowMonth, nowDay := now.Date()
+	if messageYear == nowYear && messageMonth == nowMonth && messageDay == nowDay {
+		return messageTime.Format("15:04:05")
+	}
+	return messageTime.Format("2006-01-02 15:04:05")
 }
 
 // FormatContextMessagesWithXml 将上下文消息格式化为嵌套XML格式
@@ -59,7 +81,7 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 	// 找到根消息（没有被回复的消息）
 	rootMessages := make([]*ContextMessage, 0)
 	for _, msg := range messages {
-		if msg.ReplyTo == nil {
+		if msg.ReplyTo == nil || msgMap[*msg.ReplyTo] == nil {
 			rootMessages = append(rootMessages, msg)
 		}
 	}
@@ -75,10 +97,11 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 
 	buf := strings.Builder{}
 	buf.WriteString("<messages>\n")
+	now := time.Now()
 
 	// 递归渲染每个根消息及其回复链
 	for _, rootMsg := range rootMessages {
-		renderNestedMessage(&buf, rootMsg, replies, 0)
+		renderNestedMessage(&buf, rootMsg, replies, 0, now)
 	}
 
 	buf.WriteString("</messages>\n")
@@ -86,7 +109,7 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 }
 
 // renderNestedMessage 递归渲染嵌套消息
-func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[int][]*ContextMessage, depth int) {
+func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[int][]*ContextMessage, depth int, now time.Time) {
 	indent := strings.Repeat("  ", depth+1)
 	messageType := msg.Type
 	if messageType == "" {
@@ -100,6 +123,9 @@ func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[
 
 	if msg.ReplyTo != nil {
 		fmt.Fprintf(buf, ` replyTo="%d"`, *msg.ReplyTo)
+	}
+	if messageTime := formatContextMessageTime(msg.Unixtime, now); messageTime != "" {
+		fmt.Fprintf(buf, ` time="%s"`, html.EscapeString(messageTime))
 	}
 	buf.WriteString(">\n")
 
@@ -119,7 +145,7 @@ func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[
 	// 递归渲染回复消息
 	if msgReplies, exists := replies[msg.ID]; exists {
 		for _, reply := range msgReplies {
-			renderNestedMessage(buf, reply, replies, depth+1)
+			renderNestedMessage(buf, reply, replies, depth+1, now)
 		}
 	}
 

@@ -19,11 +19,15 @@ import (
 )
 
 var (
-	errUnknownTool   = errors.New("unknown built-in tool")
-	errNoTurnContext = errors.New("no turn context available")
-	errInvalidMsgID  = errors.New("invalid message_id")
-	errNoImageSource = errors.New("either file_id or url must be provided")
-	errBadHTTPStatus = errors.New("unexpected HTTP status")
+	errUnknownTool             = errors.New("unknown built-in tool")
+	errNoTurnContext           = errors.New("no turn context available")
+	errInvalidMsgID            = errors.New("invalid message_id")
+	errNoImageSource           = errors.New("either file_id or url must be provided")
+	errBadHTTPStatus           = errors.New("unexpected HTTP status")
+	errNegativeRecentSeconds   = errors.New("recent_seconds must be non-negative")
+	errNegativeAfterMessageID  = errors.New("after_message_id must be non-negative")
+	errNegativeBeforeMessageID = errors.New("before_message_id must be non-negative")
+	errInvalidLimitFrom        = errors.New("limit_from must be \"latest\" or \"earliest\"")
 
 	progressResult = "ok. If your task is done, output a concise final answer now — do not make additional tool calls."
 )
@@ -156,7 +160,34 @@ func BuildBuiltinTools(names []string, toolModels map[string]*config.Model) ([]t
 type getContextTool struct{}
 
 type getContextArgs struct {
-	Limit int `json:"limit,omitempty"` // max messages to retrieve (default: 10)
+	Limit           int     `json:"limit,omitempty"`
+	RecentSeconds   *int64  `json:"recent_seconds,omitempty"`
+	AfterMessageID  *int    `json:"after_message_id,omitempty"`
+	BeforeMessageID *int    `json:"before_message_id,omitempty"`
+	LimitFrom       *string `json:"limit_from,omitempty"`
+}
+
+func (args getContextArgs) hasAdvancedFilters() bool {
+	return args.RecentSeconds != nil || args.AfterMessageID != nil || args.BeforeMessageID != nil || args.LimitFrom != nil
+}
+
+func (args getContextArgs) validateAdvancedFilters() (string, error) {
+	if args.RecentSeconds != nil && *args.RecentSeconds < 0 {
+		return "", errNegativeRecentSeconds
+	}
+	if args.AfterMessageID != nil && *args.AfterMessageID < 0 {
+		return "", errNegativeAfterMessageID
+	}
+	if args.BeforeMessageID != nil && *args.BeforeMessageID < 0 {
+		return "", errNegativeBeforeMessageID
+	}
+	if args.LimitFrom == nil {
+		return "latest", nil
+	}
+	if *args.LimitFrom != "latest" && *args.LimitFrom != "earliest" {
+		return "", errInvalidLimitFrom
+	}
+	return *args.LimitFrom, nil
 }
 
 func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
@@ -171,6 +202,22 @@ func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 			"limit": {
 				Type: "integer",
 				Desc: "Maximum number of messages to retrieve. Default: 10, Max: 50",
+			},
+			"recent_seconds": {
+				Type: "integer",
+				Desc: "Non-negative age window in seconds. Values greater than zero keep messages whose timestamp is at least now minus this value.",
+			},
+			"after_message_id": {
+				Type: "integer",
+				Desc: "Exclusive lower message ID bound.",
+			},
+			"before_message_id": {
+				Type: "integer",
+				Desc: "Exclusive upper message ID bound.",
+			},
+			"limit_from": {
+				Type: "string",
+				Desc: "Which end to apply limit from: latest (default) or earliest. All provided filters are intersected before this limit is applied; output remains chronological.",
 			},
 		}),
 	}, nil
@@ -195,7 +242,25 @@ func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		limit = 50
 	}
 
-	messages, err := GetMessageContext(tc.Bot, tc.Message, limit)
+	var (
+		messages []*ContextMessage
+		err      error
+	)
+	if args.hasAdvancedFilters() {
+		limitFrom, validationErr := args.validateAdvancedFilters()
+		if validationErr != nil {
+			return "", fmt.Errorf("get_context: %w", validationErr)
+		}
+		messages, err = getFilteredMessageContext(tc.Bot, tc.Message, contextQuery{
+			RecentSeconds:   args.RecentSeconds,
+			AfterMessageID:  args.AfterMessageID,
+			BeforeMessageID: args.BeforeMessageID,
+			Limit:           limit,
+			LimitFrom:       limitFrom,
+		})
+	} else {
+		messages, err = GetMessageContext(tc.Bot, tc.Message, limit)
+	}
 	if err != nil {
 		return "", fmt.Errorf("get_context: failed to get message context: %w", err)
 	}

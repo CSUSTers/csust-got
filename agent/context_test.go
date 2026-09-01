@@ -1,9 +1,12 @@
 package agentv3
 
 import (
+	"csust-got/util"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -637,8 +640,9 @@ func TestGetMessageTextWithAdditionalEntities(t *testing.T) {
 func TestContextMessageWithEntities(t *testing.T) {
 	// Create a mock message with entities
 	mockMsg := &tb.Message{
-		ID:   123,
-		Text: "Check out Google for more info",
+		ID:       123,
+		Unixtime: time.Now().Unix(),
+		Text:     "Check out Google for more info",
 		Entities: []tb.MessageEntity{
 			{
 				Type:   tb.EntityTextLink,
@@ -655,20 +659,14 @@ func TestContextMessageWithEntities(t *testing.T) {
 		},
 	}
 
-	// Test that the context message creation uses the formatted text
-	contextMsg := &ContextMessage{
-		ID:   mockMsg.ID,
-		Text: getMessageTextWithEntities(mockMsg, false),
-		User: mockMsg.Sender.Username,
-		UserNames: userNames{
-			First: mockMsg.Sender.FirstName,
-			Last:  mockMsg.Sender.LastName,
-		},
-	}
+	// Test that the context message creation uses the formatted text.
+	contextMsg := contextMessageFromTelegram(mockMsg)
+	require.NotNil(t, contextMsg)
 
 	assert.Equal(t, "Check out [Google](https://google.com) for more info", contextMsg.Text)
 	assert.Equal(t, 123, contextMsg.ID)
 	assert.Equal(t, "testuser", contextMsg.User)
+	assert.Equal(t, mockMsg.Unixtime, contextMsg.Unixtime)
 }
 
 func TestGetReplyChainIncludesMessageTypeAndMediaMetadata(t *testing.T) {
@@ -989,4 +987,31 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestFormatContextMessageTime(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 10, 30, 0, 0, util.TimeZoneCST)
+
+	assert.Equal(t, "08:15:42", formatContextMessageTime(time.Date(2026, time.September, 1, 8, 15, 42, 0, util.TimeZoneCST).Unix(), now))
+	assert.Equal(t, "2026-08-31 23:59:59", formatContextMessageTime(time.Date(2026, time.August, 31, 23, 59, 59, 0, util.TimeZoneCST).Unix(), now))
+	assert.Empty(t, formatContextMessageTime(0, now))
+}
+
+func TestContextMessageFormatIncludesTime(t *testing.T) {
+	messageTime := time.Now().Unix()
+	expectedTime := time.Unix(messageTime, 0).In(util.TimeZoneCST).Format("15:04:05")
+	messages := []*ContextMessage{{ID: 1, Unixtime: messageTime, Text: "hello"}}
+
+	assert.Contains(t, FormatContextMessages(messages), expectedTime)
+	assert.Contains(t, FormatContextMessagesWithXml(messages), `time="`+expectedTime+`"`)
+	assert.NotContains(t, FormatContextMessagesWithXml([]*ContextMessage{{ID: 2, Text: "no time"}}), "time=")
+}
+
+func TestFormatContextMessagesWithXmlRendersReplyWhoseParentIsAbsent(t *testing.T) {
+	parentID := 1
+	output := FormatContextMessagesWithXml([]*ContextMessage{{ID: 2, ReplyTo: &parentID, Text: "orphaned reply"}})
+
+	assert.Contains(t, output, `<message id="2"`)
+	assert.Contains(t, output, `replyTo="1"`)
+	assert.Contains(t, output, "orphaned reply")
 }

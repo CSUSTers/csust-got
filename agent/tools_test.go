@@ -2,8 +2,10 @@ package agentv3
 
 import (
 	"csust-got/config"
+	"csust-got/log"
 	"csust-got/orm"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +96,116 @@ func TestGetContextToolReturnsStoredPhotoMetadataAndMarkdown(t *testing.T) {
 	assert.Contains(t, output, `<image file_id="captionless-photo" />`)
 	assert.Contains(t, output, `<image file_id="captioned-photo" />`)
 	assert.Contains(t, output, "😀 **bold**")
+}
+
+func TestGetContextToolAdvancedFilters(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "get-context-filters:"
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	chat := &tb.Chat{ID: -101}
+	now := time.Now()
+	for _, message := range []*tb.Message{
+		{ID: 100, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "too old", Unixtime: now.Add(-2 * time.Hour).Unix()},
+		{ID: 101, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "below after bound", Unixtime: now.Add(-90 * time.Minute).Unix()},
+		{ID: 102, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "outside recent window", Unixtime: now.Add(-10 * time.Minute).Unix()},
+		{ID: 103, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "stored version", Unixtime: now.Add(-2 * time.Minute).Unix()},
+		{ID: 104, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "middle selected", Unixtime: now.Add(-90 * time.Second).Unix()},
+		{ID: 105, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "last selected", Unixtime: now.Add(-30 * time.Second).Unix()},
+		{ID: 106, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "above before bound", Unixtime: now.Unix()},
+	} {
+		require.NoError(t, orm.PushMessageToStream(message))
+	}
+
+	replyID := 103
+	tc := &TurnContext{Message: &tb.Message{
+		ID: 110, Chat: chat, Sender: &tb.User{Username: "caller"},
+		ReplyTo: &tb.Message{ID: replyID, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "live version", Unixtime: now.Add(-90 * time.Second).Unix()},
+	}}
+	ctx := WithTurnContext(t.Context(), tc)
+	tool := &getContextTool{}
+
+	t.Run("earliest applies all filters before limiting", func(t *testing.T) {
+		output, err := tool.InvokableRun(ctx, `{"after_message_id":101,"before_message_id":106,"recent_seconds":300,"limit":2,"limit_from":"earliest"}`)
+		require.NoError(t, err)
+		assert.Contains(t, output, `id="103"`)
+		assert.Contains(t, output, `id="104"`)
+		assert.Contains(t, output, "live version")
+		assert.NotContains(t, output, `id="100"`)
+		assert.NotContains(t, output, `id="101"`)
+		assert.NotContains(t, output, `id="102"`)
+		assert.NotContains(t, output, `id="105"`)
+		assert.NotContains(t, output, `id="106"`)
+		assert.Less(t, strings.Index(output, `id="103"`), strings.Index(output, `id="104"`))
+	})
+
+	t.Run("latest keeps chronological output", func(t *testing.T) {
+		output, err := tool.InvokableRun(ctx, `{"after_message_id":101,"before_message_id":106,"recent_seconds":300,"limit":2,"limit_from":"latest"}`)
+		require.NoError(t, err)
+		assert.Contains(t, output, `id="104"`)
+		assert.Contains(t, output, `id="105"`)
+		assert.NotContains(t, output, `id="103"`)
+		assert.Less(t, strings.Index(output, `id="104"`), strings.Index(output, `id="105"`))
+	})
+
+	t.Run("empty ID intersection returns no context", func(t *testing.T) {
+		output, err := tool.InvokableRun(ctx, `{"after_message_id":106,"before_message_id":106}`)
+		require.NoError(t, err)
+		assert.Equal(t, "No conversation context available.", output)
+	})
+}
+
+func TestGetContextToolAdvancedQueryPropagatesRedisError(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "get-context-query-error:"
+	config.BotConfig = testConfig
+	log.InitLogger()
+	orm.InitRedis()
+	miniRedis.Close()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	ctx := WithTurnContext(t.Context(), &TurnContext{Message: &tb.Message{ID: 10, Chat: &tb.Chat{ID: -100}}})
+	_, err := (&getContextTool{}).InvokableRun(ctx, `{"after_message_id":0}`)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "get_context: failed to get message context:")
+}
+
+func TestGetContextToolRejectsInvalidAdvancedFilters(t *testing.T) {
+	ctx := WithTurnContext(t.Context(), &TurnContext{Message: &tb.Message{ID: 1, Chat: &tb.Chat{ID: -100}}})
+	tool := &getContextTool{}
+
+	for _, tt := range []struct {
+		argsJSON string
+		expected string
+	}{
+		{argsJSON: `{"recent_seconds":-1}`, expected: "recent_seconds must be non-negative"},
+		{argsJSON: `{"after_message_id":-1}`, expected: "after_message_id must be non-negative"},
+		{argsJSON: `{"before_message_id":-1}`, expected: "before_message_id must be non-negative"},
+		{argsJSON: `{"limit_from":"middle"}`, expected: `limit_from must be "latest" or "earliest"`},
+	} {
+		_, err := tool.InvokableRun(ctx, tt.argsJSON)
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "get_context:")
+		assert.ErrorContains(t, err, tt.expected)
+	}
 }
 
 func TestProgressStepDetailsUpdate(t *testing.T) {
