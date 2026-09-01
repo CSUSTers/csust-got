@@ -23,9 +23,7 @@
         "esbenp.prettier-vscode",
         "ms-python.python",
         "mutantdino.resourcemonitor",
-        "ms-vscode.makefile-tools",
-        "GitHub.copilot",
-        "GitHub.copilot-chat"
+        "ms-vscode.makefile-tools"
       ]
     }
   },
