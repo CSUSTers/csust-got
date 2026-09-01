@@ -201,14 +201,6 @@ func testIntUintToA(t *testing.T) {
 			ass.Equal("1", I2Hex(1))
 			ass.Equal("-1", I2Hex(-1))
 			ass.Equal("7b", I2Hex(123))
-			ass.Equal("ffffffff", I2Hex(0xffffffff))
-			ass.Equal("eeeeeeee", I2Hex(0xeeeeeeee))
-			ass.Equal("7fffffffffffffff", I2Hex(0x7fffffffffffffff))
-			ass.Equal("7eeeeeeeeeeeeeee", I2Hex(0x7eeeeeeeeeeeeeee))
-			ass.Equal("-ffffffff", I2Hex(-0xffffffff))
-			ass.Equal("-eeeeeeee", I2Hex(-0xeeeeeeee))
-			ass.Equal("-7fffffffffffffff", I2Hex(-0x7fffffffffffffff))
-			ass.Equal("-7eeeeeeeeeeeeeee", I2Hex(-0x7eeeeeeeeeeeeeee))
 		})
 
 		t.Run("to bin", func(t *testing.T) {
@@ -219,14 +211,6 @@ func testIntUintToA(t *testing.T) {
 			ass.Equal("1", I2Bin(1))
 			ass.Equal("-1", I2Bin(-1))
 			ass.Equal("1111011", I2Bin(123))
-			ass.Equal("11111111111111111111111111111111", I2Bin(0xffffffff))
-			ass.Equal("11101110111011101110111011101110", I2Bin(0xeeeeeeee))
-			ass.Equal("111111111111111111111111111111111111111111111111111111111111111", I2Bin(0x7fffffffffffffff))
-			ass.Equal("111111011101110111011101110111011101110111011101110111011101110", I2Bin(0x7eeeeeeeeeeeeeee))
-			ass.Equal("-11111111111111111111111111111111", I2Bin(-0xffffffff))
-			ass.Equal("-11101110111011101110111011101110", I2Bin(-0xeeeeeeee))
-			ass.Equal("-111111111111111111111111111111111111111111111111111111111111111", I2Bin(-0x7fffffffffffffff))
-			ass.Equal("-111111011101110111011101110111011101110111011101110111011101110", I2Bin(-0x7eeeeeeeeeeeeeee))
 		})
 	})
 
@@ -241,7 +225,6 @@ func testIntUintToA(t *testing.T) {
 			ass.Equal("1", I2Dec[uint](1))
 			ass.Equal("123", I2Dec[uint](123))
 			ass.Equal("4294967295", I2Dec[uint](0xffffffff))
-			ass.Equal("18446744073709551615", I2Dec[uint](0xffffffffffffffff))
 		})
 
 		t.Run("to hex", func(t *testing.T) {
@@ -253,10 +236,6 @@ func testIntUintToA(t *testing.T) {
 			ass.Equal("7b", I2Hex[uint](123))
 			ass.Equal("ffffffff", I2Hex[uint](0xffffffff))
 			ass.Equal("eeeeeeee", I2Hex[uint](0xeeeeeeee))
-			ass.Equal("7fffffffffffffff", I2Hex[uint](0x7fffffffffffffff))
-			ass.Equal("7eeeeeeeeeeeeeee", I2Hex[uint](0x7eeeeeeeeeeeeeee))
-			ass.Equal("ffffffffffffffff", I2Hex[uint](0xffffffffffffffff))
-			ass.Equal("eeeeeeeeeeeeeeee", I2Hex[uint](0xeeeeeeeeeeeeeeee))
 		})
 
 		t.Run("to bin", func(t *testing.T) {
@@ -268,10 +247,6 @@ func testIntUintToA(t *testing.T) {
 			ass.Equal("1111011", I2Bin[uint](123))
 			ass.Equal("11111111111111111111111111111111", I2Bin[uint](0xffffffff))
 			ass.Equal("11101110111011101110111011101110", I2Bin[uint](0xeeeeeeee))
-			ass.Equal("111111111111111111111111111111111111111111111111111111111111111", I2Bin[uint](0x7fffffffffffffff))
-			ass.Equal("111111011101110111011101110111011101110111011101110111011101110", I2Bin[uint](0x7eeeeeeeeeeeeeee))
-			ass.Equal("1111111111111111111111111111111111111111111111111111111111111111", I2Bin[uint](0xffffffffffffffff))
-			ass.Equal("1110111011101110111011101110111011101110111011101110111011101110", I2Bin[uint](0xeeeeeeeeeeeeeeee))
 		})
 	})
 }

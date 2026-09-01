@@ -1,5 +1,3 @@
-//go:build !386 && !arm
-
 package agentv3
 
 import (
