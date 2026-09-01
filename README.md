@@ -29,7 +29,7 @@ A modern Telegram bot for CSUST, developed in Go.
 
 ## System Requirements
 
-- Go 1.26+
+- Go 1.27+
 - Rust 1.95+ (required only to build or verify the Agent Runtime from source)
 - Redis
 - Docker Engine with Docker Compose v2 (recommended)
@@ -352,7 +352,7 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 
 ## Tech Stack
 
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Framework**: [telebot.v3](https://github.com/tucnak/telebot)
 - **Database**: Redis
 - **AI**: OpenAI API Compatible Interface
@@ -373,7 +373,7 @@ make test
 make build
 
 # Code check
-golangci-lint run
+golangci-lint run --fix=false
 ```
 
 ## License

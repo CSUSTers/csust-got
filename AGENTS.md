@@ -1,4 +1,4 @@
-This repo is a modern Telegram bot for CSUST built with Go 1.26+, featuring AI chat, gacha systems, and comprehensive permission controls.
+This repo is a modern Telegram bot for CSUST built with Go 1.27+, featuring AI chat, gacha systems, and comprehensive permission controls.
 
 ## Architecture Overview
 
