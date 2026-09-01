@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/bytedance/sonic v1.15.2
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/cloudwego/eino v0.9.15
+	github.com/cloudwego/eino v0.9.17
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.9
 	github.com/eino-contrib/jsonschema v1.0.3
