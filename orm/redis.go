@@ -573,39 +573,6 @@ func GetChatContext(chatID int64, msgID int) ([]openai.ChatCompletionMessage, er
 	return chatContext, nil
 }
 
-// LoadGachaSession load gacha settings of a certain session from redis.
-func LoadGachaSession(chatID int64) (config.GachaTenant, error) {
-	tenantJSON, err := rc.Get(context.TODO(), wrapKeyWithChat("gacha_tenant", chatID)).Result()
-	if err != nil {
-		if !errors.Is(err, redis.Nil) {
-			log.Error("get gacha tenant from redis failed", zap.Int64("chat", chatID), zap.Error(err))
-		}
-		return config.GachaTenant{}, err
-	}
-	var tenant config.GachaTenant
-	err = json.Unmarshal([]byte(tenantJSON), &tenant)
-	if err != nil {
-		log.Error("unmarshal gacha tenant failed", zap.Int64("chat", chatID), zap.Error(err))
-		return config.GachaTenant{}, err
-	}
-	return tenant, nil
-}
-
-// SaveGachaSession save gacha settings of a certain session to redis.
-func SaveGachaSession(chatID int64, tenant config.GachaTenant) error {
-	tenantJSON, err := json.Marshal(tenant)
-	if err != nil {
-		log.Error("marshal gacha tenant failed", zap.Int64("chat", chatID), zap.Error(err))
-		return err
-	}
-	err = rc.Set(context.TODO(), wrapKeyWithChat("gacha_tenant", chatID), tenantJSON, 42*24*time.Hour).Err()
-	if err != nil {
-		log.Error("set gacha tenant to redis failed", zap.Int64("chat", chatID), zap.Error(err))
-		return err
-	}
-	return nil
-}
-
 // SetByeWorldDuration save bye world duration to redis.
 func SetByeWorldDuration(chatID int64, userID int64, duration time.Duration) error {
 	err := rc.Set(context.TODO(), wrapKeyWithChatMember("bye_world", chatID, userID), duration.String(), 7*24*time.Hour).Err()

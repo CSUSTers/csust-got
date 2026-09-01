@@ -79,16 +79,8 @@ chat_whitelist: &whitelist_filter
     - type: "whitelist"
       whitelist: [123, 345]
 
-mcpo_server:
-  enable: true
-  url: http://mcpo_host:8080
-  tools:
-    - time
-    - searxng
-    - fetch
-
 agent_v3:
-  enable: false
+  enable: true
   soul_path: "docs/agent_v3_soul.md"
   context_cache:
     enable: true
@@ -144,7 +136,7 @@ agent_v3:
     capture_content: "preview"
     preview_chars: 512
 
-chats:
+agents:
   - name: 什么是bot
     model: *qwen
     message_context: 6 # reply msg上下文数量
@@ -259,7 +251,16 @@ chats:
     temperature: 0.5
     place_holder: "👀"
     error_message: "😔很抱歉，我无法处理您的请求"
-    use_mcpo: true
+    agent:
+      enable: true
+      mcp_servers:
+        - enable: true
+          type: mcpo
+          url: http://mcpo_host:8080
+          tools:
+            - time
+            - searxng
+            - fetch
     features:
       image: true
       image_resize:

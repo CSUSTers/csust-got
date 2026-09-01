@@ -1,4 +1,4 @@
-This repo is a modern Telegram bot for CSUST built with Go 1.27+, featuring AI chat, gacha systems, and comprehensive permission controls.
+This repo is a modern Telegram bot for CSUST built with Go 1.27+, featuring AI chat and comprehensive permission controls.
 
 ## Architecture Overview
 
@@ -8,21 +8,21 @@ This repo is a modern Telegram bot for CSUST built with Go 1.27+, featuring AI c
 - **Configuration**: `config.yaml` → structs in `config/` → global `config.BotConfig`
 - **Data Layer**: `orm/` - Redis-based persistence (NOT a SQL ORM); stores chat state, user lists, caches
 - **Queue System**: `store/` - Background task processing (message deletion)
-- **Feature Packages**: `chat/`, `restrict/`, `base/`, `inline/`
+- **Feature Packages**: `agent/` (package `agentv3`), `restrict/`, `base/`, `inline/`
 
 ### Middleware Pipeline
-All requests flow through this ordered chain (see `main.go:116-119`):
+All requests flow through this ordered chain (see `main.go:108-111`):
 ```go
 loggerMiddleware → skipMiddleware → blockMiddleware → fakeBanMiddleware →
 rateMiddleware → noStickerMiddleware → shutdownMiddleware →
-messageStoreMiddleware → contentFilterMiddleware → byeWorldMiddleware → mcMiddleware
+messageStoreMiddleware → byeWorldMiddleware → mcMiddleware
 ```
 **Key Insight**: Middleware order matters! `blockMiddleware` must run before permission checks.
 
 ### Handler Registration Patterns
 1. **Static Commands**: `bot.Handle("/hello", base.Hello)` in `registerBaseHandler()`
-2. **Dynamic Chat Commands**: Generated from `config.yaml` chat configs in `registerChatConfigHandler()`
-3. **Regex Triggers**: Initialized via `initChatRegexHandlers()` and matched in `customHandler()`
+2. **Dynamic Agent Commands**: Generated from top-level `agents:` entries in `config.yaml` by `registerAgentConfigHandler()`
+3. **Regex Triggers**: Initialized via `initAgentRegexHandlers()` and matched in `customHandler()`
 4. **Event Handlers**: `OnUserJoined`, `OnSticker`, `OnPhoto`, etc. in `registerEventHandler()`
 
 ### Command Scope Helpers (util/utils.go)
@@ -41,11 +41,11 @@ messageStoreMiddleware → contentFilterMiddleware → byeWorldMiddleware → mc
 - Example: `ByeWorldQueue` for delayed message deletion
 - Background goroutines: `store.InitQueues(bot)`
 
-### Chat Config System (config/chat.go)
-- Multi-model AI support with templates (Go `text/template`)
-- Triggers: command, regex, reply-to-bot, gacha probability
-- Output formats: markdown/html with configurable quote/collapse styles
-- Streaming typewriter effect with rate-limited edits
+### Agent Configuration (`config/agent.go`)
+- Top-level `agents:` entries define models, templates, command/regex/reply triggers, filters, and output settings.
+- Each enabled entry is compiled at startup by the `agentv3` package.
+- Agent options support configured tools, per-agent `ToolServerConfig` MCP or MCPO servers, subagents, and skill configuration.
+- Global `agent_v3` settings control the Runtime, memory, prompt cache, trace output, built-in skills, and SearXNG.
 
 ## Development Workflows
 
@@ -55,11 +55,11 @@ messageStoreMiddleware → contentFilterMiddleware → byeWorldMiddleware → mc
 3. Add config if needed: struct in `config/`, read in `readConfig()`, validate in `checkConfig()`
 4. Write tests: `myfeature/handler_test.go` using `github.com/stretchr/testify`
 
-### Adding a New Chat Configuration
-1. Add entry to `config.yaml` under `chats:` with model, triggers, prompts
-2. Restart bot - `registerChatConfigHandler()` auto-registers command triggers
-3. Test with command trigger first, then enable regex/reply/gacha triggers
-4. Use `{{.ContextXml}}` in templates for conversation history with preserved URLs
+### Adding an Agent Configuration
+1. Add an entry under top-level `agents:` in `config.yaml` with its model, prompts, and triggers.
+2. Enable `agent_v3` and the entry's `agent` settings as required. Startup compiles enabled agents and `registerAgentConfigHandler()` registers command triggers.
+3. Test a command trigger first, then enable regex or reply triggers.
+4. Templates receive parsed message context with preserved link entities.
 
 ### Build & Test Commands
 ```bash
@@ -101,71 +101,24 @@ make run       # Deploy + execute
 
 ## Key Integration Points
 
-### AI Chat Module (chat/)
-The chat module is the core AI conversation system with MCP (Model Context Protocol) support via **mcpo provider**.
+### AI Agent Module (`agent/`, package `agentv3`)
+`main.go` imports the package as `agentv3 "csust-got/agent"`. There is one Agent v3 runtime path and no legacy chat fallback or global MCPO client.
 
-#### Chat Request Flow (chat/chat.go)
-1. **Filter Check**: `ProcessFilters()` validates whitelist/permissions → return `FilterDeny` stops processing
-2. **Context Extraction**: `GetMessageContext()` retrieves message history with entities (preserves URLs in links)
-3. **Template Rendering**: 
-   - `promptData` struct with: `DateTime`, `Input`, `ContextMessages`, `ContextXml`, `ReplyToXml`, `BotUsername`
-   - `SystemPromptTemplate.Execute(data)` → system prompt
-   - `PromptTemplate.Execute(data)` → user prompt
-4. **Image Processing** (if enabled): 
-   - Auto-resize via `FeatureSetting.ImageResize()` (default 512x512, keeps ratio)
-   - JPEG encode + base64 + prepend `data:image/jpeg;base64,`
-   - Append as `MultiContent` with `ChatMessagePartTypeImageURL`
-5. **MCP Tool Injection**: If `UseMcpo && config.McpoServer.Enable` → `request.Tools = mcpo.GetToolSet("")`
-6. **Streaming Response**: `CreateChatCompletionStream()` → `streamProcessor.process()`
-7. **Output Formatting**: `formatOutput()` extracts `<think>` reason tags, applies format config
+#### Agent Request Flow
+1. `handleAgentConfig()` selects a compiled enabled agent, then `agentv3.Chat()` runs `ProcessFilters()`.
+2. The agent parses input and message context, preserving Telegram link entities and reply history, then renders configured templates and the Agent v3 stable prefix.
+3. Eino creates the model and executes the compiled agent. Its tools can include fixed remote Runtime tools, configured MCP or MCPO `ToolServerConfig` entries, built-in tools, subagents, and skills.
+4. Agent v3 manages chat-scoped memory, prompt-cache state, trace data, and built-in SearXNG guidance. Runtime tools call the configured remote Runtime rather than a global MCPO service.
+5. `StreamToTelegram()` delivers streamed or final responses with the configured Markdown or HTML format and optional rich output.
 
-#### MCP Integration (chat/mcpo.go)
-**mcpo** is the MCP provider that exposes tools to AI models:
-- **Initialization**: `InitMcpoClient()` in `main.go` → fetches OpenAPI specs from `config.McpoServer.Url`
-- **Tool Discovery**: 
-  - GET `/{tool}/openapi.json` → parse OpenAPI 3.1 spec
-  - Convert paths to OpenAI function definitions: `POST /path` → `toolName_path`
-  - Store in `mcpTools` map, group by tool in `toolSets`
-- **Tool Execution**: 
-  - AI returns `ToolCall` with function name + JSON args
-  - `McpoTool.Call(ctx, param)` → POST to tool URL with JSON body
-  - Add `Authorization: Bearer {ApiKey}` if configured
-  - Return result to AI for next completion
-- **Tool Sets**: Use `GetToolSet(setName)` to filter tools (e.g., `"mcpo_weather"` for weather tools only)
+#### MCP and MCPO
+MCP and MCPO servers are configured per agent, subagent, or skill with `ToolServerConfig`. `McpManager` builds those tool connections during Agent v3 startup and closes them with the agent package. MCPO is one supported server type, not a global configuration or startup client.
 
-#### Streaming Output (chat/streaming.go)
-- **streamProcessor**: Manages real-time message updates with rate limiting
-- **Ticker Pattern**: 
-  - `startStreamingTicker()` → goroutine sends updates every `EditInterval` (default 1s)
-  - `updateStreamingMessage()` → finds last sentence delimiter, sends partial text
-  - Stops at `<-sp.done` channel signal
-- **Tool Call Handling**: 
-  - Accumulates `ToolCall` chunks in `currentToolCallsChunks`
-  - Merges chunks by index, executes when complete
-  - Appends tool results to `messages`, retries completion
-- **Final Output**: `formatOutput()` applies markdown/html escaping + quote/collapse/block styles
-
-#### Message Context (chat/context.go)
-- **Entity Preservation**: `getMessageTextWithEntities()` reconstructs URLs from Telegram entities
-  - Problem: `msg.Text` only has visible text, loses URLs in `[title](url)` links
-  - Solution: Parse `msg.Entities` (offset+length+type+url) and reconstruct markdown/html
-- **Context Formatting**:
-  - `FormatContextMessages()` → plain text with `User: message\n`
-  - `FormatContextMessagesWithXml()` → XML tags with message IDs and reply chains
-  - Thread reconstruction: Follows `ReplyTo` chain to build conversation tree
-
-#### Filters (chat/filter.go)
-- **Filter Interface**: `ProcessIncoming()` → `FilterAllow` or `FilterDeny`
-- **Built-in Filters**:
-  - `whitelistFilter`: Check chat ID or sender ID against config list
-- **Execution**: Runs in order defined in `config.Filters.Filters`, first deny stops chain
-- **Extension Points**: `ProcessOutgoing()` modifies response, `ProcessPromptData()` alters template data
-
-#### Adding New Chat Features
-1. **New Filter Type**: Implement `Filter` interface in `filter.go`, add case in `createFilter()`
-2. **New Template Variable**: Add field to `promptData` struct, populate in `Chat()` function
-3. **New Output Format**: Add case in `formatText()` with markdown/html escaping logic
-4. **New MCP Tool**: Deploy OpenAPI-compliant HTTP server, add to `mcpo_server.tools` list
+#### Extending the Agent
+1. Add filters in `agent/filter.go` and register their configuration handling there.
+2. Update Agent v3 context/template construction in `agent/agentv3_context.go` when a new prompt field is necessary.
+3. Update `agent/format.go`, `agent/streaming.go`, or `agent/rich_message.go` for output behavior.
+4. Add an MCP or MCPO server through the relevant agent, subagent, or skill `ToolServerConfig` entry.
 
 ## Pull Request Guidelines
 1. **Base branch**: Always create PRs against `dev` (not `master`)

@@ -1,4 +1,4 @@
-.PHONY: get build test test-json-performance fmt deploy run clean
+.PHONY: get build test fmt deploy run clean
 
 PROJECT := csust-got
 ifeq ($(VERSION),) 
@@ -32,9 +32,6 @@ build: get
 
 test: 
 	go test -v -race -covermode=atomic -short ./...
-
-test-json-performance:
-	go test ./chatv2 -run '^TestJSONBackendPerformanceGate$$' -count=1
 
 fmt:
 	gofmt -l -w . && golangci-lint run --fix=false

@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"csust-got/chat"
-	"csust-got/chatv2"
+	agentv3 "csust-got/agent"
 	"csust-got/inline"
 	"csust-got/store"
-	"csust-got/util/gacha"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,15 +33,12 @@ func main() {
 	orm.LoadWhiteList()
 	orm.LoadBlockList()
 
-	chat.InitMcpoClient()
-	chat.InitAiClients(config.BotConfig.ActiveChatConfig())
-	if err := chatv2.Init(context.Background()); err != nil {
-		log.Panic("chatv2: init failed", zap.Error(err))
+	if err := agentv3.Init(context.Background()); err != nil {
+		log.Panic("agentv3: init failed", zap.Error(err))
 	}
-	defer chatv2.Close()
-	initChatRegexHandlers(config.BotConfig.ActiveChatConfig())
-
-	chat.InitGachaConfigs()
+	log.Info("agentv3 initialized")
+	defer agentv3.Close()
+	initAgentRegexHandlers(*config.BotConfig.Agents)
 
 	err := base.InitGetVoice()
 	if err != nil {
@@ -64,7 +59,7 @@ func main() {
 	registerBaseHandler(bot)
 	registerRestrictHandler(bot)
 	registerEventHandler(bot)
-	registerChatConfigHandler(bot)
+	registerAgentConfigHandler(bot)
 
 	// inline mode
 	inline.RegisterInlineHandler(bot, config.BotConfig)
@@ -112,7 +107,7 @@ func initBot() (*Bot, error) {
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
-		messageStoreMiddleware, contentFilterMiddleware, byeWorldMiddleware,
+		messageStoreMiddleware, byeWorldMiddleware,
 		mcMiddleware)
 
 	config.BotConfig.Bot = bot
@@ -168,15 +163,11 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/getvoice", base.GetVoice)
-	bot.Handle("/memory", chatv2.MemoryCommand)
-	bot.Handle("/trace_last", chatv2.TraceLastCommand)
-	bot.Handle("/context_cache", chatv2.ContextCacheCommand)
-	bot.Handle("/runtime_status", chatv2.RuntimeStatusCommand)
-	bot.Handle("/runtime_reset", chatv2.RuntimeResetCommand)
-
-	// gacha handler
-	bot.Handle("/gacha_setting", gacha.SetGachaHandle)
-	bot.Handle("/gacha", gacha.WithMsgRpl)
+	bot.Handle("/memory", agentv3.MemoryCommand)
+	bot.Handle("/trace_last", agentv3.TraceLastCommand)
+	bot.Handle("/context_cache", agentv3.ContextCacheCommand)
+	bot.Handle("/runtime_status", agentv3.RuntimeStatusCommand)
+	bot.Handle("/runtime_reset", agentv3.RuntimeResetCommand)
 
 	// get sticker handler
 	bot.Handle("/iwant", base.GetSticker)
@@ -202,21 +193,22 @@ func stickerDlHandler(ctx Context) error {
 	return nil
 }
 
-func handleChatConfig(ctx Context, chatConfig *config.ChatConfigSingle, trigger *config.ChatTrigger) error {
-	if chatConfig.IsAgentEnabled() {
-		if config.BotConfig.WhiteListConfig.Enabled &&
-			!config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
-			zap.L().Info("chat ignore by white list",
-				zap.Int64("chat_id", ctx.Chat().ID),
-				zap.String("agent", chatConfig.Name),
-			)
-			return nil
-		}
-		if chatv2.HasCompiledChat(chatConfig.Name) {
-			return chatv2.Chat(ctx, chatConfig, trigger)
-		}
+func handleAgentConfig(ctx Context, agentConfig *config.AgentConfig, trigger *config.AgentTrigger) error {
+	if !agentConfig.IsAgentV3Enabled() {
+		return nil
 	}
-	return chat.Chat(ctx, chatConfig, trigger)
+	if config.BotConfig.WhiteListConfig.Enabled &&
+		!config.BotConfig.WhiteListConfig.Check(ctx.Chat().ID) {
+		zap.L().Info("agent ignore by white list",
+			zap.Int64("chat_id", ctx.Chat().ID),
+			zap.String("agent", agentConfig.Name),
+		)
+		return nil
+	}
+	if !agentv3.HasCompiledAgent(agentConfig.Name) {
+		return nil
+	}
+	return agentv3.Chat(ctx, agentConfig, trigger)
 }
 
 func customHandler(ctx Context) error {
@@ -245,9 +237,9 @@ func customHandler(ctx Context) error {
 	if text != "" && ctx.Message().ReplyTo != nil {
 		reply := ctx.Message().ReplyTo
 		if reply.Sender.Username == ctx.Bot().Me.Username {
-			for _, v2 := range config.BotConfig.ActiveChatConfig() {
-				if trigger, ok := v2.TriggerOnReply(); ok {
-					return handleChatConfig(ctx, v2, trigger)
+			for _, agentConfig := range *config.BotConfig.Agents {
+				if trigger, ok := agentConfig.TriggerOnReply(); ok {
+					return handleAgentConfig(ctx, agentConfig, trigger)
 				}
 			}
 		}
@@ -285,15 +277,15 @@ func registerEventHandler(bot *Bot) {
 	bot.Handle(OnDocument, base.DoNothing)
 }
 
-func registerChatConfigHandler(bot *Bot) {
-	for _, v := range config.BotConfig.ActiveChatConfig() {
-		for _, tr := range v.Trigger {
-			if tr.Command != "" {
+func registerAgentConfigHandler(bot *Bot) {
+	for _, agentConfig := range *config.BotConfig.Agents {
+		for _, trigger := range agentConfig.Trigger {
+			if trigger.Command != "" {
 				// 创建局部副本以避免闭包捕获循环变量
-				vCopy := v
-				trCopy := tr
-				bot.Handle("/"+trCopy.Command, func(ctx Context) error {
-					return handleChatConfig(ctx, vCopy, trCopy)
+				agentConfigCopy := agentConfig
+				triggerCopy := trigger
+				bot.Handle("/"+triggerCopy.Command, func(ctx Context) error {
+					return handleAgentConfig(ctx, agentConfigCopy, triggerCopy)
 				})
 			}
 		}
@@ -305,17 +297,17 @@ var regexHandlers []struct {
 	Func  func(Context) error
 }
 
-func initChatRegexHandlers(v2 []*config.ChatConfigSingle) {
-	for _, v := range v2 {
-		for _, tr := range v.Trigger {
-			if tr.Regex != "" {
-				vCopy := v   // 创建局部副本
-				trCopy := tr // 创建局部副本
+func initAgentRegexHandlers(agents config.AgentV3Configs) {
+	for _, agentConfig := range agents {
+		for _, trigger := range agentConfig.Trigger {
+			if trigger.Regex != "" {
+				agentConfigCopy := agentConfig
+				triggerCopy := trigger
 				regexHandlers = append(regexHandlers, struct {
 					Regex *regexp.Regexp
 					Func  func(Context) error
-				}{Regex: regexp.MustCompile(trCopy.Regex), Func: func(context Context) error {
-					return handleChatConfig(context, vCopy, trCopy)
+				}{Regex: regexp.MustCompile(triggerCopy.Regex), Func: func(ctx Context) error {
+					return handleAgentConfig(ctx, agentConfigCopy, triggerCopy)
 				}})
 			}
 		}
@@ -437,25 +429,6 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 				zap.String("user", ctx.Sender().Username))
 			return nil
 		}
-		return next(ctx)
-	}
-}
-
-// contentFilterMiddleware 过滤消息中的内容
-func contentFilterMiddleware(next HandlerFunc) HandlerFunc {
-	return func(ctx Context) error {
-		m := ctx.Message()
-		// continue with inline query
-		if m == nil && ctx.Query() != nil {
-			return next(ctx)
-		}
-
-		// DONE: gacha 会修改ctx.Message.Text，所以放到next之后，等dawu以后重构吧，详见 #501
-		// 2024-12-17 [dawu]: 已经重构
-		if m.Text != "" {
-			go chat.GachaReplyHandler(ctx)
-		}
-
 		return next(ctx)
 	}
 }

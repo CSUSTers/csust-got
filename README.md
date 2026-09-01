@@ -20,7 +20,6 @@ A modern Telegram bot for CSUST, developed in Go.
 ## Features
 
 - 🤖 AI Chat Conversations (supports multiple models)
-- 🎲 Gacha System
 - 🎭 Entertainment Features
 - 🔧 Flexible Configuration System
 - 🎯 Regular Expression Triggers
@@ -118,7 +117,7 @@ Please modify the configuration in `config.yaml`.
 
 ## Agent v3 Runtime and Controlled Fetch
 
-The repository defaults are `agent_v3.enable: false` and `agent_v3.runtime.fetch_enabled: false`. To expose Agent v3 CLI Fetch, explicitly enable Agent v3, its Runtime, and its Fetch gate:
+The repository defaults are `agent_v3.enable: true`, `agent_v3.runtime.enable: true`, and `agent_v3.runtime.fetch_enabled: false`. To expose Agent v3 CLI Fetch, keep Agent v3 and its remote Runtime enabled and explicitly enable the Fetch gate:
 
 ```yaml
 agent_v3:
@@ -325,8 +324,6 @@ hitowuta - Random poems
 hito_netease - NetEase style quotes
 mc - Minecraft mini-game
 reburn - Respawn (MC game)
-gacha_setting - Set JSON gacha configuration
-gacha - Draw cards according to your configuration
 ```
 
 ### Voice Related
