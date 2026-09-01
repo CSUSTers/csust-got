@@ -273,6 +273,29 @@ func TestGetMessageTextWithEntities(t *testing.T) {
 			expected:   `Visit <a href="https://google.com">Google</a> and check out <a href="tg:golang">@golang</a> for <b>bold</b> tips`,
 		},
 		{
+			name: "markdown entity after emoji uses UTF-16 offsets",
+			msg: &tb.Message{
+				Text: "😀 bold",
+				Entities: []tb.MessageEntity{
+					{Type: tb.EntityBold, Offset: 3, Length: 4},
+				},
+			},
+			htmlFormat: false,
+			expected:   "😀 **bold**",
+		},
+		{
+			name: "nested markdown entities",
+			msg: &tb.Message{
+				Text: "bold italic",
+				Entities: []tb.MessageEntity{
+					{Type: tb.EntityBold, Offset: 0, Length: 11},
+					{Type: tb.EntityItalic, Offset: 5, Length: 6},
+				},
+			},
+			htmlFormat: false,
+			expected:   "**bold *italic***",
+		},
+		{
 			name: "caption with entities",
 			msg: &tb.Message{
 				Text:    "",
@@ -648,6 +671,61 @@ func TestContextMessageWithEntities(t *testing.T) {
 	assert.Equal(t, "testuser", contextMsg.User)
 }
 
+func TestGetReplyChainIncludesMessageTypeAndMediaMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  *tb.Message
+		contains []string
+	}{
+		{
+			name: "text",
+			message: &tb.Message{
+				ID: 1, Text: "hello", Sender: &tb.User{Username: "alice"},
+			},
+			contains: []string{`type="text"`, "hello"},
+		},
+		{
+			name: "captioned photo",
+			message: &tb.Message{
+				ID: 2, Caption: "diagram", Photo: &tb.Photo{File: tb.File{FileID: "photo-captioned"}}, Sender: &tb.User{Username: "alice"},
+			},
+			contains: []string{`type="photo"`, `<image file_id="photo-captioned" />`, "diagram"},
+		},
+		{
+			name: "captionless photo",
+			message: &tb.Message{
+				ID: 3, Photo: &tb.Photo{File: tb.File{FileID: "photo-captionless"}}, Sender: &tb.User{Username: "alice"},
+			},
+			contains: []string{`type="photo"`, `<image file_id="photo-captionless" />`},
+		},
+		{
+			name: "sticker",
+			message: &tb.Message{
+				ID: 4, Sticker: &tb.Sticker{File: tb.File{FileID: "sticker-file"}, Emoji: "🙂"}, Sender: &tb.User{Username: "alice"},
+			},
+			contains: []string{`type="sticker"`, "🙂"},
+		},
+		{
+			name: "document",
+			message: &tb.Message{
+				ID: 5, Document: &tb.Document{File: tb.File{FileID: "document-file"}, FileName: "notes.pdf"}, Sender: &tb.User{Username: "alice"},
+			},
+			contains: []string{`type="document"`, "notes.pdf"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages, err := getReplyChain(nil, tt.message, 3)
+			assert.NoError(t, err)
+			output := FormatContextMessagesWithXml(messages)
+			for _, expected := range tt.contains {
+				assert.Contains(t, output, expected)
+			}
+		})
+	}
+}
+
 // Test the new nested XML format functionality
 func TestFormatContextMessagesWithXml(t *testing.T) {
 	tests := []struct {
@@ -674,7 +752,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     Hello world
   </message>
 </messages>
@@ -704,9 +782,9 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     Original message
-    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+    <message id="2" username="user2" showname="Jane Smith" type="text" replyTo="1">
       Reply to original
     </message>
   </message>
@@ -747,11 +825,11 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     Root message
-    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+    <message id="2" username="user2" showname="Jane Smith" type="text" replyTo="1">
       Reply to root
-      <message id="3" username="user3" showname="Bob Johnson" replyTo="2">
+      <message id="3" username="user3" showname="Bob Johnson" type="text" replyTo="2">
         Reply to reply
       </message>
     </message>
@@ -793,12 +871,12 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     Original message
-    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+    <message id="2" username="user2" showname="Jane Smith" type="text" replyTo="1">
       First reply
     </message>
-    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
+    <message id="3" username="user3" showname="Bob Johnson" type="text" replyTo="1">
       Second reply
     </message>
   </message>
@@ -838,13 +916,13 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     First root
-    <message id="3" username="user3" showname="Bob Johnson" replyTo="1">
+    <message id="3" username="user3" showname="Bob Johnson" type="text" replyTo="1">
       Reply to first root
     </message>
   </message>
-  <message id="2" username="user2" showname="Jane Smith">
+  <message id="2" username="user2" showname="Jane Smith" type="text">
     Second root
   </message>
 </messages>
@@ -874,9 +952,9 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="John Doe">
+  <message id="1" username="user1" showname="John Doe" type="text">
     Message with &lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt; &amp; other HTML
-    <message id="2" username="user2" showname="Jane Smith" replyTo="1">
+    <message id="2" username="user2" showname="Jane Smith" type="text" replyTo="1">
       Reply with &amp; more &lt;tags&gt;
     </message>
   </message>
@@ -897,7 +975,7 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 				},
 			},
 			expected: `<messages>
-  <message id="1" username="user1" showname="">
+  <message id="1" username="user1" showname="" type="text">
     Message from user with no name
   </message>
 </messages>

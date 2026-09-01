@@ -156,3 +156,25 @@ func TestCustomHandler_EnabledGlobalWhitelistRejectsUnlistedAgent(t *testing.T) 
 		require.NoError(t, customHandler(ctx))
 	}, "unlisted agent must be rejected before dispatch")
 }
+
+func TestShouldStoreMessageIncludesMediaWithoutText(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *Message
+		want bool
+	}{
+		{name: "nil"},
+		{name: "empty", msg: &Message{}},
+		{name: "text", msg: &Message{Text: "hello"}, want: true},
+		{name: "caption", msg: &Message{Caption: "caption"}, want: true},
+		{name: "photo", msg: &Message{Photo: &Photo{}}, want: true},
+		{name: "sticker", msg: &Message{Sticker: &Sticker{}}, want: true},
+		{name: "document", msg: &Message{Document: &Document{}}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, shouldStoreMessage(tt.msg))
+		})
+	}
+}

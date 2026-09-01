@@ -4,12 +4,15 @@ package agentv3
 
 import (
 	"csust-got/config"
+	"csust-got/orm"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	tb "gopkg.in/telebot.v3"
 )
 
 var (
@@ -52,6 +55,47 @@ func TestAnalyzeImageToolSoftFailures(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, out, "没有可分析的图片")
 	})
+}
+
+func TestGetContextToolReturnsStoredPhotoMetadataAndMarkdown(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "get-context-media:"
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	chat := &tb.Chat{ID: -100}
+	messages := []*tb.Message{
+		{
+			ID: 109, Chat: chat, Sender: &tb.User{Username: "alice"},
+			Photo: &tb.Photo{File: tb.File{FileID: "captionless-photo"}},
+		},
+		{
+			ID: 110, Chat: chat, Sender: &tb.User{Username: "bob"}, Caption: "😀 bold",
+			CaptionEntities: []tb.MessageEntity{{Type: tb.EntityBold, Offset: 3, Length: 4}},
+			Photo:           &tb.Photo{File: tb.File{FileID: "captioned-photo"}},
+		},
+	}
+	for _, message := range messages {
+		require.NoError(t, orm.PushMessageToStream(message))
+		require.NoError(t, orm.SetMessage(message))
+	}
+
+	tc := &TurnContext{Message: &tb.Message{ID: 111, Chat: chat, Sender: &tb.User{Username: "caller"}}}
+	output, err := (&getContextTool{}).InvokableRun(WithTurnContext(t.Context(), tc), `{"limit":10}`)
+	require.NoError(t, err)
+	assert.Contains(t, output, `type="photo"`)
+	assert.Contains(t, output, `<image file_id="captionless-photo" />`)
+	assert.Contains(t, output, `<image file_id="captioned-photo" />`)
+	assert.Contains(t, output, "😀 **bold**")
 }
 
 func TestProgressStepDetailsUpdate(t *testing.T) {

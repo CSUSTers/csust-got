@@ -532,7 +532,7 @@ func isAllowedCommandName(commandName string, allowed ...string) bool {
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
-		if m != nil && (m.Text != "" || m.Caption != "") {
+		if shouldStoreMessage(m) {
 			// 异步存储完整消息结构体到Redis
 			go func() {
 				// Store to stream
@@ -547,6 +547,10 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 		}
 		return next(ctx)
 	}
+}
+
+func shouldStoreMessage(m *Message) bool {
+	return m != nil && (m.Text != "" || m.Caption != "" || m.Photo != nil || m.Sticker != nil || m.Document != nil)
 }
 
 func isChatMessageHasSender(ctx Context) bool {
