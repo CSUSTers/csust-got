@@ -361,8 +361,8 @@ check_file_contains_all 'rollback gate runs every exact current test selector wi
   'run_exact_go_test()' '=== RUN   ' '--- PASS: ' 'runs == 1 && passes == 1' \
   'run_exact_go_test ./config TestAgentV3RuntimeFetchDefaultsDisabled rollback-fetch-default-disabled' \
   'run_exact_go_test ./config TestAgentV3RuntimeFetchRequiresExplicitTrue rollback-fetch-explicit-true' \
-  'run_exact_go_test ./chatv2 TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled' \
-  'run_exact_go_test ./chatv2 TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules'
+  'run_exact_go_test ./agent TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled' \
+  'run_exact_go_test ./agent TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules'
 check_file_excludes 'output cleanup assertions no longer use the obsolete non-dotfile Fetch temp glob' \
   "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" '*.fetch-tmp-*'
 check_file_contains_all 'output success, check-status, cancel, error, and quota paths use exact adjacent dotfile temp names recursively' \

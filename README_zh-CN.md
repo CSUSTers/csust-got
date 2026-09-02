@@ -20,7 +20,6 @@
 ## 特性
 
 - 🤖 AI 聊天对话（支持多种模型）
-- 🎲 抽卡系统
 - 🎭 各种娱乐功能
 - 🔧 灵活的配置系统
 - 🎯 正则表达式触发器
@@ -29,7 +28,7 @@
 
 ## 系统要求
 
-- Go 1.26+
+- Go 1.27+
 - Rust 1.95+（仅在从源码构建或验证 Agent Runtime 时需要）
 - Redis
 - Docker Engine 与 Docker Compose v2（推荐）
@@ -118,7 +117,7 @@ docker compose --profile agent-fetch -f docker-compose.yml -f docker-compose.fet
 
 ## Agent v3 Runtime 与受控 Fetch
 
-仓库默认配置为 `agent_v3.enable: false` 和 `agent_v3.runtime.fetch_enabled: false`。如需开放 Agent v3 的 CLI Fetch，必须显式启用 Agent v3、其 Runtime 和 Fetch 开关：
+仓库默认配置为 `agent_v3.enable: true`、`agent_v3.runtime.enable: true` 和 `agent_v3.runtime.fetch_enabled: false`。如需开放 Agent v3 的 CLI Fetch，请保持 Agent v3 及其远程 Runtime 启用，并显式启用 Fetch 开关：
 
 ```yaml
 agent_v3:
@@ -313,8 +312,6 @@ hitowuta - 一诗
 hito_netease - 一键网抑
 mc - MC 小游戏
 reburn - 重生（MC小游戏）
-gacha_setting - 设置一个json格式的抽卡配置
-gacha - 抽卡，按照你的配置
 ```
 
 ### 语音相关
@@ -340,7 +337,7 @@ setiwant - f=<format> vf=<format> sf=<format> 设置我要Sticker
 
 ## 技术栈
 
-- **语言**: Go 1.26+
+- **语言**: Go 1.27+
 - **框架**: [telebot.v3](https://github.com/tucnak/telebot)
 - **数据库**: Redis
 - **AI**: OpenAI API 兼容接口
@@ -361,7 +358,7 @@ make test
 make build
 
 # 代码检查
-golangci-lint run
+golangci-lint run --fix=false
 ```
 
 ## 许可证

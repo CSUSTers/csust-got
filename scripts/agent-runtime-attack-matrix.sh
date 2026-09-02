@@ -816,7 +816,7 @@ run_logged fixture-python-syntax timeout 1m "$python_for_syntax" -c \
 run_logged rust-format timeout 5m cargo fmt --manifest-path "$REPO_ROOT/agent-runtime/Cargo.toml" -- --check || true
 run_logged task1-6-rust-security timeout 30m cargo test --manifest-path "$REPO_ROOT/agent-runtime/Cargo.toml" --release --all-targets || true
 run_logged rust-release-binaries timeout 20m cargo build --manifest-path "$REPO_ROOT/agent-runtime/Cargo.toml" --release --bins || true
-run_logged task8-go-fetch-gate timeout 5m go test ./config ./chatv2 -run 'TestAgentV3Fetch|TestRemoteBashToolDocuments|TestBuildAgentV3StablePrefix' -count=1 || true
+run_logged task8-go-fetch-gate timeout 5m go test ./config ./agent -run 'TestAgentV3Fetch|TestRemoteBashToolDocuments|TestBuildAgentV3StablePrefix' -count=1 || true
 run_logged task8-go-race timeout 30m go test -race -covermode=atomic -short ./... || true
 run_logged go-build timeout 10m go build ./... || true
 run_logged task7-static-compose timeout 5m bash "$REPO_ROOT/scripts/test-agent-runtime-compose.sh" || true
@@ -3620,8 +3620,8 @@ run_exact_go_test() {
 rollback_gate_case() {
   run_exact_go_test ./config TestAgentV3RuntimeFetchDefaultsDisabled rollback-fetch-default-disabled || return 1
   run_exact_go_test ./config TestAgentV3RuntimeFetchRequiresExplicitTrue rollback-fetch-explicit-true || return 1
-  run_exact_go_test ./chatv2 TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled || return 1
-  run_exact_go_test ./chatv2 TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules || return 1
+  run_exact_go_test ./agent TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled || return 1
+  run_exact_go_test ./agent TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules || return 1
   assert_bash_success 'test "$(agent-runtime-net-probe socket inet)" = errno=1' task9-rollback rollback-seccomp 5s
 }
 case_run fetch-disabled-rollback 'isolated Go gate omits Fetch and changes Stable Prefix while live Runtime seccomp remains EPERM' rollback_gate_case || true

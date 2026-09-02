@@ -226,7 +226,7 @@ func TestSpecialListConfig(t *testing.T) {
 	req.True(BotConfig.WhiteListConfig.Enabled)
 }
 
-func TestChatConfigV1(t *testing.T) {
+func TestAgentConfigs(t *testing.T) {
 	req := testInit(t)
 	configFile := isolatedConfigFile(t)
 
@@ -238,10 +238,11 @@ func TestChatConfigV1(t *testing.T) {
 
 	defer viper.Reset()
 
-	t.Logf("%+v", BotConfig.Chats)
-	req.Greater(len(*BotConfig.Chats), 0)
-	req.NotNil((*BotConfig.Chats)[0].Model)
-	req.NotEmpty((*BotConfig.Chats)[0].Model.Model)
+	req.Greater(len(*BotConfig.Agents), 0)
+	req.NotNil((*BotConfig.Agents)[0].Model)
+	req.NotEmpty((*BotConfig.Agents)[0].Model.Model)
+	req.NotNil((*BotConfig.Agents)[0].Agent)
+	req.True((*BotConfig.Agents)[0].Agent.Enable)
 }
 
 func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
@@ -255,7 +256,7 @@ func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	defer viper.Reset()
 
 	req.NotNil(BotConfig.AgentV3)
-	req.False(BotConfig.AgentV3.Enable)
+	req.True(BotConfig.AgentV3.Enable)
 	req.Equal("docs/agent_v3_soul.md", BotConfig.AgentV3.SoulPath)
 	req.True(BotConfig.AgentV3.ContextCache.Enable)
 	req.Equal(12, BotConfig.AgentV3.ContextCache.RawTurns)
@@ -263,7 +264,6 @@ func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	req.NotNil(BotConfig.AgentV3.Runtime.FetchEnabled)
 	req.False(BotConfig.AgentV3.RuntimeFetchEnabled())
 	req.Equal([]string{"read", "grep", "write", "edit", "bash"}, BotConfig.AgentV3.Tools.ExposeOnly)
-	req.Contains(BotConfig.McpoServer.Tools, "searxng")
 	req.Equal(30*24*time.Hour, BotConfig.AgentV3.ContextCacheTTL())
 	req.Equal(120*time.Second, BotConfig.AgentV3.RuntimeCommandTimeout())
 	req.Empty(BotConfig.AgentV3.Skills.Root)

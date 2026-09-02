@@ -23,17 +23,17 @@ edit
 bash
 ```
 
-当前版本只在系统提示词中注入工具使用规则和可用 skill 说明,暂不实现从 agent runtime 文件系统读取 skill 的能力。Skill 是可复用的能力增强说明,不是现有工具体系的替代品;现有 `chatv2` agent tools、MCP tools、subagent tools、`SkillConfig` 工具/提示词扩展,以及 agent-v3 的 5 个固定 runtime 工具都继续按各自路径保留。
+当前版本只在系统提示词中注入工具使用规则和可用 skill 说明,暂不实现从 agent runtime 文件系统读取 skill 的能力。Skill 是可复用的能力增强说明,不是现有工具体系的替代品;现有 `agentv3` agent tools、MCP tools、subagent tools、`SkillConfig` 工具/提示词扩展,以及 agent-v3 的 5 个固定 runtime 工具都继续按各自路径保留。
 
 ---
 
 # 1. 当前代码改造基线
 
-当前 `chatv2.Chat()` 已经是合适入口，它负责配置匹配、过滤、输入构造、timeout context、`TurnContext`、历史加载和 agent 执行。
+当前 `agentv3.Chat()` 已经是合适入口，它负责配置匹配、过滤、输入构造、timeout context、`TurnContext`、历史加载和 agent 执行。
 
 `TurnContext` 已经包含 bot、message、chat id、config、progress、streaming/finalized 等运行时信息，v3 可以在它基础上扩展 `RunID`、`Namespace`、`TraceID`、`RuntimeClient`。
 
-当前工具构造会合并 agent tools、skill tools、MCP tools、subagent tools。v3 的 remote runtime 层要单独走一条固定工具构造路径,避免把 runtime 工具暴露面重新扩张;这不删除也不替代现有 `chatv2` 的多来源工具合并逻辑。
+当前工具构造会合并 agent tools、skill tools、MCP tools、subagent tools。v3 的 remote runtime 层要单独走一条固定工具构造路径,避免把 runtime 工具暴露面重新扩张;这不删除也不替代现有 `agentv3` 的多来源工具合并逻辑。
 
 ---
 
@@ -77,7 +77,7 @@ agentv3:{bot}:{platform}:{chat}:hot:raw_turns
 agentv3:{bot}:{platform}:{chat}:summary:current
 ```
 
-现有 Redis stream 设计有短期 TTL 和 maxlen，更适合保留为 v2 兼容或补洞；v3 需要独立 keyspace。
+现有 Redis stream 设计有短期 TTL 和 maxlen，可继续作为消息上下文的补充；Agent v3 的 prefix、turn 与 memory 数据使用独立 keyspace。
 
 ## 2.4 构建规则
 
@@ -245,7 +245,7 @@ bot 侧二次限制超时和输出大小
 
 当前版本暂不做 skill 文件系统化。Skill 不注册成额外模型工具,也不要求模型通过 `read`/`grep` 从 `/skills` 加载文档;bot 侧在 Stable Prefix/system prompt 中直接注入当前可用 skill 的名称、用途、使用规则和必要契约。
 
-现有 `chatv2` 的 `SkillConfig`、工具、MCP、subagent 组合机制继续保留;agent-v3 的 skill 注入只是给 v3 增加一组可复用能力说明,不把既有工具体系迁移成 skill 包装层。
+现有 `agentv3` 的 `SkillConfig`、工具、MCP、subagent 组合机制继续保留;agent-v3 的 skill 注入只是给 v3 增加一组可复用能力说明,不把既有工具体系迁移成 skill 包装层。
 
 当前版 skill 来源是 Go 侧按配置注册的内置/虚拟 skill,例如 rich-message。`agent_v3.skills.inject_builtin` 是内置 skill 注入总开关,默认开启;关闭后即使 chat 开启 rich 也不注入内置 skill。`agent.rich: true` 仍是 rich-message 的 per-chat 门控。若某个 skill 需要调用 CLI,该 CLI 必须在注入内容里写清楚命令、参数和安全限制;模型不能假设存在 `/skills/<name>/scripts/...` 这类 runtime 文件。
 
@@ -258,7 +258,7 @@ Stable Prefix 直接写入当前可用的精简 skill 内容和工具使用规�
 不要尝试通过 read/grep 从 /skills 加载 skill
 需要可复用扩展能力时优先参考已注入 skill 说明
 需要执行命令时,只能使用 skill 明确写出的命令和参数
-skill 是能力增强说明,不是 chatv2 tools/MCP/subagent/SkillConfig 的替代品
+skill 是能力增强说明,不是 agentv3 tools/MCP/subagent/SkillConfig 的替代品
 ```
 
 这样 skill 数量增长不会改变模型可见工具定义。skill 注入内容参与 Stable Prefix hash,内容变化时允许 prompt cache 失效并重建。
@@ -269,7 +269,7 @@ skill 是能力增强说明,不是 chatv2 tools/MCP/subagent/SkillConfig 的替�
 
 ## 6.1 新增 v3 独立工具构造
 
-agent-v3 remote runtime 层不要复用当前 `buildChatTools()` 的多来源合并逻辑,因为模型可见 runtime 工具要固定为 5 个。`buildChatTools()` 及其 agent tools、skill tools、MCP tools、subagent tools 支持仍作为现有 `chatv2` 工具体系保留。
+Agent v3 remote runtime 层不要复用 `buildConfiguredAgentTools()` 的多来源合并逻辑,因为模型可见 runtime 工具要固定为 5 个。配置的 agent tools、skill tools、MCP tools 与 subagent tools 继续按现有 `agentv3` 工具体系组合。
 
 新增：
 
@@ -413,18 +413,18 @@ agent_v3:
 ## M0：v3 骨架
 
 ```text
-ChatV3 入口
-TurnContextV3
+Agent v3 入口
+TurnContext
 RunID / Namespace
 Redis namespace helper
-v2/v3 配置并存
+顶层 `agents:` 配置与 `agent_v3` Runtime 设置
 ```
 
 验收：
 
 ```text
-v2 不受影响
-v3 能独立跑一轮请求
+已启用 Agent v3 配置能独立跑一轮请求
+没有启用 Agent 时跳过 Agent 启动工作，不回退到旧运行路径
 日志带 run_id
 ```
 
@@ -559,7 +559,7 @@ Stable Prefix = soul.md + group memory snapshot + runtime/tool rules + <agent_v3
 Hot Append = 配置控制的对话总结 + 最近多轮原文。
 Dynamic Suffix = 当前输入 + 临时检索 + 本轮工具结果。
 模型只能调用 read/grep/write/edit/bash。
-可复用扩展能力通过系统提示词中注入的 skill 说明获得;既有 chatv2 tools、MCP、subagent、SkillConfig 能力不被移除。
+可复用扩展能力通过系统提示词中注入的 skill 说明获得;既有 agentv3 tools、MCP、subagent、SkillConfig 能力不被移除。
 bash 在远端 Docker runtime 中执行，bot 只通过 HTTP RPC 通信。
 OpenAI 请求使用稳定 prompt 顺序和 prompt_cache_key。
 所有关键步骤都有 trace 和 cached_tokens 观测。

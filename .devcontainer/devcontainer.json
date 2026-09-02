@@ -1,7 +1,7 @@
 {
   "image": "mcr.microsoft.com/devcontainers/go",
   "features": {
-    "ghcr.io/devcontainers/features/go:1": {},
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.27" },
     "ghcr.io/guiyomh/features/golangci-lint:0": {},
     "ghcr.io/devcontainers-extra/features/zsh-plugins:0": {
       "plugins": "zsh-autosuggestions zsh-syntax-highlighting",
@@ -23,9 +23,7 @@
         "esbenp.prettier-vscode",
         "ms-python.python",
         "mutantdino.resourcemonitor",
-        "ms-vscode.makefile-tools",
-        "GitHub.copilot",
-        "GitHub.copilot-chat"
+        "ms-vscode.makefile-tools"
       ]
     }
   },

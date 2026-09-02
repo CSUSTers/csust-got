@@ -49,9 +49,7 @@ func NewBotConfig() *Config {
 		MeiliConfig:     new(meiliConfig),
 		McConfig:        new(mcConfig),
 		DebugOptConfig:  new(debugOptConfig),
-		Chats:           new(ChatConfigV1),
-		Agents:          new(ChatConfigV2),
-		McpoServer:      new(McpoConfig),
+		Agents:          new(AgentV3Configs),
 		AgentV3:         new(AgentV3Config),
 	}
 
@@ -83,11 +81,7 @@ type Config struct {
 	BlockListConfig *specialListConfig
 	WhiteListConfig *specialListConfig
 	*GetVoiceConfig
-	// Deprecated: Use Agents with the chatv2 agent-v3 configuration instead.
-	Chats       *ChatConfigV1
-	Agents      *ChatConfigV2
-	ChatEngine  string
-	McpoServer  *McpoConfig
+	Agents      *AgentV3Configs
 	AgentV3     *AgentV3Config
 	MeiliConfig *meiliConfig
 	McConfig    *mcConfig
@@ -148,8 +142,6 @@ func readConfig() {
 
 	// sentence delimiters for streaming
 	BotConfig.SentenceDelimiters = viper.GetStringSlice("sentence_delimiters")
-	// chat engine selection: v1, v2, or auto
-	BotConfig.ChatEngine = viper.GetString("chat_engine")
 	if len(BotConfig.SentenceDelimiters) == 0 {
 		// Set default sentence delimiters if none provided
 		BotConfig.SentenceDelimiters = []string{
@@ -166,9 +158,7 @@ func readConfig() {
 	BotConfig.BlockListConfig.readConfig()
 	BotConfig.MeiliConfig.readConfig()
 	BotConfig.McConfig.readConfig()
-	BotConfig.Chats.readConfig()
 	BotConfig.Agents.readConfig()
-	BotConfig.McpoServer.readConfig()
 	BotConfig.AgentV3.readConfig()
 
 	// genshin voice
@@ -211,24 +201,4 @@ func checkConfig() {
 	BotConfig.AgentV3.checkConfig()
 
 	BotConfig.DebugOptConfig.checkConfig()
-}
-
-// ActiveChatConfig returns the active chat configuration based on ChatEngine global setting.
-// "v2"/"agents" → agents[], "v1"/"chats" → chats[], default → chats[] (backward compatible).
-func (c *Config) ActiveChatConfig() []*ChatConfigSingle {
-	switch strings.ToLower(c.ChatEngine) {
-	case "v2", "agents":
-		if c.Agents != nil && len(*c.Agents) > 0 {
-			return []*ChatConfigSingle(*c.Agents)
-		}
-		if c.Chats != nil {
-			return []*ChatConfigSingle(*c.Chats)
-		}
-		return nil
-	default:
-		if c.Chats != nil {
-			return []*ChatConfigSingle(*c.Chats)
-		}
-		return nil
-	}
 }
