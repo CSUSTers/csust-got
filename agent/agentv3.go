@@ -153,7 +153,7 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 	}
 	ctx = WithTurnContext(ctx, tc)
 
-	history, err := LoadHistory(tc.Bot, msg, agentConfig.MessageContext)
+	history, err := loadAgentHistory(tc)
 	if err != nil {
 		zap.L().Warn("agentv3: failed to load history", zap.Error(err))
 		history = &RichHistory{}
@@ -204,6 +204,16 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return handleStreaming(ctx, tbCtx, compiled, messages, agentConfig)
 	}
 	return handleNonStreaming(ctx, tbCtx, compiled, messages, agentConfig)
+}
+
+func loadAgentHistory(tc *TurnContext) (*RichHistory, error) {
+	if tc == nil || tc.Config == nil {
+		return &RichHistory{}, nil
+	}
+	if tc.Config.UsesReplyChain() {
+		return &RichHistory{}, nil
+	}
+	return LoadHistory(tc.Bot, tc.Message, tc.Config.MessageContext)
 }
 
 // handleStreaming processes the agent response with streaming output.

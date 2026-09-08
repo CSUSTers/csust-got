@@ -368,6 +368,13 @@ func GetSkillPromptAddons(agentCfg *config.AgentOptions) string {
 // CompileAgent pre-compiles templates and builds the main agent for an agent configuration.
 // Called at Init() time; the returned CompiledAgent is reused for every request.
 func CompileAgent(ctx context.Context, chatCfg *config.AgentConfig, mcpMgr *McpManager, startup *agentV3StartupSkillSnapshots) (*CompiledAgent, error) {
+	if chatCfg == nil {
+		return nil, errAgentConfigNil
+	}
+	if err := chatCfg.ValidateContextMode(); err != nil {
+		return nil, err
+	}
+
 	// Compile system prompt template
 	var systemTpl *template.Template
 	if s := chatCfg.SystemPrompt.String(); s != "" {
@@ -385,6 +392,17 @@ func CompileAgent(ctx context.Context, chatCfg *config.AgentConfig, mcpMgr *McpM
 		promptTpl, err = template.New("prompt").Parse(p)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse prompt template for %q: %w", chatCfg.Name, err)
+		}
+	}
+	if chatCfg.UsesReplyChain() {
+		if err := validateReplySessionTemplate(promptTpl); err != nil {
+			return nil, fmt.Errorf("agent %q: %w", chatCfg.Name, err)
+		}
+		hasSoulPath := config.BotConfig != nil && config.BotConfig.AgentV3 != nil && strings.TrimSpace(config.BotConfig.AgentV3.SoulPath) != ""
+		if !hasSoulPath {
+			if err := validateReplySessionTemplate(systemTpl); err != nil {
+				return nil, fmt.Errorf("agent %q: %w", chatCfg.Name, err)
+			}
 		}
 	}
 

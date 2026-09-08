@@ -380,3 +380,47 @@ func TestAgentV3RuntimeFetchRequiresExplicitTrue(t *testing.T) {
 	cfg.Runtime.FetchEnabled = &enabled
 	assert.True(t, cfg.RuntimeFetchEnabled())
 }
+
+func TestAgentContextMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		mode  string
+		reply bool
+		bad   bool
+	}{
+		{name: "default", mode: ""},
+		{name: "chat", mode: "chat"},
+		{name: "reply chain", mode: "reply_chain", reply: true},
+		{name: "legacy reply is rejected", mode: "reply", bad: true},
+		{name: "case is rejected", mode: "CHAT", bad: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &AgentConfig{Name: "session", ContextMode: tt.mode}
+			assert.Equal(t, tt.reply, cfg.UsesReplyChain())
+			if tt.bad {
+				require.ErrorContains(t, cfg.ValidateContextMode(), "context_mode")
+				return
+			}
+			require.NoError(t, cfg.ValidateContextMode())
+		})
+	}
+
+	t.Run("yaml", func(t *testing.T) {
+		v := viper.New()
+		v.SetConfigType("yaml")
+		require.NoError(t, v.ReadConfig(strings.NewReader(`
+agents:
+  - name: reply-assistant
+    context_mode: reply_chain
+    message_context: 7
+`)))
+
+		var agents AgentV3Configs
+		require.NoError(t, v.UnmarshalKey("agents", &agents, viper.DecodeHook(DispatchFor())))
+		require.Len(t, agents, 1)
+		assert.True(t, agents[0].UsesReplyChain())
+		assert.Equal(t, 7, agents[0].MessageContext)
+	})
+}

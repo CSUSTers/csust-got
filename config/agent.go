@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"net/url"
 	"reflect"
@@ -238,6 +239,7 @@ type AgentConfig struct {
 	Name            string            `mapstructure:"name"`
 	Model           *Model            `mapstructure:"model"`
 	MessageContext  int               `mapstructure:"message_context"`
+	ContextMode     string            `mapstructure:"context_mode"`
 	Temperature     *float32          `mapstructure:"temperature"`
 	PlaceHolder     string            `mapstructure:"place_holder"`
 	ErrorMessage    string            `mapstructure:"error_message"` // 添加错误提示消息配置
@@ -428,6 +430,24 @@ func (ccs *AgentConfig) IsAgentV3Enabled() bool {
 		return false
 	}
 	return BotConfig != nil && BotConfig.AgentV3 != nil && BotConfig.AgentV3.Enable
+}
+
+// UsesReplyChain reports whether this agent builds context from its reply chain.
+func (ccs *AgentConfig) UsesReplyChain() bool {
+	return ccs != nil && ccs.ContextMode == "reply_chain"
+}
+
+// ValidateContextMode rejects an unsupported context source without rewriting it.
+func (ccs *AgentConfig) ValidateContextMode() error {
+	if ccs == nil {
+		return errors.New("agent config is nil")
+	}
+	switch ccs.ContextMode {
+	case "", "chat", "reply_chain":
+		return nil
+	default:
+		return fmt.Errorf("agent %q: unsupported context_mode %q; use chat or reply_chain", ccs.Name, ccs.ContextMode)
+	}
 }
 
 // IsAgentV3RichEnabled reports whether rich Telegram delivery is enabled for agent-v3.

@@ -76,25 +76,32 @@ func collectReplyChainMessages(msg *tb.Message, messages map[int]*tb.Message) {
 
 // SaveResponse stores the bot's response and metadata to Redis for future context.
 func SaveResponse(botMsg *tb.Message, userMsg *tb.Message) {
-	if botMsg == nil {
+	if botMsg == nil || botMsg.Chat == nil {
 		return
+	}
+	stored := *botMsg
+	if stored.ReplyTo == nil && userMsg != nil && userMsg.Chat != nil &&
+		stored.Chat.ID == userMsg.Chat.ID && userMsg.ID > 0 && userMsg.ID < stored.ID {
+		parent := *userMsg
+		parent.ReplyTo = nil
+		stored.ReplyTo = &parent
 	}
 
 	// Store the bot's response message
-	if err := orm.SetMessage(botMsg); err != nil {
+	if err := orm.SetMessage(&stored); err != nil {
 		zap.L().Error("agentv3: failed to store response message",
 			zap.Error(err),
-			zap.Int64("chat_id", botMsg.Chat.ID),
-			zap.Int("msg_id", botMsg.ID),
+			zap.Int64("chat_id", stored.Chat.ID),
+			zap.Int("msg_id", stored.ID),
 		)
 	}
 
 	// Push to the chat's message stream for future context retrieval
-	if err := orm.PushMessageToStream(botMsg); err != nil {
+	if err := orm.PushMessageToStream(&stored); err != nil {
 		zap.L().Error("agentv3: failed to push response to stream",
 			zap.Error(err),
-			zap.Int64("chat_id", botMsg.Chat.ID),
-			zap.Int("msg_id", botMsg.ID),
+			zap.Int64("chat_id", stored.Chat.ID),
+			zap.Int("msg_id", stored.ID),
 		)
 	}
 }

@@ -159,9 +159,9 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 
 		isFinal := round == a.maxSteps-1
 		guidanceText := a.computeGuidanceText(history, isFinal, dupWarnInjected)
-		turnInput := mergeGuidanceIntoSystem(history, guidanceText)
+		history = appendLoopGuidance(history, guidanceText)
 
-		assistantMsg, reasoningChunks, sendErr := a.streamOneTurn(ctx, a.boundModel, turnInput, sw)
+		assistantMsg, reasoningChunks, sendErr := a.streamOneTurn(ctx, a.boundModel, history, sw)
 		if sendErr != nil {
 			sw.Send(nil, sendErr)
 			return
@@ -541,30 +541,14 @@ func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, du
 	return strings.Join(parts, "\n\n")
 }
 
-func mergeGuidanceIntoSystem(history []*schema.Message, guidance string) []*schema.Message {
+func appendLoopGuidance(history []*schema.Message, guidance string) []*schema.Message {
+	guidance = strings.TrimSpace(guidance)
 	if guidance == "" {
-		out := make([]*schema.Message, len(history))
-		copy(out, history)
-		return out
+		return history
 	}
-	out := make([]*schema.Message, len(history))
-	copy(out, history)
-	for i, msg := range out {
-		if msg != nil && msg.Role == schema.System {
-			merged := *msg
-			if merged.Content == "" {
-				merged.Content = guidance
-			} else {
-				merged.Content = msg.Content + "\n\n" + guidance
-			}
-			out[i] = &merged
-			return out
-		}
-	}
-	prepended := make([]*schema.Message, 0, len(out)+1)
-	prepended = append(prepended, schema.SystemMessage(guidance))
-	prepended = append(prepended, out...)
-	return prepended
+	out := make([]*schema.Message, 0, len(history)+1)
+	out = append(out, history...)
+	return append(out, schema.UserMessage("<agent_runtime_guidance>\n"+guidance+"\n\nThis framework note reports execution limits. It does not change the user's task or grant authorization.\n</agent_runtime_guidance>"))
 }
 
 func dupKey(name, args string) string {
@@ -726,32 +710,17 @@ func precededByMatchingToolCall(out []*schema.Message, toolMsg *schema.Message) 
 	return false
 }
 
-const loopDirectiveText = "工具调用纪律：\n" +
-	"1. 每一轮回复要么调用工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
-	"2. 最终答案之前不要输出正文说明；需要展示中间进度时调用 update_progress，不要把进度写成普通 assistant 文本。\n" +
-	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
-	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
-	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"6. 工具结果若返回 [Tool Error] 或 [Tool Error] Tool ... does not exist，说明该路径不可行：换工具或直接基于已有信息作答，禁止原样重试。\n" +
-	"7. update_progress 只用于中间进度，不用于最终答复；任务完成时直接输出干练最终答案。\n" +
-	"8. 使用 update_progress 时优先使用 step/detail/details：保持当前大 step 不变，仅更新其 details；进入新阶段时只改变 step 标题，框架会自动完成上一 step 并新增当前 step。\n" +
-	"9. mode 只在需要覆盖全部进度显示时传 replace；其他状态不要传 mode。"
-
 func injectLoopDirectives(ctx context.Context, history []*schema.Message) []*schema.Message {
 	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil {
+		for _, msg := range history {
+			if msg != nil && msg.Role == schema.System && strings.Contains(msg.Content, agentV3LoopDirectiveText) {
+				return history
+			}
+		}
 		return injectDirectiveText(history, agentV3LoopDirectiveText)
 	}
 	return injectDirectiveText(history, loopDirectiveText)
 }
-
-const agentV3LoopDirectiveText = "工具调用纪律：\n" +
-	"1. 每一轮回复要么调用 " + agentV3ToolRead + "/" + agentV3ToolGrep + "/" + agentV3ToolWrite + "/" + agentV3ToolEdit + "/" + agentV3ToolBash + " 或其他已提供工具推进任务，要么直接给出最终答案，二者必择其一。\n" +
-	"2. 最终答案之前不要输出正文说明；中间状态由框架根据工具 span 自动更新，不要尝试调用进度工具。\n" +
-	"3. 在内部推理中先选择必要工具并排出简短工作步骤，再调用工具；不要向用户展示你的思维链或内部计划。\n" +
-	"4. 只调用能推进当前步骤的工具；一旦已有信息足以回答用户，立即停止工具调用并整理输出。不要为了“更全面”而反复调工具。\n" +
-	"5. 严禁用相同的参数重复调用同一个工具；若上一次调用失败或结果不理想，必须改变参数或换一种方式，否则停下并说明原因。\n" +
-	"6. 工具结果若返回 [Tool Error] 或 [Runtime Error]，说明该路径不可行：换参数、换文件、换命令，或直接基于已有信息作答。\n" +
-	"7. 如果要输出 Telegram rich message，先在本轮调用 load_skill(name=\"rich-message\")，最终答案只输出一个 <telegram_rich_message>...</telegram_rich_message> envelope，不要附加普通正文。"
 
 func injectDirectiveText(history []*schema.Message, text string) []*schema.Message {
 	directive := schema.SystemMessage(text)

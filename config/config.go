@@ -199,6 +199,16 @@ func checkConfig() {
 	BotConfig.MeiliConfig.checkConfig()
 	BotConfig.McConfig.checkConfig()
 	BotConfig.AgentV3.checkConfig()
+	if BotConfig.Agents != nil {
+		for _, agent := range *BotConfig.Agents {
+			if agent == nil {
+				continue
+			}
+			if err := agent.ValidateContextMode(); err != nil {
+				zap.L().Panic("invalid agent config", zap.Error(err))
+			}
+		}
+	}
 
 	BotConfig.DebugOptConfig.checkConfig()
 }

@@ -1,0 +1,138 @@
+package agentv3
+
+import (
+	"csust-got/config"
+	"csust-got/orm"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/stretchr/testify/require"
+	tb "gopkg.in/telebot.v3"
+)
+
+func setupReplySessionRedis(t *testing.T) *miniredis.Miniredis {
+	t.Helper()
+	oldConfig := config.BotConfig
+	miniRedis := miniredis.RunT(t)
+	testConfig := config.NewBotConfig()
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "reply-session-test:"
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+	return miniRedis
+}
+
+func TestSaveResponsePreservesKnownReplyWithoutMutation(t *testing.T) {
+	setupReplySessionRedis(t)
+	user := sessionMessage(10, 7, 0, "request")
+	bot := sessionMessage(11, 99, 1, "answer")
+	bot.Sender.IsBot = true
+
+	SaveResponse(bot, user)
+	require.Nil(t, bot.ReplyTo)
+
+	stored, err := orm.GetMessage(-100, 11)
+	require.NoError(t, err)
+	require.NotNil(t, stored.ReplyTo)
+	require.Equal(t, 10, stored.ReplyTo.ID)
+	stream, err := orm.GetMessagesFromStream(-100, "11", "11", 1, false)
+	require.NoError(t, err)
+	require.Len(t, stream, 1)
+	require.NotNil(t, stream[0].ReplyTo)
+	require.Equal(t, 10, stream[0].ReplyTo.ID)
+}
+
+func TestSaveResponseKeepsExistingParentAndRejectsCrossChat(t *testing.T) {
+	t.Run("existing_parent_wins", func(t *testing.T) {
+		setupReplySessionRedis(t)
+		user := sessionMessage(10, 7, 0, "request")
+		bot := sessionMessage(11, 99, 1, "answer")
+		bot.ReplyTo = &tb.Message{ID: 9, Chat: bot.Chat}
+
+		SaveResponse(bot, user)
+		stored, err := orm.GetMessage(-100, 11)
+		require.NoError(t, err)
+		require.Equal(t, 9, stored.ReplyTo.ID)
+		require.Equal(t, 9, bot.ReplyTo.ID)
+	})
+
+	t.Run("cross_chat_not_attached", func(t *testing.T) {
+		setupReplySessionRedis(t)
+		user := sessionMessage(10, 7, 0, "request")
+		user.Chat = &tb.Chat{ID: -200}
+		bot := sessionMessage(11, 99, 1, "answer")
+
+		SaveResponse(bot, user)
+		stored, err := orm.GetMessage(-100, 11)
+		require.NoError(t, err)
+		require.Nil(t, stored.ReplyTo)
+		require.Nil(t, bot.ReplyTo)
+	})
+}
+
+func TestReplySessionLoadRecoversStoredParentAndExpiry(t *testing.T) {
+	miniRedis := setupReplySessionRedis(t)
+	user := sessionMessage(10, 7, 0, "request")
+	require.NoError(t, orm.SetMessage(user))
+	require.NoError(t, orm.PushMessageToStream(user))
+	bot := sessionMessage(11, 99, 1, "answer")
+	bot.Sender.IsBot = true
+	SaveResponse(bot, user)
+	current := sessionMessage(12, 7, 2, "followup")
+	current.ReplyTo = &tb.Message{ID: 11}
+
+	loaded, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{10}, {11}, {12}}, sessionBlockIDs(loaded))
+	require.False(t, loaded.Incomplete)
+
+	miniRedis.FastForward(25 * time.Hour)
+	expired, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{12}}, sessionBlockIDs(expired))
+	require.True(t, expired.Incomplete)
+}
+
+func TestReplySessionRejectsUnsupportedStoredParents(t *testing.T) {
+	newService := func() *tb.Message {
+		return &tb.Message{
+			ID:       3,
+			Chat:     &tb.Chat{ID: -100},
+			Sender:   &tb.User{ID: 8},
+			Unixtime: 1700000000,
+		}
+	}
+
+	t.Run("stored_service", func(t *testing.T) {
+		setupReplySessionRedis(t)
+		service := newService()
+		require.NoError(t, orm.SetMessage(service))
+		current := sessionMessage(4, 7, 1, "current")
+		current.ReplyTo = &tb.Message{ID: service.ID}
+
+		loaded, err := loadReplySession(t.Context(), current, 10)
+		require.NoError(t, err)
+		require.True(t, loaded.Incomplete)
+		require.Equal(t, [][]int{{4}}, sessionBlockIDs(loaded))
+	})
+
+	t.Run("nearby_service", func(t *testing.T) {
+		setupReplySessionRedis(t)
+		service := newService()
+		require.NoError(t, orm.PushMessageToStream(service))
+		current := sessionMessage(4, 7, 1, "current")
+		current.ReplyTo = &tb.Message{ID: service.ID}
+
+		loaded, err := loadReplySession(t.Context(), current, 10)
+		require.NoError(t, err)
+		require.True(t, loaded.Incomplete)
+		require.Equal(t, [][]int{{4}}, sessionBlockIDs(loaded))
+	})
+}
