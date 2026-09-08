@@ -13,7 +13,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/meilisearch/meilisearch-go v0.36.3
-	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/samber/lo v1.53.0
 	github.com/sashabaranov/go-openai v1.42.0
@@ -25,7 +24,7 @@ require (
 	golang.org/x/image v0.45.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.41.0
-	golang.org/x/time v0.15.0
+	golang.org/x/time v0.16.0
 	gopkg.in/telebot.v3 v3.3.8
 	gopkg.in/yaml.v3 v3.0.1
 )
