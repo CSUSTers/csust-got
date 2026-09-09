@@ -245,6 +245,51 @@ func TestAgentConfigs(t *testing.T) {
 	req.True((*BotConfig.Agents)[0].Agent.Enable)
 }
 
+// TestExampleConfigYAMLAgentsParses keeps the tracked example config.yaml in
+// sync with the config structs: model anchors must expand, inline filters must
+// parse, context_mode stays at its chat default, and known-dead top-level keys
+// must not creep back into the example.
+func TestExampleConfigYAMLAgentsParses(t *testing.T) {
+	req := testInit(t)
+	configFile := isolatedConfigFile(t)
+
+	BotConfig = NewBotConfig()
+	InitViper(configFile, testEnvPrefix)
+	readConfig()
+	defer viper.Reset()
+
+	agents := *BotConfig.Agents
+	req.Len(agents, 4)
+
+	seen := make(map[string]bool, len(agents))
+	for _, agent := range agents {
+		req.NotEmpty(agent.Name)
+		seen[agent.Name] = true
+		req.NotNil(agent.Model)
+		req.NotEmpty(agent.Model.Model)
+		req.NotEmpty(agent.Model.BaseUrl)
+		req.NoError(agent.ValidateContextMode())
+		req.Empty(agent.ContextMode)
+	}
+	req.True(seen["什么是bot"])
+	req.True(seen["聊天bot"])
+	req.True(seen["思考bot"])
+	req.True(seen["总结bot"])
+
+	var think *AgentConfig
+	for _, agent := range agents {
+		if agent.Name == "思考bot" {
+			think = agent
+		}
+	}
+	req.Len(think.Filters.Filters, 1)
+	req.Equal("whitelist", think.Filters.Filters[0].Type)
+
+	for _, deadKey := range []string{"worker", "llm_models", "chat_whitelist", "github", "mc.max_count"} {
+		req.False(viper.IsSet(deadKey), "dead config key %q must stay out of the example config", deadKey)
+	}
+}
+
 func TestConfigYAMLKeepsFetchDisabledByDefault(t *testing.T) {
 	req := testInit(t)
 	configFile := isolatedConfigFile(t)
