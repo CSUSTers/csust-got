@@ -2,6 +2,7 @@ package agentv3
 
 import (
 	"csust-got/config"
+	"csust-got/log"
 	"csust-got/orm"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ func setupReplySessionRedis(t *testing.T) *miniredis.Miniredis {
 	testConfig.RedisConfig.KeyPrefix = "reply-session-test:"
 	config.BotConfig = testConfig
 	orm.InitRedis()
+	log.InitLogger()
 	t.Cleanup(func() {
 		config.BotConfig = oldConfig
 		if oldConfig != nil && oldConfig.RedisConfig != nil {
@@ -135,4 +137,98 @@ func TestReplySessionRejectsUnsupportedStoredParents(t *testing.T) {
 		require.True(t, loaded.Incomplete)
 		require.Equal(t, [][]int{{4}}, sessionBlockIDs(loaded))
 	})
+}
+
+func TestReplySessionLoadSkipsUnrelatedMalformedStreamRecord(t *testing.T) {
+	setupReplySessionRedis(t)
+	bad := sessionMessage(3, 8, 0, "unrelated")
+	bad.Poll = &tb.Poll{ID: "poll", Type: tb.PollType("unsupported"), Question: "question"}
+	require.NoError(t, orm.PushMessageToStream(bad))
+	current := sessionMessage(4, 7, 1, "current")
+
+	loaded, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{4}}, sessionBlockIDs(loaded))
+}
+
+func TestReplySessionLoadRecoversNestedCachedPoll(t *testing.T) {
+	for _, ancestor := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unrelated", true: "ancestor"}[ancestor], func(t *testing.T) {
+			setupReplySessionRedis(t)
+			parent := sessionMessage(3, 8, 0, "parent")
+			parent.ReplyTo = &tb.Message{ID: 2, Poll: &tb.Poll{Type: tb.PollRegular}}
+			require.NoError(t, orm.SetMessage(parent))
+			require.NoError(t, orm.PushMessageToStream(parent))
+			current := sessionMessage(4, 7, 1, "current")
+			want := [][]int{{4}}
+			if ancestor {
+				current.ReplyTo = &tb.Message{ID: 3}
+				want = [][]int{{3}, {4}}
+			}
+
+			loaded, err := loadReplySession(t.Context(), current, 10)
+			require.NoError(t, err)
+			require.Equal(t, want, sessionBlockIDs(loaded))
+			require.Equal(t, ancestor, loaded.Incomplete)
+		})
+	}
+}
+
+func TestReplySessionLoadFallsBackFromCorruptStoredParent(t *testing.T) {
+	tests := []struct {
+		name         string
+		nearby       bool
+		embedded     bool
+		wantBlockIDs [][]int
+	}{
+		{name: "nearby", nearby: true, wantBlockIDs: [][]int{{3}, {4}}},
+		{name: "embedded", embedded: true, wantBlockIDs: [][]int{{3}, {4}}},
+		{name: "unrecoverable", wantBlockIDs: [][]int{{4}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			miniRedis := setupReplySessionRedis(t)
+			parent := sessionMessage(3, 8, 0, "parent")
+			if test.nearby {
+				require.NoError(t, orm.PushMessageToStream(parent))
+			}
+			miniRedis.Set("reply-session-test:message_full:c-100:u3", `{"message_id":3`)
+			current := sessionMessage(4, 7, 1, "current")
+			current.ReplyTo = &tb.Message{ID: parent.ID}
+			if test.embedded {
+				current.ReplyTo = parent
+			}
+
+			loaded, err := loadReplySession(t.Context(), current, 10)
+			require.NoError(t, err)
+			require.True(t, loaded.Incomplete)
+			require.Equal(t, test.wantBlockIDs, sessionBlockIDs(loaded))
+		})
+	}
+}
+
+func TestReplySessionLoadUsesScannedCountForStreamLimit(t *testing.T) {
+	setupReplySessionRedis(t)
+	for id := 1; id <= replySessionAncestorLimit; id++ {
+		message := sessionMessage(id, 8, int64(id), "unrelated")
+		if id == 1 {
+			message.Poll = &tb.Poll{ID: "bad", Type: tb.PollType("unsupported"), Question: "question"}
+		}
+		require.NoError(t, orm.PushMessageToStream(message))
+	}
+	current := sessionMessage(replySessionAncestorLimit+1, 7, replySessionAncestorLimit+1, "current")
+
+	loaded, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.True(t, loaded.Incomplete)
+	require.Equal(t, [][]int{{replySessionAncestorLimit + 1}}, sessionBlockIDs(loaded))
+}
+
+func TestReplySessionLoadPropagatesStreamRedisError(t *testing.T) {
+	miniRedis := setupReplySessionRedis(t)
+	miniRedis.Close()
+
+	_, err := loadReplySession(t.Context(), sessionMessage(4, 7, 0, "current"), 10)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, orm.ErrInvalidCachedMessage)
 }

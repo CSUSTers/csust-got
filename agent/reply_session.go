@@ -41,7 +41,7 @@ func loadReplySession(ctx context.Context, current *tb.Message, maxContext int) 
 		return replySession{Incomplete: true}, nil
 	}
 
-	nearby, err := orm.GetMessagesFromStream(current.Chat.ID, strconv.Itoa(current.ID), "-", replySessionAncestorLimit, true)
+	nearby, scanned, err := orm.GetMessagesFromStreamBestEffort(current.Chat.ID, strconv.Itoa(current.ID), "-", replySessionAncestorLimit, true)
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return replySession{}, fmt.Errorf("load reply session messages: %w", err)
 	}
@@ -49,7 +49,11 @@ func loadReplySession(ctx context.Context, current *tb.Message, maxContext int) 
 		nearby = nil
 	}
 
-	return selectReplySession(ctx, current, nearby, orm.GetMessage, maxContext)
+	session, err := selectReplySession(ctx, current, nearby, orm.GetMessage, maxContext)
+	if err == nil && scanned >= replySessionAncestorLimit {
+		session.Incomplete = true
+	}
+	return session, err
 }
 
 func selectReplySession(ctx context.Context, current *tb.Message, nearby []*tb.Message, lookup func(int64, int) (*tb.Message, error), maxContext int) (replySession, error) {
@@ -163,7 +167,7 @@ func lookupReplySessionParent(ctx context.Context, chat *tb.Chat, embedded *tb.M
 			}
 			return stored, true, nil
 		}
-		if err != nil && !errors.Is(err, redis.Nil) {
+		if err != nil && !errors.Is(err, redis.Nil) && !errors.Is(err, orm.ErrInvalidCachedMessage) {
 			return nil, false, fmt.Errorf("load reply parent %d: %w", embedded.ID, err)
 		}
 	}
