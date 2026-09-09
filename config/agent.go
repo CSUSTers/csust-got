@@ -133,6 +133,11 @@ const (
 
 var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
 
+var (
+	errAgentConfigNil              = errors.New("agent config is nil")
+	errAgentContextModeUnsupported = errors.New("unsupported context_mode")
+)
+
 var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var (
@@ -440,13 +445,13 @@ func (ccs *AgentConfig) UsesReplyChain() bool {
 // ValidateContextMode rejects an unsupported context source without rewriting it.
 func (ccs *AgentConfig) ValidateContextMode() error {
 	if ccs == nil {
-		return errors.New("agent config is nil")
+		return errAgentConfigNil
 	}
 	switch ccs.ContextMode {
 	case "", "chat", "reply_chain":
 		return nil
 	default:
-		return fmt.Errorf("agent %q: unsupported context_mode %q; use chat or reply_chain", ccs.Name, ccs.ContextMode)
+		return fmt.Errorf("agent %q: %w %q; use chat or reply_chain", ccs.Name, errAgentContextModeUnsupported, ccs.ContextMode)
 	}
 }
 

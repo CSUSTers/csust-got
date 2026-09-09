@@ -37,8 +37,9 @@ func buildAgentV3StablePrefix(soul, skillPromptBlock string, fetchEnabled bool) 
 	if strings.TrimSpace(soul) != "" {
 		parts = append(parts, "<soul>\n"+strings.TrimSpace(soul)+"\n</soul>")
 	}
-	parts = append(parts, "<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules(fetchEnabled)+"\n</runtime_and_skill_rules>")
-	parts = append(parts, "<agent_v3_loop_directives>\n"+agentV3LoopDirectiveText+"\n</agent_v3_loop_directives>")
+	parts = append(parts,
+		"<runtime_and_skill_rules>\n"+agentV3RuntimeSkillRules(fetchEnabled)+"\n</runtime_and_skill_rules>",
+		"<agent_v3_loop_directives>\n"+agentV3LoopDirectiveText+"\n</agent_v3_loop_directives>")
 	if strings.TrimSpace(skillPromptBlock) != "" {
 		parts = append(parts, strings.TrimSpace(skillPromptBlock))
 	}

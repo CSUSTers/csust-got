@@ -15,6 +15,13 @@ import (
 
 const replySessionAncestorLimit = 1000
 
+var (
+	errReplyChainNoCurrentMessage   = errors.New("reply_chain requires a current message")
+	errReplyChainNoCurrentBlock     = errors.New("reply_chain requires a current message block")
+	errReplyChainEmptySession       = errors.New("reply_chain did not produce a current message")
+	errReplyChainTextBudgetTooSmall = errors.New("reply_chain text budget too small for current message metadata")
+)
+
 type replySessionBlock struct {
 	Messages []*tb.Message
 	Current  bool
@@ -163,9 +170,9 @@ func lookupReplySessionParent(ctx context.Context, chat *tb.Chat, embedded *tb.M
 
 	if nearby := nearbyByID[embedded.ID]; nearby != nil {
 		if nearby.ReplyTo == nil && embedded.ReplyTo != nil {
-			copy := *nearby
-			copy.ReplyTo = embedded.ReplyTo
-			return &copy, false, nil
+			clone := *nearby
+			clone.ReplyTo = embedded.ReplyTo
+			return &clone, false, nil
 		}
 		return nearby, false, nil
 	}
@@ -182,9 +189,9 @@ func replySessionEmbeddedParent(message *tb.Message, chat *tb.Chat) (*tb.Message
 	if message.Chat != nil {
 		return message, message.Chat.ID == chat.ID
 	}
-	copy := *message
-	copy.Chat = chat
-	return &copy, true
+	clone := *message
+	clone.Chat = chat
+	return &clone, true
 }
 
 func canJoinReplyUtterances(a, b *tb.Message) bool {

@@ -1,7 +1,6 @@
 package agentv3
 
 import (
-	"fmt"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -35,7 +34,7 @@ func limitReplySessionBlocksByText(blocks []replySessionBlock, tc *TurnContext, 
 	}
 	currentIndex := replySessionCurrentBlockIndex(blocks, tc.Message.ID)
 	if currentIndex < 0 {
-		return nil, false, fmt.Errorf("reply_chain requires a current message block")
+		return nil, false, errReplyChainNoCurrentBlock
 	}
 	budgetOmitted := false
 	for replySessionRenderedTextLength(blocks, tc, incomplete, truncated || budgetOmitted, currentIndex) > maxChars {
@@ -106,7 +105,7 @@ func replySessionRenderedTextLength(blocks []replySessionBlock, tc *TurnContext,
 
 func truncateReplySessionCurrentMessage(blocks []replySessionBlock, currentIndex int, tc *TurnContext, incomplete, truncated bool, maxChars int) error {
 	if currentIndex < 0 || currentIndex >= len(blocks) {
-		return fmt.Errorf("reply_chain requires a current message block")
+		return errReplyChainNoCurrentBlock
 	}
 	block := &blocks[currentIndex]
 	messageIndex := len(block.Messages) - 1
@@ -117,13 +116,13 @@ func truncateReplySessionCurrentMessage(blocks []replySessionBlock, currentIndex
 		}
 	}
 	if messageIndex < 0 || block.Messages[messageIndex] == nil {
-		return fmt.Errorf("reply_chain requires a current message")
+		return errReplyChainNoCurrentMessage
 	}
 	original := block.Messages[messageIndex]
 	best := replySessionMessageWithSuffix(original, 0)
 	block.Messages[messageIndex] = best
 	if replySessionRenderedTextLength(blocks, tc, incomplete, truncated, currentIndex) > maxChars {
-		return fmt.Errorf("reply_chain text budget too small for current message metadata")
+		return errReplyChainTextBudgetTooSmall
 	}
 
 	low, high := 0, len(replySessionRawMessageText(original))
@@ -142,14 +141,14 @@ func truncateReplySessionCurrentMessage(blocks []replySessionBlock, currentIndex
 }
 
 func replySessionMessageCopy(message *tb.Message) *tb.Message {
-	copy := *message
+	clone := *message
 	if message.ReplyTo != nil {
-		copy.ReplyTo = &tb.Message{ID: message.ReplyTo.ID}
+		clone.ReplyTo = &tb.Message{ID: message.ReplyTo.ID}
 	} else {
-		copy.ReplyTo = nil
+		clone.ReplyTo = nil
 	}
-	copy.AlbumID = ""
-	return &copy
+	clone.AlbumID = ""
+	return &clone
 }
 
 func replySessionRawMessageText(message *tb.Message) string {
@@ -163,31 +162,31 @@ func replySessionRawMessageText(message *tb.Message) string {
 }
 
 func replySessionMessageWithSuffix(message *tb.Message, maxBytes int) *tb.Message {
-	copy := replySessionMessageCopy(message)
-	text := replySessionRawMessageText(copy)
+	clone := replySessionMessageCopy(message)
+	text := replySessionRawMessageText(clone)
 	if maxBytes < 0 {
 		maxBytes = 0
 	}
 	if len(text) <= maxBytes {
-		return copy
+		return clone
 	}
 	start := len(text) - maxBytes
 	for start < len(text) && !utf8.RuneStart(text[start]) {
 		start++
 	}
-	entities, caption := copy.Entities, copy.Text == ""
+	entities, caption := clone.Entities, clone.Text == ""
 	if caption {
-		entities = copy.CaptionEntities
+		entities = clone.CaptionEntities
 	}
 	start = replySessionSuffixStartAfterEntities(text, entities, start)
 	cutUTF16 := replySessionUTF16Length(text[:start])
 	trimmed := replySessionSuffixEntities(entities, cutUTF16, replySessionUTF16Length(text))
 	if caption {
-		copy.Caption, copy.CaptionEntities = text[start:], trimmed
+		clone.Caption, clone.CaptionEntities = text[start:], trimmed
 	} else {
-		copy.Text, copy.Entities = text[start:], trimmed
+		clone.Text, clone.Entities = text[start:], trimmed
 	}
-	return copy
+	return clone
 }
 
 func replySessionSuffixStartAfterEntities(text string, entities []tb.MessageEntity, start int) int {
@@ -231,11 +230,13 @@ func replySessionSuffixEntities(entities []tb.MessageEntity, cut, total int) []t
 }
 
 func replySessionEntityIsAtomic(entity tb.MessageEntity) bool {
-	switch string(entity.Type) {
-	case "text_link", "url", "email", "phone_number", "mention", "text_mention", "hashtag", "cashtag", "bot_command", "custom_emoji":
+	switch entity.Type {
+	case tb.EntityTextLink, tb.EntityURL, tb.EntityEmail, tb.EntityPhone, tb.EntityMention,
+		tb.EntityTMention, tb.EntityHashtag, tb.EntityCashtag, tb.EntityCommand, tb.EntityCustomEmoji:
 		return true
+	default:
+		return entity.CustomEmoji != ""
 	}
-	return entity.CustomEmoji != ""
 }
 
 func replySessionUTF16Length(text string) int {

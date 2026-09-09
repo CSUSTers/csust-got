@@ -2,6 +2,7 @@ package agentv3
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -49,7 +50,7 @@ func validateReplySessionTemplateNode(node parse.Node) error {
 		return nil
 	}
 	value := reflect.ValueOf(node)
-	if value.Kind() == reflect.Ptr && value.IsNil() {
+	if value.Kind() == reflect.Pointer && value.IsNil() {
 		return nil
 	}
 	switch node := node.(type) {
@@ -136,8 +137,10 @@ func validateReplySessionTemplateFields(fields []string) error {
 	return nil
 }
 
+var errReplyChainTemplateUnsupportedAccess = errors.New("reply_chain template uses unsupported field/access")
+
 func replySessionTemplateAccessError(access string) error {
-	return fmt.Errorf("reply_chain template uses unsupported field/access %q; use static text or DateTime, CurrentDateCN, BotUsername; remove conversation interpolation because session messages supply it directly, or use context_mode: chat", access)
+	return fmt.Errorf("%w %q; use static text or DateTime, CurrentDateCN, BotUsername; remove conversation interpolation because session messages supply it directly, or use context_mode: chat", errReplyChainTemplateUnsupportedAccess, access)
 }
 
 func renderReplySessionTemplate(tpl *template.Template, tc *TurnContext) (string, error) {

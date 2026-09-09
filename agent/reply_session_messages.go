@@ -17,7 +17,7 @@ const (
 
 func buildReplySessionMessages(_ *CompiledAgent, tc *TurnContext, session replySession, maxChars int) ([]*schema.Message, error) {
 	if tc == nil || tc.Message == nil {
-		return nil, fmt.Errorf("reply_chain requires a current message")
+		return nil, errReplyChainNoCurrentMessage
 	}
 	blocks := replySessionLocalBlocks(session, tc.Message)
 	blocks, budgetOmitted, err := limitReplySessionBlocksByText(blocks, tc, session.Incomplete, session.Truncated, maxChars)
@@ -26,7 +26,7 @@ func buildReplySessionMessages(_ *CompiledAgent, tc *TurnContext, session replyS
 	}
 	currentIndex := replySessionCurrentBlockIndex(blocks, tc.Message.ID)
 	if currentIndex < 0 {
-		return nil, fmt.Errorf("reply_chain requires a current message block")
+		return nil, errReplyChainNoCurrentBlock
 	}
 
 	if tc.V3 != nil {

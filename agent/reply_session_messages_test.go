@@ -39,6 +39,8 @@ func replySessionTextPart(message *schema.Message) string {
 	return message.Content
 }
 
+var errReplySessionTestEncodeFailed = errors.New("encode failed")
+
 func replySessionTestContext(cfg *config.AgentConfig, current *tb.Message) *TurnContext {
 	return &TurnContext{
 		Config:  cfg,
@@ -290,7 +292,7 @@ func TestReplySessionMessagesRespectImageFeatureGatesAndEncodingFailures(t *test
 	t.Run("encoding failure keeps reference", func(t *testing.T) {
 		oldEncoder := encodeTelegramPhotoDataURL
 		encodeTelegramPhotoDataURL = func(*TurnContext, *tb.Photo) (string, error) {
-			return "", errors.New("encode failed")
+			return "", errReplySessionTestEncodeFailed
 		}
 		t.Cleanup(func() { encodeTelegramPhotoDataURL = oldEncoder })
 

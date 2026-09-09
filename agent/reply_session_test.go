@@ -21,6 +21,11 @@ func sessionMessage(id int, sender int64, sec int64, text string) *tb.Message {
 	}
 }
 
+var (
+	errReplySessionTestNoTraversal = errors.New("a new session must not traverse nearby replies")
+	errReplySessionTestRedisDown   = errors.New("redis unavailable")
+)
+
 func sessionBlockIDs(s replySession) [][]int {
 	out := make([][]int, 0, len(s.Blocks))
 	for _, block := range s.Blocks {
@@ -107,7 +112,7 @@ func TestReplySessionReplyBoundaries(t *testing.T) {
 
 		got, err := selectReplySession(t.Context(), current, []*tb.Message{oldBot, followup}, func(int64, int) (*tb.Message, error) {
 			lookupCalls++
-			return nil, errors.New("a new session must not traverse nearby replies")
+			return nil, errReplySessionTestNoTraversal
 		}, 10)
 		require.NoError(t, err)
 		require.Equal(t, [][]int{{20, 21}}, sessionBlockIDs(got))
@@ -248,7 +253,7 @@ func TestReplySessionChainSafety(t *testing.T) {
 	t.Run("lookup_error", func(t *testing.T) {
 		current := sessionMessage(4, 7, 0, "current")
 		current.ReplyTo = &tb.Message{ID: 3}
-		want := errors.New("redis unavailable")
+		want := errReplySessionTestRedisDown
 
 		_, err := selectReplySession(t.Context(), current, nil, func(int64, int) (*tb.Message, error) {
 			return nil, want

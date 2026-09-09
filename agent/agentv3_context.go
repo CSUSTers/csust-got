@@ -258,7 +258,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			return nil, err
 		}
 		if len(sessionMessages) == 0 {
-			err := fmt.Errorf("reply_chain did not produce a current message")
+			err := errReplyChainEmptySession
 			finishContextSpan(err, nil)
 			return nil, err
 		}
