@@ -15,7 +15,7 @@ require (
 	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/samber/lo v1.53.0
-	github.com/sashabaranov/go-openai v1.42.0
+	github.com/sashabaranov/go-openai v1.42.1
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
 	github.com/swaggest/openapi-go v0.2.61
