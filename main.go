@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"regexp"
+	"syscall"
 	"time"
 
 	"csust-got/base"
@@ -30,14 +33,13 @@ func main() {
 	defer log.Sync()
 	orm.InitRedis()
 
-	orm.LoadWhiteList()
-	orm.LoadBlockList()
-
 	if err := agentv3.Init(context.Background()); err != nil {
 		log.Panic("agentv3: init failed", zap.Error(err))
 	}
 	log.Info("agentv3 initialized")
 	defer agentv3.Close()
+	orm.LoadWhiteList()
+	orm.LoadBlockList()
 	initAgentRegexHandlers(*config.BotConfig.Agents)
 
 	err := base.InitGetVoice()
@@ -68,6 +70,15 @@ func main() {
 
 	store.InitQueues(bot)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := agentv3.StartCron(ctx, bot); err != nil {
+		log.Panic("agentv3: cron startup failed", zap.Error(err))
+	}
+	go func() {
+		<-ctx.Done()
+		bot.Stop()
+	}()
 	bot.Start()
 }
 

@@ -70,7 +70,9 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	}
 	loadedSkillNames := make(map[string]struct{})
 
-	tc.RunID = newAgentV3RunID()
+	if !tc.Background || tc.RunID == "" {
+		tc.RunID = newAgentV3RunID()
+	}
 	scope := orm.AgentV3Scope{
 		Bot:      agentV3BotName(tc),
 		Platform: agentV3Platform,
@@ -80,6 +82,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	tc.RuntimeClient = NewRemoteRuntimeClient(&cfg.Runtime, cfg.RuntimeCommandTimeout(), cfg.RuntimeRequestTimeout())
 
 	trace := NewAgentV3Trace(tc.RunID, tc.ChatID, tc.Message.ID)
+	trace.SetContentRedacted(tc.Background)
 	tc.V3 = &AgentV3TurnState{
 		Scope:            scope,
 		RunID:            tc.RunID,
@@ -117,19 +120,22 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		}
 	}
 	finishMemorySpan(nil, map[string]any{
-		"version": memoryVersion,
-		"hash":    memoryHash,
-		"chars":   len(memoryText),
+		agentV3FieldVersion: memoryVersion,
+		"hash":              memoryHash,
+		"chars":             len(memoryText),
 	})
 
 	includeLoadSkill := len(catalog.Sorted) > 0
 	fetchEnabled := cfg.RuntimeFetchEnabled()
 	searxngEnabled := cc.AgentV3StartupSkills != nil && cc.AgentV3StartupSkills.SearXNG != nil
-	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled)
+	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled, cfg.CronConfig().RunnerAgent != "")
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(catalog.Sorted)
 	prefixText := buildAgentV3StablePrefix(soul, skillPromptBlock, fetchEnabled)
+	if cfg.CronConfig().RunnerAgent != "" {
+		prefixText = joinAgentV3PromptBlocks(prefixText, cronDelegateHelp, cronTasksHelp)
+	}
 	prefixHash := hashString(prefixText)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
@@ -193,7 +199,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	summary := ""
 	var summaryVersion int64
 	var rawTurns []orm.AgentV3Turn
-	if !replyChain {
+	if !replyChain && !tc.Background {
 		summary, summaryVersion, err = orm.AgentV3GetSummary(ctx, scope)
 		if err != nil {
 			err = fmt.Errorf("agent v3 summary: %w", err)
@@ -242,7 +248,18 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	}
 
 	var messages []*schema.Message
-	if replyChain {
+	switch {
+	case tc.Background:
+		userMsg, err := buildAgentV3UserMessage(cc, tc, history, nil)
+		if err != nil {
+			finishContextSpan(err, nil)
+			return nil, err
+		}
+		messages = buildAgentV3TurnMessages(prefixText, memoryText, "", nil, nil, userMsg)
+		if !strings.Contains(userMsg.Content, tc.Message.Text) {
+			messages = append(messages, schema.UserMessage(tc.Message.Text))
+		}
+	case replyChain:
 		session, err := loadReplySession(ctx, tc.Message, tc.Config.MessageContext)
 		if err != nil {
 			finishContextSpan(err, nil)
@@ -273,7 +290,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			messages = append(messages, memoryMsg)
 		}
 		messages = append(messages, promptAddition, sessionMessages[len(sessionMessages)-1])
-	} else {
+	default:
 		userMsg, err := buildAgentV3UserMessage(cc, tc, history, rawTurns)
 		if err != nil {
 			finishContextSpan(err, nil)
@@ -445,8 +462,10 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			"assistant_chars":      len(assistantOutput),
 			"user_chars":           len(userInput),
 		}
-		if preview, ok := agentV3TracePreview(assistantOutput); ok {
-			attrs["output_preview"] = preview
+		if !tc.Background {
+			if preview, ok := agentV3TracePreview(assistantOutput); ok {
+				attrs["output_preview"] = preview
+			}
 		}
 		finishSpan = tc.V3.Trace.StartSpan("final_output", attrs)
 	}

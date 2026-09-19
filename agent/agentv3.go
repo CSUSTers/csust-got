@@ -26,6 +26,9 @@ var (
 // Init compiles all enabled agent configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
+	if err := validateCronStartup(); err != nil {
+		return err
+	}
 	var startup *agentV3StartupSkillSnapshots
 	if hasEnabledAgent() {
 		if err := validateAgentV3StartupConfig(); err != nil {
@@ -60,6 +63,7 @@ func Init(ctx context.Context) error {
 		)
 	}
 
+	initCronService()
 	return nil
 }
 
@@ -109,6 +113,9 @@ func HasCompiledAgent(name string) bool {
 
 // Close shuts down all agent resources.
 func Close() {
+	if s := cronService.Swap(nil); s != nil {
+		s.stop()
+	}
 	if mcpManager != nil {
 		mcpManager.Close()
 	}

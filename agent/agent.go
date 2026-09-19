@@ -40,6 +40,7 @@ const softTurnGuidance = "你已经进行了 %d 轮工具调用。如果你认�
 const finalTurnGuidance = "你已经接近本次任务的步骤上限。这一轮禁止继续调用任何工具，请直接基于已有信息输出最终答案；如果信息仍不足，也只能明确说明卡在哪里、缺什么，不要再继续调工具。"
 
 const agentV3MinToolMaxSteps = 4
+const backgroundToolErrorText = "background tool invocation failed"
 
 // buildModel creates an eino ChatModel from a config.Model definition.
 func buildModel(ctx context.Context, modelCfg *config.Model) (model.ToolCallingChatModel, error) {
@@ -172,6 +173,19 @@ func buildMainAgent(ctx context.Context, chatCfg *config.AgentConfig, mcpMgr *Mc
 		searxng = startup.SearXNG
 	}
 	warnAgentV3SearXNGToolCollisions(ctx, chatCfg.Name, searxng, allTools)
+	if cfg != nil && cfg.CronConfig().RunnerAgent != "" {
+		filtered := allTools[:0]
+		for _, item := range allTools {
+			info, err := item.Info(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if info.Name != agentV3ToolDelegate && info.Name != agentV3ToolCronTasks {
+				filtered = append(filtered, item)
+			}
+		}
+		allTools = filtered
+	}
 	allTools = append(buildAgentV3Tools(chatCfg, cfg, skillCatalog, searxng), allTools...)
 	allTools = wrapToolsWithErrorHandler(allTools)
 
@@ -344,8 +358,12 @@ func wrapToolsWithErrorHandler(tools []tool.BaseTool) []tool.BaseTool {
 	return wrapped
 }
 
-func toolErrorHandler(_ context.Context, err error) string {
-	return fmt.Sprintf("[Tool Error] %s\nPlease try a different approach or adjust parameters.", err.Error())
+func toolErrorHandler(ctx context.Context, err error) string {
+	message := err.Error()
+	if tc := GetTurnContext(ctx); tc != nil && tc.Background {
+		message = backgroundToolErrorText
+	}
+	return fmt.Sprintf("[Tool Error] %s\nPlease try a different approach or adjust parameters.", message)
 }
 
 // GetSkillPromptAddons returns the concatenated system prompt addons for all skills in the agent config.

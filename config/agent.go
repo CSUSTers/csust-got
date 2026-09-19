@@ -315,6 +315,7 @@ type AgentV3Config struct {
 	Enable        bool                       `mapstructure:"enable"`
 	Model         *Model                     `mapstructure:"model"`
 	SoulPath      string                     `mapstructure:"soul_path"`
+	Cron          AgentV3CronConfig          `mapstructure:"cron"`
 	ContextCache  AgentV3ContextCacheConfig  `mapstructure:"context_cache"`
 	Memory        AgentV3MemoryConfig        `mapstructure:"memory"`
 	Runtime       AgentV3RuntimeConfig       `mapstructure:"runtime"`
@@ -507,6 +508,7 @@ func (c *AgentV3Config) checkConfig() {
 	if c.ContextCache.RawTurns <= 0 {
 		c.ContextCache.RawTurns = 12
 	}
+	c.Cron = c.Cron.WithDefaults()
 	if c.ContextCache.SummaryTurns <= 0 {
 		c.ContextCache.SummaryTurns = 80
 	}

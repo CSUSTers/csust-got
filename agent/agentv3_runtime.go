@@ -363,10 +363,13 @@ func buildAgentV3Tools(_ *config.AgentConfig, cfg *config.AgentV3Config, catalog
 	if len(catalog.Sorted) > 0 {
 		tools = append(tools, &loadSkillTool{})
 	}
+	if cfg != nil && cfg.CronConfig().RunnerAgent != "" {
+		tools = append(tools, &cronTool{}, &cronTool{manage: true})
+	}
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool, cronEnabled ...bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
@@ -387,6 +390,13 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled b
 			agentV3ToolArgsField: "name",
 			agentV3ToolDescField: "Load an available agent-v3 skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
 		})
+	}
+	if len(cronEnabled) > 0 && cronEnabled[0] {
+		for _, t := range []*cronTool{{}, {manage: true}} {
+			info, _ := t.Info(context.Background())
+			params, _ := info.ParamsOneOf.ToJSONSchema()
+			infos = append(infos, map[string]any{agentV3ToolNameField: info.Name, agentV3ToolDescField: info.Desc, agentV3ToolArgsField: params})
+		}
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)

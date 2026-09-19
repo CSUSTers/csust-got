@@ -12,6 +12,11 @@ const (
 	agentV3ToolEdit      = "edit"
 	agentV3ToolBash      = "bash"
 	agentV3ToolLoadSkill = "load_skill"
+	agentV3ToolDelegate  = "delegate"
+	agentV3ToolCronTasks = "cron_tasks"
+
+	agentV3ActionList   = "list"
+	agentV3ActionUpdate = "update"
 
 	agentV3ToolNameField      = "name"
 	agentV3ToolDescField      = "desc"
@@ -25,4 +30,8 @@ const (
 	agentV3ToolCommandField   = "command"
 	agentV3ToolTimeoutField   = "timeout"
 	agentV3ToolSkillNameField = "name"
+	agentV3FieldCron          = "cron"
+	agentV3FieldFileID        = "file_id"
+	agentV3FieldMessage       = "message"
+	agentV3FieldVersion       = "version"
 )

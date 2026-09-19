@@ -55,6 +55,17 @@ message:
 agent_v3:
   enable: true
   soul_path: "docs/agent_v3_soul.md"
+  # 设置 runner_agent 并启用同名专用 agent 后才开放 cron 工具。详见 docs/agent-cron.md。
+  cron:
+    runner_agent: ""
+    poll_interval_minutes: 1
+    timezone: "Asia/Shanghai"
+    max_concurrency: 4
+    chat_cooldown_seconds: 60
+    max_tasks_per_chat: 20
+    max_prompt_bytes: 16384
+    max_manual_retries: 2
+    run_timeout: "10m"
   context_cache:
     enable: true
     raw_turns: 12
@@ -285,6 +296,18 @@ agents:
       <USER_INPUT>
       {{with .ReplyToXml}}{{.}}{{end}}
       </USER_INPUT>
+
+  # 无交互触发器的专用后台 runner 示例；取消注释并 enable: true 后可使用。
+  # - name: cron-runner
+  #   model: *qwen
+  #   trigger: []
+  #   agent:
+  #     enable: false
+  #     max_steps: 20
+  #   system_prompt: |-
+  #     执行自包含的定时任务。使用当前聊天的工作空间，最终仅输出结果正文。
+  #     不创建或管理其他定时任务；失败时说明限制，不声称完成未执行的动作。
+  #   prompt_template: "{{.Input}}"
 
 # meili search
 meili:

@@ -3,8 +3,10 @@ package agentv3
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -219,6 +221,8 @@ func TestAgentV3TracePersistsSensitiveToolPreviewPolicy(t *testing.T) {
 		{agentV3ToolSearXNGWebSearch, `{"query":"fixture-private-query","token":"fixture-secret-token"}`, "fixture-private-result https://search.fixture.invalid/private-result fixture-secret-token"},
 		{agentV3ToolSearXNGSuggestions, `{"query":"fixture-private-query","token":"fixture-secret-token"}`, "fixture-private-query-suggestion fixture-secret-token"},
 		{agentV3ToolSearXNGInstanceInfo, `{"include_engines":true,"token":"fixture-secret-token"}`, "fixture-instance-result https://search.fixture.invalid/instance fixture-secret-token"},
+		{"delegate", `{"cron":"* * * * *","prompt":"fixture-cron-secret"}`, "fixture-cron-created-secret"},
+		{"cron_tasks", `{"action":"get","task_id":"fixture-private-task"}`, "fixture-cron-result-secret"},
 		{"fixture_generic_tool", `{"query":"fixture-generic-args"}`, "fixture-generic-result"},
 	}
 	trace := NewAgentV3Trace("trace-preview-test", -100, 42)
@@ -253,11 +257,14 @@ func TestAgentV3TracePersistsSensitiveToolPreviewPolicy(t *testing.T) {
 		"fixture-private-result",
 		"fixture-secret-token",
 		"https://search.fixture.invalid/",
+		"fixture-cron-secret",
+		"fixture-private-task",
+		"fixture-cron-result-secret",
 	} {
 		assert.NotContains(t, string(data), marker)
 	}
 
-	for _, call := range calls[:4] {
+	for _, call := range calls[:6] {
 		attrs := persistedAgentV3ToolSpanAttrs(t, persisted.Spans, call.name)
 		assert.Equal(t, call.name, attrs["tool"])
 		assert.NotEmpty(t, attrs["args_hash"])
@@ -284,8 +291,77 @@ func TestAgentV3TracePersistsSensitiveToolPreviewPolicy(t *testing.T) {
 		"fixture-private-result",
 		"fixture-secret-token",
 		"https://search.fixture.invalid/",
+		"fixture-cron-secret",
+		"fixture-private-task",
+		"fixture-cron-result-secret",
 	} {
 		assert.NotContains(t, string(summaryPayload), marker)
+	}
+}
+
+type traceErrorTestTool struct{}
+
+var errBackgroundToolSecretUnderTest = errors.New("BACKGROUND_TOOL_ERROR_SECRET")
+
+func (traceErrorTestTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{Name: "fixture_sensitive"}, nil
+}
+func (traceErrorTestTool) InvokableRun(context.Context, string, ...tool.Option) (string, error) {
+	return "", &url.Error{
+		Op:  "Get",
+		URL: "https://api.telegram.invalid/botBACKGROUND_FAKE_TOKEN/getFile?prompt=BACKGROUND_PRIVATE_PROMPT",
+		Err: errBackgroundToolSecretUnderTest,
+	}
+}
+
+func TestBackgroundTraceNeverPersistsPayloadContent(t *testing.T) {
+	for _, capture := range []string{"preview", "full"} {
+		t.Run(capture, func(t *testing.T) {
+			oldConfig := config.BotConfig
+			t.Cleanup(func() {
+				config.BotConfig = oldConfig
+				if oldConfig != nil && oldConfig.RedisConfig != nil {
+					orm.InitRedis()
+				}
+			})
+			miniRedis := miniredis.RunT(t)
+			testConfig := config.NewBotConfig()
+			testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+			testConfig.RedisConfig.KeyPrefix = "agent-v3-background-trace:"
+			tracePath := filepath.Join(t.TempDir(), "agentv3.jsonl")
+			testConfig.AgentV3 = &config.AgentV3Config{Observability: config.AgentV3ObservabilityConfig{Enable: true, JSONLPath: tracePath, CaptureContent: capture, PreviewChars: 512}}
+			config.BotConfig = testConfig
+			orm.InitRedis()
+
+			trace := NewAgentV3Trace("background-trace", -100, 0)
+			trace.SetContentRedacted(true)
+			model := &scriptedToolModel{turns: [][]*schema.Message{
+				{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "sensitive", Function: schema.FunctionCall{Name: "fixture_sensitive", Arguments: `{"prompt":"BACKGROUND_ARGS_SECRET"}`}}}}},
+				{{Role: schema.Assistant, Content: "BACKGROUND_MODEL_SECRET"}},
+			}}
+			wrappedTools := wrapToolsWithErrorHandler([]tool.BaseTool{traceErrorTestTool{}})
+			agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "background", Model: model, Tools: wrappedTools, MaxSteps: 4})
+			require.NoError(t, err)
+			ctx := WithTurnContext(t.Context(), &TurnContext{Background: true, V3: &AgentV3TurnState{Trace: trace}})
+			response, err := agent.Generate(ctx, []*schema.Message{schema.UserMessage("BACKGROUND_INPUT_SECRET")})
+			require.NoError(t, err)
+			require.Equal(t, "BACKGROUND_MODEL_SECRET", response.Content)
+			modelInputs, err := json.Marshal(model.capturedInputs())
+			require.NoError(t, err)
+			for _, marker := range []string{"BACKGROUND_FAKE_TOKEN", "BACKGROUND_PRIVATE_PROMPT", "BACKGROUND_TOOL_ERROR_SECRET"} {
+				require.NotContains(t, string(modelInputs), marker)
+			}
+			require.Contains(t, string(modelInputs), "background tool invocation failed")
+			trace.Finish(ctx, orm.AgentV3Scope{Bot: "test-bot", Platform: agentV3Platform, ChatID: -100})
+
+			data, err := os.ReadFile(tracePath)
+			require.NoError(t, err)
+			for _, marker := range []string{"BACKGROUND_INPUT_SECRET", "BACKGROUND_ARGS_SECRET", "BACKGROUND_FAKE_TOKEN", "BACKGROUND_PRIVATE_PROMPT", "BACKGROUND_TOOL_ERROR_SECRET", "BACKGROUND_MODEL_SECRET"} {
+				require.NotContains(t, string(data), marker)
+			}
+			require.Contains(t, string(data), `"args_hash"`)
+			require.Contains(t, string(data), `"result_chars"`)
+		})
 	}
 }
 
