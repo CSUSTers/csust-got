@@ -23,9 +23,13 @@ import (
 const agentV3TraceSaveTimeout = 5 * time.Second
 
 var (
-	agentV3TraceSinkMu             sync.Mutex
+	agentV3TraceSink               = make(chan struct{}, 1)
 	errAgentV3TracePayloadTooLarge = errors.New("agent v3 trace payload is too large")
 )
+
+func init() {
+	agentV3TraceSink <- struct{}{}
+}
 
 // AgentV3Trace records one agent-v3 run.
 type AgentV3Trace struct {
@@ -50,6 +54,7 @@ type AgentV3Trace struct {
 	StartedAt               time.Time          `json:"started_at"`
 	FinishedAt              time.Time          `json:"finished_at"`
 	Spans                   []AgentV3TraceSpan `json:"spans"`
+	RedactContent           bool               `json:"-"`
 }
 
 // AgentV3TraceSpan records one timed agent-v3 operation.
@@ -95,11 +100,16 @@ func (t *AgentV3Trace) StartSpan(name string, attrs map[string]any) func(error, 
 			DurationMS: finish.Sub(start).Milliseconds(),
 			Attrs:      merged,
 		}
+		t.mu.Lock()
 		if err != nil {
 			span.Error = err.Error()
-			t.SetError(err)
+			if t.RedactContent {
+				span.Error = "operation failed"
+			}
+			if t.Error == "" {
+				t.Error = span.Error
+			}
 		}
-		t.mu.Lock()
 		t.Spans = append(t.Spans, span)
 		t.mu.Unlock()
 	}
@@ -146,8 +156,22 @@ func (t *AgentV3Trace) SetError(err error) {
 	}
 	t.mu.Lock()
 	if t.Error == "" {
-		t.Error = err.Error()
+		if t.RedactContent {
+			t.Error = "operation failed"
+		} else {
+			t.Error = err.Error()
+		}
 	}
+	t.mu.Unlock()
+}
+
+// SetContentRedacted controls whether trace content is replaced with safe summaries.
+func (t *AgentV3Trace) SetContentRedacted(redacted bool) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.RedactContent = redacted
 	t.mu.Unlock()
 }
 
@@ -157,6 +181,19 @@ func agentV3TraceSaveContext(ctx context.Context) (context.Context, context.Canc
 
 // Finish saves the agent-v3 trace summary and JSONL payload.
 func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
+	saveCtx, cancelSave := agentV3TraceSaveContext(ctx)
+	defer cancelSave()
+	t.finish(saveCtx, scope)
+}
+
+// FinishContext saves a trace without detaching from the caller's bounded context.
+func (t *AgentV3Trace) FinishContext(ctx context.Context, scope orm.AgentV3Scope) {
+	saveCtx, cancelSave := context.WithTimeout(ctx, agentV3TraceSaveTimeout)
+	defer cancelSave()
+	t.finish(saveCtx, scope)
+}
+
+func (t *AgentV3Trace) finish(saveCtx context.Context, scope orm.AgentV3Scope) {
 	if t == nil || config.BotConfig == nil || config.BotConfig.AgentV3 == nil || !config.BotConfig.AgentV3.Observability.Enable {
 		return
 	}
@@ -187,16 +224,14 @@ func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
 	payload, _ := json.Marshal(t)
 	t.mu.Unlock()
 
-	saveCtx, cancelSave := agentV3TraceSaveContext(ctx)
 	err := orm.AgentV3SaveTraceSummary(saveCtx, scope, summary, config.BotConfig.AgentV3.ContextCacheTTL())
-	cancelSave()
 	if err != nil {
 		zap.L().Warn("agentv3: failed to save agent v3 trace summary",
 			zap.String("run_id", t.RunID),
 			zap.Error(err),
 		)
 	}
-	if err := appendAgentV3TraceJSONL(config.BotConfig.AgentV3.Observability.JSONLPath, payload); err != nil {
+	if err := appendAgentV3TraceJSONLContext(saveCtx, config.BotConfig.AgentV3.Observability.JSONLPath, payload); err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		zap.L().Warn("agentv3: failed to append agent v3 trace jsonl",
 			zap.String("run_id", t.RunID),
 			zap.String("path", config.BotConfig.AgentV3.Observability.JSONLPath),
@@ -206,8 +241,15 @@ func (t *AgentV3Trace) Finish(ctx context.Context, scope orm.AgentV3Scope) {
 }
 
 func appendAgentV3TraceJSONL(path string, payload []byte) error {
+	return appendAgentV3TraceJSONLContext(context.Background(), path, payload)
+}
+
+func appendAgentV3TraceJSONLContext(ctx context.Context, path string, payload []byte) error {
 	if path == "" || len(payload) == 0 {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	recordSize, err := checkedAgentV3TraceRecordSize(len(payload))
 	if err != nil {
@@ -217,8 +259,15 @@ func appendAgentV3TraceJSONL(path string, payload []byte) error {
 	copy(record, payload)
 	record[len(payload)] = '\n'
 
-	agentV3TraceSinkMu.Lock()
-	defer agentV3TraceSinkMu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-agentV3TraceSink:
+	}
+	defer func() { agentV3TraceSink <- struct{}{} }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if dir := filepath.Dir(path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err

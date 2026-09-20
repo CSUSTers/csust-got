@@ -21,6 +21,16 @@ import (
 var errToolNodeBadFileID = fmt.Errorf("[NodeRunError] %w\n------------------------\nnode path: [tools]", errTestBadTelegramFile)
 
 var errAgentFailureUnderTest = errors.New("agent failure")
+var errInteractiveDiagnosticUnderTest = errors.New("interactive diagnostic sentinel")
+
+func TestToolErrorHandlerOnlyRedactsBackgroundTurns(t *testing.T) {
+	err := errInteractiveDiagnosticUnderTest
+	interactive := WithTurnContext(t.Context(), &TurnContext{})
+	assert.Contains(t, toolErrorHandler(interactive, err), err.Error())
+	background := WithTurnContext(t.Context(), &TurnContext{Background: true})
+	assert.NotContains(t, toolErrorHandler(background, err), err.Error())
+	assert.Contains(t, toolErrorHandler(background, err), backgroundToolErrorText)
+}
 
 func TestCalcGuidanceLevel(t *testing.T) {
 	toolCallMsg := &schema.Message{

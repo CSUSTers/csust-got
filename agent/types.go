@@ -27,6 +27,7 @@ type TurnContext struct {
 	Namespace     string
 	RuntimeClient *RemoteRuntimeClient
 	V3            *AgentV3TurnState
+	Background    bool
 	// Progress tracking — used by update_progress tool and streaming handlers.
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex

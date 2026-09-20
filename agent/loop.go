@@ -307,8 +307,10 @@ func (a *CustomAgent) streamOneTurn(
 				attrs["prompt_tokens"] = merged.ResponseMeta.Usage.PromptTokens
 				attrs["cached_tokens"] = merged.ResponseMeta.Usage.PromptTokenDetails.CachedTokens
 			}
-			if preview, ok := agentV3TracePreview(merged.Content); ok {
-				attrs["output_preview"] = preview
+			if !tc.Background {
+				if preview, ok := agentV3TracePreview(merged.Content); ok {
+					attrs["output_preview"] = preview
+				}
 			}
 			finishSpan(nil, attrs)
 		}
@@ -453,7 +455,7 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 			"tool":      name,
 			"args_hash": hashString(args),
 		}
-		if agentV3TraceToolPreviewAllowed(name) {
+		if !turn.Background && agentV3TraceToolPreviewAllowed(name) {
 			if preview, ok := agentV3TracePreview(args); ok {
 				attrs["args_preview"] = preview
 			}
@@ -483,19 +485,26 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 
 	result, err := t.InvokableRun(ctx, args)
 	if err != nil {
+		toolErr := err
+		errText := err.Error()
+		if turn := GetTurnContext(ctx); turn != nil && turn.Background {
+			toolErr = errBackgroundTool
+			errText = toolErr.Error()
+		}
 		zap.L().Warn("agentv3/loop: tool invocation failed",
 			zap.String("agent", a.name),
 			zap.String("tool", name),
-			zap.Error(err),
+			zap.Error(toolErr),
 		)
 		result = fmt.Sprintf(
 			"[Tool Error] %s\nPlease try a different approach or adjust parameters.",
-			err.Error(),
+			errText,
 		)
 	}
 	if finishSpan != nil {
 		attrs := map[string]any{"result_chars": len(result)}
-		if agentV3TraceToolPreviewAllowed(name) {
+		turn := GetTurnContext(ctx)
+		if (turn == nil || !turn.Background) && agentV3TraceToolPreviewAllowed(name) {
 			if preview, ok := agentV3TracePreview(result); ok {
 				attrs["result_preview"] = preview
 			}
@@ -511,7 +520,9 @@ func agentV3TraceToolPreviewAllowed(name string) bool {
 	case agentV3ToolLoadSkill,
 		agentV3ToolSearXNGWebSearch,
 		agentV3ToolSearXNGSuggestions,
-		agentV3ToolSearXNGInstanceInfo:
+		agentV3ToolSearXNGInstanceInfo,
+		agentV3ToolDelegate,
+		agentV3ToolCronTasks:
 		return false
 	default:
 		return true
