@@ -29,6 +29,7 @@ type agentV3SkillDescriptor struct {
 	SHA256      string             `json:"sha256"`
 	Source      agentV3SkillSource `json:"source"`
 	VirtualPath string             `json:"virtual_path"`
+	environment map[string]string
 }
 
 type agentV3SkillSnapshot struct {
@@ -90,5 +91,25 @@ func cloneAgentV3SkillDescriptor(descriptor agentV3SkillDescriptor) agentV3Skill
 		SHA256:      strings.Clone(descriptor.SHA256),
 		Source:      agentV3SkillSource(strings.Clone(string(descriptor.Source))),
 		VirtualPath: strings.Clone(descriptor.VirtualPath),
+		environment: cloneAgentV3SkillEnvironment(descriptor.environment),
 	}
+}
+
+func (descriptor agentV3SkillDescriptor) String() string {
+	return fmt.Sprintf("agentV3SkillDescriptor{name:%q source:%q sha256:%q environment:[redacted]}", descriptor.Name, descriptor.Source, descriptor.SHA256)
+}
+
+func (descriptor agentV3SkillDescriptor) GoString() string {
+	return descriptor.String()
+}
+
+func cloneAgentV3SkillEnvironment(env map[string]string) map[string]string {
+	if env == nil {
+		return nil
+	}
+	copy := make(map[string]string, len(env))
+	for name, value := range env {
+		copy[strings.Clone(name)] = strings.Clone(value)
+	}
+	return copy
 }

@@ -193,6 +193,33 @@ using generic `read` or `grep` on `/skills`. The generic read-only Runtime
 `/skills` filesystem and scripts remain available to operators and the Runtime,
 but they do not authorize or activate a skill and do not register tool schemas.
 
+`agent_v3.runtime.env` is a direct string-to-string map of literal Bash values
+(not names of Bot environment variables). For example, `env: {SERVICE_URL:
+"https://example.org"}`. `config.yaml` keys retain their original case;
+`custom.yaml` overrides declared keys by exact case. An existing key can also
+be overridden with `BOT_AGENT_V3_RUNTIME_ENV_<UPPERCASE_KEY>` (including an
+empty value); that prefix cannot introduce a new key. Values are not expanded.
+Do not commit real credentials to configuration files.
+
+Each filesystem skill may have a sibling `.env` with static `NAME=value` lines,
+blank lines, whole-line comments, optional matching quotes, and literal `$`.
+The Bot-local and Runtime-global owners freeze these files at startup. Once
+`load_skill` succeeds, its source-specific environment applies to subsequent
+Bash calls in that turn only; later loaded skills override earlier skills, and
+explicit `runtime.env` wins over all skills. Duplicate loads do not reorder
+layers. No `.env` data enters skill snapshots or prompts. A malformed `.env`
+fails startup, and changing it requires restarting its owning service.
+
+Upgrade the Runtime to support `bash_env_version: 1` before enabling env values;
+the Bot refuses env-bearing Bash against an old Runtime without retrying the
+command without env. Do not route one endpoint to mixed Runtime versions.
+Protect the Bot-to-Runtime HTTP link and disable logging of secret request
+bodies. Runtime skill directories remain readable through the existing
+`/skills` mount even before activation: activation is **not** a secret-access
+boundary, and Bash output or an allowed Fetch request can expose values. Do
+not place credentials there that must be hidden from other commands sharing
+that Runtime. No Bot-local root is mounted by the checked-in Compose file.
+
 #### Runtime-global rollout and mounts
 
 First upgrade and start a Runtime that exposes authenticated `GET /v1/skills`.

@@ -48,6 +48,8 @@ type AgentV3TurnState struct {
 	Trace                 *AgentV3Trace
 	SkillCatalog          agentV3SkillCatalog
 	loadedSkillNames      map[string]struct{}
+	runtimeEnv            map[string]string
+	loadedSkillEnv        []runtimeSkillEnvLayer
 }
 
 func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
@@ -90,6 +92,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		Trace:            trace,
 		SkillCatalog:     catalog,
 		loadedSkillNames: loadedSkillNames,
+		runtimeEnv:       cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
 	}
 	finishContextSpan := trace.StartSpan("context_build", map[string]any{
 		"agent": cc.Name,
@@ -245,6 +248,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		Trace:                 trace,
 		SkillCatalog:          catalog,
 		loadedSkillNames:      loadedSkillNames,
+		runtimeEnv:            cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
 	}
 
 	var messages []*schema.Message
@@ -797,6 +801,9 @@ func validateAgentV3RuntimeConfig(cfg *config.AgentV3Config) error {
 	}
 	if cfg.Skills.Mode != "" && cfg.Skills.Mode != agentV3SkillsModeSystemPrompt {
 		return fmt.Errorf("%w: %q; expected %s", errAgentV3SkillsModeUnsupported, cfg.Skills.Mode, agentV3SkillsModeSystemPrompt)
+	}
+	if err := config.ValidateAgentV3RuntimeEnv(cfg.Runtime.Env); err != nil {
+		return fmt.Errorf("agent v3 runtime env: %w", err)
 	}
 	return nil
 }

@@ -42,6 +42,7 @@ pub mod fetch_policy;
 pub mod fetch_protocol;
 pub mod identity;
 pub mod namespace_gate;
+mod runtime_env;
 pub mod runtime_fetch_proxy;
 pub mod runtime_security;
 pub mod sandbox;
@@ -133,6 +134,12 @@ pub struct BashRequest {
     pub command: String,
     #[serde(default)]
     pub timeout: String,
+    #[serde(default)]
+    pub bash_env_version: Option<u32>,
+    #[serde(default)]
+    pub env: runtime_env::ApplicationEnv,
+    #[serde(default, deserialize_with = "runtime_env::deserialize_skill_layers")]
+    pub skill_env: Vec<runtime_env::SkillEnvLayer>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,6 +166,7 @@ pub struct TextResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BashResponse {
+    pub bash_env_version: u32,
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
@@ -170,6 +178,8 @@ pub struct BashResponse {
 
 #[derive(Debug, Serialize)]
 pub struct StatusResponse {
+    pub runtime_env: bool,
+    pub bash_env_version: u32,
     pub ok: bool,
     pub version: String,
     pub workspace_root: String,
@@ -437,9 +447,10 @@ async fn edit_handler(
 async fn bash_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(req): Json<BashRequest>,
+    request: Result<Json<BashRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<BashResponse>, RuntimeError> {
     authorize(&state, &headers)?;
+    let Json(req) = request.map_err(|_| RuntimeError::bad_request("runtime_env_request"))?;
     let identity = RuntimeIdentity::from_common(&req.common)?;
     let use_lease = state
         .namespace_gate
@@ -497,6 +508,8 @@ async fn status_handler(
         readiness_errors.push("runtime supervisor is dumpable".to_string());
     }
     Ok(Json(StatusResponse {
+        runtime_env: true,
+        bash_env_version: runtime_env::BASH_ENV_VERSION,
         ok: bash_ready
             && !supervisor_dumpable
             && (!fetch_enabled || !state.require_fetch_for_readiness || fetch_ready),
@@ -1365,6 +1378,14 @@ async fn run_bash_owner(
     if req.command.trim().is_empty() {
         return Err(RuntimeError::bad_request("command is empty"));
     }
+    let environment = runtime_env::resolve_environment(
+        req.bash_env_version,
+        &req.env,
+        &req.skill_env,
+        &state.skill_snapshot,
+        state.fetch_proxy.shell_environment(),
+    )
+    .map_err(|error| RuntimeError::bad_request(error.to_string()))?;
     let supervisor = state.command_supervisor.as_ref().ok_or_else(|| {
         RuntimeError::unavailable("bash unavailable: cgroup v2 delegation is not ready")
     })?;
@@ -1438,7 +1459,7 @@ async fn run_bash_owner(
                 )
                 .map_err(|error| error.to_string())?;
             binding
-                .into_launch(fetch_proxy.shell_environment())
+                .into_launch(environment)
                 .map_err(|error| error.to_string())
         },
         timeout_duration,
@@ -1493,6 +1514,7 @@ async fn run_bash_owner(
     let output = output.map_err(supervisor_runtime_error)?;
     let duration_ms = started.elapsed().as_millis();
     Ok(BashResponse {
+        bash_env_version: runtime_env::BASH_ENV_VERSION,
         exit_code: output.exit_code,
         truncated: output.truncated,
         stdout: output.stdout,
@@ -1516,7 +1538,10 @@ async fn cleanup_unstarted_bash(cleanup_dir: Option<PathBuf>) -> Result<(), Runt
 }
 
 fn supervisor_runtime_error(error: SupervisorError) -> RuntimeError {
-    if error.is_timeout() {
+    if matches!(&error, SupervisorError::Spawn(message) if message == "runtime_env_exec_spec_limit")
+    {
+        RuntimeError::bad_request("runtime_env_exec_spec_limit")
+    } else if error.is_timeout() {
         RuntimeError::bad_request("command timed out")
     } else if error.is_canceled() {
         RuntimeError::bad_request("command canceled")
@@ -2085,6 +2110,7 @@ pub fn request_with_json(path: &str, body: serde_json::Value) -> Request<Body> {
 
 #[cfg(test)]
 mod tests {
+    include!("runtime_env_http_tests.rs");
     use super::*;
     use crate::runtime_security::RuntimeFetchSecurity;
     use axum::body::to_bytes;
@@ -3966,6 +3992,9 @@ mod tests {
                 "env".to_string()
             },
             timeout: "2s".to_string(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let response = run_bash_for_test(&state, &req).await.unwrap();
@@ -4089,6 +4118,9 @@ mod tests {
             },
             command: command.to_string(),
             timeout: "8s".to_string(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let response = timeout(Duration::from_secs(10), run_bash_for_test(&state, &req))
@@ -4125,6 +4157,9 @@ mod tests {
             },
             command,
             timeout: String::new(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let error = run_bash_for_test(&state, &req).await.unwrap_err();
@@ -4147,6 +4182,9 @@ mod tests {
             },
             command: "sleep 30 & echo $! > timeout-background.pid; wait".to_string(),
             timeout: String::new(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let error = run_bash_for_test(&state, &req).await.unwrap_err();
@@ -4170,6 +4208,9 @@ mod tests {
             command: "sleep 30 >/dev/null 2>&1 & echo $! > normal-background.pid; exit 0"
                 .to_string(),
             timeout: String::new(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let response = run_bash_for_test(&state, &req).await.unwrap();
@@ -4192,6 +4233,9 @@ mod tests {
             command: "setsid --fork --wait sh -c 'echo $$ > escaped-session.pid; exec sleep 30'"
                 .to_string(),
             timeout: String::new(),
+            bash_env_version: None,
+            env: Default::default(),
+            skill_env: Vec::new(),
         };
 
         let result = run_bash_for_test(&state, &req).await;

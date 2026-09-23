@@ -392,6 +392,11 @@ func CompileAgent(ctx context.Context, chatCfg *config.AgentConfig, mcpMgr *McpM
 	if err := chatCfg.ValidateContextMode(); err != nil {
 		return nil, err
 	}
+	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		if err := config.ValidateAgentV3RuntimeEnv(config.BotConfig.AgentV3.Runtime.Env); err != nil {
+			return nil, fmt.Errorf("agent v3 runtime env: %w", err)
+		}
+	}
 
 	// Compile system prompt template
 	var systemTpl *template.Template

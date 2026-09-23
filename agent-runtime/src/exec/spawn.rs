@@ -28,11 +28,21 @@ pub(super) fn spawn_direct(
     target: ExecTarget,
     env: Vec<(String, String)>,
 ) -> Result<Child, SupervisorError> {
-    let mut command = Command::new(target.program);
-    command.args(target.args);
-    command.current_dir(target.cwd);
+    validate_environment(&env).map_err(|error| SupervisorError::Spawn(error.to_string()))?;
+    let spec = ExecSpec {
+        cgroup_procs: PathBuf::new(),
+        program: target.program,
+        args: target.args,
+        cwd: target.cwd,
+        env,
+        rlimits: RlimitSpec::approved_defaults(),
+    };
+    serialize_exec_spec(&spec).map_err(|error| SupervisorError::Spawn(error.to_string()))?;
+    let mut command = Command::new(spec.program);
+    command.args(spec.args);
+    command.current_dir(spec.cwd);
     command.env_clear();
-    command.envs(env);
+    command.envs(spec.env);
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -91,13 +101,7 @@ fn spawn_exec_helper_with_control_inner(
     use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
 
     validate_environment(&spec.env)?;
-    let payload = serde_json::to_vec(spec)
-        .map_err(|error| ExecError::new(format!("serialize exec spec: {error}")))?;
-    if payload.len() > MAX_EXEC_SPEC_BYTES {
-        return Err(ExecError::new(format!(
-            "exec spec exceeds {MAX_EXEC_SPEC_BYTES} bytes"
-        )));
-    }
+    let payload = serialize_exec_spec(spec)?;
     let mut pipe_fds = [-1; 2];
     if unsafe { libc::pipe2(pipe_fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err(ExecError::new(format!(
@@ -225,19 +229,16 @@ pub(super) fn helper_argv() -> [String; 2] {
 
 #[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
 pub(super) fn validate_environment(env: &[(String, String)]) -> Result<(), ExecError> {
-    let allowed: BTreeSet<_> = ALLOWED_ENVIRONMENT.into_iter().collect();
-    let mut seen = BTreeSet::new();
-    for (name, _) in env {
-        if !allowed.contains(name.as_str()) {
-            return Err(ExecError::new(format!(
-                "exec environment variable {name} is not allowed"
-            )));
-        }
-        if !seen.insert(name) {
-            return Err(ExecError::new(format!(
-                "exec environment variable {name} is duplicated"
-            )));
-        }
+    crate::runtime_env::validate_final_environment(env)
+        .map_err(|_| ExecError::new("runtime_env_invalid_environment"))
+}
+
+#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
+pub(super) fn serialize_exec_spec(spec: &ExecSpec) -> Result<Vec<u8>, ExecError> {
+    let payload =
+        serde_json::to_vec(spec).map_err(|_| ExecError::new("serialize exec spec failed"))?;
+    if payload.len() > MAX_EXEC_SPEC_BYTES {
+        return Err(ExecError::new("runtime_env_exec_spec_limit"));
     }
-    Ok(())
+    Ok(payload)
 }

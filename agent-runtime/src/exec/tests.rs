@@ -1,5 +1,6 @@
 use super::{
-    CommandSupervisor, ExecTarget, RlimitSpec, SupervisorError, helper_argv, validate_environment,
+    CommandSupervisor, ExecSpec, ExecTarget, RlimitSpec, SupervisorError, helper_argv,
+    serialize_exec_spec, validate_environment,
 };
 #[cfg(not(target_os = "linux"))]
 use crate::cgroup::{CgroupConfig, CommandLimits};
@@ -47,16 +48,85 @@ fn helper_argv_contains_only_the_bounded_config_descriptor() {
 }
 
 #[test]
-fn helper_environment_is_allowlisted() {
+fn helper_environment_uses_final_environment_policy() {
     validate_environment(&[
         ("PATH".to_string(), "/bin".to_string()),
         ("HOME".to_string(), "/tmp".to_string()),
+        ("AGENT_FETCH_CONTROL_FD".to_string(), "4".to_string()),
+        ("APP_LITERAL".to_string(), "fixture-value".to_string()),
     ])
     .unwrap();
-    let error =
-        validate_environment(&[("LD_PRELOAD".to_string(), "/workspace/escape.so".to_string())])
-            .unwrap_err();
-    assert!(error.to_string().contains("LD_PRELOAD"));
+    for name in [
+        "LD_PRELOAD",
+        "BASH_ENV",
+        "ENV",
+        "PROOT_HIDDEN",
+        "HTTP_PROXY",
+    ] {
+        let error =
+            validate_environment(&[(name.to_string(), "fixture-private".to_string())]).unwrap_err();
+        assert!(!error.to_string().contains("fixture-private"));
+    }
+    for env in [
+        vec![("AGENT_FETCH_CONTROL_FD".to_string(), "5".to_string())],
+        vec![
+            ("APP_LITERAL".to_string(), "first".to_string()),
+            ("APP_LITERAL".to_string(), "second".to_string()),
+        ],
+        vec![("APP_LITERAL".to_string(), "nul\0secret".to_string())],
+    ] {
+        assert!(validate_environment(&env).is_err());
+    }
+}
+
+fn budget_spec() -> ExecSpec {
+    ExecSpec {
+        cgroup_procs: PathBuf::from("/sys/fs/cgroup/fixture/cgroup.procs"),
+        program: PathBuf::from("/bin/bash"),
+        args: vec!["-lc".to_string(), String::new()],
+        cwd: PathBuf::from("/workspace"),
+        env: vec![("APP_LITERAL".to_string(), "fixture-private".to_string())],
+        rlimits: RlimitSpec::approved_defaults(),
+    }
+}
+
+#[test]
+fn complete_exec_spec_budget_accepts_exact_limit_and_rejects_next_byte() {
+    let mut spec = budget_spec();
+    let base = serde_json::to_vec(&spec).unwrap().len();
+    spec.args[1] = "x".repeat(super::MAX_EXEC_SPEC_BYTES - base);
+    assert_eq!(serialize_exec_spec(&spec).unwrap().len(), 32_768);
+    spec.args[1].push('x');
+    let error = serialize_exec_spec(&spec).unwrap_err();
+    assert_eq!(error.to_string(), "runtime_env_exec_spec_limit");
+    assert!(!error.to_string().contains("fixture-private"));
+}
+
+#[test]
+fn exec_spec_debug_omits_environment_and_command_contents() {
+    let mut spec = budget_spec();
+    spec.args[1] = "private-command-text".to_string();
+    let debug = format!("{spec:?}");
+    assert!(!debug.contains("fixture-private"));
+    assert!(!debug.contains("private-command-text"));
+    assert!(!debug.contains("/workspace"));
+}
+
+#[test]
+fn direct_spawn_rejects_oversized_command_with_small_environment() {
+    let supervisor = CommandSupervisor::test_direct();
+    let target = shell_target(&"x".repeat(super::MAX_EXEC_SPEC_BYTES));
+    let error = match supervisor.start(
+        target,
+        vec![("APP_LITERAL".to_string(), "fixture-private".to_string())],
+        Duration::from_secs(1),
+    ) {
+        Ok(_) => panic!("oversized command unexpectedly spawned"),
+        Err(error) => error,
+    };
+    assert_eq!(error.to_string(), "runtime_env_exec_spec_limit");
+    assert!(!error.to_string().contains("fixture-private"));
+    assert!(supervisor.health().is_ready());
 }
 
 #[tokio::test]
