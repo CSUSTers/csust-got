@@ -107,9 +107,9 @@ func cloneAgentV3SkillEnvironment(env map[string]string) map[string]string {
 	if env == nil {
 		return nil
 	}
-	copy := make(map[string]string, len(env))
+	cloned := make(map[string]string, len(env))
 	for name, value := range env {
-		copy[strings.Clone(name)] = strings.Clone(value)
+		cloned[strings.Clone(name)] = strings.Clone(value)
 	}
-	return copy
+	return cloned
 }

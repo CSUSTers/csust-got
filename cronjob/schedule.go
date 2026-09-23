@@ -126,6 +126,7 @@ func (s *Schedule) Next(after time.Time) (time.Time, error) {
 		return time.Time{}, NewError(CodeInvalidArgument, "schedule is not initialized")
 	}
 	switch s.kind {
+	case scheduleCron:
 	case scheduleOnce:
 		if s.deadline.After(after) {
 			return s.deadline, nil

@@ -534,7 +534,7 @@ func TestRuntimeEnvLookupCollisionAcrossFiles(t *testing.T) {
 	BotConfig = NewBotConfig()
 	InitViper(configFile, "BOT")
 	readConfig()
-	require.ErrorContains(t, runtimeEnvConfigErr, "runtime_env_lookup_collision")
+	require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_lookup_collision")
 	require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
 }
 
@@ -568,8 +568,8 @@ func TestRuntimeEnvInheritedYAMLMergeFailsClosed(t *testing.T) {
 			InitViper(configFile, "BOT")
 			ReadConfig(BotConfig.AgentV3)
 			require.Equal(t, "synthetic-secret", viper.GetString("agent_v3.runtime.env.secret"), "Viper sees an inherited env value")
-			require.ErrorContains(t, runtimeEnvConfigErr, "runtime_env_merge")
-			require.NotContains(t, runtimeEnvConfigErr.Error(), "synthetic-secret")
+			require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_merge")
+			require.NotContains(t, errRuntimeEnvConfigState.Error(), "synthetic-secret")
 			require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
 		})
 	}
@@ -581,7 +581,7 @@ func TestRuntimeEnvExplicitConfigurationAfterUnrelatedMerge(t *testing.T) {
 	BotConfig = NewBotConfig()
 	InitViper(configFile, "BOT")
 	ReadConfig(BotConfig.AgentV3)
-	require.NoError(t, runtimeEnvConfigErr)
+	require.NoError(t, errRuntimeEnvConfigState)
 	require.Equal(t, map[string]string{"DIRECT": "literal"}, BotConfig.AgentV3.Runtime.Env)
 }
 
@@ -593,7 +593,7 @@ func TestRuntimeEnvCustomInheritedMergeDoesNotFallBackToBase(t *testing.T) {
 	BotConfig = NewBotConfig()
 	InitViper(configFile, "BOT")
 	ReadConfig(BotConfig.AgentV3)
-	require.ErrorContains(t, runtimeEnvConfigErr, "runtime_env_merge")
-	require.NotContains(t, runtimeEnvConfigErr.Error(), "synthetic-secret")
+	require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_merge")
+	require.NotContains(t, errRuntimeEnvConfigState.Error(), "synthetic-secret")
 	require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
 }

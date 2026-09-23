@@ -141,6 +141,13 @@ var (
 var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var (
+	errRuntimeEnvLimit    = errors.New("runtime_env_limit")
+	errRuntimeEnvName     = errors.New("runtime_env_name")
+	errRuntimeEnvReserved = errors.New("runtime_env_reserved")
+	errRuntimeEnvValue    = errors.New("runtime_env_value")
+)
+
+var (
 	errInvalidAgentV3SearXNGBaseURL                = errors.New("invalid agent_v3.skills.searxng.base_url")
 	errInvalidAgentV3SearXNGCredentialsEnvironment = errors.New("invalid agent_v3.skills.searxng credentials environment")
 	errInvalidAgentV3SearXNGTimeout                = errors.New("invalid agent_v3.skills.searxng.timeout")
@@ -361,14 +368,14 @@ type AgentV3RuntimeConfig struct {
 // ValidateAgentV3RuntimeEnv checks literal runtime environment entries against the runtime's limits.
 func ValidateAgentV3RuntimeEnv(env map[string]string) error {
 	if len(env) > 64 {
-		return errors.New("runtime_env_limit")
+		return errRuntimeEnvLimit
 	}
 
 	serializedBytes := 2 // The outer JSON array.
 	first := true
 	for name, value := range env {
 		if len(name) < 1 || len(name) > 128 || !agentV3EnvironmentName.MatchString(name) {
-			return errors.New("runtime_env_name")
+			return errRuntimeEnvName
 		}
 		upper := strings.ToUpper(name)
 		switch upper {
@@ -376,7 +383,7 @@ func ValidateAgentV3RuntimeEnv(env map[string]string) error {
 			"CDPATH", "PWD", "OLDPWD", "SHLVL", "PS4", "PROMPT_COMMAND", "GLOBIGNORE",
 			"TMPDIR", "TMP", "TEMP", "GLIBC_TUNABLES", "GCONV_PATH", "LOCPATH", "NLSPATH",
 			"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY":
-			return errors.New("runtime_env_reserved")
+			return errRuntimeEnvReserved
 		}
 		for _, prefix := range [...]string{
 			"AGENT_RUNTIME_", "AGENT_FETCH_", "LD_", "DYLD_", "BASH_", "PROOT_", "MALLOC_",
@@ -384,11 +391,11 @@ func ValidateAgentV3RuntimeEnv(env map[string]string) error {
 			"CURL_", "WGET_",
 		} {
 			if strings.HasPrefix(upper, prefix) {
-				return errors.New("runtime_env_reserved")
+				return errRuntimeEnvReserved
 			}
 		}
 		if len(value) > 2048 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
-			return errors.New("runtime_env_value")
+			return errRuntimeEnvValue
 		}
 		if !first {
 			serializedBytes++ // Comma between pairs.
@@ -397,7 +404,7 @@ func ValidateAgentV3RuntimeEnv(env map[string]string) error {
 		serializedBytes += 1 + len(name) + 2 + 1 + agentV3RuntimeJSONStringBytes(value) + 1 // ["name","value"]
 	}
 	if serializedBytes > 8192 {
-		return errors.New("runtime_env_limit")
+		return errRuntimeEnvLimit
 	}
 	return nil
 }
@@ -415,11 +422,11 @@ func ValidateAgentV3RuntimeEnvLayers(layers ...map[string]string) error {
 			}
 			count++
 			if count > 64 {
-				return errors.New("runtime_env_limit")
+				return errRuntimeEnvLimit
 			}
 			serializedBytes += 1 + len(name) + 2 + 1 + agentV3RuntimeJSONStringBytes(value) + 1
 			if serializedBytes > 8192 {
-				return errors.New("runtime_env_limit")
+				return errRuntimeEnvLimit
 			}
 		}
 	}
@@ -581,7 +588,7 @@ type FeatureSetting struct {
 }
 
 func (c *AgentV3Config) readConfig() {
-	if runtimeEnvConfigErr != nil {
+	if errRuntimeEnvConfigState != nil {
 		return
 	}
 	err := viper.UnmarshalKey("agent_v3", c, viper.DecodeHook(DispatchFor()))

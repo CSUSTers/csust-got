@@ -17,9 +17,15 @@ import (
 var BotConfig *Config
 
 var runtimeEnvConfig map[string]string
-var runtimeEnvConfigErr error
+var errRuntimeEnvConfigState error
 
 var (
+	errRuntimeEnvLoad            = errors.New("runtime_env_load")
+	errRuntimeEnvLookupCollision = errors.New("runtime_env_lookup_collision")
+	errRuntimeEnvType            = errors.New("runtime_env_type")
+	errRuntimeEnvMerge           = errors.New("runtime_env_merge")
+	errRuntimeEnvDuplicate       = errors.New("runtime_env_duplicate")
+
 	noTokenMsg = "bot token is not set! Please set config file config.yaml or env BOT_TOKEN!"
 	noRedisMsg = "redis address is not set! Please set config file config.yaml or env BOT_REDIS_ADDR!"
 	noMeiliMsg = "meili configuration is not set! Please set config file config.yaml!"
@@ -101,76 +107,35 @@ func GetBot() *Bot {
 // InitViper init viper
 func InitViper(configFile, envPrefix string) {
 	runtimeEnvConfig = nil
-	runtimeEnvConfigErr = nil
+	errRuntimeEnvConfigState = nil
 	if configFile != "" {
 		baseEnv, err := readRuntimeEnvFile(configFile)
 		if err != nil {
-			runtimeEnvConfigErr = err
+			errRuntimeEnvConfigState = err
 		}
 		mergeRuntimeEnvEntries(baseEnv)
 		if err := checkRuntimeEnvLookups(runtimeEnvConfig); err != nil {
-			runtimeEnvConfigErr = err
+			errRuntimeEnvConfigState = err
 		}
 		viper.SetConfigFile(configFile)
 		if err := viper.ReadInConfig(); err != nil {
-			if len(baseEnv) > 0 && runtimeEnvConfigErr == nil {
-				runtimeEnvConfigErr = errors.New("runtime_env_load")
+			if len(baseEnv) > 0 && errRuntimeEnvConfigState == nil {
+				errRuntimeEnvConfigState = errRuntimeEnvLoad
 			}
-			if runtimeEnvConfigErr != nil {
-				zap.L().Warn("an error was produced when reading config!", zap.String("configFile", configFile), zap.Error(runtimeEnvConfigErr))
+			if errRuntimeEnvConfigState != nil {
+				zap.L().Warn("an error was produced when reading config!", zap.String("configFile", configFile), zap.Error(errRuntimeEnvConfigState))
 			} else {
 				zap.L().Warn("an error was produced when reading config!", zap.String("configFile", configFile), zap.Error(err))
 			}
 			return
 		}
-		// 检查同一目录下是否存在custom.yaml文件
-		customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
-		if _, err := os.Stat(customConfigFile); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				runtimeEnvConfigErr = errors.New("runtime_env_load")
-				zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
-			}
-		} else {
-			customEnv, envErr := readRuntimeEnvFile(customConfigFile)
-			if envErr != nil {
-				runtimeEnvConfigErr = envErr
-			}
-			mergeRuntimeEnvEntries(customEnv)
-			if err := checkRuntimeEnvLookups(runtimeEnvConfig); err != nil {
-				runtimeEnvConfigErr = err
-			}
-			v := viper.New()
-			v.SetConfigFile(customConfigFile)
-			if err := v.ReadInConfig(); err != nil {
-				if len(customEnv) > 0 && runtimeEnvConfigErr == nil {
-					runtimeEnvConfigErr = errors.New("runtime_env_load")
-				}
-				if runtimeEnvConfigErr != nil {
-					zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(runtimeEnvConfigErr))
-				} else {
-					zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
-				}
-			} else if err := viper.MergeConfigMap(v.AllSettings()); err != nil {
-				if len(customEnv) > 0 && runtimeEnvConfigErr == nil {
-					runtimeEnvConfigErr = errors.New("runtime_env_load")
-				}
-				if runtimeEnvConfigErr != nil {
-					zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(runtimeEnvConfigErr))
-				} else {
-					zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
-				}
-			} else {
-				if runtimeEnvConfigErr == nil {
-					zap.L().Info("custom config merged successfully", zap.String("customConfigFile", customConfigFile))
-				}
-			}
-		}
+		mergeCustomViperConfig(configFile)
 	}
 	viper.SetEnvPrefix(envPrefix)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AllowEmptyEnv(true)
 	viper.AutomaticEnv()
-	if runtimeEnvConfigErr == nil {
+	if errRuntimeEnvConfigState == nil {
 		for name := range runtimeEnvConfig {
 			lookup := "AGENT_V3_RUNTIME_ENV_" + strings.ToUpper(name)
 			if envPrefix != "" {
@@ -186,12 +151,58 @@ func InitViper(configFile, envPrefix string) {
 	noRedisMsg = fmt.Sprintf("redis address is not set! Please set config file %s or env %s_REDIS_ADDR!", configFile, envPrefix)
 }
 
+func mergeCustomViperConfig(configFile string) {
+	customConfigFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	if _, err := os.Stat(customConfigFile); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			errRuntimeEnvConfigState = errRuntimeEnvLoad
+			zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+		}
+		return
+	}
+	customEnv, envErr := readRuntimeEnvFile(customConfigFile)
+	if envErr != nil {
+		errRuntimeEnvConfigState = envErr
+	}
+	mergeRuntimeEnvEntries(customEnv)
+	if err := checkRuntimeEnvLookups(runtimeEnvConfig); err != nil {
+		errRuntimeEnvConfigState = err
+	}
+	v := viper.New()
+	v.SetConfigFile(customConfigFile)
+	if err := v.ReadInConfig(); err != nil {
+		if len(customEnv) > 0 && errRuntimeEnvConfigState == nil {
+			errRuntimeEnvConfigState = errRuntimeEnvLoad
+		}
+		if errRuntimeEnvConfigState != nil {
+			zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(errRuntimeEnvConfigState))
+		} else {
+			zap.L().Warn("an error was produced when reading custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+		}
+		return
+	}
+	if err := viper.MergeConfigMap(v.AllSettings()); err != nil {
+		if len(customEnv) > 0 && errRuntimeEnvConfigState == nil {
+			errRuntimeEnvConfigState = errRuntimeEnvLoad
+		}
+		if errRuntimeEnvConfigState != nil {
+			zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(errRuntimeEnvConfigState))
+		} else {
+			zap.L().Warn("an error was produced when merging custom config!", zap.String("customConfigFile", customConfigFile), zap.Error(err))
+		}
+		return
+	}
+	if errRuntimeEnvConfigState == nil {
+		zap.L().Info("custom config merged successfully", zap.String("customConfigFile", customConfigFile))
+	}
+}
+
 func checkRuntimeEnvLookups(entries map[string]string) error {
 	lookups := make(map[string]bool, len(entries))
 	for name := range entries {
 		lookup := strings.ToUpper(name)
 		if lookups[lookup] {
-			return errors.New("runtime_env_lookup_collision")
+			return errRuntimeEnvLookupCollision
 		}
 		lookups[lookup] = true
 	}
@@ -201,7 +212,7 @@ func checkRuntimeEnvLookups(entries map[string]string) error {
 func readRuntimeEnvFile(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, errors.New("runtime_env_load")
+		return nil, errRuntimeEnvLoad
 	}
 	return parseRuntimeEnvYAML(data)
 }
@@ -218,7 +229,7 @@ func mergeRuntimeEnvEntries(entries map[string]string) {
 func parseRuntimeEnvYAML(data []byte) (map[string]string, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, errors.New("runtime_env_load")
+		return nil, errRuntimeEnvLoad
 	}
 	if len(doc.Content) == 0 {
 		return nil, nil
@@ -226,20 +237,20 @@ func parseRuntimeEnvYAML(data []byte) (map[string]string, error) {
 	node := doc.Content[0]
 	for _, section := range [...]string{"agent_v3", "runtime", "env"} {
 		if node.Kind != yaml.MappingNode {
-			return nil, errors.New("runtime_env_type")
+			return nil, errRuntimeEnvType
 		}
 		var next *yaml.Node
 		for i := 0; i < len(node.Content); i += 2 {
 			key := node.Content[i]
 			if key.Tag == "!!merge" {
-				return nil, errors.New("runtime_env_merge")
+				return nil, errRuntimeEnvMerge
 			}
 			if key.Kind == yaml.ScalarNode && strings.EqualFold(key.Value, section) {
 				if key.Value != section {
-					return nil, errors.New("runtime_env_type")
+					return nil, errRuntimeEnvType
 				}
 				if next != nil {
-					return nil, errors.New("runtime_env_duplicate")
+					return nil, errRuntimeEnvDuplicate
 				}
 				next = node.Content[i+1]
 			}
@@ -250,19 +261,19 @@ func parseRuntimeEnvYAML(data []byte) (map[string]string, error) {
 		node = next
 	}
 	if node.Kind != yaml.MappingNode {
-		return nil, errors.New("runtime_env_type")
+		return nil, errRuntimeEnvType
 	}
 	result := make(map[string]string, len(node.Content)/2)
 	for i := 0; i < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
 		if key.Tag == "!!merge" {
-			return nil, errors.New("runtime_env_merge")
+			return nil, errRuntimeEnvMerge
 		}
 		if key.Kind != yaml.ScalarNode || key.Tag != "!!str" || value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-			return nil, errors.New("runtime_env_type")
+			return nil, errRuntimeEnvType
 		}
 		if _, exists := result[key.Value]; exists {
-			return nil, errors.New("runtime_env_duplicate")
+			return nil, errRuntimeEnvDuplicate
 		}
 		result[key.Value] = value.Value
 	}
@@ -316,8 +327,8 @@ func ReadConfig(configs ...interface{ readConfig() }) {
 
 // check some config value is reasonable, otherwise set to default value.
 func checkConfig() {
-	if runtimeEnvConfigErr != nil {
-		zap.L().Panic("invalid agent_v3 runtime env", zap.Error(runtimeEnvConfigErr))
+	if errRuntimeEnvConfigState != nil {
+		zap.L().Panic("invalid agent_v3 runtime env", zap.Error(errRuntimeEnvConfigState))
 	}
 	if BotConfig.Token == "" {
 		zap.L().Panic(noTokenMsg)

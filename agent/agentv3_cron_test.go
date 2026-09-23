@@ -514,9 +514,10 @@ func TestCronFinishPersistenceRetryAndLifecycleCancellation(t *testing.T) {
 			task, err = f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
 			require.NoError(t, err)
 			require.Equal(t, cronjob.OutcomeFailed, task.LatestResult.Outcome)
-			if expression == "@at 90s" {
+			switch expression {
+			case "@at 90s":
 				require.True(t, task.NextRunAt.IsZero())
-			} else if expression == "@every 90s" {
+			case "@every 90s":
 				require.True(t, task.NextRunAt.Equal(task.LatestResult.FinishedAt.Add(90*time.Second)))
 			}
 		})

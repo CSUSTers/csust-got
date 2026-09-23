@@ -10,6 +10,11 @@ import (
 type scheduleKind uint8
 
 const (
+	monthAlias   = "@month"
+	monthlyAlias = "@monthly"
+)
+
+const (
 	scheduleCron scheduleKind = iota
 	scheduleOnce
 	scheduleEvery
@@ -42,7 +47,7 @@ func Resolve(expression, timezone string, now time.Time) (*Schedule, error) {
 	switch parts[0] {
 	case "@at":
 		schedule, err = resolveAt(parts, timezone, now)
-	case "@daily", "@month", "@monthly", "@week", "@weekly":
+	case "@daily", monthAlias, monthlyAlias, "@week", "@weekly":
 		canonical, aliasErr := resolveAlias(parts)
 		if aliasErr != nil {
 			return nil, aliasErr
@@ -160,7 +165,7 @@ func asciiDigits(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	for i := 0; i < len(raw); i++ {
+	for i := range len(raw) {
 		if raw[i] < '0' || raw[i] > '9' {
 			return false
 		}
@@ -180,7 +185,7 @@ func resolveAlias(parts []string) (string, error) {
 			return "", NewError(CodeInvalidArgument, "@daily requires HH:MM")
 		}
 		wall = parts[1]
-	case "@month", "@monthly", "@week", "@weekly":
+	case monthAlias, monthlyAlias, "@week", "@weekly":
 		if len(parts) != 3 || !asciiDigits(parts[1]) {
 			return "", NewError(CodeInvalidArgument, "recurring schedule requires a numeric day and HH:MM")
 		}
@@ -197,7 +202,7 @@ func resolveAlias(parts []string) (string, error) {
 		if parseErr != nil {
 			return "", NewError(CodeInvalidArgument, "day is out of range")
 		}
-		if parts[0] == "@month" || parts[0] == "@monthly" {
+		if parts[0] == monthAlias || parts[0] == monthlyAlias {
 			if value < 1 || value > 31 {
 				return "", NewError(CodeInvalidArgument, "day must be between 1 and 31")
 			}

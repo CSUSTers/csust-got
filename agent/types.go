@@ -109,6 +109,7 @@ func (tc *TurnContext) activateSkill(skill agentV3SkillDescriptor) {
 	}
 	tc.V3.loadedSkillNames[skill.Name] = struct{}{}
 	switch skill.Source {
+	case agentV3SkillSourceBuiltin:
 	case agentV3SkillSourceBotLocal:
 		values := cloneAgentV3SkillEnvironment(skill.environment)
 		if values == nil {

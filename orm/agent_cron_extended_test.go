@@ -50,9 +50,9 @@ func TestAgentCronCanonicalScheduleBoundaryAndDedup(t *testing.T) {
 	first, err := store.Create(t.Context(), request)
 	require.NoError(t, err)
 	assert.Equal(t, "@at "+request.NextRunAt.UTC().Format(time.RFC3339Nano), first.Task.Cron)
-	copy := request
-	copy.Cron = " @at   " + request.NextRunAt.In(time.FixedZone("other", 3600)).Format(time.RFC3339Nano)
-	duplicate, err := store.Create(t.Context(), copy)
+	duplicateRequest := request
+	duplicateRequest.Cron = " @at   " + request.NextRunAt.In(time.FixedZone("other", 3600)).Format(time.RFC3339Nano)
+	duplicate, err := store.Create(t.Context(), duplicateRequest)
 	require.NoError(t, err)
 	assert.True(t, duplicate.Deduplicated)
 	assert.Equal(t, first.Task.ID, duplicate.Task.ID)

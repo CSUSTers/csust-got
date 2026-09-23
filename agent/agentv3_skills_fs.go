@@ -156,11 +156,11 @@ func loadAgentV3FilesystemSkill(root *os.Root, entryName string, preChildInfo os
 		return agentV3SkillDescriptor{}, fmt.Errorf("skill %q: %w", name, err)
 	}
 	descriptor := agentV3SkillDescriptor{Name: name, Description: description, Content: contentString, VirtualPath: "/skills/" + name + "/SKILL.md"}
-	if sourceEnv, err := readAgentV3SkillEnvironment(childRoot, name, hooks); err != nil {
+	sourceEnv, err := readAgentV3SkillEnvironment(childRoot, name, hooks)
+	if err != nil {
 		return agentV3SkillDescriptor{}, err
-	} else {
-		descriptor.environment = sourceEnv
 	}
+	descriptor.environment = sourceEnv
 	return descriptor, nil
 }
 
