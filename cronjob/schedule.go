@@ -24,11 +24,14 @@ type cronField struct {
 	wildcard bool
 }
 
-// Schedule is a parsed five-field cron schedule in a named timezone.
+// Schedule is a parsed cron, one-time, or fixed-delay schedule in a named timezone.
 type Schedule struct {
 	expression string
 	timezone   string
 	location   *time.Location
+	kind       scheduleKind
+	deadline   time.Time
+	interval   time.Duration
 	minute     cronField
 	hour       cronField
 	day        cronField
@@ -36,15 +39,49 @@ type Schedule struct {
 	weekday    cronField
 }
 
-// Parse validates and parses a five-field cron expression and timezone.
+// Parse reads a five-field cron or a persisted absolute @at or @every schedule.
 func Parse(expression, timezone string) (*Schedule, error) {
 	parts := strings.Fields(expression)
+	if len(parts) == 2 && parts[0] == "@at" {
+		location, err := loadScheduleLocation(timezone)
+		if err != nil {
+			return nil, err
+		}
+		deadline, err := time.Parse(time.RFC3339Nano, parts[1])
+		if err != nil {
+			return nil, NewError(CodeInvalidArgument, "@at must be an absolute RFC3339 instant")
+		}
+		return &Schedule{
+			expression: "@at " + deadline.UTC().Format(time.RFC3339Nano),
+			timezone:   timezone,
+			location:   location,
+			kind:       scheduleOnce,
+			deadline:   deadline,
+		}, nil
+	}
+	if len(parts) == 2 && parts[0] == "@every" {
+		location, err := loadScheduleLocation(timezone)
+		if err != nil {
+			return nil, err
+		}
+		interval, err := parseScheduleDuration(parts[1])
+		if err != nil {
+			return nil, err
+		}
+		return &Schedule{
+			expression: "@every " + interval.String(),
+			timezone:   timezone,
+			location:   location,
+			kind:       scheduleEvery,
+			interval:   interval,
+		}, nil
+	}
 	if len(parts) != 5 {
 		return nil, NewError(CodeInvalidArgument, "cron must contain exactly five fields")
 	}
-	location, err := time.LoadLocation(timezone)
+	location, err := loadScheduleLocation(timezone)
 	if err != nil {
-		return nil, NewError(CodeInvalidArgument, fmt.Sprintf("invalid timezone %q", timezone))
+		return nil, err
 	}
 
 	fields := make([]cronField, 5)
@@ -73,7 +110,7 @@ func Parse(expression, timezone string) (*Schedule, error) {
 	}, nil
 }
 
-// Expression returns the normalized five-field cron expression.
+// Expression returns the canonical persisted schedule expression.
 func (s *Schedule) Expression() string {
 	return s.expression
 }
@@ -87,6 +124,15 @@ func (s *Schedule) Timezone() string {
 func (s *Schedule) Next(after time.Time) (time.Time, error) {
 	if s == nil || s.location == nil {
 		return time.Time{}, NewError(CodeInvalidArgument, "schedule is not initialized")
+	}
+	switch s.kind {
+	case scheduleOnce:
+		if s.deadline.After(after) {
+			return s.deadline, nil
+		}
+		return time.Time{}, NewError(CodeInvalidArgument, "one-time schedule is no longer in the future")
+	case scheduleEvery:
+		return after.Add(s.interval), nil
 	}
 
 	limit := after.AddDate(searchYears, 0, 0)
@@ -109,6 +155,23 @@ func (s *Schedule) Next(after time.Time) (time.Time, error) {
 		date = date.AddDate(0, 0, 1)
 	}
 	return time.Time{}, NewError(CodeInvalidArgument, "cron has no matching time within eight years")
+}
+
+// IsOnce reports whether the schedule has a single absolute deadline.
+func (s *Schedule) IsOnce() bool {
+	return s != nil && s.kind == scheduleOnce
+}
+
+// AfterRun returns the next recurring deadline or an exhausted one-time schedule.
+func (s *Schedule) AfterRun(after time.Time) (next time.Time, hasNext bool, err error) {
+	if s == nil || s.location == nil {
+		return time.Time{}, false, NewError(CodeInvalidArgument, "schedule is not initialized")
+	}
+	if s.IsOnce() {
+		return time.Time{}, false, nil
+	}
+	next, err = s.Next(after)
+	return next, err == nil, err
 }
 
 func (s *Schedule) matchesDay(year int, month time.Month, day int) bool {

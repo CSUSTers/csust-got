@@ -199,6 +199,7 @@ func TestAgentCronDueKeepsChatFairnessAndSkipsBlockedChatBeforeLimit(t *testing.
 	}
 	eligibleRequest := agentCronTestCreate(agentCronTestScope(-1361), 48, createdAt, "eligible")
 	eligibleRequest.NextRunAt = blocked[0].NextRunAt.Add(time.Millisecond)
+	eligibleRequest.Cron = "@at " + eligibleRequest.NextRunAt.Format(time.RFC3339Nano)
 	eligibleResult, err := store.Create(t.Context(), eligibleRequest)
 	require.NoError(t, err)
 	eligible := eligibleResult.Task
@@ -248,6 +249,7 @@ func TestAgentCronDueReturnsOneCandidatePerChatAcrossScheduledAndRetry(t *testin
 
 	scheduledRequest := agentCronTestCreate(scope, 48, dueAt.Add(time.Second), "scheduled")
 	scheduledRequest.NextRunAt = dueAt.Add(2 * time.Second)
+	scheduledRequest.Cron = "@at " + scheduledRequest.NextRunAt.Format(time.RFC3339Nano)
 	scheduled, err := store.Create(t.Context(), scheduledRequest)
 	require.NoError(t, err)
 	candidates, err := store.Due(t.Context(), cronjob.DueRequest{Coordinator: scope.Coordinator(), Now: dueAt.Add(2 * time.Second), Limit: 10})

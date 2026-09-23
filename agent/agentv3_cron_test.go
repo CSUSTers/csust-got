@@ -102,8 +102,12 @@ func (f *cronFixture) invoke(t *testing.T, manage bool, args any) map[string]any
 }
 
 func (f *cronFixture) create(t *testing.T) cronjob.Task {
+	return f.createSchedule(t, "* * * * *")
+}
+
+func (f *cronFixture) createSchedule(t *testing.T, expression string) cronjob.Task {
 	t.Helper()
-	out := f.invoke(t, false, map[string]any{"cron": "* * * * *", "prompt": testCronPrompt})
+	out := f.invoke(t, false, map[string]any{"cron": expression, "prompt": testCronPrompt})
 	require.NotContains(t, out, "code")
 	task, err := f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: cronjob.Scope{Bot: "cronbot", Platform: "tg", ChatID: -100}, TaskID: out["task_id"].(string)})
 	require.NoError(t, err)
@@ -167,78 +171,95 @@ func TestCronToolsValidationOwnershipAndScope(t *testing.T) {
 }
 
 func TestCronDedicatedRunnerRuntimeAndTelegramOutbox(t *testing.T) {
-	f := newCronFixture(t)
-	var runtimeRequests []runtimeBashRequest
-	runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req runtimeBashRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "bad JSON", 400)
-			return
-		}
-		runtimeRequests = append(runtimeRequests, req)
-		_ = json.NewEncoder(w).Encode(runtimeBashResponse{Stdout: "workspace ready"})
-	}))
-	t.Cleanup(runtimeServer.Close)
-	config.BotConfig.AgentV3.Runtime.Endpoint = runtimeServer.URL
-	mdl := &scriptedToolModel{turns: [][]*schema.Message{
-		{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "bash-call", Type: "function", Function: schema.FunctionCall{Name: "bash", Arguments: `{"command":"pwd"}`}}}}},
-		{{Role: schema.Assistant, Content: strings.Repeat("🙂", 2200), ReasoningContent: "PRIVATE_REASONING"}},
-	}}
-	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "runner", Model: mdl, Tools: buildAgentV3Tools(nil, config.BotConfig.AgentV3, agentV3SkillCatalog{}, nil), MaxSteps: 4})
-	require.NoError(t, err)
-	value, _ := compiledAgents.Load("runner")
-	value.(*CompiledAgent).Agent = agent
-	var mu sync.Mutex
-	var sends []map[string]any
-	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "bad JSON", 400)
-			return
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		sends = append(sends, payload)
-		if len(sends) == 2 {
-			_, _ = w.Write([]byte(`{"ok":false,"error_code":500,"description":"temporary failure"}`))
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"chat":{"id":-100}}}`, len(sends)+100)
-	}))
-	t.Cleanup(telegram.Close)
-	f.s.bot.URL = telegram.URL
-	task := f.runTask(t, f.create(t))
-	require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
-	require.NotContains(t, task.LatestResult.Text, "PRIVATE_REASONING")
-	require.Len(t, runtimeRequests, 1)
-	require.Equal(t, "cronbot:tg:-100", runtimeRequests[0].Namespace)
-	require.Equal(t, task.LatestResult.RunID, runtimeRequests[0].RunID)
-	inputs := mdl.capturedInputs()
-	require.Len(t, inputs, 2)
-	allInput, _ := json.Marshal(inputs[0])
-	require.Contains(t, string(allInput), "runner template")
-	require.Contains(t, string(allInput), "A self-contained scheduled task")
-	turns, err := orm.AgentV3LoadTurns(t.Context(), orm.AgentV3Scope{Bot: "cronbot", Platform: "tg", ChatID: -100}, 20)
-	require.NoError(t, err)
-	require.Empty(t, turns)
-	task = f.deliver(t, task)
-	require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
-	require.Equal(t, cronjob.DeliveryPending, task.Report.State)
-	require.Len(t, task.Report.Receipt.MessageIDs, 1)
-	f.now = task.Report.NextAttemptAt
-	task = f.deliver(t, task)
-	require.Equal(t, cronjob.DeliveryDelivered, task.Report.State)
-	require.Len(t, task.Report.Receipt.MessageIDs, 2)
-	require.Len(t, mdl.capturedInputs(), 2, "delivery must not call model")
-	mu.Lock()
-	defer mu.Unlock()
-	require.Len(t, sends, 3)
-	require.Equal(t, sends[1]["text"], sends[2]["text"], "retry only failed chunk")
-	require.NotEqual(t, sends[0]["text"], sends[2]["text"])
-	for _, payload := range sends {
-		require.Equal(t, "-100", payload["chat_id"])
-		require.Equal(t, "77", payload["message_thread_id"])
-		require.Empty(t, payload["parse_mode"])
+	for _, expression := range []string{"* * * * *", "@at 90s"} {
+		t.Run(expression, func(t *testing.T) {
+			f := newCronFixture(t)
+			var runtimeRequests []runtimeBashRequest
+			runtimeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req runtimeBashRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, "bad JSON", 400)
+					return
+				}
+				runtimeRequests = append(runtimeRequests, req)
+				_ = json.NewEncoder(w).Encode(runtimeBashResponse{Stdout: "workspace ready"})
+			}))
+			t.Cleanup(runtimeServer.Close)
+			config.BotConfig.AgentV3.Runtime.Endpoint = runtimeServer.URL
+			mdl := &scriptedToolModel{turns: [][]*schema.Message{
+				{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "bash-call", Type: "function", Function: schema.FunctionCall{Name: "bash", Arguments: `{"command":"pwd"}`}}}}},
+				{{Role: schema.Assistant, Content: strings.Repeat("🙂", 2200), ReasoningContent: "PRIVATE_REASONING"}},
+			}}
+			agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "runner", Model: mdl, Tools: buildAgentV3Tools(nil, config.BotConfig.AgentV3, agentV3SkillCatalog{}, nil), MaxSteps: 4})
+			require.NoError(t, err)
+			value, _ := compiledAgents.Load("runner")
+			value.(*CompiledAgent).Agent = agent
+			var mu sync.Mutex
+			var sends []map[string]any
+			telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var payload map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, "bad JSON", 400)
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				sends = append(sends, payload)
+				if len(sends) == 2 {
+					_, _ = w.Write([]byte(`{"ok":false,"error_code":500,"description":"temporary failure"}`))
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"chat":{"id":-100}}}`, len(sends)+100)
+			}))
+			t.Cleanup(telegram.Close)
+			f.s.bot.URL = telegram.URL
+			task := f.runTask(t, f.createSchedule(t, expression))
+			require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
+			require.NotContains(t, task.LatestResult.Text, "PRIVATE_REASONING")
+			require.Len(t, runtimeRequests, 1)
+			require.Equal(t, "cronbot:tg:-100", runtimeRequests[0].Namespace)
+			require.Equal(t, task.LatestResult.RunID, runtimeRequests[0].RunID)
+			inputs := mdl.capturedInputs()
+			require.Len(t, inputs, 2)
+			allInput, _ := json.Marshal(inputs[0])
+			require.Contains(t, string(allInput), "runner template")
+			require.Contains(t, string(allInput), "A self-contained scheduled task")
+			turns, err := orm.AgentV3LoadTurns(t.Context(), orm.AgentV3Scope{Bot: "cronbot", Platform: "tg", ChatID: -100}, 20)
+			require.NoError(t, err)
+			require.Empty(t, turns)
+			task = f.deliver(t, task)
+			require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
+			require.Equal(t, cronjob.DeliveryPending, task.Report.State)
+			require.Len(t, task.Report.Receipt.MessageIDs, 1)
+			f.now = task.Report.NextAttemptAt
+			task = f.deliver(t, task)
+			require.Equal(t, cronjob.DeliveryDelivered, task.Report.State)
+			require.Len(t, task.Report.Receipt.MessageIDs, 2)
+			require.Len(t, mdl.capturedInputs(), 2, "delivery must not call model")
+			if expression == "@at 90s" {
+				require.True(t, task.NextRunAt.IsZero())
+				view := f.invoke(t, true, map[string]any{"action": "get", "task_id": task.ID})
+				require.Contains(t, view, "next_run_at")
+				require.Nil(t, view["next_run_at"])
+				require.Contains(t, cronReportText(task), "无下一次计划（一次性已结束）")
+				require.NotContains(t, cronReportText(task), "0001-")
+				f.now = f.now.Add(24 * time.Hour)
+				f.s.pollDue(t.Context(), t.Context(), make(chan struct{}, 1))
+				f.s.wg.Wait()
+				require.Len(t, mdl.capturedInputs(), 2, "completed once must not invoke the model on later polls")
+				require.Len(t, runtimeRequests, 1)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			require.Len(t, sends, 3)
+			require.Equal(t, sends[1]["text"], sends[2]["text"], "retry only failed chunk")
+			require.NotEqual(t, sends[0]["text"], sends[2]["text"])
+			for _, payload := range sends {
+				require.Equal(t, "-100", payload["chat_id"])
+				require.Equal(t, "77", payload["message_thread_id"])
+				require.Empty(t, payload["parse_mode"])
+			}
+		})
 	}
 }
 
@@ -395,37 +416,43 @@ func TestCronBackgroundGuardThroughActualSubAgent(t *testing.T) {
 }
 
 func TestCronReportOnlyRetryNeverRegenerates(t *testing.T) {
-	f := newCronFixture(t)
-	runs := 0
-	f.s.run = func(context.Context, cronjob.Lease) agentCronRunResult {
-		runs++
-		return agentCronRunResult{Text: "saved result"}
+	for _, expression := range []string{"* * * * *", "@at 90s", "@every 90s"} {
+		t.Run(expression, func(t *testing.T) {
+			f := newCronFixture(t)
+			runs := 0
+			f.s.run = func(context.Context, cronjob.Lease) agentCronRunResult {
+				runs++
+				return agentCronRunResult{Text: "saved result"}
+			}
+			f.s.report = func(context.Context, cronjob.Task) (*cronjob.DeliveryReceipt, error) {
+				return nil, errCronTelegramUnderTest
+			}
+			task := f.runTask(t, f.createSchedule(t, expression))
+			next := task.NextRunAt
+			originalVersion := task.LatestResult.TaskVersion
+			for range 3 {
+				task = f.deliver(t, task)
+				if !task.Report.NextAttemptAt.IsZero() {
+					f.now = task.Report.NextAttemptAt
+				}
+			}
+			require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
+			require.Equal(t, cronjob.DeliveryExhausted, task.Report.State)
+			args := map[string]any{"action": "retry", "task_id": task.ID, "expected_version": task.Version, "run_id": task.LatestResult.RunID}
+			out := f.invoke(t, true, args)
+			require.Equal(t, "report_only", out["mode"])
+			require.Equal(t, "conflict", f.invoke(t, true, args)["code"])
+			f.s.report = func(context.Context, cronjob.Task) (*cronjob.DeliveryReceipt, error) {
+				return &cronjob.DeliveryReceipt{MessageIDs: []int{1}}, nil
+			}
+			task = f.deliver(t, task)
+			require.Equal(t, cronjob.DeliveryDelivered, task.Report.State)
+			require.Equal(t, originalVersion, task.LatestResult.TaskVersion)
+			require.Equal(t, originalVersion+1, task.Report.TaskVersion)
+			require.Equal(t, 1, runs)
+			require.Equal(t, next, task.NextRunAt, "report-only retry must not move the schedule")
+		})
 	}
-	f.s.report = func(context.Context, cronjob.Task) (*cronjob.DeliveryReceipt, error) {
-		return nil, errCronTelegramUnderTest
-	}
-	task := f.runTask(t, f.create(t))
-	originalVersion := task.LatestResult.TaskVersion
-	for range 3 {
-		task = f.deliver(t, task)
-		if !task.Report.NextAttemptAt.IsZero() {
-			f.now = task.Report.NextAttemptAt
-		}
-	}
-	require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
-	require.Equal(t, cronjob.DeliveryExhausted, task.Report.State)
-	args := map[string]any{"action": "retry", "task_id": task.ID, "expected_version": task.Version, "run_id": task.LatestResult.RunID}
-	out := f.invoke(t, true, args)
-	require.Equal(t, "report_only", out["mode"])
-	require.Equal(t, "conflict", f.invoke(t, true, args)["code"])
-	f.s.report = func(context.Context, cronjob.Task) (*cronjob.DeliveryReceipt, error) {
-		return &cronjob.DeliveryReceipt{MessageIDs: []int{1}}, nil
-	}
-	task = f.deliver(t, task)
-	require.Equal(t, cronjob.DeliveryDelivered, task.Report.State)
-	require.Equal(t, originalVersion, task.LatestResult.TaskVersion)
-	require.Equal(t, originalVersion+1, task.Report.TaskVersion)
-	require.Equal(t, 1, runs)
 }
 
 type cronFlakyFinishStore struct {
@@ -442,49 +469,58 @@ func (s *cronFlakyFinishStore) Finish(ctx context.Context, req cronjob.FinishReq
 }
 
 func TestCronFinishPersistenceRetryAndLifecycleCancellation(t *testing.T) {
-	f := newCronFixture(t)
-	store := &cronFlakyFinishStore{Store: f.s.store}
-	f.s.store = store
-	runs := 0
-	f.s.run = func(context.Context, cronjob.Lease) agentCronRunResult {
-		runs++
-		return agentCronRunResult{Text: "result"}
+	for _, expression := range []string{"* * * * *", "@at 90s", "@every 90s"} {
+		t.Run(expression, func(t *testing.T) {
+			f := newCronFixture(t)
+			store := &cronFlakyFinishStore{Store: f.s.store}
+			f.s.store = store
+			runs := 0
+			f.s.run = func(context.Context, cronjob.Lease) agentCronRunResult {
+				runs++
+				return agentCronRunResult{Text: "result"}
+			}
+			task := f.runTask(t, f.createSchedule(t, expression))
+			require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
+			require.Equal(t, 1, runs)
+			require.Equal(t, 3, store.finishes)
+			// A second task demonstrates real poll-loop cancellation and worker joining.
+			err := f.s.store.Delete(t.Context(), cronjob.DeleteRequest{Actor: cronjob.Actor{Scope: task.Scope, UserID: 7}, TaskID: task.ID, ExpectedVersion: task.Version, Now: f.now})
+			require.NoError(t, err)
+			task = f.createSchedule(t, expression)
+			f.now = task.NextRunAt
+			agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "runner", Model: &scriptedToolModel{}, MaxSteps: 4})
+			require.NoError(t, err)
+			value, _ := compiledAgents.Load("runner")
+			value.(*CompiledAgent).Agent = agent
+			started := make(chan struct{})
+			f.s.run = func(ctx context.Context, _ cronjob.Lease) agentCronRunResult {
+				close(started)
+				<-ctx.Done()
+				return agentCronRunResult{Err: ctx.Err()}
+			}
+			require.NoError(t, StartCron(t.Context(), f.s.bot))
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("scheduler did not start due task")
+			}
+			done := make(chan struct{})
+			go func() { f.s.stop(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("scheduler did not cancel and join worker")
+			}
+			task, err = f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
+			require.NoError(t, err)
+			require.Equal(t, cronjob.OutcomeFailed, task.LatestResult.Outcome)
+			if expression == "@at 90s" {
+				require.True(t, task.NextRunAt.IsZero())
+			} else if expression == "@every 90s" {
+				require.True(t, task.NextRunAt.Equal(task.LatestResult.FinishedAt.Add(90*time.Second)))
+			}
+		})
 	}
-	task := f.runTask(t, f.create(t))
-	require.Equal(t, cronjob.OutcomeSucceeded, task.LatestResult.Outcome)
-	require.Equal(t, 1, runs)
-	require.Equal(t, 3, store.finishes)
-	// A second task demonstrates real poll-loop cancellation and worker joining.
-	err := f.s.store.Delete(t.Context(), cronjob.DeleteRequest{Actor: cronjob.Actor{Scope: task.Scope, UserID: 7}, TaskID: task.ID, ExpectedVersion: task.Version, Now: f.now})
-	require.NoError(t, err)
-	task = f.create(t)
-	f.now = task.NextRunAt
-	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "runner", Model: &scriptedToolModel{}, MaxSteps: 4})
-	require.NoError(t, err)
-	value, _ := compiledAgents.Load("runner")
-	value.(*CompiledAgent).Agent = agent
-	started := make(chan struct{})
-	f.s.run = func(ctx context.Context, _ cronjob.Lease) agentCronRunResult {
-		close(started)
-		<-ctx.Done()
-		return agentCronRunResult{Err: ctx.Err()}
-	}
-	require.NoError(t, StartCron(t.Context(), f.s.bot))
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("scheduler did not start due task")
-	}
-	done := make(chan struct{})
-	go func() { f.s.stop(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("scheduler did not cancel and join worker")
-	}
-	task, err = f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
-	require.NoError(t, err)
-	require.Equal(t, cronjob.OutcomeFailed, task.LatestResult.Outcome)
 }
 
 type cronFinishSignalStore struct {

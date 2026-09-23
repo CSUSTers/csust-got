@@ -276,6 +276,18 @@ func agentCronTimeScore(value time.Time) float64 {
 	return float64(value.UnixMilli())
 }
 
+func agentCronCompletedOnce(task cronjob.Task) bool {
+	if !task.NextRunAt.IsZero() || task.ActiveRun != nil || task.LatestResult == nil {
+		return false
+	}
+	schedule, err := cronjob.Parse(task.Cron, task.Timezone)
+	return err == nil && schedule.IsOnce()
+}
+
+func agentCronRetryCanRun(task cronjob.Task, now time.Time) bool {
+	return task.NextRunAt.After(now) || agentCronCompletedOnce(task)
+}
+
 func agentCronReportTerminal(state cronjob.DeliveryState) bool {
 	switch state {
 	case cronjob.DeliveryDelivered, cronjob.DeliveryFailed, cronjob.DeliveryExhausted, cronjob.DeliverySuppressed:

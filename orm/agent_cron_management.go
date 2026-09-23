@@ -31,6 +31,13 @@ func (s *agentCronStore) Create(ctx context.Context, request cronjob.CreateReque
 	}
 	cronValue = schedule.Expression()
 	timezone = schedule.Timezone()
+	next, err := schedule.Next(request.Now)
+	if err != nil {
+		return result, err
+	}
+	if !request.NextRunAt.Equal(next) {
+		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "next run does not match cron schedule")
+	}
 	if request.MaxTasksPerChat <= 0 {
 		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "task quota must be positive")
 	}
@@ -167,8 +174,16 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 	if err := validateScope(request.Actor.Scope); err != nil {
 		return result, err
 	}
-	if request.Actor.UserID == 0 || request.TaskID == "" || request.ExpectedVersion <= 0 || request.Now.IsZero() || request.NextRunAt.IsZero() || !request.NextRunAt.After(request.Now) || (request.Cron == nil && request.Prompt == nil) {
-		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "valid actor, task, version, update, now, and future next run are required")
+	if request.Actor.UserID == 0 || request.TaskID == "" || request.ExpectedVersion <= 0 || request.Now.IsZero() || (request.Cron == nil && request.Prompt == nil) {
+		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "valid actor, task, version, update, and time are required")
+	}
+	var updatedSchedule *cronjob.Schedule
+	var updatedCron string
+	if request.Cron != nil {
+		if request.NextRunAt.IsZero() || !request.NextRunAt.After(request.Now) {
+			return result, cronjob.NewError(cronjob.CodeInvalidArgument, "future next run is required for schedule update")
+		}
+		updatedCron = normalizeCronValue(*request.Cron)
 	}
 	scope := request.Actor.Scope
 	err := s.watchCoordinator(ctx, scope.Coordinator(), func(tx *redis.Tx, pipe redis.Pipeliner) error {
@@ -193,7 +208,12 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 		cronValue := stored.Task.Cron
 		prompt := stored.Task.Prompt
 		if request.Cron != nil {
-			cronValue = normalizeCronValue(*request.Cron)
+			cronValue = updatedCron
+		} else if stored.Task.NextRunAt.IsZero() {
+			if agentCronCompletedOnce(stored.Task) {
+				return cronjob.NewError(cronjob.CodeConflict, "completed one-time task requires a new schedule")
+			}
+			return cronjob.NewError(cronjob.CodeConflict, "task has no pending schedule")
 		}
 		if request.Prompt != nil {
 			prompt = normalizePromptValue(*request.Prompt)
@@ -201,11 +221,29 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 		if err := validateTaskText(cronValue, stored.Task.Timezone, prompt); err != nil {
 			return err
 		}
-		schedule, err := cronjob.Parse(cronValue, stored.Task.Timezone)
-		if err != nil {
-			return err
+		if request.Cron == nil {
+			schedule, parseErr := cronjob.Parse(cronValue, stored.Task.Timezone)
+			if parseErr != nil {
+				return parseErr
+			}
+			cronValue = schedule.Expression()
+		} else {
+			if updatedSchedule == nil {
+				var parseErr error
+				updatedSchedule, parseErr = cronjob.Parse(cronValue, stored.Task.Timezone)
+				if parseErr != nil {
+					return parseErr
+				}
+				next, nextErr := updatedSchedule.Next(request.Now)
+				if nextErr != nil {
+					return nextErr
+				}
+				if !request.NextRunAt.Equal(next) {
+					return cronjob.NewError(cronjob.CodeInvalidArgument, "next run does not match cron schedule")
+				}
+			}
+			cronValue = updatedSchedule.Expression()
 		}
-		cronValue = schedule.Expression()
 		newDedup := agentCronDedupKey(stored.Task.CreatorID, cronValue, stored.Task.Timezone, prompt)
 		if newDedup != stored.DedupKey {
 			existingID, getErr := tx.HGet(ctx, s.dedupKey(scope), newDedup).Result()
@@ -222,7 +260,9 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 		stored.Task.Cron = cronValue
 		stored.Task.Prompt = prompt
 		stored.Task.Version++
-		stored.Task.NextRunAt = request.NextRunAt
+		if request.Cron != nil {
+			stored.Task.NextRunAt = request.NextRunAt
+		}
 		stored.Task.LatestResult = nil
 		stored.Task.Report = nil
 		stored.Task.UpdatedAt = request.Now
