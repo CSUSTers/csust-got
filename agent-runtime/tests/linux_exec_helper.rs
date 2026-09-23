@@ -140,6 +140,107 @@ mod linux_exec_helper {
     }
 
     #[tokio::test]
+    async fn helper_delivers_literal_application_env_only_to_target() {
+        let host_sentinel = ["HOME", "USER", "LOGNAME", "LANG", "TERM"]
+            .into_iter()
+            .find(|name| std::env::var_os(name).is_some())
+            .expect("fixture needs a host environment sentinel");
+        let fixture = tempfile::tempdir().unwrap();
+        let cgroup_procs = fixture.path().join("cgroup.procs");
+        std::fs::write(&cgroup_procs, b"").unwrap();
+        let spec = ExecSpec {
+            cgroup_procs,
+            program: PathBuf::from("/bin/bash"),
+            args: vec![
+                "-c".to_string(),
+                format!(
+                    "test \"$APP_LITERAL\" = 'fixture-$HOME-$(false)' && test -z \"${{{host_sentinel}+x}}\" && test \"$AGENT_FETCH_CONTROL_FD\" = 4"
+                ),
+            ],
+            cwd: fixture.path().to_path_buf(),
+            env: vec![
+                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+                ("AGENT_FETCH_CONTROL_FD".to_string(), "4".to_string()),
+                (
+                    "APP_LITERAL".to_string(),
+                    "fixture-$HOME-$(false)".to_string(),
+                ),
+            ],
+            rlimits: RlimitSpec::approved_defaults(),
+        };
+        let mut spawned = spawn_exec_helper(
+            PathBuf::from(env!("CARGO_BIN_EXE_agent-runtime-exec")).as_path(),
+            &spec,
+        )
+        .unwrap();
+        assert_eq!(
+            spawned
+                .await_startup_status(Duration::from_secs(1))
+                .await
+                .unwrap(),
+            ExecStartupOutcome::TargetExecSucceeded
+        );
+        assert_eq!(spawned.child.wait().await.unwrap().code(), Some(0));
+    }
+
+    #[test]
+    fn helper_rejects_forbidden_env_before_target_spawn() {
+        let fixture = tempfile::tempdir().unwrap();
+        let spec = ExecSpec {
+            cgroup_procs: fixture.path().join("cgroup.procs"),
+            program: PathBuf::from("/bin/true"),
+            args: Vec::new(),
+            cwd: fixture.path().to_path_buf(),
+            env: vec![("LD_PRELOAD".to_string(), "fixture-private".to_string())],
+            rlimits: RlimitSpec::approved_defaults(),
+        };
+        let error = match spawn_exec_helper(
+            PathBuf::from(env!("CARGO_BIN_EXE_agent-runtime-exec")).as_path(),
+            &spec,
+        ) {
+            Ok(_) => panic!("forbidden environment unexpectedly spawned"),
+            Err(error) => error,
+        };
+        assert!(!error.to_string().contains("fixture-private"));
+    }
+
+    #[tokio::test]
+    async fn helper_enforces_exact_complete_exec_spec_budget() {
+        let fixture = tempfile::tempdir().unwrap();
+        let cgroup_procs = fixture.path().join("cgroup.procs");
+        std::fs::write(&cgroup_procs, b"").unwrap();
+        let mut spec = ExecSpec {
+            cgroup_procs,
+            program: PathBuf::from("/bin/true"),
+            args: vec![String::new()],
+            cwd: fixture.path().to_path_buf(),
+            env: vec![("APP_LITERAL".to_string(), "fixture-private".to_string())],
+            rlimits: RlimitSpec::approved_defaults(),
+        };
+        let base = serde_json::to_vec(&spec).unwrap().len();
+        spec.args[0] = "x".repeat(32_768 - base);
+        assert_eq!(serde_json::to_vec(&spec).unwrap().len(), 32_768);
+        let binary = PathBuf::from(env!("CARGO_BIN_EXE_agent-runtime-exec"));
+        let mut spawned = spawn_exec_helper(&binary, &spec).unwrap();
+        assert_eq!(
+            spawned
+                .await_startup_status(Duration::from_secs(1))
+                .await
+                .unwrap(),
+            ExecStartupOutcome::TargetExecSucceeded
+        );
+        assert_eq!(spawned.child.wait().await.unwrap().code(), Some(0));
+
+        spec.args[0].push('x');
+        assert_eq!(serde_json::to_vec(&spec).unwrap().len(), 32_769);
+        let error = match spawn_exec_helper(&binary, &spec) {
+            Ok(_) => panic!("oversized exec spec unexpectedly spawned"),
+            Err(error) => error,
+        };
+        assert_eq!(error.to_string(), "runtime_env_exec_spec_limit");
+    }
+
+    #[tokio::test]
     async fn helper_closes_non_cloexec_fd_above_lowered_nofile() {
         struct FdGuard(i32);
 

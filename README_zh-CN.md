@@ -190,6 +190,26 @@ snapshot 在启动后不可变。要刷新内容，必须重启拥有它的 Bot 
 `/skills`。generic read-only Runtime `/skills` 文件系统和 scripts 仍供运维人员
 与 Runtime 使用，但它们不授权或激活 skill，也不会注册 tool schema。
 
+`agent_v3.runtime.env` 是直接的字符串键值表，例如
+`env: {SERVICE_URL: "https://example.org"}`，值为字面量，不从 Bot 宿主环境
+取值或展开变量。`config.yaml` 中的键保留大小写，`custom.yaml` 按原键覆盖。
+已声明键还可通过 `BOT_AGENT_V3_RUNTIME_ENV_<大写键名>` 覆盖，包括空值；
+此环境前缀不能创建新键。不要把真实凭据提交到配置文件。
+
+每个文件系统 skill 可在 `SKILL.md` 同目录放静态 `.env`：支持
+`NAME=value`、空行、整行注释、成对引号及字面 `$`，不执行 shell。
+Bot-local 与 Runtime-global 分别在启动时冻结其文件；成功调用 `load_skill`
+后，它的来源对应的环境只在本轮后续 Bash 生效。后加载的 skill 覆盖先加载的，
+显式 `runtime.env` 优先于所有 skill；重复加载不改变顺序。`.env` 不进入公开
+snapshot 或 prompt；格式错误使所属服务启动失败，更新后须重启所属服务。
+
+启用 env 前先升级 Runtime 到支持 `bash_env_version: 1` 的版本；旧 Runtime
+无法承接带 env 的 Bash，Bot 会拒绝而不会降级执行。不要将一个 endpoint
+混合路由到新旧版本；保护 Bot 到 Runtime 的 HTTP 链路并禁止记录含密钥的请求体。
+当前 `/skills` 挂载允许 Bash 在激活前读取 skill 文件：`load_skill` 不是密钥
+访问授权边界，Bash 输出及获许可的 Fetch 请求也能外发值。不要在共享 Runtime
+的目录放置需要对其他命令保密的凭据。仓库 Compose 不挂载 Bot-local root。
+
 #### Runtime-global 上线与挂载
 
 先升级并启动能提供已认证 `GET /v1/skills` 的 Runtime，然后才在 Bot 中启用

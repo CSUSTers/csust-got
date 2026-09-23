@@ -141,6 +141,13 @@ var (
 var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 var (
+	errRuntimeEnvLimit    = errors.New("runtime_env_limit")
+	errRuntimeEnvName     = errors.New("runtime_env_name")
+	errRuntimeEnvReserved = errors.New("runtime_env_reserved")
+	errRuntimeEnvValue    = errors.New("runtime_env_value")
+)
+
+var (
 	errInvalidAgentV3SearXNGBaseURL                = errors.New("invalid agent_v3.skills.searxng.base_url")
 	errInvalidAgentV3SearXNGCredentialsEnvironment = errors.New("invalid agent_v3.skills.searxng credentials environment")
 	errInvalidAgentV3SearXNGTimeout                = errors.New("invalid agent_v3.skills.searxng.timeout")
@@ -346,15 +353,101 @@ type AgentV3MemoryConfig struct {
 
 // AgentV3RuntimeConfig points agent-v3 tools at the remote runtime service.
 type AgentV3RuntimeConfig struct {
-	Enable         bool   `mapstructure:"enable"`
-	Mode           string `mapstructure:"mode"`
-	Endpoint       string `mapstructure:"endpoint"`
-	AuthTokenEnv   string `mapstructure:"auth_token_env"`
-	NamespaceScope string `mapstructure:"namespace_scope"`
-	CommandTimeout string `mapstructure:"command_timeout"`
-	MaxOutputChars int    `mapstructure:"max_output_chars"`
-	RequestTimeout string `mapstructure:"request_timeout"`
-	FetchEnabled   *bool  `mapstructure:"fetch_enabled"`
+	Enable         bool              `mapstructure:"enable"`
+	Mode           string            `mapstructure:"mode"`
+	Endpoint       string            `mapstructure:"endpoint"`
+	AuthTokenEnv   string            `mapstructure:"auth_token_env"`
+	Env            map[string]string `mapstructure:"env"`
+	NamespaceScope string            `mapstructure:"namespace_scope"`
+	CommandTimeout string            `mapstructure:"command_timeout"`
+	MaxOutputChars int               `mapstructure:"max_output_chars"`
+	RequestTimeout string            `mapstructure:"request_timeout"`
+	FetchEnabled   *bool             `mapstructure:"fetch_enabled"`
+}
+
+// ValidateAgentV3RuntimeEnv checks literal runtime environment entries against the runtime's limits.
+func ValidateAgentV3RuntimeEnv(env map[string]string) error {
+	if len(env) > 64 {
+		return errRuntimeEnvLimit
+	}
+
+	serializedBytes := 2 // The outer JSON array.
+	first := true
+	for name, value := range env {
+		if len(name) < 1 || len(name) > 128 || !agentV3EnvironmentName.MatchString(name) {
+			return errRuntimeEnvName
+		}
+		upper := strings.ToUpper(name)
+		switch upper {
+		case "PATH", "HOME", "SHELL", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "IFS",
+			"CDPATH", "PWD", "OLDPWD", "SHLVL", "PS4", "PROMPT_COMMAND", "GLOBIGNORE",
+			"TMPDIR", "TMP", "TEMP", "GLIBC_TUNABLES", "GCONV_PATH", "LOCPATH", "NLSPATH",
+			"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY":
+			return errRuntimeEnvReserved
+		}
+		for _, prefix := range [...]string{
+			"AGENT_RUNTIME_", "AGENT_FETCH_", "LD_", "DYLD_", "BASH_", "PROOT_", "MALLOC_",
+			"GIT_", "PYTHON", "PERL", "RUBY", "NODE_", "JAVA_", "JDK_", "_JAVA_", "SSL_",
+			"CURL_", "WGET_",
+		} {
+			if strings.HasPrefix(upper, prefix) {
+				return errRuntimeEnvReserved
+			}
+		}
+		if len(value) > 2048 || !utf8.ValidString(value) || strings.ContainsRune(value, '\x00') {
+			return errRuntimeEnvValue
+		}
+		if !first {
+			serializedBytes++ // Comma between pairs.
+		}
+		first = false
+		serializedBytes += 1 + len(name) + 2 + 1 + agentV3RuntimeJSONStringBytes(value) + 1 // ["name","value"]
+	}
+	if serializedBytes > 8192 {
+		return errRuntimeEnvLimit
+	}
+	return nil
+}
+
+// ValidateAgentV3RuntimeEnvLayers checks visible layers before overrides, as the Runtime does.
+func ValidateAgentV3RuntimeEnvLayers(layers ...map[string]string) error {
+	count, serializedBytes := 0, 2
+	for _, layer := range layers {
+		if err := ValidateAgentV3RuntimeEnv(layer); err != nil {
+			return err
+		}
+		for name, value := range layer {
+			if count != 0 {
+				serializedBytes++
+			}
+			count++
+			if count > 64 {
+				return errRuntimeEnvLimit
+			}
+			serializedBytes += 1 + len(name) + 2 + 1 + agentV3RuntimeJSONStringBytes(value) + 1
+			if serializedBytes > 8192 {
+				return errRuntimeEnvLimit
+			}
+		}
+	}
+	return nil
+}
+
+func agentV3RuntimeJSONStringBytes(value string) int {
+	size := 2 // Surrounding quotes.
+	for _, r := range value {
+		switch r {
+		case '"', '\\', '\b', '\f', '\n', '\r', '\t':
+			size += 2
+		default:
+			if r < 0x20 {
+				size += 6 // \u00XX
+			} else {
+				size += utf8.RuneLen(r)
+			}
+		}
+	}
+	return size
 }
 
 // AgentV3ToolsConfig constrains agent-v3 visible tools.
@@ -495,9 +588,16 @@ type FeatureSetting struct {
 }
 
 func (c *AgentV3Config) readConfig() {
+	if errRuntimeEnvConfigState != nil {
+		return
+	}
 	err := viper.UnmarshalKey("agent_v3", c, viper.DecodeHook(DispatchFor()))
 	if err != nil {
-		zap.L().Warn("cannot parse agent_v3 config", zap.Error(err))
+		zap.L().Warn("cannot parse agent_v3 config")
+	}
+	c.Runtime.Env = make(map[string]string, len(runtimeEnvConfig))
+	for name, value := range runtimeEnvConfig {
+		c.Runtime.Env[name] = value
 	}
 }
 

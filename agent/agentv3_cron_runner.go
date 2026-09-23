@@ -79,7 +79,11 @@ func cronReportText(task cronjob.Task) string {
 	if r == nil {
 		return ""
 	}
-	header := fmt.Sprintf("Cron task %s\nRun %s — %s\nNext scheduled: %s\n\n", task.ID, r.RunID, r.Outcome, task.NextRunAt.Format(time.RFC3339))
+	next := task.NextRunAt.Format(time.RFC3339)
+	if task.NextRunAt.IsZero() {
+		next = "无下一次计划（一次性已结束）"
+	}
+	header := fmt.Sprintf("Cron task %s\nRun %s — %s\nNext scheduled: %s\n\n", task.ID, r.RunID, r.Outcome, next)
 	if r.Outcome == cronjob.OutcomeSucceeded {
 		return header + r.Text
 	}

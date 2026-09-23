@@ -17,8 +17,6 @@ use std::pin::Pin;
 use std::process::Stdio;
 #[cfg(any(test, feature = "c7-test-support"))]
 use std::sync::Mutex;
-#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
-use std::{collections::BTreeSet, io, process::ExitStatus};
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -28,6 +26,8 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
+use std::{io, process::ExitStatus};
 #[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
 use tokio::io::AsyncRead;
 #[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
@@ -64,11 +64,11 @@ pub use spawn::install_exec_fds;
 use spawn::spawn_direct;
 #[cfg(all(target_os = "linux", not(feature = "c7-test-support")))]
 use spawn::spawn_exec_helper_with_control;
-#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
-use spawn::validate_environment;
 #[cfg(all(feature = "c7-test-support", target_os = "linux"))]
 use spawn::{SpawnControls, spawn_exec_helper_with_control_and_controls};
 pub use spawn::{SpawnedExecHelper, spawn_exec_helper};
+#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
+use spawn::{serialize_exec_spec, validate_environment};
 #[cfg(test)]
 use status::read_exec_startup_for_test;
 #[cfg(target_os = "linux")]
@@ -83,7 +83,7 @@ use status_reader::ExecStartupStatusReader;
 use supervisor::HelperLaunchFault;
 pub use supervisor::{CommandHandle, CommandSupervisor};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
 const MAX_EXEC_SPEC_BYTES: usize = 32 * 1024;
 #[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
 const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
@@ -95,9 +95,6 @@ pub const EXEC_CONFIG_FD: i32 = 3;
 pub const COMMAND_CONTROL_FD: i32 = 4;
 pub const EXEC_STATUS_FD: i32 = 5;
 pub const EXEC_CONFIG_FLAG: &str = "--config-fd";
-#[cfg(any(test, target_os = "linux", feature = "c7-test-support"))]
-const ALLOWED_ENVIRONMENT: [&str; 3] = ["PATH", "HOME", "AGENT_FETCH_CONTROL_FD"];
-
 #[cfg(all(feature = "c7-test-support", target_os = "linux"))]
 pub(crate) mod c7_test_support;
 

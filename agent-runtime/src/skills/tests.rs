@@ -1,4 +1,7 @@
-use super::loader::{RuntimeSkillLoadHookPoint, load_runtime_skill_descriptors_with_hook};
+use super::loader::{
+    RuntimeSkillLoadHookPoint, load_runtime_skill_descriptors_with_hook,
+    load_runtime_skills_with_hook,
+};
 use super::*;
 use sha2::Sha256;
 use std::{fs, path::Path};
@@ -230,6 +233,220 @@ fn frozen_runtime_skill_snapshot_ignores_post_startup_file_changes() {
         frozen.snapshot().skills[0].content,
         "# Alpha\nBefore startup.\n"
     );
+}
+
+#[test]
+fn runtime_skill_environment_is_private_and_frozen_without_changing_public_hash() {
+    let root = tempdir().unwrap();
+    write_skill(root.path(), "alpha", b"# Alpha\nBefore startup.\n");
+    let before = FrozenSkillSnapshot::load(Some(root.path())).unwrap();
+    let public_bytes = before.json_bytes();
+    let public_hash = before.snapshot().snapshot_sha256.clone();
+
+    let env_path = root.path().join("alpha/.env");
+    fs::write(&env_path, b"API_KEY=private-startup-marker\n").unwrap();
+    let frozen = FrozenSkillSnapshot::load(Some(root.path())).unwrap();
+    let skill = &frozen.snapshot().skills[0];
+    let environment = frozen
+        .skill_environment(&skill.name, &skill.sha256)
+        .unwrap();
+    assert_eq!(frozen.json_bytes(), public_bytes);
+    assert_eq!(frozen.snapshot().snapshot_sha256, public_hash);
+    assert!(!String::from_utf8_lossy(&frozen.json_bytes()).contains("private-startup-marker"));
+    assert!(!format!("{frozen:?}").contains("private-startup-marker"));
+    assert!(frozen.skill_environment("other", &skill.sha256).is_none());
+    assert!(
+        frozen
+            .skill_environment(&skill.name, "wrong-hash")
+            .is_none()
+    );
+    assert!(
+        before
+            .skill_environment(&skill.name, &skill.sha256)
+            .is_some()
+    );
+
+    fs::write(&env_path, b"API_KEY=replaced-marker\n").unwrap();
+    assert!(std::ptr::eq(
+        environment,
+        frozen
+            .skill_environment(&skill.name, &skill.sha256)
+            .unwrap()
+    ));
+    assert!(!format!("{frozen:?}").contains("replaced-marker"));
+    let reloaded = FrozenSkillSnapshot::load(Some(root.path())).unwrap();
+    assert_eq!(reloaded.json_bytes(), frozen.json_bytes());
+    assert!(
+        reloaded
+            .skill_environment(&skill.name, &skill.sha256)
+            .is_some()
+    );
+    let copied = frozen.clone();
+    assert!(
+        copied
+            .skill_environment(&skill.name, &skill.sha256)
+            .is_some()
+    );
+}
+
+#[test]
+fn runtime_skill_environment_rejects_invalid_files_without_exposing_path_or_values() {
+    let root = tempdir().unwrap();
+    write_skill(root.path(), "alpha", b"# Alpha\nDescription\n");
+    let env_path = root.path().join("alpha/.env");
+
+    fs::write(&env_path, b"# comment\n").unwrap();
+    assert!(FrozenSkillSnapshot::load(Some(root.path())).is_ok());
+    for invalid in [
+        &b"API_KEY=private-invalid-marker\nAPI_KEY=duplicate\n"[..],
+        &b"NO_EQUALS private-invalid-marker\n"[..],
+        &b"API_KEY=\xffprivate-invalid-marker\n"[..],
+        &b"API_KEY=private-invalid-marker\0\n"[..],
+    ] {
+        fs::write(&env_path, invalid).unwrap();
+        let error = FrozenSkillSnapshot::load(Some(root.path())).unwrap_err();
+        let display = error.to_string();
+        assert!(!display.contains("private-invalid-marker"), "{display}");
+        assert!(
+            !display.contains(&root.path().display().to_string()),
+            "{display}"
+        );
+        assert!(!format!("{error:?}").contains("private-invalid-marker"));
+    }
+
+    fs::write(&env_path, format!("#{}", "a".repeat(8191))).unwrap();
+    assert!(FrozenSkillSnapshot::load(Some(root.path())).is_ok());
+    fs::write(&env_path, format!("#{}", "a".repeat(8192))).unwrap();
+    let error = FrozenSkillSnapshot::load(Some(root.path())).unwrap_err();
+    assert!(error.to_string().contains("capacity"));
+    assert!(
+        !error
+            .to_string()
+            .contains(&root.path().display().to_string())
+    );
+}
+
+#[test]
+fn runtime_skill_environment_rejects_directory_and_symlink() {
+    let fixture = tempdir().unwrap();
+    write_skill(fixture.path(), "alpha", b"# Alpha\nDescription\n");
+    let env_path = fixture.path().join("alpha/.env");
+    fs::create_dir(&env_path).unwrap();
+    assert!(FrozenSkillSnapshot::load(Some(fixture.path())).is_err());
+    fs::remove_dir(&env_path).unwrap();
+
+    let target = fixture.path().join("target.env");
+    fs::write(&target, b"API_KEY=outside-marker\n").unwrap();
+    match create_file_symlink(&target, &env_path) {
+        Ok(()) => {
+            let error = FrozenSkillSnapshot::load(Some(fixture.path())).unwrap_err();
+            assert!(!error.to_string().contains("outside-marker"));
+            assert!(
+                !error
+                    .to_string()
+                    .contains(&fixture.path().display().to_string())
+            );
+        }
+        Err(error) => {
+            #[cfg(windows)]
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                return;
+            }
+            panic!("create file symlink: {error}");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn runtime_skill_environment_rejects_fifo_without_opening_it() {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt as _};
+
+    let root = tempdir().unwrap();
+    write_skill(root.path(), "alpha", b"# Alpha\nDescription\n");
+    let env_path = root.path().join("alpha/.env");
+    let filename = CString::new(env_path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `filename` is a valid NUL-terminated path and remains alive for the call.
+    assert_eq!(unsafe { libc::mkfifo(filename.as_ptr(), 0o600) }, 0);
+    let error = FrozenSkillSnapshot::load(Some(root.path())).unwrap_err();
+    assert!(error.to_string().contains("regular file"));
+    assert!(
+        !error
+            .to_string()
+            .contains(&root.path().display().to_string())
+    );
+}
+
+#[test]
+fn runtime_skill_environment_rejects_replacement_between_handle_checks() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("root");
+    let env = root.join("alpha/.env");
+    let attacker = fixture.path().join("attacker.env");
+    let retired = fixture.path().join("retired.env");
+    write_skill(&root, "alpha", b"# Alpha\nTrusted content.\n");
+    fs::write(&env, b"API_KEY=trusted-marker\n").unwrap();
+    fs::write(&attacker, b"API_KEY=attacker-marker\n").unwrap();
+    let mut swapped = false;
+
+    let result = load_runtime_skills_with_hook(&root, |point, path| {
+        if point == RuntimeSkillLoadHookPoint::EnvHandleOpened && path == env && !swapped {
+            fs::rename(&env, &retired).unwrap();
+            fs::rename(&attacker, &env).unwrap();
+            swapped = true;
+        }
+    });
+
+    assert!(swapped);
+    let error = result.unwrap_err();
+    assert!(!error.to_string().contains("attacker-marker"));
+    assert!(!error.to_string().contains(&root.display().to_string()));
+}
+
+#[test]
+fn runtime_skill_environment_does_not_treat_disappearance_as_missing() {
+    let root = tempdir().unwrap();
+    write_skill(root.path(), "alpha", b"# Alpha\nDescription\n");
+    let env = root.path().join("alpha/.env");
+    fs::write(&env, b"API_KEY=private-marker\n").unwrap();
+    let mut removed = false;
+
+    let result = load_runtime_skills_with_hook(root.path(), |point, path| {
+        if point == RuntimeSkillLoadHookPoint::EnvHandleOpened && path == env {
+            fs::remove_file(&env).unwrap();
+            removed = true;
+        }
+    });
+
+    assert!(removed);
+    let error = result.unwrap_err();
+    assert!(!error.to_string().contains("private-marker"));
+    assert!(
+        !error
+            .to_string()
+            .contains(&root.path().display().to_string())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn runtime_skill_environment_rejects_unreadable_file_when_access_is_denied() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = tempdir().unwrap();
+    write_skill(root.path(), "alpha", b"# Alpha\nDescription\n");
+    let env = root.path().join("alpha/.env");
+    fs::write(&env, b"API_KEY=private-marker\n").unwrap();
+    fs::set_permissions(&env, fs::Permissions::from_mode(0)).unwrap();
+    if fs::File::open(&env).is_err() {
+        let error = FrozenSkillSnapshot::load(Some(root.path())).unwrap_err();
+        assert!(!error.to_string().contains("private-marker"));
+        assert!(
+            !error
+                .to_string()
+                .contains(&root.path().display().to_string())
+        );
+    }
 }
 
 #[test]

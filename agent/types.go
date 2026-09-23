@@ -95,6 +95,46 @@ func (tc *TurnContext) markSkillLoaded(name string) {
 	tc.V3.loadedSkillNames[canonical] = struct{}{}
 }
 
+func (tc *TurnContext) activateSkill(skill agentV3SkillDescriptor) {
+	if tc == nil || tc.V3 == nil {
+		return
+	}
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	if tc.V3.loadedSkillNames == nil {
+		tc.V3.loadedSkillNames = make(map[string]struct{})
+	}
+	if _, ok := tc.V3.loadedSkillNames[skill.Name]; ok {
+		return
+	}
+	tc.V3.loadedSkillNames[skill.Name] = struct{}{}
+	switch skill.Source {
+	case agentV3SkillSourceBuiltin:
+	case agentV3SkillSourceBotLocal:
+		values := cloneAgentV3SkillEnvironment(skill.environment)
+		if values == nil {
+			values = make(map[string]string)
+		}
+		tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, Env: values})
+	case agentV3SkillSourceRuntimeGlobal:
+		tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, SkillSHA256: skill.SHA256})
+	}
+}
+
+func (tc *TurnContext) runtimeEnvironment() (map[string]string, []runtimeSkillEnvLayer) {
+	tc.toolMu.Lock()
+	defer tc.toolMu.Unlock()
+	if tc.V3 == nil {
+		return nil, nil
+	}
+	layers := make([]runtimeSkillEnvLayer, len(tc.V3.loadedSkillEnv))
+	for i, layer := range tc.V3.loadedSkillEnv {
+		layers[i] = layer
+		layers[i].Env = cloneAgentV3SkillEnvironment(layer.Env)
+	}
+	return cloneAgentV3SkillEnvironment(tc.V3.runtimeEnv), layers
+}
+
 func (tc *TurnContext) hasLoadedSkill(name string) bool {
 	if tc == nil {
 		return false

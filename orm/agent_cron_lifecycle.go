@@ -204,12 +204,12 @@ func agentCronCandidateFromStored(stored storedAgentCronTask, kind cronjob.RunKi
 	task := stored.Task
 	switch kind {
 	case cronjob.RunScheduled:
-		if task.NextRunAt.After(now) || task.NextRunAt.UnixMilli() != indexScore {
+		if task.NextRunAt.IsZero() || task.NextRunAt.After(now) || task.NextRunAt.UnixMilli() != indexScore {
 			return cronjob.Candidate{}, false
 		}
 		return cronjob.Candidate{Scope: task.Scope, TaskID: task.ID, TaskVersion: task.Version, Kind: kind, ScheduledAt: task.NextRunAt}, true
 	case cronjob.RunRetry:
-		if task.LatestResult == nil || task.LatestResult.RetryStatus != cronjob.RetryQueued || stored.RetryReadyAt.After(now) || stored.RetryReadyAt.UnixMilli() != indexScore || !task.NextRunAt.After(now) {
+		if task.LatestResult == nil || task.LatestResult.RetryStatus != cronjob.RetryQueued || stored.RetryReadyAt.After(now) || stored.RetryReadyAt.UnixMilli() != indexScore || !agentCronRetryCanRun(task, now) {
 			return cronjob.Candidate{}, false
 		}
 		return cronjob.Candidate{
@@ -257,7 +257,7 @@ func (s *agentCronStore) Claim(ctx context.Context, request cronjob.ClaimRequest
 			if scoreErr != nil && !errors.Is(scoreErr, redis.Nil) {
 				return scoreErr
 			}
-			if errors.Is(scoreErr, redis.Nil) || stored.Task.NextRunAt.After(request.Now) || !stored.Task.NextRunAt.Equal(request.Candidate.ScheduledAt) || int64(score) != stored.Task.NextRunAt.UnixMilli() {
+			if errors.Is(scoreErr, redis.Nil) || stored.Task.NextRunAt.IsZero() || stored.Task.NextRunAt.After(request.Now) || !stored.Task.NextRunAt.Equal(request.Candidate.ScheduledAt) || int64(score) != stored.Task.NextRunAt.UnixMilli() {
 				return cronjob.NewError(cronjob.CodeConflict, "scheduled occurrence is stale")
 			}
 			if stored.Task.LatestResult != nil && stored.Task.LatestResult.RetryStatus == cronjob.RetryQueued {
@@ -271,7 +271,7 @@ func (s *agentCronStore) Claim(ctx context.Context, request cronjob.ClaimRequest
 			if scoreErr != nil && !errors.Is(scoreErr, redis.Nil) {
 				return scoreErr
 			}
-			if errors.Is(scoreErr, redis.Nil) || stored.RetryReadyAt.After(request.Now) || !stored.Task.NextRunAt.After(request.Now) || int64(score) != stored.RetryReadyAt.UnixMilli() || stored.Task.LatestResult == nil || stored.Task.LatestResult.RetryStatus != cronjob.RetryQueued || stored.Task.LatestResult.RunID != request.Candidate.RetryOfRunID || !stored.Task.LatestResult.ScheduledAt.Equal(request.Candidate.ScheduledAt) || stored.Task.LatestResult.RetryCount+1 != request.Candidate.RetryCount {
+			if errors.Is(scoreErr, redis.Nil) || stored.RetryReadyAt.After(request.Now) || !agentCronRetryCanRun(stored.Task, request.Now) || int64(score) != stored.RetryReadyAt.UnixMilli() || stored.Task.LatestResult == nil || stored.Task.LatestResult.RetryStatus != cronjob.RetryQueued || stored.Task.LatestResult.RunID != request.Candidate.RetryOfRunID || !stored.Task.LatestResult.ScheduledAt.Equal(request.Candidate.ScheduledAt) || stored.Task.LatestResult.RetryCount+1 != request.Candidate.RetryCount {
 				return cronjob.NewError(cronjob.CodeConflict, "retry candidate is stale")
 			}
 			stored.Task.LatestResult.RetryStatus = cronjob.RetryConsumed
@@ -388,8 +388,8 @@ func (s *agentCronStore) Finish(ctx context.Context, request cronjob.FinishReque
 	if err := validateScope(request.Lease.Task.Scope); err != nil {
 		return resultTask, err
 	}
-	if request.Lease.Token == "" || request.Lease.RunID == "" || request.Now.IsZero() || request.NextRunAt.IsZero() || !request.NextRunAt.After(request.Now) {
-		return resultTask, cronjob.NewError(cronjob.CodeInvalidArgument, "valid lease, finish time, and future next run are required")
+	if request.Lease.Token == "" || request.Lease.RunID == "" || request.Now.IsZero() {
+		return resultTask, cronjob.NewError(cronjob.CodeInvalidArgument, "valid lease and finish time are required")
 	}
 	if request.Result.Outcome != cronjob.OutcomeSucceeded && request.Result.Outcome != cronjob.OutcomeFailed && request.Result.Outcome != cronjob.OutcomeSkipped {
 		return resultTask, cronjob.NewError(cronjob.CodeInvalidArgument, "valid execution outcome is required")
@@ -424,6 +424,28 @@ func (s *agentCronStore) Finish(ctx context.Context, request cronjob.FinishReque
 		if leaseRecord.Scope != scope || leaseRecord.TaskID != request.Lease.Task.ID || !request.Now.Before(leaseRecord.ExpiresAt) || stored.Task.ActiveRun == nil || stored.Task.ActiveRun.LeaseToken != request.Lease.Token || stored.Task.ActiveRun.RunID != request.Lease.RunID || stored.Task.Version != request.Lease.TaskVersion || leaseRecord.TaskVersion != request.Lease.TaskVersion || leaseRecord.RunID != request.Lease.RunID {
 			postErr = cronjob.NewError(cronjob.CodeConflict, "execution lease is stale")
 			return nil
+		}
+		schedule, parseErr := cronjob.Parse(stored.Task.Cron, stored.Task.Timezone)
+		if parseErr != nil {
+			return parseErr
+		}
+		if schedule.IsOnce() {
+			if !request.NextRunAt.IsZero() {
+				return cronjob.NewError(cronjob.CodeInvalidArgument, "completed one-time task must not have a next run")
+			}
+		} else {
+			if request.NextRunAt.IsZero() || !request.NextRunAt.After(request.Now) {
+				return cronjob.NewError(cronjob.CodeInvalidArgument, "periodic task requires a future next run")
+			}
+			if strings.HasPrefix(schedule.Expression(), "@every ") {
+				expected, hasNext, nextErr := schedule.AfterRun(request.Now)
+				if nextErr != nil {
+					return nextErr
+				}
+				if !hasNext || !request.NextRunAt.Equal(expected) {
+					return cronjob.NewError(cronjob.CodeInvalidArgument, "next run does not match interval delay")
+				}
+			}
 		}
 
 		run := stored.Task.ActiveRun
@@ -466,7 +488,11 @@ func (s *agentCronStore) Finish(ctx context.Context, request cronjob.FinishReque
 		}
 		member := agentCronTaskMember(scope, stored.Task.ID)
 		pipe.Set(ctx, s.taskKey(scope, stored.Task.ID), data, 0)
-		pipe.ZAdd(ctx, s.dueKey(coordinator), redis.Z{Score: agentCronTimeScore(request.NextRunAt), Member: member})
+		if request.NextRunAt.IsZero() {
+			pipe.ZRem(ctx, s.dueKey(coordinator), member)
+		} else {
+			pipe.ZAdd(ctx, s.dueKey(coordinator), redis.Z{Score: agentCronTimeScore(request.NextRunAt), Member: member})
+		}
 		pipe.ZRem(ctx, s.retryKey(coordinator), member)
 		if agentCronReportTerminal(report.State) {
 			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
@@ -539,7 +565,7 @@ func (s *agentCronStore) Recover(ctx context.Context, request cronjob.RecoverReq
 			if parseErr != nil {
 				return parseErr
 			}
-			nextRunAt, nextErr := schedule.Next(request.Now)
+			nextRunAt, hasNext, nextErr := schedule.AfterRun(request.Now)
 			if nextErr != nil {
 				return nextErr
 			}
@@ -564,7 +590,11 @@ func (s *agentCronStore) Recover(ctx context.Context, request cronjob.RecoverReq
 			}
 			member := agentCronTaskMember(stored.Task.Scope, stored.Task.ID)
 			pipe.Set(ctx, s.taskKey(stored.Task.Scope, stored.Task.ID), data, 0)
-			pipe.ZAdd(ctx, s.dueKey(request.Coordinator), redis.Z{Score: agentCronTimeScore(nextRunAt), Member: member})
+			if hasNext {
+				pipe.ZAdd(ctx, s.dueKey(request.Coordinator), redis.Z{Score: agentCronTimeScore(nextRunAt), Member: member})
+			} else {
+				pipe.ZRem(ctx, s.dueKey(request.Coordinator), member)
+			}
 			pipe.ZRem(ctx, s.retryKey(request.Coordinator), member)
 			pipe.ZAdd(ctx, s.reportsKey(request.Coordinator), redis.Z{Score: agentCronTimeScore(request.Now), Member: member})
 			s.releaseExecutionResources(ctx, tx, pipe, *leaseRecord)

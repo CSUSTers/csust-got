@@ -85,6 +85,9 @@ agent_v3:
     mode: "remote_http"
     endpoint: "http://agent-runtime:8080"
     auth_token_env: "AGENT_RUNTIME_TOKEN"
+    # Bash 应用环境变量：直接写字面值，不读取 Bot 进程环境；请勿提交真实密钥。
+    # 启用前先升级 Runtime 至支持 bash_env_version=1 的版本。基础 env 优先于技能 .env。
+    env: {}
     namespace_scope: "group"
     command_timeout: "120s"
     max_output_chars: 12000
@@ -99,6 +102,7 @@ agent_v3:
   skills:
     mode: "system_prompt"
     root: ""
+    # Bot-local 每个技能可放置 .env，启动时冻结；load_skill 后仅本轮后续 Bash 生效。
     inject_builtin: true
     runtime_global: false
     searxng:

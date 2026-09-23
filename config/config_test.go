@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -409,4 +410,190 @@ func TestCustomConfigValidOverridesBase(t *testing.T) {
 	req.Empty(customConfigWarnings(logs))
 	req.True(BotConfig.DebugMode)
 	req.Equal("custom-token", BotConfig.Token)
+}
+
+func TestRuntimeEnvPreservesNamesAndLiteralValues(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte(`token: test-token
+redis:
+  addr: localhost:6379
+agent_v3:
+  runtime:
+    env:
+      ApiToken: "${NOT_EXPANDED}"
+      EMPTY: ""
+      URL: "https://example.org/?a=1&b=2"
+`), 0o644))
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_UNDECLARED", "not imported")
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	readConfig()
+	require.Equal(t, map[string]string{
+		"ApiToken": "${NOT_EXPANDED}",
+		"EMPTY":    "",
+		"URL":      "https://example.org/?a=1&b=2",
+	}, BotConfig.AgentV3.Runtime.Env)
+	require.NotPanics(t, checkConfig)
+}
+
+func TestRuntimeEnvCustomAndDeclaredEnvOverrides(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte(`agent_v3:
+  runtime:
+    env:
+      ApiToken: "base"
+      SHARED: "base"
+      BASE_ONLY: "base"
+`), 0o644))
+	customFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	require.NoError(t, os.WriteFile(customFile, []byte(`agent_v3:
+  runtime:
+    env:
+      ApiToken: "custom"
+      SHARED: ""
+      CUSTOM_ONLY: "custom"
+`), 0o644))
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_APITOKEN", "")
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_SHARED", "host override")
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_UNDECLARED", "not imported")
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	ReadConfig(BotConfig.AgentV3)
+	require.Equal(t, map[string]string{
+		"ApiToken":    "",
+		"SHARED":      "host override",
+		"BASE_ONLY":   "base",
+		"CUSTOM_ONLY": "custom",
+	}, BotConfig.AgentV3.Runtime.Env)
+	require.NoError(t, ValidateAgentV3RuntimeEnv(BotConfig.AgentV3.Runtime.Env))
+}
+
+func TestRuntimeEnvMissingIgnoresHostValues(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	writeCustomConfigBase(t, configFile)
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_SECRET", "host-only")
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV", `{"SECRET":"host-only"}`)
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	readConfig()
+	require.Empty(t, BotConfig.AgentV3.Runtime.Env)
+}
+
+func TestRuntimeEnvWholeMapEnvDoesNotOverrideDeclaredKeys(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("agent_v3:\n  enable: true\n  runtime:\n    env: {KEY: base}\n"), 0o644))
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV", `{"KEY":"host"}`)
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	readConfig()
+	require.True(t, BotConfig.AgentV3.Enable)
+	require.Equal(t, map[string]string{"KEY": "base"}, BotConfig.AgentV3.Runtime.Env)
+}
+
+func TestRuntimeEnvInvalidInputFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+	}{
+		{"null", "null"},
+		{"number", "{KEY: 123}"},
+		{"boolean", "{KEY: true}"},
+		{"sequence", "[one, two]"},
+		{"nested map", "{KEY: {nested: value}}"},
+		{"duplicate", "{KEY: first, KEY: second}"},
+		{"invalid name", "{1KEY: secret}"},
+		{"reserved name", "{PATH: secret}"},
+		{"lookup collision", "{ApiKey: secret, APIKEY: different}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, configFile := setupCustomConfigTest(t)
+			require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\nagent_v3:\n  runtime:\n    env: "+tt.env+"\n"), 0o644))
+			BotConfig = NewBotConfig()
+			InitViper(configFile, "BOT")
+			readConfig()
+			require.Panics(t, checkConfig)
+			require.PanicsWithValue(t, "invalid agent_v3 runtime env", func() { InitConfig(configFile, "BOT") })
+		})
+	}
+}
+
+func TestRuntimeEnvInvalidCustomDoesNotFallbackToBase(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\nagent_v3:\n  runtime:\n    env: {KEY: base}\n"), 0o644))
+	customFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	require.NoError(t, os.WriteFile(customFile, []byte("agent_v3:\n  runtime:\n    env: {KEY: null}\n"), 0o644))
+	require.Panics(t, func() { InitConfig(configFile, "BOT") })
+}
+
+func TestRuntimeEnvLookupCollisionAcrossFiles(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("agent_v3:\n  runtime:\n    env: {ApiKey: base}\n"), 0o644))
+	customFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	require.NoError(t, os.WriteFile(customFile, []byte("agent_v3:\n  runtime:\n    env: {APIKEY: custom}\n"), 0o644))
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	readConfig()
+	require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_lookup_collision")
+	require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
+}
+
+func TestRuntimeEnvDeclaredHostOverrideIsValidatedAtStartup(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\nagent_v3:\n  runtime:\n    env: {KEY: base}\n"), 0o644))
+	t.Setenv("BOT_AGENT_V3_RUNTIME_ENV_KEY", strings.Repeat("x", 2049))
+	require.PanicsWithValue(t, "invalid agent_v3 runtime env", func() { InitConfig(configFile, "BOT") })
+}
+
+func TestRuntimeEnvRejectsAliasedRuntimeSection(t *testing.T) {
+	_, err := parseRuntimeEnvYAML([]byte("shared: &settings {env: {PRIVATE: synthetic-secret}}\nagent_v3:\n  runtime: *settings\n"))
+	require.ErrorContains(t, err, "runtime_env_type")
+	require.NotContains(t, err.Error(), "synthetic-secret")
+}
+
+func TestRuntimeEnvInheritedYAMLMergeFailsClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{"root", "defaults: &cfg {agent_v3: {runtime: {env: {SECRET: synthetic-secret}}}}\n<<: *cfg\n"},
+		{"agent_v3", "agent_v3:\n  defaults: &cfg {runtime: {env: {SECRET: synthetic-secret}}}\n  <<: *cfg\n"},
+		{"runtime", "agent_v3:\n  runtime:\n    defaults: &cfg {env: {SECRET: synthetic-secret}}\n    <<: *cfg\n"},
+		{"env", "agent_v3:\n  runtime:\n    defaults: &cfg {SECRET: synthetic-secret}\n    env:\n      <<: *cfg\n      DIRECT: literal\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, configFile := setupCustomConfigTest(t)
+			require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\n"+tt.body), 0o644))
+			BotConfig = NewBotConfig()
+			InitViper(configFile, "BOT")
+			ReadConfig(BotConfig.AgentV3)
+			require.Equal(t, "synthetic-secret", viper.GetString("agent_v3.runtime.env.secret"), "Viper sees an inherited env value")
+			require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_merge")
+			require.NotContains(t, errRuntimeEnvConfigState.Error(), "synthetic-secret")
+			require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
+		})
+	}
+}
+
+func TestRuntimeEnvExplicitConfigurationAfterUnrelatedMerge(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\nmisc:\n  defaults: &other {debug: true}\n  <<: *other\nagent_v3:\n  runtime:\n    env: {DIRECT: literal}\n"), 0o644))
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	ReadConfig(BotConfig.AgentV3)
+	require.NoError(t, errRuntimeEnvConfigState)
+	require.Equal(t, map[string]string{"DIRECT": "literal"}, BotConfig.AgentV3.Runtime.Env)
+}
+
+func TestRuntimeEnvCustomInheritedMergeDoesNotFallBackToBase(t *testing.T) {
+	_, _, configFile := setupCustomConfigTest(t)
+	require.NoError(t, os.WriteFile(configFile, []byte("token: test-token\nredis:\n  addr: localhost:6379\nagent_v3:\n  runtime:\n    env: {BASE: literal}\n"), 0o644))
+	customFile := filepath.Join(filepath.Dir(configFile), "custom.yaml")
+	require.NoError(t, os.WriteFile(customFile, []byte("agent_v3:\n  runtime:\n    defaults: &cfg {env: {CUSTOM: synthetic-secret}}\n    <<: *cfg\n"), 0o644))
+	BotConfig = NewBotConfig()
+	InitViper(configFile, "BOT")
+	ReadConfig(BotConfig.AgentV3)
+	require.ErrorContains(t, errRuntimeEnvConfigState, "runtime_env_merge")
+	require.NotContains(t, errRuntimeEnvConfigState.Error(), "synthetic-secret")
+	require.PanicsWithValue(t, "invalid agent_v3 runtime env", checkConfig)
 }

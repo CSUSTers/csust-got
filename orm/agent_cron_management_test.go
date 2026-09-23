@@ -132,11 +132,12 @@ func TestAgentCronCreatorCASUpdateAndDelete(t *testing.T) {
 
 	updated, err := store.Update(t.Context(), cronjob.UpdateRequest{
 		Actor: cronjob.Actor{Scope: scope, UserID: 31}, TaskID: task.ID, ExpectedVersion: task.Version,
-		Prompt: &prompt, NextRunAt: now.Add(2 * time.Minute), Now: now.Add(time.Second),
+		Prompt: &prompt, NextRunAt: task.NextRunAt, Now: now.Add(time.Second),
 	})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), updated.Version)
 	assert.Equal(t, prompt, updated.Prompt)
+	assert.Equal(t, task.NextRunAt, updated.NextRunAt)
 
 	err = store.Delete(t.Context(), cronjob.DeleteRequest{Actor: cronjob.Actor{Scope: scope, UserID: 31}, TaskID: task.ID, ExpectedVersion: task.Version})
 	assert.ErrorIs(t, err, cronjob.ErrConflict)
