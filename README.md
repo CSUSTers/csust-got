@@ -212,7 +212,10 @@ fails startup, and changing it requires restarting its owning service.
 
 Upgrade the Runtime to support `bash_env_version: 1` before enabling env values;
 the Bot refuses env-bearing Bash against an old Runtime without retrying the
-command without env. Do not route one endpoint to mixed Runtime versions.
+command without env. Loading a Bot-local skill without `.env` values keeps Bash
+compatible with an old Runtime; loading a Runtime-global skill always requires
+version 1 because only the Runtime can see its `.env`. Do not route one
+endpoint to mixed Runtime versions.
 Protect the Bot-to-Runtime HTTP link and disable logging of secret request
 bodies. Runtime skill directories remain readable through the existing
 `/skills` mount even before activation: activation is **not** a secret-access

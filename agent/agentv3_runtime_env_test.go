@@ -162,14 +162,45 @@ func TestAgentV3BashEnvDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
-func TestAgentV3BotLocalSkillWithoutDotenvSendsEmptyEnv(t *testing.T) {
-	tc := &TurnContext{V3: &AgentV3TurnState{}}
-	tc.activateSkill(agentV3SkillDescriptor{Name: "alpha", Source: agentV3SkillSourceBotLocal})
-	_, layers := tc.runtimeEnvironment()
-	require.Len(t, layers, 1)
-	data, err := json.Marshal(layers[0])
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"source":"bot-local","name":"alpha","env":{}}`, string(data))
+func TestAgentV3BotLocalSkillWithoutEnvKeepsLegacyRuntimeBash(t *testing.T) {
+	for name, env := range map[string]map[string]string{"missing": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			catalog := mustAgentV3SkillCatalog(t, agentV3SkillSourceBotLocal, agentV3SkillDescriptor{
+				Name: "alpha", Description: "Alpha skill.", Content: alphaSkillContent,
+				VirtualPath: "/skills/alpha/SKILL.md", environment: env,
+			})
+			statusCalls := 0
+			var request map[string]json.RawMessage
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/status" {
+					statusCalls++
+					_, _ = w.Write([]byte(`{"ok":true}`))
+					return
+				}
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+				_, _ = w.Write([]byte(`{"exit_code":0,"stdout":"ok"}`))
+			}))
+			defer srv.Close()
+			tc := &TurnContext{
+				RuntimeClient: &RemoteRuntimeClient{Endpoint: srv.URL, HTTPClient: srv.Client()},
+				V3:            &AgentV3TurnState{SkillCatalog: catalog},
+			}
+			ctx := WithTurnContext(t.Context(), tc)
+			_, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"alpha"}`)
+			require.NoError(t, err)
+			require.True(t, tc.hasLoadedSkill("alpha"))
+			_, layers := tc.runtimeEnvironment()
+			assert.Empty(t, layers)
+			out, err := (&remoteBashTool{}).InvokableRun(ctx, `{"command":"true"}`)
+			require.NoError(t, err)
+			assert.Contains(t, out, "stdout:\nok")
+			assert.Zero(t, statusCalls)
+			require.NotNil(t, request)
+			for _, field := range []string{"bash_env_version", "env", "skill_env"} {
+				assert.NotContains(t, request, field)
+			}
+		})
+	}
 }
 
 func TestAgentV3SkillEnvironmentUsesOnlyCatalogWinner(t *testing.T) {

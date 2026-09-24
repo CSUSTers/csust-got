@@ -204,7 +204,9 @@ Bot-local 与 Runtime-global 分别在启动时冻结其文件；成功调用 `l
 snapshot 或 prompt；格式错误使所属服务启动失败，更新后须重启所属服务。
 
 启用 env 前先升级 Runtime 到支持 `bash_env_version: 1` 的版本；旧 Runtime
-无法承接带 env 的 Bash，Bot 会拒绝而不会降级执行。不要将一个 endpoint
+无法承接带 env 的 Bash，Bot 会拒绝而不会降级执行。已加载但没有 `.env` 值的
+Bot-local skill 不会使 Bash 带 env；Runtime-global skill 的 `.env` 只有 Runtime
+可见，加载后总是需要版本 1。不要将一个 endpoint
 混合路由到新旧版本；保护 Bot 到 Runtime 的 HTTP 链路并禁止记录含密钥的请求体。
 当前 `/skills` 挂载允许 Bash 在激活前读取 skill 文件：`load_skill` 不是密钥
 访问授权边界，Bash 输出及获许可的 Fetch 请求也能外发值。不要在共享 Runtime

@@ -111,11 +111,9 @@ func (tc *TurnContext) activateSkill(skill agentV3SkillDescriptor) {
 	switch skill.Source {
 	case agentV3SkillSourceBuiltin:
 	case agentV3SkillSourceBotLocal:
-		values := cloneAgentV3SkillEnvironment(skill.environment)
-		if values == nil {
-			values = make(map[string]string)
+		if len(skill.environment) > 0 {
+			tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, Env: cloneAgentV3SkillEnvironment(skill.environment)})
 		}
-		tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, Env: values})
 	case agentV3SkillSourceRuntimeGlobal:
 		tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, SkillSHA256: skill.SHA256})
 	}
