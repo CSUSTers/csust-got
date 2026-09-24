@@ -93,7 +93,7 @@ async fn env_http_capability_real_child_precedence_and_request_isolation() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn env_http_full_spec_budget_rejects_without_target_or_jail_leak() {
     let state = test_state();
     let workspace = test_workspace(&state, "env-budget");

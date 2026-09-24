@@ -288,7 +288,7 @@ fn open_env_file_nofollow(parent: &Dir) -> io::Result<CapFile> {
     options.read(true).follow(FollowSymlinks::No);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt as _;
+        use cap_fs_ext::OpenOptionsExt as _;
 
         options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
     }

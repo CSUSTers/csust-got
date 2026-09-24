@@ -112,8 +112,8 @@ fn exec_spec_debug_omits_environment_and_command_contents() {
     assert!(!debug.contains("/workspace"));
 }
 
-#[test]
-fn direct_spawn_rejects_oversized_command_with_small_environment() {
+#[tokio::test(flavor = "multi_thread")]
+async fn direct_spawn_rejects_oversized_command_with_small_environment() {
     let supervisor = CommandSupervisor::test_direct();
     let target = shell_target(&"x".repeat(super::MAX_EXEC_SPEC_BYTES));
     let error = match supervisor.start(
