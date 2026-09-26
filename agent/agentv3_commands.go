@@ -37,7 +37,7 @@ func MemoryCommand(ctx tb.Context) error {
 			return replyAgentV3CommandError(ctx, "memory_add", err)
 		}
 		return ctx.Reply("已记住。")
-	case "list":
+	case agentV3ActionList:
 		if !canManageAgentV3Memory(ctx) {
 			return ctx.Reply("只有管理员可以查看群记忆。")
 		}

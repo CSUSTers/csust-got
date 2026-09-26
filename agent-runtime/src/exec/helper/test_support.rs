@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn helper_bounded_reader_accepts_limit_and_rejects_next_byte() {
+    use std::os::fd::AsRawFd;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let payload = fixture.path().join("exec-payload");
+    std::fs::write(&payload, vec![b'x'; MAX_EXEC_SPEC_BYTES]).unwrap();
+    let input = std::fs::File::open(&payload).unwrap();
+    assert_eq!(
+        read_bounded_exec_spec(input.as_raw_fd(), MAX_EXEC_SPEC_BYTES)
+            .unwrap()
+            .len(),
+        MAX_EXEC_SPEC_BYTES
+    );
+    std::fs::write(&payload, vec![b'x'; MAX_EXEC_SPEC_BYTES + 1]).unwrap();
+    let input = std::fs::File::open(&payload).unwrap();
+    assert!(read_bounded_exec_spec(input.as_raw_fd(), MAX_EXEC_SPEC_BYTES).is_err());
+}
+
 pub(in crate::exec) fn injected_failure_record(
     stage: ExecInitStage,
 ) -> [u8; EXEC_STATUS_RECORD_BYTES] {

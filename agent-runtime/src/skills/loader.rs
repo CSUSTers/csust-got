@@ -2,6 +2,7 @@ use super::{
     MAX_SKILL_CONTENT_BYTES, MAX_SKILL_FILE_BYTES, MAX_SKILLS_PER_SOURCE, SkillDescriptor,
     SkillSnapshotError, is_canonical_skill_name, skill_description,
 };
+use crate::runtime_env::{ApplicationEnv, parse_dotenv};
 use cap_fs_ext::{DirExt as _, FollowSymlinks, OpenOptionsFollowExt as _};
 use cap_std::{
     ambient_authority,
@@ -9,6 +10,7 @@ use cap_std::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs::Metadata,
     io::{self, Read as _},
     path::Path,
@@ -35,12 +37,14 @@ type ObjectIdentity = (u32, u64);
 #[cfg(not(any(unix, windows)))]
 type ObjectIdentity = ();
 
-pub(super) fn load_runtime_skill_descriptors(
+const MAX_SKILL_ENV_FILE_BYTES: usize = 8 * 1024;
+
+pub(super) fn load_runtime_skills(
     root: &Path,
-) -> Result<Vec<SkillDescriptor>, SkillSnapshotError> {
+) -> Result<(Vec<SkillDescriptor>, BTreeMap<String, ApplicationEnv>), SkillSnapshotError> {
     #[cfg(test)]
     {
-        load_runtime_skill_descriptors_with_hook(root, |_, _| {})
+        load_runtime_skills_with_hook(root, |_, _| {})
     }
     #[cfg(not(test))]
     {
@@ -54,20 +58,29 @@ pub(super) enum RuntimeSkillLoadHookPoint {
     RootIdentity,
     ChildBoundary,
     SkillHandleOpened,
+    EnvHandleOpened,
+}
+
+#[cfg(test)]
+pub(super) fn load_runtime_skills_with_hook(
+    root: &Path,
+    mut hook: impl FnMut(RuntimeSkillLoadHookPoint, &Path),
+) -> Result<(Vec<SkillDescriptor>, BTreeMap<String, ApplicationEnv>), SkillSnapshotError> {
+    load_runtime_skill_descriptors_inner(root, &mut hook)
 }
 
 #[cfg(test)]
 pub(super) fn load_runtime_skill_descriptors_with_hook(
     root: &Path,
-    mut hook: impl FnMut(RuntimeSkillLoadHookPoint, &Path),
+    hook: impl FnMut(RuntimeSkillLoadHookPoint, &Path),
 ) -> Result<Vec<SkillDescriptor>, SkillSnapshotError> {
-    load_runtime_skill_descriptors_inner(root, &mut hook)
+    load_runtime_skills_with_hook(root, hook).map(|(descriptors, _)| descriptors)
 }
 
 fn load_runtime_skill_descriptors_inner(
     root: &Path,
     #[cfg(test)] hook: &mut dyn FnMut(RuntimeSkillLoadHookPoint, &Path),
-) -> Result<Vec<SkillDescriptor>, SkillSnapshotError> {
+) -> Result<(Vec<SkillDescriptor>, BTreeMap<String, ApplicationEnv>), SkillSnapshotError> {
     let root_dir = open_stable_handle(
         || open_root_nofollow(root),
         dir_identity,
@@ -77,6 +90,7 @@ fn load_runtime_skill_descriptors_inner(
     )?;
 
     let mut descriptors = Vec::new();
+    let mut environments = BTreeMap::new();
     let mut total_content_bytes = 0usize;
     let entries = root_dir
         .entries()
@@ -146,6 +160,14 @@ fn load_runtime_skill_descriptors_inner(
         if total_content_bytes > MAX_SKILL_CONTENT_BYTES {
             return Err(capacity("skills root exceeds aggregate content capacity"));
         }
+        let environment = read_skill_environment(
+            &child_dir,
+            #[cfg(test)]
+            hook,
+            #[cfg(test)]
+            &path,
+        )?;
+        environments.insert(name.clone(), environment);
         descriptors.push(SkillDescriptor {
             name: name.clone(),
             description,
@@ -155,7 +177,49 @@ fn load_runtime_skill_descriptors_inner(
             virtual_path: format!("/skills/{name}/SKILL.md"),
         });
     }
-    Ok(descriptors)
+    Ok((descriptors, environments))
+}
+
+fn read_skill_environment(
+    child: &Dir,
+    #[cfg(test)] hook: &mut dyn FnMut(RuntimeSkillLoadHookPoint, &Path),
+    #[cfg(test)] child_path: &Path,
+) -> Result<ApplicationEnv, SkillSnapshotError> {
+    let filename = Path::new(".env");
+    let metadata = match child.symlink_metadata(filename) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(ApplicationEnv::default());
+        }
+        Err(_) => return Err(env_error("cannot inspect skill environment")),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(env_error("skill environment must be a regular file"));
+    }
+    let file = open_stable_handle(
+        || open_env_file_nofollow(child),
+        file_identity,
+        pre_open_hook!(
+            hook,
+            RuntimeSkillLoadHookPoint::EnvHandleOpened,
+            &child_path.join(".env")
+        ),
+        filename,
+        "skill environment",
+    )
+    .map_err(|_| env_error("cannot open stable skill environment"))?;
+    let mut bytes = Vec::with_capacity(MAX_SKILL_ENV_FILE_BYTES.min(4096));
+    file.take((MAX_SKILL_ENV_FILE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| env_error("cannot read skill environment"))?;
+    if bytes.len() > MAX_SKILL_ENV_FILE_BYTES {
+        return Err(env_error("skill environment exceeds per-file capacity"));
+    }
+    parse_dotenv(&bytes).map_err(|_| env_error("skill environment is invalid"))
+}
+
+fn env_error(category: &'static str) -> SkillSnapshotError {
+    SkillSnapshotError::new(category)
 }
 
 fn open_stable_handle<T>(
@@ -216,9 +280,25 @@ fn open_root_nofollow(root: &Path) -> io::Result<Dir> {
 }
 
 fn open_skill_file_nofollow(parent: &Dir) -> io::Result<CapFile> {
+    open_file_nofollow(parent, Path::new("SKILL.md"))
+}
+
+fn open_env_file_nofollow(parent: &Dir) -> io::Result<CapFile> {
     let mut options = OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
-    parent.open_with(Path::new("SKILL.md"), &options)
+    #[cfg(unix)]
+    {
+        use cap_fs_ext::OpenOptionsExt as _;
+
+        options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    parent.open_with(Path::new(".env"), &options)
+}
+
+fn open_file_nofollow(parent: &Dir, name: &Path) -> io::Result<CapFile> {
+    let mut options = OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    parent.open_with(name, &options)
 }
 
 fn dir_identity(directory: &Dir) -> io::Result<ObjectIdentity> {

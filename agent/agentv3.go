@@ -26,6 +26,9 @@ var (
 // Init compiles all enabled agent configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
+	if err := validateCronStartup(); err != nil {
+		return err
+	}
 	var startup *agentV3StartupSkillSnapshots
 	if hasEnabledAgent() {
 		if err := validateAgentV3StartupConfig(); err != nil {
@@ -60,6 +63,7 @@ func Init(ctx context.Context) error {
 		)
 	}
 
+	initCronService()
 	return nil
 }
 
@@ -109,6 +113,9 @@ func HasCompiledAgent(name string) bool {
 
 // Close shuts down all agent resources.
 func Close() {
+	if s := cronService.Swap(nil); s != nil {
+		s.stop()
+	}
 	if mcpManager != nil {
 		mcpManager.Close()
 	}
@@ -153,7 +160,7 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 	}
 	ctx = WithTurnContext(ctx, tc)
 
-	history, err := LoadHistory(tc.Bot, msg, agentConfig.MessageContext)
+	history, err := loadAgentHistory(tc)
 	if err != nil {
 		zap.L().Warn("agentv3: failed to load history", zap.Error(err))
 		history = &RichHistory{}
@@ -204,6 +211,16 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return handleStreaming(ctx, tbCtx, compiled, messages, agentConfig)
 	}
 	return handleNonStreaming(ctx, tbCtx, compiled, messages, agentConfig)
+}
+
+func loadAgentHistory(tc *TurnContext) (*RichHistory, error) {
+	if tc == nil || tc.Config == nil {
+		return &RichHistory{}, nil
+	}
+	if tc.Config.UsesReplyChain() {
+		return &RichHistory{}, nil
+	}
+	return LoadHistory(tc.Bot, tc.Message, tc.Config.MessageContext)
 }
 
 // handleStreaming processes the agent response with streaming output.

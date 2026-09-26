@@ -7,6 +7,10 @@ on:
     paths:
       - 'agent-runtime/**'
       - '.github/workflows/agent-runtime.yml'
+  pull_request:
+    paths:
+      - 'agent-runtime/**'
+      - '.github/workflows/agent-runtime.yml'
   release:
     types:
       - published
@@ -48,6 +52,7 @@ jobs:
 
       - name: Push To registry
         id: push-to-registry
+        if: github.event_name != 'pull_request'
         uses: redhat-actions/push-to-registry@v3
         with:
           image: ${{ steps.build-image.outputs.image }}

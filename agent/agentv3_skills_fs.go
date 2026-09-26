@@ -20,6 +20,8 @@ type agentV3FilesystemSkillLoadHooks struct {
 	afterChildCheck    func(string)
 	afterSkillCheck    func(string)
 	beforeSkillRead    func(string)
+	afterEnvCheck      func(string)
+	beforeEnvRead      func(string)
 }
 
 func loadAgentV3FilesystemSkillSnapshotWithHooks(root string, source agentV3SkillSource, hooks *agentV3FilesystemSkillLoadHooks) (agentV3SkillSnapshot, error) {
@@ -153,7 +155,13 @@ func loadAgentV3FilesystemSkill(root *os.Root, entryName string, preChildInfo os
 	if err != nil {
 		return agentV3SkillDescriptor{}, fmt.Errorf("skill %q: %w", name, err)
 	}
-	return agentV3SkillDescriptor{Name: name, Description: description, Content: contentString, VirtualPath: "/skills/" + name + "/SKILL.md"}, nil
+	descriptor := agentV3SkillDescriptor{Name: name, Description: description, Content: contentString, VirtualPath: "/skills/" + name + "/SKILL.md"}
+	sourceEnv, err := readAgentV3SkillEnvironment(childRoot, name, hooks)
+	if err != nil {
+		return agentV3SkillDescriptor{}, err
+	}
+	descriptor.environment = sourceEnv
+	return descriptor, nil
 }
 
 func readAgentV3SkillFile(root *os.Root, name string, preSkillInfo os.FileInfo, remainingContentBytes int, hooks *agentV3FilesystemSkillLoadHooks) ([]byte, error) {

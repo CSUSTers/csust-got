@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fmt, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fmt, path::Path, sync::Arc};
+
+use crate::runtime_env::ApplicationEnv;
 
 mod loader;
 #[cfg(test)]
@@ -30,10 +32,21 @@ pub struct SkillSnapshot {
     pub skills: Vec<SkillDescriptor>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FrozenSkillSnapshot {
     snapshot: Arc<SkillSnapshot>,
     json: Bytes,
+    environments: Arc<BTreeMap<String, ApplicationEnv>>,
+}
+
+impl fmt::Debug for FrozenSkillSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FrozenSkillSnapshot")
+            .field("snapshot", &self.snapshot)
+            .field("environment_count", &self.environments.len())
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,18 +73,22 @@ impl std::error::Error for SkillSnapshotError {}
 impl FrozenSkillSnapshot {
     pub fn load(root: Option<&Path>) -> Result<Self, SkillSnapshotError> {
         match root {
-            Some(root) => Self::from_snapshot(build_validated_snapshot(
-                loader::load_runtime_skill_descriptors(root)?,
-            )?),
+            Some(root) => {
+                let (skills, environments) = loader::load_runtime_skills(root)?;
+                Self::from_snapshot(build_validated_snapshot(skills)?, environments)
+            }
             None => Self::empty(),
         }
     }
 
     pub fn empty() -> Result<Self, SkillSnapshotError> {
-        Self::from_snapshot(build_validated_snapshot(Vec::new())?)
+        Self::from_snapshot(build_validated_snapshot(Vec::new())?, BTreeMap::new())
     }
 
-    fn from_snapshot(snapshot: SkillSnapshot) -> Result<Self, SkillSnapshotError> {
+    fn from_snapshot(
+        snapshot: SkillSnapshot,
+        environments: BTreeMap<String, ApplicationEnv>,
+    ) -> Result<Self, SkillSnapshotError> {
         let json = serde_json::to_vec(&snapshot).map_err(|error| {
             SkillSnapshotError::new(format!("serialize skill snapshot: {error}"))
         })?;
@@ -83,6 +100,7 @@ impl FrozenSkillSnapshot {
         Ok(Self {
             snapshot: Arc::new(snapshot),
             json: Bytes::from(json),
+            environments: Arc::new(environments),
         })
     }
 
@@ -92,6 +110,14 @@ impl FrozenSkillSnapshot {
 
     pub fn json_bytes(&self) -> Bytes {
         self.json.clone()
+    }
+
+    pub(crate) fn skill_environment(&self, name: &str, sha256: &str) -> Option<&ApplicationEnv> {
+        self.snapshot
+            .skills
+            .iter()
+            .find(|skill| skill.name == name && skill.sha256 == sha256)
+            .and_then(|_| self.environments.get(name))
     }
 }
 
@@ -190,7 +216,7 @@ fn validate_descriptor(descriptor: &SkillDescriptor) -> Result<(), SkillSnapshot
     Ok(())
 }
 
-fn is_canonical_skill_name(name: &str) -> bool {
+pub(crate) fn is_canonical_skill_name(name: &str) -> bool {
     let bytes = name.as_bytes();
     (1..=64).contains(&bytes.len())
         && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
