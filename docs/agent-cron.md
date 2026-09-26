@@ -87,11 +87,17 @@ The `cron` field accepts these schedules:
 | `@at tomorro HH:MM` | Once on the next local calendar day, e.g. `@at tomorro 09:00` |
 | `@daily HH:MM` | Daily, e.g. `@daily 09:05` |
 | `@month <1-31> HH:MM` / `@monthly <1-31> HH:MM` | Monthly on this day; skip months without it |
-| `@week <0-7> HH:MM` / `@weekly <0-7> HH:MM` | Weekly, e.g. `@weekly 1 09:00`; 0/7 is Sunday |
+| `@week <0-7\|weekday> HH:MM` / `@weekly <0-7\|weekday> HH:MM` | Weekly, e.g. `@weekly 1 09:00` or `@weekly Wednesday 09:00`; 0/7 is Sunday |
+| `@every <weekday> HH:MM` | Weekly calendar schedule, e.g. `@every Wed 09:00`; weekday must be a name, not a number |
 | `@every <duration>` | Fixed delay, e.g. `@every 90s` |
 
 Times are 24-hour `HH:MM`, without seconds. `tomorro` is the exact accepted spelling;
-`tomorrow`, weekday names, bare `@daily`, and other macros are not supported.
+`tomorrow`, bare `@daily`, and other macros are not supported. Weekly aliases require
+both a weekday and `HH:MM` (e.g. `@every Wed` and `@weekly Wed` are invalid); there
+is no default time. Names are case-insensitive, with exactly three-letter or full
+English forms (`Sun`/`Sunday` through `Sat`/`Saturday`). Numeric weekdays 0–7 remain
+supported with `@week`/`@weekly`, but not `@every`. Weekday names are not supported
+in original five-field cron or monthly aliases.
 Durations use Go syntax (`90s`, `1h30m`, `1ms`), must be positive whole milliseconds
 within its duration range, and do not support `d`/`w` units. The reference clock's
 nanoseconds are preserved; the millisecond Redis index does not allow early claims.
@@ -107,7 +113,7 @@ Explicit local dates and `tomorro` reject nonexistent DST times. Repeated local
 times choose the earliest strictly future instant and execute once only. Bare
 `@at HH:MM` skips a nonexistent local time to the next date where it exists.
 Tomorrow means the next calendar date, not a 24-hour delay. Daily/monthly/weekly
-aliases canonicalize to five fields and retain cron's gap/fold behavior and dedup.
+aliases canonicalize to five numeric fields and retain cron's gap/fold behavior and dedup.
 
 Original five numeric fields: minute, hour, day-of-month, month, day-of-week. Supported:
 `*`, lists, inclusive ranges, positive steps; Sunday is 0 or 7. No seconds/year,
@@ -122,12 +128,13 @@ replay. Expired execution leases become interrupted failures, never automatic mo
 replays. A calendar-cron task's next normal occurrence remains scheduled independently
 of queued manual retry; a normal occurrence that becomes due takes priority.
 
-`@every` is **fixed-delay**, not fixed-rate or minute-step cron: its first deadline
+`@every <duration>` is **fixed-delay**, not fixed-rate or minute-step cron: its first deadline
 is creation/rescheduling time plus the duration; subsequent deadlines are completion
 or interrupted-lease recovery time plus the duration. Manual execution retry moves
 the next deadline too; report-only retry does not. Poll interval, chat cooldown,
 concurrency limits and report blocking still apply: `@every 30s` does not guarantee
-starting every 30 seconds.
+starting every 30 seconds. By contrast, `@every <weekday> HH:MM` is weekly calendar
+cron, using the captured timezone and the same gap/fold rules as five-field cron.
 
 One-time tasks that were never claimed keep their original deadline across downtime
 and run once when eligible. Success, failure, skip, and interrupted-lease recovery

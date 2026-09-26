@@ -10,6 +10,7 @@ import (
 type scheduleKind uint8
 
 const (
+	everyAlias   = "@every"
 	monthAlias   = "@month"
 	monthlyAlias = "@monthly"
 )
@@ -47,7 +48,11 @@ func Resolve(expression, timezone string, now time.Time) (*Schedule, error) {
 	switch parts[0] {
 	case "@at":
 		schedule, err = resolveAt(parts, timezone, now)
-	case "@daily", monthAlias, monthlyAlias, "@week", "@weekly":
+	case "@daily", monthAlias, monthlyAlias, "@week", "@weekly", everyAlias:
+		if parts[0] == everyAlias && len(parts) != 3 {
+			schedule, err = Parse(expression, timezone)
+			break
+		}
 		canonical, aliasErr := resolveAlias(parts)
 		if aliasErr != nil {
 			return nil, aliasErr
@@ -178,41 +183,61 @@ func resolveAlias(parts []string) (string, error) {
 		return "", NewError(CodeInvalidArgument, "invalid recurring schedule")
 	}
 	var wall string
-	var selector string
+	day, weekday := "*", "*"
 	switch parts[0] {
 	case "@daily":
 		if len(parts) != 2 {
 			return "", NewError(CodeInvalidArgument, "@daily requires HH:MM")
 		}
 		wall = parts[1]
-	case monthAlias, monthlyAlias, "@week", "@weekly":
+	case monthAlias, monthlyAlias:
 		if len(parts) != 3 || !asciiDigits(parts[1]) {
 			return "", NewError(CodeInvalidArgument, "recurring schedule requires a numeric day and HH:MM")
 		}
-		selector = parts[1]
+		value, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return "", NewError(CodeInvalidArgument, "day is out of range")
+		}
+		if value < 1 || value > 31 {
+			return "", NewError(CodeInvalidArgument, "day must be between 1 and 31")
+		}
+		day = strconv.Itoa(value)
+		wall = parts[2]
+	case "@week", "@weekly", everyAlias:
+		if len(parts) != 3 {
+			return "", NewError(CodeInvalidArgument, "recurring schedule requires a weekday and HH:MM")
+		}
+		value, err := parseWeekday(parts[1], parts[0] != everyAlias)
+		if err != nil {
+			return "", err
+		}
+		weekday = strconv.Itoa(value)
 		wall = parts[2]
 	}
 	minute, hour, err := parseWallTime(wall)
 	if err != nil {
 		return "", err
 	}
-	day, weekday := "*", "*"
-	if selector != "" {
-		value, parseErr := strconv.Atoi(selector)
-		if parseErr != nil {
-			return "", NewError(CodeInvalidArgument, "day is out of range")
+	return fmt.Sprintf("%d %d %s * %s", minute, hour, day, weekday), nil
+}
+
+func parseWeekday(raw string, allowNumeric bool) (int, error) {
+	if allowNumeric && asciiDigits(raw) {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value > 7 {
+			return 0, NewError(CodeInvalidArgument, "weekday must be between 0 and 7")
 		}
-		if parts[0] == monthAlias || parts[0] == monthlyAlias {
-			if value < 1 || value > 31 {
-				return "", NewError(CodeInvalidArgument, "day must be between 1 and 31")
-			}
-			day = strconv.Itoa(value)
-		} else {
-			if value > 7 {
-				return "", NewError(CodeInvalidArgument, "weekday must be between 0 and 7")
-			}
-			weekday = strconv.Itoa(value)
+		return value, nil
+	}
+	for i := range len(raw) {
+		if (raw[i] < 'a' || raw[i] > 'z') && (raw[i] < 'A' || raw[i] > 'Z') {
+			return 0, NewError(CodeInvalidArgument, "weekday must be a three-letter or full English name, or 0-7 for @week/@weekly")
 		}
 	}
-	return fmt.Sprintf("%d %d %s * %s", minute, hour, day, weekday), nil
+	for day, name := range []string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"} {
+		if strings.EqualFold(raw, name) || strings.EqualFold(raw, name[:3]) {
+			return day, nil
+		}
+	}
+	return 0, NewError(CodeInvalidArgument, "weekday must be a three-letter or full English name, or 0-7 for @week/@weekly")
 }
