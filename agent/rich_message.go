@@ -74,22 +74,34 @@ type telegramRawCaller interface {
 }
 
 type telegramReplyParameters struct {
-	MessageID int `json:"message_id"`
+	MessageID                int  `json:"message_id"`
+	AllowSendingWithoutReply bool `json:"allow_sending_without_reply,omitempty"`
 }
 
 type telegramSendRichMessagePayload struct {
 	ChatID          int64                    `json:"chat_id"`
+	MessageThreadID int64                    `json:"message_thread_id,omitempty"`
 	RichMessage     inputRichMessage         `json:"rich_message"`
 	ReplyParameters *telegramReplyParameters `json:"reply_parameters,omitempty"`
 }
 
 func sendTelegramRichMessage(raw telegramRawCaller, chatID int64, replyToMessageID int, rich inputRichMessage) (*tb.Message, error) {
+	return sendTelegramRichMessageWithOptions(raw, chatID, replyToMessageID, rich, telegramRichSendOptions{})
+}
+
+type telegramRichSendOptions struct {
+	ThreadID          int64
+	AllowWithoutReply bool
+}
+
+func sendTelegramRichMessageWithOptions(raw telegramRawCaller, chatID int64, replyToMessageID int, rich inputRichMessage, opts telegramRichSendOptions) (*tb.Message, error) {
 	payload := telegramSendRichMessagePayload{
-		ChatID:      chatID,
-		RichMessage: rich,
+		ChatID:          chatID,
+		MessageThreadID: opts.ThreadID,
+		RichMessage:     rich,
 	}
 	if replyToMessageID != 0 {
-		payload.ReplyParameters = &telegramReplyParameters{MessageID: replyToMessageID}
+		payload.ReplyParameters = &telegramReplyParameters{MessageID: replyToMessageID, AllowSendingWithoutReply: opts.AllowWithoutReply}
 	}
 
 	body, err := raw.Raw(telegramSendRichMessageMethod, payload)

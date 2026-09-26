@@ -154,6 +154,57 @@ func TestAgentCronReportOnlyRetryVersionAndBudgetAreMonotonic(t *testing.T) {
 	assert.ErrorIs(t, err, cronjob.ErrConflict)
 }
 
+func TestAgentCronRichResultAndPartialReceiptSurviveReportOnlyRetry(t *testing.T) {
+	setupAgentV3Redis(t)
+	store := NewAgentCronStore()
+	now := time.Date(2026, 9, 19, 15, 0, 0, 0, time.UTC)
+	task := createAgentCronTask(t, store, agentCronTestScope(-1810), 91, now, "rich-report")
+	due := task.NextRunAt
+	lease := claimAgentCronTask(t, store, dueCandidateForTask(t, store, task, due), "rich-run", due, 2, 0)
+	markdown := "<telegram_rich_message># 状态 🙂\n\n**完成**</telegram_rich_message>"
+	task, err := store.Finish(t.Context(), cronjob.FinishRequest{
+		Lease: lease, Result: cronjob.ExecutionResult{Outcome: cronjob.OutcomeSucceeded, Format: "telegram_rich_message_v1", Text: markdown},
+		Report: cronjob.Report{State: cronjob.DeliveryPending}, NextRunAt: due.Add(time.Hour), Now: due.Add(time.Second),
+	})
+	require.NoError(t, err)
+	resultVersion, nextRun := task.LatestResult.TaskVersion, task.NextRunAt
+	for attempt := 1; attempt <= 3; attempt++ {
+		now = task.Report.NextAttemptAt
+		var receipt *cronjob.DeliveryReceipt
+		if attempt == 1 {
+			receipt = &cronjob.DeliveryReceipt{MessageIDs: []int{101}}
+		}
+		task = failReport(t, store, claimReportForTask(t, store, task, now), now.Add(time.Second), receipt)
+		persisted, getErr := store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
+		require.NoError(t, getErr)
+		assert.Equal(t, "telegram_rich_message_v1", persisted.LatestResult.Format)
+		assert.Equal(t, markdown, persisted.LatestResult.Text)
+		assert.Equal(t, []int{101}, persisted.Report.Receipt.MessageIDs)
+		assert.True(t, persisted.Report.Receipt.DeliveredAt.IsZero())
+	}
+	assert.Equal(t, cronjob.DeliveryExhausted, task.Report.State)
+	retried, err := store.Retry(t.Context(), cronjob.RetryRequest{
+		Actor: cronjob.Actor{Scope: task.Scope, UserID: task.CreatorID}, TaskID: task.ID,
+		ExpectedVersion: task.Version, RunID: task.LatestResult.RunID, Now: now.Add(time.Minute), MaxRetries: 2,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, cronjob.RetryReportOnly, retried.Mode)
+	assert.Equal(t, resultVersion, retried.Task.LatestResult.TaskVersion)
+	assert.Equal(t, resultVersion+1, retried.Task.Report.TaskVersion)
+	assert.Equal(t, nextRun, retried.Task.NextRunAt)
+	assert.Equal(t, []int{101}, retried.Task.Report.Receipt.MessageIDs)
+	now = retried.Task.Report.NextAttemptAt
+	task, err = store.FinishReport(t.Context(), cronjob.ReportFinishRequest{
+		Lease: claimReportForTask(t, store, retried.Task, now), Now: now.Add(time.Second), Delivered: true,
+		Receipt: &cronjob.DeliveryReceipt{MessageIDs: []int{101, 102}, DeliveredAt: now.Add(time.Second)},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, cronjob.DeliveryDelivered, task.Report.State)
+	assert.Equal(t, []int{101, 102}, task.Report.Receipt.MessageIDs)
+	assert.Equal(t, "telegram_rich_message_v1", task.LatestResult.Format)
+	assert.Equal(t, markdown, task.LatestResult.Text)
+}
+
 func TestAgentCronExecutionRetryIsFiniteAndNormalDueWins(t *testing.T) {
 	setupAgentV3Redis(t)
 	store := NewAgentCronStore()

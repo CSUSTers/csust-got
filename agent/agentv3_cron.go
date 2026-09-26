@@ -312,6 +312,13 @@ func (s *agentCronService) execute(ctx context.Context, lease cronjob.Lease) {
 		result.RetryStatus = cronjob.RetryAvailable
 	} else {
 		result.Outcome, result.Text, result.RetryStatus = cronjob.OutcomeSucceeded, boundedCronText(runResult.Text), cronjob.RetryUnavailable
+		if runResult.Format == cronRichFormatV1 {
+			before, beforeErr := cronRichMarkdown(runResult.Text)
+			after, afterErr := cronRichMarkdown(result.Text)
+			if beforeErr == nil && afterErr == nil && before == after {
+				result.Format = runResult.Format
+			}
+		}
 	}
 	cancel()
 	now := s.now()

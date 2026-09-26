@@ -84,7 +84,7 @@ func main() {
 
 func initBot() (*Bot, error) {
 	errorHandler := func(err error, c Context) {
-		log.Error("bot has error", zap.Any("update", c.Update()), zap.Error(err))
+		log.Error("bot has error", zap.Int("update_id", c.Update().ID), zap.String("error_type", fmt.Sprintf("%T", err)))
 	}
 
 	httpClient := http.DefaultClient
@@ -112,6 +112,14 @@ func initBot() (*Bot, error) {
 	}
 
 	bot, err := NewBot(settings)
+	if err != nil {
+		return nil, err
+	}
+	replyClient := *httpClient
+	replyClient.Timeout = 10 * time.Second
+	twitterReplyBot, err = NewBot(Settings{
+		Token: settings.Token, URL: settings.URL, Client: &replyClient, Offline: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +241,7 @@ func customHandler(ctx Context) error {
 		}
 		return nil
 	}
+	defer twitterTranslator.Translate(ctx, twitterReplyBot)
 
 	text := ctx.Message().Text
 	if text == "" {
@@ -279,13 +288,14 @@ func registerEventHandler(bot *Bot) {
 	// bot.Handle(OnUserLeft, base.LeftMember)
 	// bot.Handle(OnText, base.DoNothing)
 	// bot.Handle(OnSticker, base.DoNothing)
-	bot.Handle(OnAnimation, base.DoNothing)
-	bot.Handle(OnMedia, base.DoNothing)
+	bot.Handle(OnAnimation, translationOnlyHandler)
+	bot.Handle(OnMedia, translationOnlyHandler)
 	bot.Handle(OnPhoto, customHandler)
-	bot.Handle(OnVideo, base.DoNothing)
-	bot.Handle(OnVoice, base.DoNothing)
+	bot.Handle(OnVideo, translationOnlyHandler)
+	bot.Handle(OnAudio, translationOnlyHandler)
+	bot.Handle(OnVoice, translationOnlyHandler)
 	bot.Handle(OnVideoNote, base.DoNothing)
-	bot.Handle(OnDocument, base.DoNothing)
+	bot.Handle(OnDocument, translationOnlyHandler)
 }
 
 func registerAgentConfigHandler(bot *Bot) {
@@ -308,6 +318,14 @@ var regexHandlers []struct {
 	Func  func(Context) error
 }
 
+var twitterTranslator = base.NewTwitterTranslator(nil)
+var twitterReplyBot *Bot
+
+func translationOnlyHandler(ctx Context) error {
+	twitterTranslator.Translate(ctx, twitterReplyBot)
+	return nil
+}
+
 func initAgentRegexHandlers(agents config.AgentV3Configs) {
 	for _, agentConfig := range agents {
 		for _, trigger := range agentConfig.Trigger {
@@ -328,7 +346,7 @@ func initAgentRegexHandlers(agents config.AgentV3Configs) {
 
 func loggerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		log.Debug("bot receive update", zap.Any("update", ctx.Update()))
+		log.Debug("bot receive update", zap.Int("update_id", ctx.Update().ID))
 		return next(ctx)
 	}
 }
@@ -339,13 +357,13 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 		m := ctx.Message()
 		q := ctx.Query()
 		if m == nil && q == nil {
-			log.Debug("bot skip non-message and non-query update", zap.Any("update", ctx.Update()))
+			log.Debug("bot skip non-message and non-query update", zap.Int("update_id", ctx.Update().ID))
 		}
 
 		if m != nil {
 			d := time.Since(m.Time())
 			if skipSec > 0 && int64(d.Seconds()) > skipSec {
-				log.Debug("bot skip expired update", zap.Any("update", ctx.Update()))
+				log.Debug("bot skip expired update", zap.Int("update_id", ctx.Update().ID))
 				return nil
 			}
 		}
@@ -465,11 +483,11 @@ func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 			err := store.ByeWorldQueue.Push(m, deletedAt)
 			if err != nil {
 				log.Error("bye world queue push failed", zap.String("chat", ctx.Chat().Title),
-					zap.String("user", ctx.Sender().Username), zap.String("message", m.Text), zap.Error(err))
+					zap.String("user", ctx.Sender().Username), zap.String("error_type", fmt.Sprintf("%T", err)))
 				return next(ctx)
 			}
 			log.Debug("message push to bye world queue", zap.String("chat", ctx.Chat().Title),
-				zap.String("user", ctx.Sender().Username), zap.String("message", m.Text))
+				zap.String("user", ctx.Sender().Username))
 			orm.KeepByeWorldDuration(ctx.Chat().ID, ctx.Sender().ID)
 		}
 
@@ -502,7 +520,7 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 
 		cmd, _, err := entities.CommandTakeArgs(m, 0)
 		if err != nil {
-			log.Error("parse command failed", zap.String("text", m.Text), zap.Error(err))
+			log.Error("parse command failed", zap.String("error_type", fmt.Sprintf("%T", err)))
 			return next(ctx)
 		}
 

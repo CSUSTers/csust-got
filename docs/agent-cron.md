@@ -87,11 +87,17 @@ The `cron` field accepts these schedules:
 | `@at tomorro HH:MM` | Once on the next local calendar day, e.g. `@at tomorro 09:00` |
 | `@daily HH:MM` | Daily, e.g. `@daily 09:05` |
 | `@month <1-31> HH:MM` / `@monthly <1-31> HH:MM` | Monthly on this day; skip months without it |
-| `@week <0-7> HH:MM` / `@weekly <0-7> HH:MM` | Weekly, e.g. `@weekly 1 09:00`; 0/7 is Sunday |
+| `@week <0-7\|weekday> HH:MM` / `@weekly <0-7\|weekday> HH:MM` | Weekly, e.g. `@weekly 1 09:00` or `@weekly Wednesday 09:00`; 0/7 is Sunday |
+| `@every <weekday> HH:MM` | Weekly calendar schedule, e.g. `@every Wed 09:00`; weekday must be a name, not a number |
 | `@every <duration>` | Fixed delay, e.g. `@every 90s` |
 
 Times are 24-hour `HH:MM`, without seconds. `tomorro` is the exact accepted spelling;
-`tomorrow`, weekday names, bare `@daily`, and other macros are not supported.
+`tomorrow`, bare `@daily`, and other macros are not supported. Weekly aliases require
+both a weekday and `HH:MM` (e.g. `@every Wed` and `@weekly Wed` are invalid); there
+is no default time. Names are case-insensitive, with exactly three-letter or full
+English forms (`Sun`/`Sunday` through `Sat`/`Saturday`). Numeric weekdays 0–7 remain
+supported with `@week`/`@weekly`, but not `@every`. Weekday names are not supported
+in original five-field cron or monthly aliases.
 Durations use Go syntax (`90s`, `1h30m`, `1ms`), must be positive whole milliseconds
 within its duration range, and do not support `d`/`w` units. The reference clock's
 nanoseconds are preserved; the millisecond Redis index does not allow early claims.
@@ -107,7 +113,7 @@ Explicit local dates and `tomorro` reject nonexistent DST times. Repeated local
 times choose the earliest strictly future instant and execute once only. Bare
 `@at HH:MM` skips a nonexistent local time to the next date where it exists.
 Tomorrow means the next calendar date, not a 24-hour delay. Daily/monthly/weekly
-aliases canonicalize to five fields and retain cron's gap/fold behavior and dedup.
+aliases canonicalize to five numeric fields and retain cron's gap/fold behavior and dedup.
 
 Original five numeric fields: minute, hour, day-of-month, month, day-of-week. Supported:
 `*`, lists, inclusive ranges, positive steps; Sunday is 0 or 7. No seconds/year,
@@ -122,12 +128,13 @@ replay. Expired execution leases become interrupted failures, never automatic mo
 replays. A calendar-cron task's next normal occurrence remains scheduled independently
 of queued manual retry; a normal occurrence that becomes due takes priority.
 
-`@every` is **fixed-delay**, not fixed-rate or minute-step cron: its first deadline
+`@every <duration>` is **fixed-delay**, not fixed-rate or minute-step cron: its first deadline
 is creation/rescheduling time plus the duration; subsequent deadlines are completion
 or interrupted-lease recovery time plus the duration. Manual execution retry moves
 the next deadline too; report-only retry does not. Poll interval, chat cooldown,
 concurrency limits and report blocking still apply: `@every 30s` does not guarantee
-starting every 30 seconds.
+starting every 30 seconds. By contrast, `@every <weekday> HH:MM` is weekly calendar
+cron, using the captured timezone and the same gap/fold rules as five-field cron.
 
 One-time tasks that were never claimed keep their original deadline across downtime
 and run once when eligible. Success, failure, skip, and interrupted-lease recovery
@@ -144,11 +151,27 @@ delivery is suppressed. Background turns, including nested subagents and skills,
 cannot invoke either cron tool. They use fresh synthetic context, no reply-chain
 lookup, and do not save synthetic turns into ordinary chat history.
 
-Generation and reporting are independent: final visible text (not reasoning) is
-saved before Telegram sending. Text is plain, capped at 12000 runes plus an explicit
-truncation marker. Reports split into safe chunks; confirmed message IDs survive
-failed delivery so subsequent attempts skip those chunks. Reports carry task/run
-status and the next schedule. Telegram delivery failure never reruns generation.
+Generation and reporting are independent: final output (not reasoning) is saved
+before Telegram sending, capped at 12000 runes plus an explicit truncation marker.
+Ordinary text, older results, failures, and skipped runs keep their plain-text
+report layout. `cron_tasks get` always returns the original bounded response in
+`latest_result.text`, including any envelope and surrounding text; its fields
+are unchanged. Only a successful run with rich enabled and a successful
+`load_skill(name="rich-message")` in that same turn may save a rich delivery
+marker, and only if its bounded original text still contains the complete,
+nonempty first envelope selected by the generation-time resolver. Truncation
+through the envelope or a different selected body keeps the plain layout.
+Rich reports send task/run status and next schedule as plain metadata first,
+then only the envelope's Markdown body via a separate `sendRichMessage` in the
+original chat/topic/reply context (normally two messages; long metadata may
+require multiple 1800-rune chunks). The saved format fixes the delivery layout:
+later configuration changes cannot upgrade old results or downgrade a rich retry.
+Any text outside the envelope remains available through `get` but is not sent
+in the rich body. A damaged stored rich envelope fails before any report send;
+it is never reclassified as plain during delivery.
+Confirmed message IDs form one cursor across metadata chunks and the rich body;
+failed delivery resumes only unsent parts, including on a `report_only` retry,
+without rerunning generation. Rich API failure does not fall back to plain text.
 Runner HTTP/image downloads and response-body reads use the execution context, so a
 run deadline or shutdown cancels stalled network work. The model outcome is captured
 and persisted before bounded trace finalization; slow telemetry cannot turn a
@@ -168,6 +191,8 @@ recreating it. It cannot undo remote side effects or a Telegram message already 
 flight. Lease fencing protects persisted state, **not exactly-once external effects**.
 A crash after Telegram accepts a chunk but before its receipt is persisted can
 duplicate that chunk. A retry may repeat earlier external effects.
+Older binaries cannot resume partially delivered rich reports using the new
+layout marker; drain or safely handle these reports before rolling back.
 
 `agent.Init` validates configuration and captures static policy before the existing
 Redis list caches are loaded. `agent.StartCron` runs only after bot identity exists.

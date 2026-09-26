@@ -39,12 +39,13 @@ func TestCronActualToolInfoScheduleContract(t *testing.T) {
 		require.NoError(t, json.Unmarshal(encoded, &decoded))
 		require.Equal(t, "string", decoded.Properties["cron"].Type)
 		require.Equal(t, "string", decoded.Properties["prompt"].Type)
-		for _, syntax := range []string{"m h dom mon dow", "@at <duration|RFC3339|YYYY-MM-DD HH:MM|HH:MM>", "@at tomorro HH:MM", "@daily HH:MM", "@month/@monthly <1-31> HH:MM", "@week/@weekly <0-7> HH:MM", "@every <duration>", "@at 10m", "@at tomorro 09:00", "@weekly 1 09:00", "@every 90s", "positive whole-millisecond", "no d/w", "0/7 is Sunday"} {
+		for _, syntax := range []string{"m h dom mon dow", "@at <duration|RFC3339|YYYY-MM-DD HH:MM|HH:MM>", "@at tomorro HH:MM", "@daily HH:MM", "@month/@monthly <1-31> HH:MM", "@week/@weekly <0-7|weekday-name> HH:MM", "@every <weekday-name> HH:MM", "@every <duration>", "@at 10m", "@at tomorro 09:00", "@weekly 1 09:00", "@weekly Wednesday 09:00", "@every Wed 09:00", "@every 90s", "positive whole-millisecond", "no d/w", "0/7 is Sunday", "HH:MM required", "case-insensitive", "three-letter or full English"} {
 			require.Contains(t, decoded.Properties["cron"].Description, syntax)
 		}
-		for _, rule := range []string{"configured timezone", "absolute UTC", "strictly in the future", "next local calendar day", "gap", "fold", "earliest strictly future", "once only", "both fold instants", "monthly days are skipped", "fixed-delay", "completion/recovery", "manual execution retry", "no sub-minute start guarantee", "Background agents cannot"} {
+		for _, rule := range []string{"configured timezone", "absolute UTC", "strictly in the future", "next local calendar day", "gap", "fold", "earliest strictly future", "once only", "both fold instants", "monthly days are skipped", "@every <duration> is fixed-delay", "@every <weekday-name> HH:MM is weekly calendar cron", "completion/recovery", "manual execution retry", "no sub-minute start guarantee", "Background agents cannot"} {
 			require.Contains(t, info.Desc, rule)
 		}
+		require.Contains(t, info.Desc, "@weekly Wednesday 09:00")
 		require.NotContains(t, info.Desc, "recurring five-field numeric cron task")
 		if info.Name == "delegate" {
 			for _, syntax := range []string{"@at", "@daily", "@month/@monthly", "@week/@weekly", "@every"} {
@@ -82,6 +83,10 @@ func TestCronToolAllScheduleSyntaxAndCanonicalDedup(t *testing.T) {
 		{"@monthly 31 09:05", "5 9 31 * *"},
 		{"@week 1 09:00", "0 9 * * 1"},
 		{"@weekly 1 09:00", "0 9 * * 1"},
+		{"@week Wednesday 09:05", "5 9 * * 3"},
+		{"@weekly wEd 09:05", "5 9 * * 3"},
+		{"@every Wed 09:05", "5 9 * * 3"},
+		{"@weekly Monday 09:00", "0 9 * * 1"},
 		{"@every 90s", "@every 1m30s"},
 		{"0 9 * * 1", "0 9 * * 1"},
 	} {
@@ -90,14 +95,55 @@ func TestCronToolAllScheduleSyntaxAndCanonicalDedup(t *testing.T) {
 			require.NotContains(t, out, "code")
 			require.Equal(t, tc.canonical, out["cron"])
 			require.Equal(t, "Asia/Shanghai", out["timezone"])
+			task, err := f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: cronjob.Scope{Bot: "cronbot", Platform: "tg", ChatID: -100}, TaskID: out["task_id"].(string)})
+			require.NoError(t, err)
+			require.Equal(t, tc.canonical, task.Cron)
+			require.Equal(t, "Asia/Shanghai", task.Timezone)
+			schedule, err := cronjob.Parse(task.Cron, task.Timezone)
+			require.NoError(t, err)
+			next, err := schedule.Next(f.now)
+			require.NoError(t, err)
+			require.Equal(t, next, task.NextRunAt)
 			duplicate := f.invoke(t, false, map[string]any{"cron": tc.canonical, "prompt": testCronPrompt})
 			require.Equal(t, true, duplicate["deduplicated"])
 			require.Equal(t, out["task_id"], duplicate["task_id"])
 		})
 	}
-	for _, input := range []string{"@at tomorrow 09:00", "@daily", "@weekly Monday 09:00", "@every 1.5ms", "@at 0s", "@at 2026-09-23T02:00:00Z"} {
+	for _, input := range []string{"@at tomorrow 09:00", "@daily", "@every Wed", "@weekly Wed", "@week Wednesday", "@every 1.5ms", "@at 0s", "@at 2026-09-23T02:00:00Z"} {
 		require.Equal(t, "invalid_argument", f.invoke(t, false, map[string]any{"cron": input, "prompt": testCronPrompt})["code"])
 	}
+}
+
+func TestCronToolNamedWeekdayUpdateAndMissingTimeLeaveStoreUnchanged(t *testing.T) {
+	f := newCronFixture(t)
+	f.now = time.Date(2026, 9, 23, 2, 0, 0, 0, time.UTC)
+	task := f.createSchedule(t, "@weekly Wednesday 09:05")
+	require.Equal(t, "5 9 * * 3", task.Cron)
+	require.Equal(t, time.Date(2026, 9, 30, 1, 5, 0, 0, time.UTC), task.NextRunAt)
+	for _, input := range []string{"@every Wed", "@weekly Wed", "@week Wednesday"} {
+		out := f.invoke(t, false, map[string]any{"cron": input, "prompt": testCronPrompt})
+		require.Equal(t, "invalid_argument", out["code"])
+		page := f.invoke(t, true, map[string]any{"action": "list"})
+		require.Len(t, page["tasks"], 1)
+	}
+	f.s.cfg.Timezone = "UTC"
+	for _, input := range []string{"@every Wed", "@weekly Wed", "@week Wednesday"} {
+		out := f.invoke(t, true, map[string]any{"action": "update", "task_id": task.ID, "expected_version": task.Version, "cron": input})
+		require.Equal(t, "invalid_argument", out["code"])
+		stored, err := f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
+		require.NoError(t, err)
+		require.Equal(t, task, stored)
+	}
+	out := f.invoke(t, true, map[string]any{"action": "update", "task_id": task.ID, "expected_version": task.Version, "cron": "@every monDAY 09:05"})
+	require.NotContains(t, out, "code")
+	require.Equal(t, "5 9 * * 1", out["cron"])
+	require.Equal(t, "Asia/Shanghai", out["timezone"])
+	require.Equal(t, time.Date(2026, 9, 28, 1, 5, 0, 0, time.UTC).Format(time.RFC3339Nano), out["next_run_at"])
+	stored, err := f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
+	require.NoError(t, err)
+	require.Equal(t, "5 9 * * 1", stored.Cron)
+	require.Equal(t, "Asia/Shanghai", stored.Timezone)
+	require.Equal(t, time.Date(2026, 9, 28, 1, 5, 0, 0, time.UTC), stored.NextRunAt)
 }
 
 func TestCronToolPromptUpdatesKeepDeadlineAndCapturedTimezone(t *testing.T) {
