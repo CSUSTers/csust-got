@@ -151,11 +151,27 @@ delivery is suppressed. Background turns, including nested subagents and skills,
 cannot invoke either cron tool. They use fresh synthetic context, no reply-chain
 lookup, and do not save synthetic turns into ordinary chat history.
 
-Generation and reporting are independent: final visible text (not reasoning) is
-saved before Telegram sending. Text is plain, capped at 12000 runes plus an explicit
-truncation marker. Reports split into safe chunks; confirmed message IDs survive
-failed delivery so subsequent attempts skip those chunks. Reports carry task/run
-status and the next schedule. Telegram delivery failure never reruns generation.
+Generation and reporting are independent: final output (not reasoning) is saved
+before Telegram sending, capped at 12000 runes plus an explicit truncation marker.
+Ordinary text, older results, failures, and skipped runs keep their plain-text
+report layout. `cron_tasks get` always returns the original bounded response in
+`latest_result.text`, including any envelope and surrounding text; its fields
+are unchanged. Only a successful run with rich enabled and a successful
+`load_skill(name="rich-message")` in that same turn may save a rich delivery
+marker, and only if its bounded original text still contains the complete,
+nonempty first envelope selected by the generation-time resolver. Truncation
+through the envelope or a different selected body keeps the plain layout.
+Rich reports send task/run status and next schedule as plain metadata first,
+then only the envelope's Markdown body via a separate `sendRichMessage` in the
+original chat/topic/reply context (normally two messages; long metadata may
+require multiple 1800-rune chunks). The saved format fixes the delivery layout:
+later configuration changes cannot upgrade old results or downgrade a rich retry.
+Any text outside the envelope remains available through `get` but is not sent
+in the rich body. A damaged stored rich envelope fails before any report send;
+it is never reclassified as plain during delivery.
+Confirmed message IDs form one cursor across metadata chunks and the rich body;
+failed delivery resumes only unsent parts, including on a `report_only` retry,
+without rerunning generation. Rich API failure does not fall back to plain text.
 Runner HTTP/image downloads and response-body reads use the execution context, so a
 run deadline or shutdown cancels stalled network work. The model outcome is captured
 and persisted before bounded trace finalization; slow telemetry cannot turn a
@@ -175,6 +191,8 @@ recreating it. It cannot undo remote side effects or a Telegram message already 
 flight. Lease fencing protects persisted state, **not exactly-once external effects**.
 A crash after Telegram accepts a chunk but before its receipt is persisted can
 duplicate that chunk. A retry may repeat earlier external effects.
+Older binaries cannot resume partially delivered rich reports using the new
+layout marker; drain or safely handle these reports before rolling back.
 
 `agent.Init` validates configuration and captures static policy before the existing
 Redis list caches are loaded. `agent.StartCron` runs only after bot identity exists.

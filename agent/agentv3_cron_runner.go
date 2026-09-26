@@ -19,10 +19,14 @@ import (
 var (
 	errCronEmptyFinalResponse = errors.New("empty final response")
 	errCronMissingResult      = errors.New("missing result")
+	errCronInvalidRichResult  = errors.New("invalid stored cron rich result")
 )
+
+const cronRichFormatV1 = "telegram_rich_message_v1"
 
 type agentCronRunResult struct {
 	Text     string
+	Format   string
 	Err      error
 	Finalize func(context.Context)
 }
@@ -62,6 +66,10 @@ func (s *agentCronService) generate(ctx context.Context, lease cronjob.Lease) (r
 		return result
 	}
 	result.Text = boundedCronText(response.Content)
+	delivery := resolveTelegramRichDelivery(response.Content, response.ReasoningContent, &compiled.Config.Format, compiled.Config.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	if markdown, err := cronRichMarkdown(result.Text); delivery.ShouldSendRich && err == nil && markdown == delivery.RichMessage.Markdown {
+		result.Format = cronRichFormatV1
+	}
 	return result
 }
 
@@ -74,7 +82,22 @@ func boundedCronText(text string) string {
 	return text
 }
 
-func cronReportText(task cronjob.Task) string {
+func cronRichMarkdown(text string) (string, error) {
+	_, rest, found := strings.Cut(text, telegramRichEnvelopeStart)
+	if !found {
+		return "", errCronInvalidRichResult
+	}
+	if _, _, complete := strings.Cut(rest, telegramRichEnvelopeEnd); !complete {
+		return "", errCronInvalidRichResult
+	}
+	parsed, ok := parseTelegramRichMessageEnvelope(text)
+	if !ok || parsed.Err != nil || parsed.RichMessage.Markdown == "" {
+		return "", errCronInvalidRichResult
+	}
+	return parsed.RichMessage.Markdown, nil
+}
+
+func cronReportMetadata(task cronjob.Task) string {
 	r := task.LatestResult
 	if r == nil {
 		return ""
@@ -83,7 +106,15 @@ func cronReportText(task cronjob.Task) string {
 	if task.NextRunAt.IsZero() {
 		next = "无下一次计划（一次性已结束）"
 	}
-	header := fmt.Sprintf("Cron task %s\nRun %s — %s\nNext scheduled: %s\n\n", task.ID, r.RunID, r.Outcome, next)
+	return fmt.Sprintf("Cron task %s\nRun %s — %s\nNext scheduled: %s\n\n", task.ID, r.RunID, r.Outcome, next)
+}
+
+func cronReportText(task cronjob.Task) string {
+	r := task.LatestResult
+	if r == nil {
+		return ""
+	}
+	header := cronReportMetadata(task)
 	if r.Outcome == cronjob.OutcomeSucceeded {
 		return header + r.Text
 	}
@@ -91,6 +122,35 @@ func cronReportText(task cronjob.Task) string {
 		return header + "Skipped: current permissions or policy availability did not permit execution. This occurrence will not be retried."
 	}
 	return header + "Execution failed or was interrupted. Earlier actions may already have caused side effects.\nTo explicitly request a retry, tell the bot: Retry cron task " + task.ID + " run " + r.RunID + ". The bot must get the current version before requesting retry; retries are limited."
+}
+
+type cronReportPart struct {
+	text string
+	rich bool
+}
+
+func cronReportParts(task cronjob.Task) ([]cronReportPart, error) {
+	if task.LatestResult == nil {
+		return nil, nil
+	}
+	if task.LatestResult.Outcome == cronjob.OutcomeSucceeded && task.LatestResult.Format == cronRichFormatV1 {
+		markdown, err := cronRichMarkdown(task.LatestResult.Text)
+		if err != nil {
+			return nil, err
+		}
+		chunks := cronReportChunks(cronReportMetadata(task))
+		parts := make([]cronReportPart, 0, len(chunks)+1)
+		for _, chunk := range chunks {
+			parts = append(parts, cronReportPart{text: chunk})
+		}
+		return append(parts, cronReportPart{text: markdown, rich: true}), nil
+	}
+	chunks := cronReportChunks(cronReportText(task))
+	parts := make([]cronReportPart, 0, len(chunks))
+	for _, chunk := range chunks {
+		parts = append(parts, cronReportPart{text: chunk})
+	}
+	return parts, nil
 }
 
 type cronReportTransport struct {
@@ -107,8 +167,11 @@ func (s *agentCronService) sendReport(ctx context.Context, task cronjob.Task) (*
 	if task.Report != nil && task.Report.Receipt != nil {
 		receipt.MessageIDs = slices.Clone(task.Report.Receipt.MessageIDs)
 	}
-	text := cronReportText(task)
-	if text == "" {
+	parts, err := cronReportParts(task)
+	if err != nil {
+		return receipt, err
+	}
+	if len(parts) == 0 {
 		return receipt, errCronMissingResult
 	}
 	transport := http.DefaultTransport
@@ -127,8 +190,7 @@ func (s *agentCronService) sendReport(ctx context.Context, task cronjob.Task) (*
 	if err != nil {
 		return receipt, err
 	}
-	chunks := cronReportChunks(text)
-	for i := len(receipt.MessageIDs); i < len(chunks); i++ {
+	for i := len(receipt.MessageIDs); i < len(parts); i++ {
 		if err := ctx.Err(); err != nil {
 			return receipt, err
 		}
@@ -147,7 +209,12 @@ func (s *agentCronService) sendReport(ctx context.Context, task cronjob.Task) (*
 		if task.SourceMessageID != 0 {
 			opts.ReplyTo = &tb.Message{ID: task.SourceMessageID, Chat: &tb.Chat{ID: task.Scope.ChatID}}
 		}
-		message, err := bot.Send(&tb.Chat{ID: task.Scope.ChatID}, chunks[i], opts)
+		var message *tb.Message
+		if parts[i].rich {
+			message, err = sendTelegramRichMessageWithOptions(bot, task.Scope.ChatID, task.SourceMessageID, inputRichMessage{Markdown: parts[i].text}, telegramRichSendOptions{ThreadID: task.ThreadID, AllowWithoutReply: true})
+		} else {
+			message, err = bot.Send(&tb.Chat{ID: task.Scope.ChatID}, parts[i].text, opts)
+		}
 		if err != nil {
 			return receipt, err
 		}
