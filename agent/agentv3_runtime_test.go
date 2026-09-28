@@ -904,6 +904,9 @@ func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
 
 func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *testing.T) {
 	withoutRich := buildAgentV3StablePrefix("soul", "", true)
+	assert.Contains(t, withoutRich, "<agent_v3_execution_protocol>")
+	assert.Contains(t, withoutRich, "Identify the latest actual user request")
+	assert.Equal(t, 1, strings.Count(withoutRich, "工具调用纪律："))
 	assert.NotContains(t, withoutRich, "<group_memory_snapshot>")
 	assert.NotContains(t, withoutRich, "<rich_message_skill>")
 	assert.NotContains(t, withoutRich, "\n<agent_v3_skills>\n")
@@ -927,10 +930,17 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 	assert.NotContains(t, withRich, "rich rules")
 	assert.NotContains(t, withRich, "<tool_definitions>")
 
+	idxProtocol := strings.Index(withRich, "<agent_v3_execution_protocol>")
+	idxSoul := strings.Index(withRich, "<soul>")
 	idxRuntimeRules := strings.Index(withRich, "<runtime_and_skill_rules>")
-	idxSkills := strings.Index(withRich, "<agent_v3_skills>")
+	idxDirective := strings.Index(withRich, "工具调用纪律：")
+	idxSkills := strings.LastIndex(withRich, "<agent_v3_skills>")
+	assert.Greater(t, idxProtocol, -1, "<agent_v3_execution_protocol> must be present")
+	assert.Less(t, idxProtocol, idxSoul, "protocol must appear before <soul>")
+	assert.Less(t, idxSoul, idxRuntimeRules, "<soul> must appear before <runtime_and_skill_rules>")
 	assert.Greater(t, idxRuntimeRules, -1, "<runtime_and_skill_rules> must be present")
-	assert.Less(t, idxRuntimeRules, idxSkills, "<runtime_and_skill_rules> must appear before <agent_v3_skills>")
+	assert.Less(t, idxRuntimeRules, idxDirective, "<runtime_and_skill_rules> must appear before loop directives")
+	assert.Less(t, idxDirective, idxSkills, "loop directives must appear before <agent_v3_skills>")
 
 	withoutFetch := buildAgentV3StablePrefix("soul", skillBlock, false)
 	assert.Contains(t, withRich, "only allowed external network entry point for shell commands in the Bash environment")
@@ -938,19 +948,20 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 }
 
 func TestBuildAgentV3StablePrefixHashIncludesRuntimeRules(t *testing.T) {
-	soulHash := hashString("soul")
-	fetchRulesHash := hashString(agentV3RuntimeSkillRules(true))
-	noFetchRulesHash := hashString(agentV3RuntimeSkillRules(false))
-	emptySkillsHash := hashString("")
-	withoutRich := buildAgentV3PrefixHash(soulHash, fetchRulesHash, emptySkillsHash)
-	withChangedMemoryAndTools := buildAgentV3PrefixHash(soulHash, fetchRulesHash, emptySkillsHash)
-	withRich := buildAgentV3PrefixHash(soulHash, fetchRulesHash, hashString(buildAgentV3SkillPromptBlock([]agentV3SkillDescriptor{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}})))
-	withoutFetch := buildAgentV3PrefixHash(soulHash, noFetchRulesHash, emptySkillsHash)
+	withoutRichPrefix := buildAgentV3StablePrefix("soul", "", true)
+	withChangedMemoryAndToolsPrefix := buildAgentV3StablePrefix("soul", "", true)
+	withRichPrefix := buildAgentV3StablePrefix("soul", buildAgentV3SkillPromptBlock([]agentV3SkillDescriptor{{Name: "rich-message", Content: agentV3RichMessageSkillContract(true)}}), true)
+	withoutFetchPrefix := buildAgentV3StablePrefix("soul", "", false)
+
+	withoutRich := hashString(withoutRichPrefix)
+	withChangedMemoryAndTools := hashString(withChangedMemoryAndToolsPrefix)
+	withRich := hashString(withRichPrefix)
+	withoutFetch := hashString(withoutFetchPrefix)
 
 	assert.Equal(t, withoutRich, withChangedMemoryAndTools)
 	assert.NotEqual(t, withoutRich, withRich)
 	assert.NotEqual(t, withoutRich, withoutFetch)
-	assert.Equal(t, withoutRich, buildAgentV3PrefixHash(soulHash, fetchRulesHash, emptySkillsHash))
+	assert.Equal(t, withoutRich, hashString(buildAgentV3StablePrefix("soul", "", true)))
 }
 
 func TestBuildAgentV3MemorySnapshotMessageKeepsMemoryOutOfSystem(t *testing.T) {

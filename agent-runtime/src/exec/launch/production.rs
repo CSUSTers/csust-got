@@ -62,33 +62,13 @@ where
         }
     };
     if let Err(error) = validate_environment(&launch.environment) {
-        match revoke_before_cgroup_cleanup(&launch.lifecycle, &supervisor.inner.health) {
-            Ok(()) => {
-                let cleanup_error = group.kill_wait_remove_blocking().err();
-                if cleanup_error.is_some() {
-                    supervisor.inner.health.latch_cleanup_failure();
-                }
-                let mut failures = vec![error.to_string()];
-                if let Some(cleanup_error) = cleanup_error {
-                    failures.push(format!("cgroup cleanup failed: {cleanup_error}"));
-                }
-                return Err(SupervisorError::Spawn(failures.join("; ")));
-            }
-            Err(revoke_error) => {
-                supervisor
-                    .inner
-                    .deferred
-                    .retain(DeferredCommandCleanup::new_unlaunched(
-                        Some(group),
-                        cleanup_dir,
-                        None,
-                    ));
-                supervisor.inner.health.latch_cleanup_failure();
-                return Err(SupervisorError::CleanupDeferred(format!(
-                    "command binding cleanup failed: {revoke_error}"
-                )));
-            }
-        }
+        return reject_launch_before_spawn(
+            supervisor,
+            group,
+            &launch.lifecycle,
+            cleanup_dir,
+            error.to_string(),
+        );
     }
     let lifecycle = launch.lifecycle;
     let spec = ExecSpec {
@@ -99,6 +79,15 @@ where
         env: launch.environment,
         rlimits: rlimits.clone(),
     };
+    if let Err(error) = serialize_exec_spec(&spec) {
+        return reject_launch_before_spawn(
+            supervisor,
+            group,
+            &lifecycle,
+            cleanup_dir,
+            error.to_string(),
+        );
+    }
     #[cfg(not(feature = "c7-test-support"))]
     let spawn_result = spawn_exec_helper_with_control(exec_helper, &spec, launch.control_source);
     #[cfg(feature = "c7-test-support")]
@@ -144,6 +133,42 @@ where
                     )))
                 }
             }
+        }
+    }
+}
+
+fn reject_launch_before_spawn(
+    supervisor: &CommandSupervisor,
+    group: CommandCgroup,
+    lifecycle: &CommandLifecycleLease,
+    cleanup_dir: Option<PathBuf>,
+    reason: String,
+) -> Result<PreparedProductionCommand, SupervisorError> {
+    match revoke_before_cgroup_cleanup(lifecycle, &supervisor.inner.health) {
+        Ok(()) => {
+            let cleanup_error = group.kill_wait_remove_blocking().err();
+            if cleanup_error.is_some() {
+                supervisor.inner.health.latch_cleanup_failure();
+            }
+            let mut failures = vec![reason];
+            if let Some(cleanup_error) = cleanup_error {
+                failures.push(format!("cgroup cleanup failed: {cleanup_error}"));
+            }
+            Err(SupervisorError::Spawn(failures.join("; ")))
+        }
+        Err(revoke_error) => {
+            supervisor
+                .inner
+                .deferred
+                .retain(DeferredCommandCleanup::new_unlaunched(
+                    Some(group),
+                    cleanup_dir,
+                    None,
+                ));
+            supervisor.inner.health.latch_cleanup_failure();
+            Err(SupervisorError::CleanupDeferred(format!(
+                "command binding cleanup failed: {revoke_error}"
+            )))
         }
     }
 }

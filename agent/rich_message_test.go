@@ -1,6 +1,7 @@
 package agentv3
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -129,6 +130,21 @@ func TestSendTelegramRichMessageUsesRawMethodAndPayload(t *testing.T) {
 	assert.Equal(t, "**hello**", payload.RichMessage.Markdown)
 	require.NotNil(t, payload.ReplyParameters)
 	assert.Equal(t, 99, payload.ReplyParameters.MessageID)
+	assert.Zero(t, payload.MessageThreadID)
+	assert.False(t, payload.ReplyParameters.AllowSendingWithoutReply)
+	encoded, err := json.Marshal(payload)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "message_thread_id")
+	assert.NotContains(t, string(encoded), "allow_sending_without_reply")
+}
+
+func TestSendTelegramRichMessageCronOptions(t *testing.T) {
+	raw := &stubTelegramRawCaller{body: []byte(`{"result":{"message_id":123}}`)}
+	_, err := sendTelegramRichMessageWithOptions(raw, -100, 50, inputRichMessage{Markdown: "**body**"}, telegramRichSendOptions{ThreadID: 77, AllowWithoutReply: true})
+	require.NoError(t, err)
+	encoded, err := json.Marshal(raw.payload)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"chat_id":-100,"message_thread_id":77,"rich_message":{"markdown":"**body**"},"reply_parameters":{"message_id":50,"allow_sending_without_reply":true}}`, string(encoded))
 }
 
 func TestTelegramRichRawFailureIsReturned(t *testing.T) {

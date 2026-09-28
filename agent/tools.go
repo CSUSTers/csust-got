@@ -15,6 +15,7 @@ import (
 	tb "gopkg.in/telebot.v3"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -28,6 +29,8 @@ var (
 	errNegativeAfterMessageID  = errors.New("after_message_id must be non-negative")
 	errNegativeBeforeMessageID = errors.New("before_message_id must be non-negative")
 	errInvalidLimitFrom        = errors.New("limit_from must be \"latest\" or \"earliest\"")
+	errTelegramBotUnavailable  = telegramBotUnavailableError{}
+	errBackgroundTool          = errors.New(backgroundToolErrorText)
 
 	progressResult = "ok. If your task is done, output a concise final answer now — do not make additional tool calls."
 )
@@ -52,7 +55,7 @@ func parseProgressStyle(s string) wholeTextType {
 
 func updateProgressMessage(ctx context.Context, args updateProgressArgs, content string, style wholeTextType) string {
 	tc := GetTurnContext(ctx)
-	if tc == nil || (content == "" && !args.hasStructuredProgress()) {
+	if tc == nil || tc.Background || (content == "" && !args.hasStructuredProgress()) {
 		return progressStatusSkipped
 	}
 	if tc.finalized.Load() {
@@ -127,11 +130,13 @@ type modelConfigurable interface {
 // builtinToolFactories maps tool names to factory functions.
 // Each factory creates a tool.InvokableTool instance.
 var builtinToolFactories = map[string]func() tool.InvokableTool{
-	"get_context":     func() tool.InvokableTool { return &getContextTool{} },
-	"get_image":       func() tool.InvokableTool { return &getImageTool{} },
-	"get_message":     func() tool.InvokableTool { return &getMessageTool{} },
-	"analyze_image":   func() tool.InvokableTool { return &analyzeImageTool{} },
-	"update_progress": func() tool.InvokableTool { return &updateProgressTool{} },
+	agentV3ToolDelegate:  func() tool.InvokableTool { return &cronTool{} },
+	agentV3ToolCronTasks: func() tool.InvokableTool { return &cronTool{manage: true} },
+	"get_context":        func() tool.InvokableTool { return &getContextTool{} },
+	"get_image":          func() tool.InvokableTool { return &getImageTool{} },
+	"get_message":        func() tool.InvokableTool { return &getMessageTool{} },
+	"analyze_image":      func() tool.InvokableTool { return &analyzeImageTool{} },
+	"update_progress":    func() tool.InvokableTool { return &updateProgressTool{} },
 }
 
 // BuildBuiltinTools creates tool instances from a list of tool names.
@@ -288,7 +293,7 @@ func (t *getImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 			"Returns the image as base64-encoded data that can be analyzed by vision models. " +
 			"Use this when a message references an image that needs to be examined.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"file_id": {
+			agentV3FieldFileID: {
 				Type:     "string",
 				Desc:     "Telegram file ID of the image to retrieve",
 				Required: true,
@@ -311,7 +316,7 @@ func (t *getImageTool) InvokableRun(ctx context.Context, argsJSON string, _ ...t
 		return "", fmt.Errorf("get_image: invalid arguments: %w", err)
 	}
 
-	return downloadImage(tc, args.FileID, args.URL)
+	return downloadImage(ctx, tc, args.FileID, args.URL)
 }
 
 // ---- analyze_image Tool ----
@@ -336,7 +341,7 @@ func (t *analyzeImageTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 			"Returns a text description or answer about the image. Use this when you need to " +
 			"understand what an image contains. Provide a specific query to focus the analysis.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"file_id": {
+			agentV3FieldFileID: {
 				Type:     "string",
 				Desc:     "Telegram file ID of the image to analyze",
 				Required: true,
@@ -365,7 +370,7 @@ func (t *analyzeImageTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 	}
 
 	// Download image
-	imageData, err := downloadImage(tc, args.FileID, args.URL)
+	imageData, err := downloadImage(ctx, tc, args.FileID, args.URL)
 	if err != nil {
 		if msg, ok := recoverableImageToolMessage(err); ok {
 			return msg, nil
@@ -403,27 +408,31 @@ func (t *analyzeImageTool) InvokableRun(ctx context.Context, argsJSON string, _ 
 // ---- Image Download Helper ----
 
 // downloadImage downloads an image from Telegram file ID or URL, returns base64 data URI.
-func downloadImage(tc *TurnContext, fileID, url string) (string, error) {
+func downloadImage(ctx context.Context, tc *TurnContext, fileID, imageURL string) (string, error) {
 	var data []byte
 	var mimeType string
 	switch {
 	case fileID != "":
-		file, err := tc.Bot.FileByID(fileID)
+		filePath, err := telegramFilePath(ctx, tc, fileID)
 		if err != nil {
 			return "", fmt.Errorf("failed to get file info: %w", err)
 		}
-		reader, err := tc.Bot.File(&file)
+		requestURL := strings.TrimRight(tc.Bot.URL, "/") + "/file/bot" + tc.Bot.Token + "/" + strings.TrimLeft(filePath, "/")
+		resp, err := doAgentHTTPRequest(ctx, http.MethodGet, requestURL, nil)
 		if err != nil {
 			return "", fmt.Errorf("failed to download file: %w", err)
 		}
-		defer func() { _ = reader.Close() }()
-		data, err = io.ReadAll(io.LimitReader(reader, 10*1024*1024)) // 10MB limit
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("%w: %d", errBadHTTPStatus, resp.StatusCode)
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
 		if err != nil {
 			return "", fmt.Errorf("failed to read file data: %w", err)
 		}
 		mimeType = "image/jpeg" // Telegram typically serves JPEG
-	case url != "":
-		resp, err := http.Get(url) //nolint:gosec
+	case imageURL != "":
+		resp, err := doAgentHTTPRequest(ctx, http.MethodGet, imageURL, nil) //nolint:gosec
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch URL: %w", err)
 		}
@@ -444,6 +453,82 @@ func downloadImage(tc *TurnContext, fileID, url string) (string, error) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, encoded), nil
+}
+
+func telegramFilePath(ctx context.Context, tc *TurnContext, fileID string) (string, error) {
+	if tc == nil || tc.Bot == nil || tc.Bot.URL == "" || tc.Bot.Token == "" {
+		return "", errTelegramBotUnavailable
+	}
+	payload, err := json.Marshal(map[string]string{agentV3FieldFileID: fileID})
+	if err != nil {
+		return "", err
+	}
+	requestURL := strings.TrimRight(tc.Bot.URL, "/") + "/bot" + tc.Bot.Token + "/getFile"
+	resp, err := doAgentHTTPRequest(ctx, http.MethodPost, requestURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", telegramUnexpectedStatusError{statusCode: resp.StatusCode}
+	}
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			FilePath string `json:"file_path"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&result); err != nil {
+		return "", err
+	}
+	if !result.OK || result.Result.FilePath == "" {
+		return "", telegramBadRequestError{description: result.Description}
+	}
+	return result.Result.FilePath, nil
+}
+
+type telegramUnexpectedStatusError struct {
+	statusCode int
+}
+
+func (e telegramUnexpectedStatusError) Error() string {
+	return fmt.Sprintf("telegram: unexpected status %d", e.statusCode)
+}
+
+type telegramBotUnavailableError struct{}
+
+func (telegramBotUnavailableError) Error() string {
+	return "Telegram bot is unavailable"
+}
+
+type telegramBadRequestError struct {
+	description string
+}
+
+func (e telegramBadRequestError) Error() string {
+	return "telegram: bad request: " + e.description
+}
+
+func doAgentHTTPRequest(ctx context.Context, method, requestURL string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	client := http.DefaultClient
+	if config.BotConfig != nil && config.BotConfig.Proxy != "" {
+		proxyURL, err := url.Parse(config.BotConfig.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+		defer transport.CloseIdleConnections()
+		client = &http.Client{Transport: transport}
+	}
+	return client.Do(req)
 }
 
 func recoverableImageToolMessage(err error) (string, bool) {
@@ -693,6 +778,9 @@ func (t *updateProgressTool) InvokableRun(ctx context.Context, argsJSON string, 
 	tc := GetTurnContext(ctx)
 	if tc == nil {
 		return "", fmt.Errorf("update_progress: %w", errNoTurnContext)
+	}
+	if tc.Background {
+		return "skipped (background results are delivered by the cron outbox)", nil
 	}
 
 	if tc.finalized.Load() {

@@ -1,10 +1,14 @@
 package agentv3
 
 import (
+	"context"
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +18,67 @@ import (
 	"github.com/stretchr/testify/require"
 	tb "gopkg.in/telebot.v3"
 )
+
+func TestGetImageToolCancelsDirectAndTelegramHTTP(t *testing.T) {
+	tests := []struct {
+		name     string
+		telegram bool
+		body     bool
+	}{
+		{name: "direct headers"},
+		{name: "direct body", body: true},
+		{name: "telegram metadata", telegram: true},
+		{name: "telegram body", telegram: true, body: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestCanceled := make(chan struct{})
+			releaseServer := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if test.telegram && r.URL.Path == "/botfixture-token/getFile" && test.body {
+					_, _ = w.Write([]byte(`{"ok":true,"result":{"file_path":"photos/fixture.jpg"}}`))
+					return
+				}
+				if test.body {
+					w.Header().Set("Content-Type", "image/jpeg")
+					w.WriteHeader(http.StatusOK)
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				}
+				select {
+				case <-r.Context().Done():
+					close(requestCanceled)
+				case <-releaseServer:
+				}
+			}))
+			defer server.Close()
+			defer close(releaseServer)
+
+			bot, err := tb.NewBot(tb.Settings{Token: "fixture-token", URL: server.URL, Offline: true})
+			require.NoError(t, err)
+			tc := &TurnContext{Bot: bot}
+			args := fmt.Sprintf(`{"url":%q}`, server.URL+"/image")
+			if test.telegram {
+				args = `{"file_id":"fixture-file"}`
+			}
+			ctx, cancel := context.WithTimeout(WithTurnContext(t.Context(), tc), 75*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			_, err = (&getImageTool{}).InvokableRun(ctx, args)
+			require.Error(t, err)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.Less(t, time.Since(started), time.Second)
+			if test.name != "telegram metadata" {
+				select {
+				case <-requestCanceled:
+				case <-time.After(time.Second):
+					t.Fatal("HTTP request was not canceled")
+				}
+			}
+		})
+	}
+}
 
 var (
 	errTestBadTelegramFile = errors.New("failed to get file info: telegram: Bad Request: wrong file_id or the file is temporarily unavailable (400)")

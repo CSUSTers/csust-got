@@ -208,8 +208,8 @@ func TestAgentV3SkillContentChangeChangesPrefixHash(t *testing.T) {
 	secondCatalog, _, err := mergeAgentV3SkillSnapshots(second)
 	require.NoError(t, err)
 
-	firstHash := buildAgentV3PrefixHash(hashString("soul"), hashString("rules"), hashString(buildAgentV3SkillPromptBlock(firstCatalog.Sorted)))
-	secondHash := buildAgentV3PrefixHash(hashString("soul"), hashString("rules"), hashString(buildAgentV3SkillPromptBlock(secondCatalog.Sorted)))
+	firstHash := hashString(buildAgentV3StablePrefix("soul", buildAgentV3SkillPromptBlock(firstCatalog.Sorted), false))
+	secondHash := hashString(buildAgentV3StablePrefix("soul", buildAgentV3SkillPromptBlock(secondCatalog.Sorted), false))
 	assert.NotEqual(t, firstHash, secondHash)
 }
 

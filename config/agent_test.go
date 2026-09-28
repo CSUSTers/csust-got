@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -379,4 +380,153 @@ func TestAgentV3RuntimeFetchRequiresExplicitTrue(t *testing.T) {
 	enabled := true
 	cfg.Runtime.FetchEnabled = &enabled
 	assert.True(t, cfg.RuntimeFetchEnabled())
+}
+
+func TestAgentV3RuntimeEnvYAMLIsLiteral(t *testing.T) {
+	v := viper.New()
+	v.SetConfigType("yaml")
+	require.NoError(t, v.ReadConfig(strings.NewReader(`
+agent_v3:
+  runtime:
+    env:
+      ApiToken: "${SECRET_TOKEN}"
+      EMPTY: ""
+      WEBHOOK_URL: "https://example.org/?a=1&b=2"
+`)))
+
+	var cfg AgentV3Config
+	require.NoError(t, v.UnmarshalKey("agent_v3", &cfg, viper.DecodeHook(DispatchFor())))
+	require.Equal(t, map[string]string{
+		"apitoken":    "${SECRET_TOKEN}",
+		"empty":       "",
+		"webhook_url": "https://example.org/?a=1&b=2",
+	}, cfg.Runtime.Env)
+	// Viper normalizes YAML keys to lowercase before unmarshalling maps.
+	require.NoError(t, ValidateAgentV3RuntimeEnv(cfg.Runtime.Env))
+	direct := map[string]string{"ApiToken": "literal"}
+	require.NoError(t, ValidateAgentV3RuntimeEnv(direct))
+	require.Equal(t, "literal", direct["ApiToken"])
+}
+
+func TestValidateAgentV3RuntimeEnvLimits(t *testing.T) {
+	require.NoError(t, ValidateAgentV3RuntimeEnv(nil))
+	require.NoError(t, ValidateAgentV3RuntimeEnv(map[string]string{
+		"_": "", strings.Repeat("A", 128): strings.Repeat("界", 682) + "aa",
+	}))
+
+	valid := make(map[string]string, 64)
+	for i := range 64 {
+		valid[fmt.Sprintf("ITEM_%d", i)] = "x"
+	}
+	require.NoError(t, ValidateAgentV3RuntimeEnv(valid))
+	valid["ITEM_64"] = "x"
+	require.ErrorContains(t, ValidateAgentV3RuntimeEnv(valid), "runtime_env_limit")
+
+	budget := map[string]string{}
+	for _, name := range []string{"A", "B", "C", "D"} {
+		budget[name] = strings.Repeat("a", 2037)
+	}
+	budget["A"] += "aaaaaaa"
+	require.NoError(t, ValidateAgentV3RuntimeEnv(budget)) // Serialized [[name,value],...] is exactly 8192 bytes.
+	budget["A"] += "a"
+	require.ErrorContains(t, ValidateAgentV3RuntimeEnv(budget), "runtime_env_limit")
+	budget["A"] = strings.Repeat("a", 2043) + "&"
+	require.NoError(t, ValidateAgentV3RuntimeEnv(budget)) // Rust does not HTML-escape &.
+	budget["A"] = strings.Repeat("\u2028", 681) + "&"
+	require.NoError(t, ValidateAgentV3RuntimeEnv(budget)) // Rust does not escape U+2028.
+	budget["A"] = strings.Repeat("\n", 2038)
+	require.ErrorContains(t, ValidateAgentV3RuntimeEnv(budget), "runtime_env_limit")
+}
+
+func TestValidateAgentV3RuntimeEnvLayersCountsBeforeOverride(t *testing.T) {
+	first := make(map[string]string)
+	for i := range 64 {
+		first[fmt.Sprintf("ITEM_%d", i)] = "x"
+	}
+	require.NoError(t, ValidateAgentV3RuntimeEnvLayers(first))
+	require.ErrorContains(t, ValidateAgentV3RuntimeEnvLayers(first, map[string]string{"ITEM_0": "new"}), "runtime_env_limit")
+	require.ErrorContains(t, ValidateAgentV3RuntimeEnvLayers(
+		map[string]string{"A": strings.Repeat("x", 2048), "B": strings.Repeat("x", 2048)},
+		map[string]string{"C": strings.Repeat("x", 2048), "D": strings.Repeat("x", 2048)},
+	), "runtime_env_limit")
+}
+
+func TestValidateAgentV3RuntimeEnvRejectsInvalidNamesAndValues(t *testing.T) {
+	for _, name := range []string{"", "1ABC", "A-B", "A.B", "A B", "é", strings.Repeat("A", 129)} {
+		t.Run(fmt.Sprintf("invalid name %q", name), func(t *testing.T) {
+			require.ErrorContains(t, ValidateAgentV3RuntimeEnv(map[string]string{name: "secret-value"}), "runtime_env_name")
+		})
+	}
+	reserved := []string{
+		"PATH", "HOME", "SHELL", "ENV", "BASH_ENV", "SHELLOPTS", "BASHOPTS", "IFS",
+		"CDPATH", "PWD", "OLDPWD", "SHLVL", "PS4", "PROMPT_COMMAND", "GLOBIGNORE",
+		"TMPDIR", "TMP", "TEMP", "GLIBC_TUNABLES", "GCONV_PATH", "LOCPATH", "NLSPATH",
+		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+	}
+	for _, name := range reserved {
+		t.Run("reserved "+name, func(t *testing.T) {
+			require.ErrorContains(t, ValidateAgentV3RuntimeEnv(map[string]string{strings.ToLower(name): "secret-value"}), "runtime_env_reserved")
+		})
+	}
+	for _, prefix := range []string{
+		"AGENT_RUNTIME_", "AGENT_FETCH_", "LD_", "DYLD_", "BASH_", "PROOT_", "MALLOC_",
+		"GIT_", "PYTHON", "PERL", "RUBY", "NODE_", "JAVA_", "JDK_", "_JAVA_", "SSL_",
+		"CURL_", "WGET_",
+	} {
+		t.Run("prefix "+prefix, func(t *testing.T) {
+			require.ErrorContains(t, ValidateAgentV3RuntimeEnv(map[string]string{strings.ToLower(prefix) + "X": "secret-value"}), "runtime_env_reserved")
+		})
+	}
+	for _, name := range []string{"PYTHO", "GIT", "NODE", "SSL", "TEMP_FILE"} {
+		require.NoError(t, ValidateAgentV3RuntimeEnv(map[string]string{name: "literal"}))
+	}
+	for _, value := range []string{strings.Repeat("a", 2049), strings.Repeat("界", 683), "before\x00after", string([]byte{0xff})} {
+		err := ValidateAgentV3RuntimeEnv(map[string]string{"CREDENTIAL": value})
+		require.ErrorContains(t, err, "runtime_env_value")
+		require.NotContains(t, err.Error(), value)
+	}
+}
+
+func TestAgentContextMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		mode  string
+		reply bool
+		bad   bool
+	}{
+		{name: "default", mode: ""},
+		{name: "chat", mode: "chat"},
+		{name: "reply chain", mode: "reply_chain", reply: true},
+		{name: "legacy reply is rejected", mode: "reply", bad: true},
+		{name: "case is rejected", mode: "CHAT", bad: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &AgentConfig{Name: "session", ContextMode: tt.mode}
+			assert.Equal(t, tt.reply, cfg.UsesReplyChain())
+			if tt.bad {
+				require.ErrorContains(t, cfg.ValidateContextMode(), "context_mode")
+				return
+			}
+			require.NoError(t, cfg.ValidateContextMode())
+		})
+	}
+
+	t.Run("yaml", func(t *testing.T) {
+		v := viper.New()
+		v.SetConfigType("yaml")
+		require.NoError(t, v.ReadConfig(strings.NewReader(`
+agents:
+  - name: reply-assistant
+    context_mode: reply_chain
+    message_context: 7
+`)))
+
+		var agents AgentV3Configs
+		require.NoError(t, v.UnmarshalKey("agents", &agents, viper.DecodeHook(DispatchFor())))
+		require.Len(t, agents, 1)
+		assert.True(t, agents[0].UsesReplyChain())
+		assert.Equal(t, 7, agents[0].MessageContext)
+	})
 }

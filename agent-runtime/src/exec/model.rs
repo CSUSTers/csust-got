@@ -25,7 +25,7 @@ impl Default for RlimitSpec {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecSpec {
     pub cgroup_procs: PathBuf,
     pub program: PathBuf,
@@ -33,6 +33,17 @@ pub struct ExecSpec {
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
     pub rlimits: RlimitSpec,
+}
+
+impl fmt::Debug for ExecSpec {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExecSpec")
+            .field("arg_count", &self.args.len())
+            .field("environment_count", &self.env.len())
+            .field("rlimits", &self.rlimits)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

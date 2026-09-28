@@ -26,9 +26,12 @@ var (
 	errRuntimeClientUnspecified = errors.New("runtime client is not configured")
 	errRuntimeSkillsInvalid     = errors.New("agent v3 runtime skills response is invalid")
 	errRuntimeSkillsTooLarge    = errors.New("agent v3 runtime skills response exceeds size limit")
+	errRuntimeEnvCapability     = errors.New("agent v3 runtime does not support Bash environment version 1")
+	errRuntimeEnvResponse       = errors.New("agent v3 runtime environment request failed")
 )
 
 const agentV3RuntimeSkillsResponseMaxBytes = int64(8 * 1024 * 1024)
+const agentV3BashEnvVersion = 1
 
 // RemoteRuntimeClient calls the agent-v3 remote runtime service.
 type RemoteRuntimeClient struct {
@@ -70,8 +73,33 @@ type runtimeEditRequest struct {
 
 type runtimeBashRequest struct {
 	runtimeCommonRequest
-	Command string `json:"command"`
-	Timeout string `json:"timeout,omitempty"`
+	Command        string                 `json:"command"`
+	Timeout        string                 `json:"timeout,omitempty"`
+	BashEnvVersion int                    `json:"bash_env_version,omitempty"`
+	Env            map[string]string      `json:"env,omitempty"`
+	SkillEnv       []runtimeSkillEnvLayer `json:"skill_env,omitempty"`
+}
+
+type runtimeSkillEnvLayer struct {
+	Source      agentV3SkillSource `json:"source"`
+	Name        string             `json:"name"`
+	Env         map[string]string  `json:"env,omitempty"`
+	SkillSHA256 string             `json:"skill_sha256,omitempty"`
+}
+
+func (l runtimeSkillEnvLayer) MarshalJSON() ([]byte, error) {
+	if l.Source == agentV3SkillSourceBotLocal {
+		return json.Marshal(struct {
+			Source agentV3SkillSource `json:"source"`
+			Name   string             `json:"name"`
+			Env    map[string]string  `json:"env"`
+		}{l.Source, l.Name, l.Env})
+	}
+	return json.Marshal(struct {
+		Source      agentV3SkillSource `json:"source"`
+		Name        string             `json:"name"`
+		SkillSHA256 string             `json:"skill_sha256"`
+	}{l.Source, l.Name, l.SkillSHA256})
 }
 
 type runtimeResetRequest struct {
@@ -88,21 +116,24 @@ type runtimeTextResponse struct {
 }
 
 type runtimeBashResponse struct {
-	ExitCode   int    `json:"exit_code"`
-	Stdout     string `json:"stdout"`
-	Stderr     string `json:"stderr"`
-	DurationMS int64  `json:"duration_ms"`
-	Truncated  bool   `json:"truncated"`
-	Error      string `json:"error,omitempty"`
+	BashEnvVersion int    `json:"bash_env_version"`
+	ExitCode       int    `json:"exit_code"`
+	Stdout         string `json:"stdout"`
+	Stderr         string `json:"stderr"`
+	DurationMS     int64  `json:"duration_ms"`
+	Truncated      bool   `json:"truncated"`
+	Error          string `json:"error,omitempty"`
 }
 
 type runtimeStatusResponse struct {
-	OK            bool   `json:"ok"`
-	Version       string `json:"version,omitempty"`
-	WorkspaceRoot string `json:"workspace_root,omitempty"`
-	SkillsRoot    string `json:"skills_root,omitempty"`
-	BashSandbox   string `json:"bash_sandbox,omitempty"`
-	Error         string `json:"error,omitempty"`
+	RuntimeEnv     bool   `json:"runtime_env"`
+	BashEnvVersion int    `json:"bash_env_version"`
+	OK             bool   `json:"ok"`
+	Version        string `json:"version,omitempty"`
+	WorkspaceRoot  string `json:"workspace_root,omitempty"`
+	SkillsRoot     string `json:"skills_root,omitempty"`
+	BashSandbox    string `json:"bash_sandbox,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 type runtimeResetResponse struct {
@@ -181,10 +212,78 @@ func (c *RemoteRuntimeClient) Edit(ctx context.Context, req runtimeEditRequest) 
 // Bash runs a command in the remote runtime workspace.
 func (c *RemoteRuntimeClient) Bash(ctx context.Context, req runtimeBashRequest) (runtimeBashResponse, error) {
 	var out runtimeBashResponse
-	err := c.post(ctx, "/v1/bash", req, &out)
+	protected := req.BashEnvVersion != 0 || len(req.Env) != 0 || len(req.SkillEnv) != 0
+	if protected {
+		if req.BashEnvVersion != agentV3BashEnvVersion {
+			return out, errRuntimeEnvResponse
+		}
+		knownLayers := make([]map[string]string, 0, len(req.SkillEnv)+1)
+		for _, layer := range req.SkillEnv {
+			if layer.Source == agentV3SkillSourceBotLocal {
+				knownLayers = append(knownLayers, layer.Env)
+			}
+		}
+		knownLayers = append(knownLayers, req.Env)
+		if len(req.SkillEnv) > 128 || config.ValidateAgentV3RuntimeEnvLayers(knownLayers...) != nil {
+			return out, errRuntimeEnvResponse
+		}
+		if err := c.checkRuntimeEnvCapability(ctx); err != nil {
+			return out, err
+		}
+	}
+	err := c.postWithProtection(ctx, "/v1/bash", req, &out, protected)
+	if protected && err == nil && out.BashEnvVersion != agentV3BashEnvVersion {
+		return runtimeBashResponse{}, errRuntimeEnvCapability
+	}
+	if protected && err == nil && out.Error != "" {
+		return runtimeBashResponse{}, errRuntimeEnvResponse
+	}
+	if err != nil {
+		return runtimeBashResponse{}, err
+	}
 	out.Stdout, out.Truncated = truncateForModel(out.Stdout, c.MaxOutputChars, out.Truncated)
 	out.Stderr, out.Truncated = truncateForModel(out.Stderr, c.MaxOutputChars, out.Truncated)
 	return out, err
+}
+
+func (c *RemoteRuntimeClient) checkRuntimeEnvCapability(ctx context.Context) error {
+	if c == nil || c.Endpoint == "" {
+		return errRuntimeEnvCapability
+	}
+	u, err := url.JoinPath(c.Endpoint, "v1/status")
+	if err != nil {
+		return errRuntimeEnvCapability
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return errRuntimeEnvCapability
+	}
+	if c.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
+	}
+	client := c.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	safe := *client
+	safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := safe.Do(req)
+	if err != nil {
+		return errRuntimeEnvCapability
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return errRuntimeEnvCapability
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
+	if err != nil || len(body) > 2*1024*1024 {
+		return errRuntimeEnvCapability
+	}
+	var status runtimeStatusResponse
+	if err := json.Unmarshal(body, &status); err != nil || !status.OK || !status.RuntimeEnv || status.BashEnvVersion != agentV3BashEnvVersion {
+		return errRuntimeEnvCapability
+	}
+	return nil
 }
 
 // Status returns remote runtime health information.
@@ -266,6 +365,10 @@ func (c *RemoteRuntimeClient) Reset(ctx context.Context, req runtimeResetRequest
 }
 
 func (c *RemoteRuntimeClient) post(ctx context.Context, path string, in any, out any) error {
+	return c.postWithProtection(ctx, path, in, out, false)
+}
+
+func (c *RemoteRuntimeClient) postWithProtection(ctx context.Context, path string, in any, out any, protected bool) error {
 	if c == nil || c.Endpoint == "" {
 		return errRuntimeEndpointEmpty
 	}
@@ -285,22 +388,56 @@ func (c *RemoteRuntimeClient) post(ctx context.Context, path string, in any, out
 	if c.AuthToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.AuthToken)
 	}
-	resp, err := c.HTTPClient.Do(req)
+	client := c.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	if protected {
+		safe := *client
+		safe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		client = &safe
+	}
+	resp, err := client.Do(req)
 	if err != nil {
+		if protected {
+			return errRuntimeEnvResponse
+		}
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	limit := int64(2 * 1024 * 1024)
+	if protected {
+		limit++
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
+		if protected {
+			return errRuntimeEnvResponse
+		}
 		return err
 	}
+	if protected && len(body) > 2*1024*1024 {
+		return errRuntimeEnvResponse
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if protected {
+			return errRuntimeEnvResponse
+		}
 		return fmt.Errorf("%w: runtime %s returned %d: %s", errRuntimeHTTPStatus, path, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if len(body) == 0 {
+		if protected {
+			return errRuntimeEnvCapability
+		}
 		return nil
 	}
-	return json.Unmarshal(body, out)
+	if err := json.Unmarshal(body, out); err != nil {
+		if protected {
+			return errRuntimeEnvResponse
+		}
+		return err
+	}
+	return nil
 }
 
 func (c *RemoteRuntimeClient) get(ctx context.Context, path string, out any) error {
@@ -363,10 +500,13 @@ func buildAgentV3Tools(_ *config.AgentConfig, cfg *config.AgentV3Config, catalog
 	if len(catalog.Sorted) > 0 {
 		tools = append(tools, &loadSkillTool{})
 	}
+	if cfg != nil && cfg.CronConfig().RunnerAgent != "" {
+		tools = append(tools, &cronTool{}, &cronTool{manage: true})
+	}
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool, cronEnabled ...bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
@@ -387,6 +527,13 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled b
 			agentV3ToolArgsField: "name",
 			agentV3ToolDescField: "Load an available agent-v3 skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
 		})
+	}
+	if len(cronEnabled) > 0 && cronEnabled[0] {
+		for _, t := range []*cronTool{{}, {manage: true}} {
+			info, _ := t.Info(context.Background())
+			params, _ := info.ParamsOneOf.ToJSONSchema()
+			infos = append(infos, map[string]any{agentV3ToolNameField: info.Name, agentV3ToolDescField: info.Desc, agentV3ToolArgsField: params})
+		}
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)
@@ -620,10 +767,18 @@ func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("bash: invalid arguments: %w", err)
 	}
+	env, layers := tc.runtimeEnvironment()
+	version := 0
+	if len(env) > 0 || len(layers) > 0 {
+		version = agentV3BashEnvVersion
+	}
 	resp, err := tc.RuntimeClient.Bash(ctx, runtimeBashRequest{
 		runtimeCommonRequest: runtimeCommon(tc, args.Cwd),
 		Command:              args.Command,
 		Timeout:              args.Timeout,
+		BashEnvVersion:       version,
+		Env:                  env,
+		SkillEnv:             layers,
 	})
 	if tc.V3 != nil && tc.V3.Trace != nil {
 		tc.V3.Trace.RecordBash(resp.ExitCode, resp.DurationMS, resp.Truncated)
@@ -683,7 +838,7 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if !ok {
 		return "[Skill Error] requested skill is not available.", nil
 	}
-	tc.markSkillLoaded(skill.Name)
+	tc.activateSkill(skill)
 	var b strings.Builder
 	b.WriteString("<loaded_skill name=\"")
 	b.WriteString(escapeAgentV3SkillAttr(skill.Name))
