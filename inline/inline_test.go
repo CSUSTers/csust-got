@@ -35,7 +35,7 @@ func Test_writeUrl(t *testing.T) {
 			es := urlx.ExtractStr(tt.url)
 			assert.Equal(t, 1, len(es), "extracted url count should be 1")
 			e := es[0]
-			err := writeUrl(buf, e)
+			_, err := writeUrl(buf, bytes.NewBufferString(""), e)
 			if (err != nil) != tt.shouldErr {
 				t.Errorf("writeUrl() error = %v, wantErr %v", err, tt.shouldErr)
 			} else if err == nil {
@@ -47,10 +47,11 @@ func Test_writeUrl(t *testing.T) {
 
 func Test_writeAll(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		want      string
-		shouldErr bool
+		name           string
+		input          string
+		want           string
+		wantTranslated string
+		shouldErr      bool
 	}{
 		{
 			name:  "single URL",
@@ -93,9 +94,21 @@ func Test_writeAll(t *testing.T) {
 			want:  "感觉不如 https://www.bilibili.com/video/BV1fV411W7Ss/ https://www.zhihu.com/question/34923126",
 		},
 		{
-			name:  "x URL with zhihu.com URL and text",
-			input: "感觉不如 https://x.com/nocatsnolife_m/status/1743271045698924555?s=123&t=ABCD-EFGH https://www.zhihu.com/question/34923126?sort=created",
-			want:  "感觉不如 https://fxtwitter.com/nocatsnolife_m/status/1743271045698924555 https://www.zhihu.com/question/34923126",
+			name:           "x URL with zhihu.com URL and text",
+			input:          "感觉不如 https://x.com/nocatsnolife_m/status/1743271045698924555?s=123&t=ABCD-EFGH https://www.zhihu.com/question/34923126?sort=created",
+			want:           "感觉不如 https://fxtwitter.com/nocatsnolife_m/status/1743271045698924555 https://www.zhihu.com/question/34923126",
+			wantTranslated: "感觉不如 https://fxtwitter.com/nocatsnolife_m/status/1743271045698924555/zh https://www.zhihu.com/question/34923126",
+		},
+		{
+			name:           "multiple twitter URLs with bilibili URL",
+			input:          "https://fixupx.com/a/status/1?s=20 看 https://www.bilibili.com/video/BV1fV411W7Ss/?spm_id_from=333 和 https://twitter.com/b/status/2",
+			want:           "https://fixupx.com/a/status/1 看 https://www.bilibili.com/video/BV1fV411W7Ss/ 和 https://fxtwitter.com/b/status/2",
+			wantTranslated: "https://fixupx.com/a/status/1/zh 看 https://www.bilibili.com/video/BV1fV411W7Ss/ 和 https://fxtwitter.com/b/status/2/zh",
+		},
+		{
+			name:  "twitter profile URL",
+			input: "https://x.com/nocatsnolife_m?s=123",
+			want:  "https://fxtwitter.com/nocatsnolife_m",
 		},
 		{
 			name: "jd URL with taobao URL and text",
@@ -106,15 +119,19 @@ func Test_writeAll(t *testing.T) {
 		},
 	}
 
-	buf := bytes.NewBufferString("")
 	for _, tt := range tests {
-		buf.Reset()
 		t.Run(tt.name, func(t *testing.T) {
-			err := writeAll(buf, urlx.ExtractStr(tt.input))
+			buf := bytes.NewBufferString("")
+			translatedBuf := bytes.NewBufferString("")
+			translated, err := writeAll(buf, translatedBuf, urlx.ExtractStr(tt.input))
 			if (err != nil) != tt.shouldErr {
 				t.Errorf("writeAll() error = %v, wantErr %v", err, tt.shouldErr)
 			} else if err == nil {
 				assert.Equal(t, tt.want, buf.String())
+				assert.Equal(t, tt.wantTranslated != "", translated)
+				if translated {
+					assert.Equal(t, tt.wantTranslated, translatedBuf.String())
+				}
 			}
 		})
 	}

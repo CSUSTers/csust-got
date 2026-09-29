@@ -115,14 +115,6 @@ func initBot() (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	replyClient := *httpClient
-	replyClient.Timeout = 10 * time.Second
-	twitterReplyBot, err = NewBot(Settings{
-		Token: settings.Token, URL: settings.URL, Client: &replyClient, Offline: true,
-	})
-	if err != nil {
-		return nil, err
-	}
 
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware,
 		rateMiddleware, noStickerMiddleware, shutdownMiddleware,
@@ -241,7 +233,6 @@ func customHandler(ctx Context) error {
 		}
 		return nil
 	}
-	defer twitterTranslator.Translate(ctx, twitterReplyBot)
 
 	text := ctx.Message().Text
 	if text == "" {
@@ -288,14 +279,13 @@ func registerEventHandler(bot *Bot) {
 	// bot.Handle(OnUserLeft, base.LeftMember)
 	// bot.Handle(OnText, base.DoNothing)
 	// bot.Handle(OnSticker, base.DoNothing)
-	bot.Handle(OnAnimation, translationOnlyHandler)
-	bot.Handle(OnMedia, translationOnlyHandler)
+	bot.Handle(OnAnimation, base.DoNothing)
+	bot.Handle(OnMedia, base.DoNothing)
 	bot.Handle(OnPhoto, customHandler)
-	bot.Handle(OnVideo, translationOnlyHandler)
-	bot.Handle(OnAudio, translationOnlyHandler)
-	bot.Handle(OnVoice, translationOnlyHandler)
+	bot.Handle(OnVideo, base.DoNothing)
+	bot.Handle(OnVoice, base.DoNothing)
 	bot.Handle(OnVideoNote, base.DoNothing)
-	bot.Handle(OnDocument, translationOnlyHandler)
+	bot.Handle(OnDocument, base.DoNothing)
 }
 
 func registerAgentConfigHandler(bot *Bot) {
@@ -316,14 +306,6 @@ func registerAgentConfigHandler(bot *Bot) {
 var regexHandlers []struct {
 	Regex *regexp.Regexp
 	Func  func(Context) error
-}
-
-var twitterTranslator = base.NewTwitterTranslator(nil)
-var twitterReplyBot *Bot
-
-func translationOnlyHandler(ctx Context) error {
-	twitterTranslator.Translate(ctx, twitterReplyBot)
-	return nil
 }
 
 func initAgentRegexHandlers(agents config.AgentV3Configs) {

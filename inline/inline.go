@@ -39,7 +39,8 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		log.Debug("extracted urls", zap.String("origin", text), zap.Any("urls", exs))
 
 		buf := bytes.NewBufferString("")
-		err := writeAll(buf, exs)
+		translatedBuf := bytes.NewBufferString("")
+		translated, err := writeAll(buf, translatedBuf, exs)
 		if err != nil {
 			log.Error("write all error", zap.Error(err))
 			return err
@@ -52,19 +53,13 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 		}
 
 		log.Debug("replaced text", zap.String("origin", text), zap.String("replaced", reText))
-		reTextEscaped := util.EscapeTgMDv2ReservedChars(reText)
-		err = ctx.Answer(&tb.QueryResponse{
-			Results: tb.Results{
-				&tb.ArticleResult{
-					ResultBase: tb.ResultBase{
-						ParseMode: tb.ModeMarkdownV2,
-					},
-					Title:       "发送",
-					Description: reText,
-					Text:        reTextEscaped,
-				},
-			},
-		})
+		results := tb.Results{newArticleResult("发送", reText)}
+		if translated {
+			translatedText := translatedBuf.String()
+			log.Debug("translated text", zap.String("origin", text), zap.String("translated", translatedText))
+			results = append(results, newArticleResult("发送（中文翻译）", translatedText))
+		}
+		err = ctx.Answer(&tb.QueryResponse{Results: results})
 		if err != nil {
 			log.Error("inline mode answer error", zap.Error(err))
 		}
@@ -72,29 +67,56 @@ func handler(conf *config.Config) func(ctx tb.Context) error {
 	}
 }
 
-func writeAll(buf *bytes.Buffer, exs []*urlx.Extra) error {
-	for _, e := range exs {
-		if e.Type == urlx.TypeUrl {
-			err := writeUrl(buf, e)
-			if err != nil {
-				return err
-			}
-		} else {
-			buf.WriteString(e.Text)
-		}
+func newArticleResult(title, text string) *tb.ArticleResult {
+	return &tb.ArticleResult{
+		ResultBase: tb.ResultBase{
+			ParseMode: tb.ModeMarkdownV2,
+		},
+		Title:       title,
+		Description: text,
+		Text:        util.EscapeTgMDv2ReservedChars(text),
 	}
-	return nil
 }
 
-func writeUrl(buf *bytes.Buffer, e *urlx.Extra) error {
+func writeAll(buf, translatedBuf *bytes.Buffer, exs []*urlx.Extra) (bool, error) {
+	translated := false
+	for _, e := range exs {
+		if e.Type != urlx.TypeUrl {
+			buf.WriteString(e.Text)
+			translatedBuf.WriteString(e.Text)
+			continue
+		}
+		ok, err := writeUrl(buf, translatedBuf, e)
+		if err != nil {
+			return false, err
+		}
+		translated = translated || ok
+	}
+	return translated, nil
+}
+
+func writeUrl(buf, translatedBuf *bytes.Buffer, e *urlx.Extra) (bool, error) {
 	u := e.Url
 
 	for _, cfg := range urlProcessConfigs {
-		if cfg.needProcess(e) {
-			return cfg.writeUrl(buf, u)
+		if !cfg.needProcess(e) {
+			continue
 		}
+		start := buf.Len()
+		if err := cfg.writeUrl(buf, u); err != nil {
+			return false, err
+		}
+		if t, ok := cfg.(translatedUrlProcessor); ok {
+			if translatedUrl, translated := t.translatedUrl(u); translated {
+				translatedBuf.WriteString(translatedUrl)
+				return true, nil
+			}
+		}
+		translatedBuf.Write(buf.Bytes()[start:])
+		return false, nil
 	}
 
 	buf.WriteString(u.Text)
-	return nil
+	translatedBuf.WriteString(u.Text)
+	return false, nil
 }
