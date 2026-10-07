@@ -14,10 +14,12 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"csust-got/agent/session"
 	"csust-got/config"
 	"csust-got/orm"
 
 	"github.com/cloudwego/eino/schema"
+	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -50,6 +52,8 @@ type AgentV3TurnState struct {
 	loadedSkillNames      map[string]struct{}
 	runtimeEnv            map[string]string
 	loadedSkillEnv        []runtimeSkillEnvLayer
+	renderCtx             context.Context
+	frameTime             time.Time
 }
 
 func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
@@ -95,6 +99,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		SkillCatalog:     catalog,
 		loadedSkillNames: loadedSkillNames,
 		runtimeEnv:       cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
+		renderCtx:        ctx,
+		frameTime:        beijingNow(),
 	}
 	finishContextSpan := trace.StartSpan("context_build", map[string]any{
 		"agent": cc.Name,
@@ -199,6 +205,61 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		"prompt_cache_key_hash": hashString(promptCacheKey),
 	})
 
+	trace.PrefixHash = prefixHash
+	trace.PrefixVersion = prefixVersion
+	trace.PromptCacheKeyHash = hashString(promptCacheKey)
+	trace.MemorySnapshotVersion = memoryVersion
+	trace.RuntimeNamespaceHash = hashString(tc.Namespace)
+	tc.V3.PrefixHash, tc.V3.PrefixVersion, tc.V3.PromptCacheKey = prefixHash, prefixVersion, promptCacheKey
+	tc.V3.MemorySnapshotHash, tc.V3.MemorySnapshotVersion = memoryHash, memoryVersion
+	tc.V3.ToolDefsHash = toolDefsHash
+
+	var accepted agentV3PreparedSessionInput
+	rebuilt := false
+	state := tc.Session
+	if !tc.Background && state != nil && state.load {
+		state.load = false
+		var prepared agentV3PreparedSessionInput
+		loaded, loadErr := state.service.LoadWithAcceptance(ctx, state.selection, func(op context.Context, candidate *session.LoadCandidate) error {
+			candidateV3 := *tc.V3
+			candidateV3.renderCtx = op
+			candidateTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: tc.Message, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: &candidateV3}
+			var err error
+			prepared, err = buildAgentV3LoadedInput(cc, candidateTC, prefixText, memoryText, candidate.Messages, candidate)
+			if err != nil {
+				return err
+			}
+			if err := op.Err(); err != nil {
+				return err
+			}
+			limit := cfg.Session.ContextOverflow.TokenLimit()
+			estimate, err := cc.Agent.estimateSessionContext(op, prepared.messages, limit)
+			if err != nil {
+				return fmt.Errorf("session context estimate unknown: %w", err)
+			}
+			if estimate.Tokens > limit || estimate.Capped {
+				rebuilt = true
+				zap.L().Debug("agentv3: overflow_rebuild", zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.String("strategy", cfg.Session.ContextOverflow.StrategyName()), zap.Int64("max_tokens", limit), zap.Int64("estimated_tokens", estimate.Tokens), zap.Bool("estimate_capped", estimate.Capped), zap.String("estimate_method", estimate.Method))
+				return errAgentV3SessionContextOverflow
+			}
+			return op.Err()
+		})
+		if loadErr == nil {
+			state.parent, state.replay = loaded.Parent, loaded.Messages
+			tc.V3.ImageRefs = prepared.imageRefs
+			accepted = prepared
+		} else {
+			prepared = agentV3PreparedSessionInput{}
+			state.parent, state.replay, state.input, state.kinds = nil, nil, nil, nil
+			tc.V3.ImageRefs = nil
+			logAgentV3SessionLoadError(tc, loadErr)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		finishContextSpan(err, nil)
+		return nil, err
+	}
+
 	finishHotAppendSpan := trace.StartSpan("hot_append", nil)
 	replyChain := tc.Config != nil && tc.Config.UsesReplyChain()
 	sessionLoaded := tc.Session != nil && tc.Session.parent != nil && !tc.Background
@@ -206,6 +267,13 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	var summaryVersion int64
 	var rawTurns []orm.AgentV3Turn
 	if !sessionLoaded && !replyChain && !tc.Background {
+		if state != nil && state.ownsHistory {
+			history, err = loadAgentHistory(tc)
+			if err != nil {
+				zap.L().Warn("agentv3: failed to load history", zap.Error(err))
+				history = &RichHistory{}
+			}
+		}
 		summary, summaryVersion, err = orm.AgentV3GetSummary(ctx, scope)
 		if err != nil {
 			err = fmt.Errorf("agent v3 summary: %w", err)
@@ -228,31 +296,9 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		"raw_turn_count":  len(rawTurns),
 	})
 
-	trace.PrefixHash = prefixHash
-	trace.PrefixVersion = prefixVersion
-	trace.PromptCacheKeyHash = hashString(promptCacheKey)
-	trace.MemorySnapshotVersion = memoryVersion
 	trace.SummaryVersion = summaryVersion
 	trace.RawTurnCount = len(rawTurns)
-	trace.RuntimeNamespaceHash = hashString(tc.Namespace)
-
-	tc.V3 = &AgentV3TurnState{
-		Scope:                 scope,
-		RunID:                 tc.RunID,
-		Namespace:             tc.Namespace,
-		PrefixHash:            prefixHash,
-		PrefixVersion:         prefixVersion,
-		PromptCacheKey:        promptCacheKey,
-		MemorySnapshotHash:    memoryHash,
-		MemorySnapshotVersion: memoryVersion,
-		SummaryVersion:        summaryVersion,
-		RawTurnCount:          len(rawTurns),
-		ToolDefsHash:          toolDefsHash,
-		Trace:                 trace,
-		SkillCatalog:          catalog,
-		loadedSkillNames:      loadedSkillNames,
-		runtimeEnv:            cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
-	}
+	tc.V3.SummaryVersion, tc.V3.RawTurnCount = summaryVersion, len(rawTurns)
 
 	var messages []*schema.Message
 	var frameIndexes []int
@@ -269,22 +315,16 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			messages = append(messages, schema.UserMessage(tc.Message.Text))
 		}
 	case sessionLoaded:
-		current, err := buildAgentV3SessionInput(cc, tc)
-		if err != nil {
-			finishContextSpan(err, nil)
-			return nil, err
+		if accepted.messages == nil {
+			accepted, err = buildAgentV3LoadedInput(cc, tc, prefixText, memoryText, state.replay, state.parent)
+			if err != nil {
+				finishContextSpan(err, nil)
+				return nil, err
+			}
 		}
-		messages = []*schema.Message{schema.SystemMessage(prefixText)}
-		frameIndexes = append(frameIndexes, 0)
-		messages = append(messages, tc.Session.replay...)
-		if memoryMsg := buildAgentV3MemorySnapshotMessage(memoryText); memoryMsg != nil {
-			frameIndexes = append(frameIndexes, len(messages))
-			messages = append(messages, memoryMsg)
-		}
-		currentStart = len(messages)
-		messages = append(messages, current...)
+		messages, frameIndexes, currentStart = accepted.messages, accepted.frameIndexes, accepted.currentStart
 	case replyChain:
-		session, err := loadReplySession(ctx, tc.Message, tc.Config.MessageContext)
+		replyContext, err := loadReplySession(ctx, tc.Message, tc.Config.MessageContext)
 		if err != nil {
 			finishContextSpan(err, nil)
 			return nil, err
@@ -293,7 +333,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		if maxChars <= 0 {
 			maxChars = replySessionDefaultTextBudget
 		}
-		sessionMessages, err := buildReplySessionMessages(cc, tc, session, maxChars)
+		sessionMessages, err := buildReplySessionMessages(cc, tc, replyContext, maxChars)
 		if err != nil {
 			finishContextSpan(err, nil)
 			return nil, err
@@ -316,6 +356,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			messages = append(messages, memoryMsg)
 		}
 		currentStart = len(messages)
+		frameIndexes = append(frameIndexes, currentStart)
 		messages = append(messages, promptAddition, sessionMessages[len(sessionMessages)-1])
 	default:
 		userMsg, err := buildAgentV3UserMessage(cc, tc, history, rawTurns)
@@ -330,6 +371,19 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			frameIndexes = append(frameIndexes, 1)
 		}
 		currentStart = len(messages) - 1
+	}
+	if err := ctx.Err(); err != nil {
+		finishContextSpan(err, nil)
+		return nil, err
+	}
+	if rebuilt && !sessionLoaded {
+		limit := cfg.Session.ContextOverflow.TokenLimit()
+		estimate, estimateErr := cc.Agent.estimateSessionContext(ctx, messages, limit)
+		if estimateErr != nil {
+			zap.L().Warn("agentv3: fallback context estimate unknown; executing existing context mode once", zap.Error(estimateErr))
+		} else if estimate.Tokens > limit || estimate.Capped {
+			zap.L().Debug("agentv3: fallback context exceeds session limit; executing existing context mode once", zap.Int64("estimated_tokens", estimate.Tokens), zap.Bool("estimate_capped", estimate.Capped), zap.Int64("max_tokens", limit), zap.String("estimate_method", estimate.Method))
+		}
 	}
 	if !tc.Background {
 		setAgentV3SessionBaseline(tc, messages, frameIndexes, currentStart)
@@ -396,6 +450,9 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	}
 	if userText == "" {
 		userText = pd.Input
+	}
+	if pd.ReplyToXml != "" && !strings.Contains(userText, pd.ReplyToXml) {
+		userText = joinUserMessageSections(userText, pd.ReplyToXml)
 	}
 
 	dynamic := strings.Builder{}

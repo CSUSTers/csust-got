@@ -75,7 +75,7 @@ func (s *Service) scope(scope Scope) (Scope, error) {
 	return scope, scope.Validate()
 }
 
-func (s *Service) begin(ctx context.Context) (context.Context, func(), error) {
+func (s *Service) track(ctx context.Context) (context.Context, func(), error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -83,13 +83,30 @@ func (s *Service) begin(ctx context.Context) (context.Context, func(), error) {
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	op, cancel := context.WithTimeout(ctx, s.options.OperationTimeout)
+	op, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(s.ctx, cancel)
 	return op, func() { stop(); cancel(); s.wg.Done() }, nil
 }
 
+func (s *Service) begin(ctx context.Context) (context.Context, func(), error) {
+	tracked, done, err := s.track(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	op, cancel := context.WithTimeout(tracked, s.options.OperationTimeout)
+	return op, func() { cancel(); done() }, nil
+}
+
 // Load returns complete replay and a parent proof only after all ancestors are verified.
 func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, error) {
+	return s.LoadWithAcceptance(ctx, selection, nil)
+}
+
+// LoadWithAcceptance validates a pinned candidate before accepting it as user activity.
+// accept borrows read-only messages and ancestry only for the callback's duration;
+// it must use the supplied context, not retain the candidate or reenter this Service.
+// The callback runs without the scope file lock, within the tracked Load deadline.
+func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, accept func(context.Context, *LoadCandidate) error) (result LoadResult, loadErr error) {
 	op, done, err := s.begin(ctx)
 	if err != nil {
 		return LoadResult{}, err
@@ -107,7 +124,14 @@ func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, er
 		return LoadResult{}, err
 	}
 	var pinned Pinned
+	defer func() {
+		if pinned.Lease.Token != "" && result.Parent == nil {
+			loadErr = errors.Join(loadErr, s.release(selection.Scope, pinned.Lease))
+		}
+	}()
 	var messages []*schema.Message
+	var baseline TurnCapture
+	ancestorReplyIDs := map[int]struct{}{}
 	err = s.files.WithScopeLock(op, selection.Scope, func(files *ScopeFiles) error {
 		var err error
 		pinned, err = s.repo.ResolveAndPin(op, selection, token, s.options.LeaseDuration)
@@ -120,6 +144,9 @@ func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, er
 		seen := map[NodeRef]bool{}
 		var archiveSize int64
 		for i, n := range pinned.Nodes {
+			if err := op.Err(); err != nil {
+				return err
+			}
 			if n.Scope != selection.Scope || n.Ref.DAGID != pinned.Lease.DAGID || seen[n.Ref] {
 				return ErrCorrupt
 			}
@@ -150,25 +177,42 @@ func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, er
 			if len(messages) > maxArchiveRecords {
 				return fmt.Errorf("%w: too many history messages", ErrCorrupt)
 			}
+			for _, id := range n.ReplyMessageIDs {
+				ancestorReplyIDs[id] = struct{}{}
+			}
 		}
 		if err = ValidateHistory(messages); err != nil {
 			return err
 		}
+		baseline, err = Snapshot(TurnCapture{Bootstrap: History(messages...)})
+		return err
+	})
+	if err != nil {
+		return LoadResult{}, err
+	}
+	if err = op.Err(); err == nil && accept != nil {
+		err = accept(op, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
+	}
+	if err != nil {
+		return LoadResult{}, err
+	}
+	err = s.files.WithScopeLock(op, selection.Scope, func(*ScopeFiles) error {
 		return s.repo.ConfirmLoaded(op, selection.Scope, pinned.Lease, s.options.LeaseDuration)
 	})
 	if err != nil {
-		if pinned.Lease.Token != "" {
-			err = errors.Join(err, s.release(selection.Scope, pinned.Lease))
-		}
 		return LoadResult{}, err
 	}
-	baseline, err := Snapshot(TurnCapture{Bootstrap: History(messages...)})
+	s.mu.Lock()
+	err = op.Err()
+	if s.closed && err == nil {
+		err = ErrClosed
+	}
 	if err != nil {
-		return LoadResult{}, errors.Join(err, s.release(selection.Scope, pinned.Lease))
+		s.mu.Unlock()
+		return LoadResult{}, err
 	}
 	parentCtx, cancel := context.WithCancel(s.ctx)
-	parent := &LoadedParent{service: s, scope: selection.Scope, ref: pinned.Nodes[len(pinned.Nodes)-1].Ref, lease: pinned.Lease, baseline: baseline.Bootstrap, valid: true, ctx: parentCtx, cancel: cancel, done: make(chan struct{})}
-	s.mu.Lock()
+	parent := &LoadedParent{service: s, scope: selection.Scope, ref: pinned.Nodes[len(pinned.Nodes)-1].Ref, lease: pinned.Lease, baseline: baseline.Bootstrap, ancestorReplyIDs: ancestorReplyIDs, valid: true, ctx: parentCtx, cancel: cancel, done: make(chan struct{})}
 	s.parents[parent] = struct{}{}
 	s.mu.Unlock()
 	go parent.heartbeat()
@@ -178,21 +222,31 @@ func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, er
 // LoadedParent can only be constructed by a complete successful Load. Close it after
 // generation/delivery/Commit, including when saving is disabled or the call fails.
 type LoadedParent struct {
-	service  *Service
-	scope    Scope
-	ref      NodeRef
-	lease    Lease
-	baseline []Record
-	mu       sync.Mutex
-	valid    bool
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
-	closeErr error
+	service          *Service
+	scope            Scope
+	ref              NodeRef
+	lease            Lease
+	baseline         []Record
+	ancestorReplyIDs map[int]struct{}
+	mu               sync.Mutex
+	valid            bool
+	ctx              context.Context
+	cancel           context.CancelFunc
+	done             chan struct{}
+	closeErr         error
 }
 
 // Ref returns the successfully loaded node, not a transferable parent proof.
 func (p *LoadedParent) Ref() NodeRef { return p.ref }
+
+// ContainsReplyMessageID reports coverage of this parent's verified ancestor chain.
+func (p *LoadedParent) ContainsReplyMessageID(id int) bool {
+	if p == nil || id <= 0 {
+		return false
+	}
+	_, ok := p.ancestorReplyIDs[id]
+	return ok
+}
 
 // Close stops renewal, releases the pin, and reports release or storage cleanup failures.
 func (p *LoadedParent) Close() error {
@@ -346,6 +400,10 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 func (s *Service) compensate(files *ScopeFiles, scope Scope, intent Intent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.options.OperationTimeout)
 	defer cancel()
+	return s.abortIntent(ctx, files, scope, intent)
+}
+
+func (s *Service) abortIntent(ctx context.Context, files *ScopeFiles, scope Scope, intent Intent) error {
 	ok, err := s.repo.AbortIntent(ctx, scope, intent)
 	if err != nil {
 		return errors.Join(ErrUnknown, err)
@@ -356,6 +414,12 @@ func (s *Service) compensate(files *ScopeFiles, scope Scope, intent Intent) erro
 	if err = files.Remove(intent.Node); err != nil {
 		return err
 	}
+	if ctx.Err() != nil {
+		// The abort and file removal already started; finish only this durable intent.
+		cleanup, cancel := context.WithTimeout(context.Background(), s.options.OperationTimeout)
+		defer cancel()
+		return s.repo.FinishIntent(cleanup, scope, intent)
+	}
 	return s.repo.FinishIntent(ctx, scope, intent)
 }
 
@@ -364,15 +428,13 @@ func (s *Service) Close() error {
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.closed = true
-		s.cancel()
-		s.mu.Unlock()
-		s.wg.Wait()
-		s.mu.Lock()
 		parents := make([]*LoadedParent, 0, len(s.parents))
 		for parent := range s.parents {
 			parents = append(parents, parent)
 		}
+		s.cancel()
 		s.mu.Unlock()
+		s.wg.Wait()
 		for _, parent := range parents {
 			s.closeErr = errors.Join(s.closeErr, parent.Close())
 		}

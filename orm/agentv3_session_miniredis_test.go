@@ -11,5 +11,5 @@ import (
 
 type sessionMiniRedis struct{ *miniredis.Miniredis }
 
-func newSessionTestRedis(t *testing.T) sessionTestRedis { return sessionMiniRedis{miniredis.RunT(t)} }
+func newSessionTestRedis(t testing.TB) sessionTestRedis { return sessionMiniRedis{miniredis.RunT(t)} }
 func (sessionMiniRedis) configureClient(*redis.Client)  {}

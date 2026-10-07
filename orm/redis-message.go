@@ -75,9 +75,40 @@ func PushMessageToStream(msg *Message) error {
 
 // GetMessage 从 Redis 获取完整的消息结构体
 func GetMessage(chatID int64, messageID int) (*Message, error) {
+	return getMessageContext(context.Background(), rc, chatID, messageID)
+}
+
+// GetMessageContext isolates the connection so cancellation can interrupt socket reads.
+func GetMessageContext(ctx context.Context, chatID int64, messageID int) (*Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if ctx.Done() == nil {
+		return getMessageContext(ctx, rc, chatID, messageID)
+	}
+	options := *rc.Options()
+	options.ContextTimeoutEnabled = true
+	options.PushNotificationProcessor = nil
+	client := redis.NewClient(&options)
+	closed := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { _ = client.Close(); close(closed) })
+	defer func() {
+		if !stop() {
+			<-closed
+		} else {
+			_ = client.Close()
+		}
+	}()
+	return getMessageContext(ctx, client, chatID, messageID)
+}
+
+func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, messageID int) (*Message, error) {
 	key := wrapKeyWithChatMsg("message_full", chatID, messageID)
 
-	jsonData, err := rc.Get(context.TODO(), key).Bytes()
+	jsonData, err := client.Get(ctx, key).Bytes()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get message from redis failed", zap.Int64("chat", chatID), zap.Int("message", messageID), zap.Error(err))

@@ -59,10 +59,18 @@ agent_v3:
   # 同 Redis prefix/bot/platform/chat 的实例须共享同卷（sharedVolume）并支持跨进程锁。
   # 群内会话不按 user 隔离；归档含工具/媒体等敏感数据，建议文件 0600 或等效 ACL。
   session:
+    enable: true # 默认 true；false 关闭完整会话加载/保存/阈值处理，实际 reply 也不强制重开。
     directory: "data/agent-sessions"
     ttl: "24h" # 默认 24h，正数 Go duration 字符串（不支持 1d）；整 DAG 闲置 TTL，非每节点/Redis EXPIRE。
-    # 有效完整加载/成功提交刷新活跃时间，失败加载不刷新；仅本地每日 02:00 清过期 active DAG。
+    context_overflow:
+      strategy: rebuild # 当前唯一支持的策略；省略默认 rebuild，不是压缩/摘要。
+      max_tokens: 200000 # 省略默认 200000，显式值必须为正整数；完整首轮候选输入估算严格 > 此值才回退。
+    # 估算方法 text-runs-media-budget-v1 为近似值，非 provider tokenizer/窗口保证，详见文档。
+    # 超限整体回退原 context_mode，允许保存时建立新 DAG 根，不复连或删除旧祖先。
+    # 被接受的完整加载（含 save=false）/成功提交刷新活跃时间，失败/超限拒绝不刷新旧 DAG。
+    # 仅进程本地每日 02:00 清过期 active DAG，与 cron.timezone 独立；容器默认 TZ=Asia/Shanghai。
     # 启动/短周期仅恢复已登记 intent/deleting；不自动重建丢失的 Redis 索引或扫描陌生文件。
+    # 无启用的 v3 agent、全局关闭或 session.enable=false 不初始化存储；存储初始化失败 Warn 后局部回退。
   # 设置 runner_agent 并启用同名专用 agent 后才开放 cron 工具。详见 docs/agent-cron.md。
   cron:
     runner_agent: ""
@@ -191,9 +199,9 @@ agents:
     message_context: 6
     # context_mode: reply_chain # [可选] 仅用回复链构建上下文, 默认 chat
     # session 缺省 save_context=true/load_context=false；不关闭 raw turns / summaries / memory 等旧存储。
-    # 实际 reply 分支强制 true/true；带 ReplyTo 的 command/regex 仍使用下列开关。
+    # 全局 session 启用且可用时，实际 reply 分支强制 true/true；带 ReplyTo 的 command/regex 仍使用下列开关。
     # reply 精确续接被回复的 bot 消息，可同 chat 跨 agent 分叉；非 reply load=true 续接同 agent 最近成功提交。
-    # 加载缺失/损坏/Redis 失败时完整回退 context_mode，保存时新建 root；最终实际发送成功才存增量 JSONL。
+    # 加载缺失/损坏/Redis 失败或候选估算超阈值时整体回退 context_mode，保存时新建 root；最终送达成功才存增量 JSONL。
     session:
       save_context: true
       load_context: false

@@ -25,6 +25,7 @@ var (
 	errAgentV3SessionBaseline             = errors.New("incomplete or changed session invocation baseline")
 	errAgentV3SessionModelMessagesChanged = errors.New("model session baseline changed non-system messages")
 	errAgentV3SessionModelMessagesOmitted = errors.New("model session baseline omitted input messages")
+	errAgentV3SessionContextOverflow      = errors.New("session context overflow rebuild")
 )
 
 type agentV3SessionService struct {
@@ -52,37 +53,50 @@ type agentV3SessionTurn struct {
 	input       []*schema.Message
 	kinds       []agentV3SessionInputKind
 	baselineErr error
+	selection   session.Selection
+	load        bool
+	ownsHistory bool
 }
 
 func initAgentV3SessionService(ctx context.Context) error {
-	if config.BotConfig == nil {
+	closeAgentV3SessionService()
+	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil {
 		return nil
 	}
-	cfg := config.AgentV3SessionConfig{}
-	if config.BotConfig.AgentV3 != nil {
-		cfg = config.BotConfig.AgentV3.Session
-	}
+	cfg := config.BotConfig.AgentV3.Session
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("agentv3: session configuration: %w", err)
 	}
+	if !cfg.Enabled() || !hasEnabledAgent() {
+		return nil
+	}
 	repo, err := orm.NewProductionAgentV3SessionRepository()
 	if err != nil {
-		return fmt.Errorf("agentv3: session repository: %w", err)
+		zap.L().Warn("agentv3: session unavailable; using legacy context", zap.String("stage", "repository"), zap.Error(err))
+		return nil
 	}
 	files, err := session.NewFileStore(cfg.DirectoryPath())
 	if err != nil {
-		return fmt.Errorf("agentv3: session directory: %w", err)
+		zap.L().Warn("agentv3: session unavailable; using legacy context", zap.String("stage", "directory"), zap.Error(err))
+		return nil
 	}
 	service, err := session.NewService(repo, files, session.Options{TTL: cfg.IdleTTL()})
 	if err != nil {
-		_ = files.Close()
-		return fmt.Errorf("agentv3: session service: %w", err)
+		err = errors.Join(err, files.Close())
+		zap.L().Warn("agentv3: session unavailable; using legacy context", zap.String("stage", "service"), zap.Error(err))
+		return nil
 	}
 	s := startAgentV3SessionMaintenance(ctx, service, time.Local)
 	if old := agentSessionService.Swap(s); old != nil {
 		old.close()
 	}
 	return nil
+}
+
+func closeAgentV3SessionService() {
+	if old := agentSessionService.Swap(nil); old != nil {
+		old.close()
+	}
 }
 
 func startAgentV3SessionMaintenance(ctx context.Context, service *session.Service, location *time.Location) *agentV3SessionService {
@@ -148,12 +162,15 @@ func (s *agentV3SessionService) close() {
 	})
 }
 
-func loadAgentV3Session(ctx context.Context, tc *TurnContext) {
+func setupAgentV3SessionTurn(tc *TurnContext) {
 	if tc.Background {
 		return
 	}
-	state := &agentV3SessionTurn{scope: session.Scope{Bot: agentV3BotName(tc), Platform: agentV3Platform, ChatID: tc.ChatID}}
+	state := &agentV3SessionTurn{scope: session.Scope{Bot: agentV3BotName(tc), Platform: agentV3Platform, ChatID: tc.ChatID}, ownsHistory: true}
 	tc.Session = state
+	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil || !config.BotConfig.AgentV3.Enable || !config.BotConfig.AgentV3.Session.Enabled() {
+		return
+	}
 	s := agentSessionService.Load()
 	if s == nil {
 		return
@@ -170,16 +187,11 @@ func loadAgentV3Session(ctx context.Context, tc *TurnContext) {
 	selection := session.Selection{Scope: state.scope, Agent: tc.Config.Name, Mode: session.SelectLatest}
 	if tc.Trigger != nil && tc.Trigger.Reply {
 		selection.Mode = session.SelectReply
-		if tc.Message.ReplyTo != nil {
-			selection.ReplyMessageID = tc.Message.ReplyTo.ID
+		if target, valid := replySessionEmbeddedParent(tc.Message.ReplyTo, tc.Message.Chat); valid && target.Chat.ID == tc.ChatID {
+			selection.ReplyMessageID = target.ID
 		}
 	}
-	loaded, err := state.service.Load(ctx, selection)
-	if err != nil {
-		zap.L().Warn("agentv3: session load failed; using legacy context", zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Error(err))
-		return
-	}
-	state.parent, state.replay = loaded.Parent, loaded.Messages
+	state.selection, state.load = selection, true
 }
 
 func closeAgentV3SessionTurn(tc *TurnContext) {
@@ -190,26 +202,102 @@ func closeAgentV3SessionTurn(tc *TurnContext) {
 	}
 }
 
-func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext) ([]*schema.Message, error) {
-	if !tc.Config.UsesReplyChain() {
-		current := *tc.Message
+type agentV3SessionReplyProof interface{ ContainsReplyMessageID(int) bool }
+
+type agentV3PreparedSessionInput struct {
+	messages     []*schema.Message
+	frameIndexes []int
+	currentStart int
+	imageRefs    []orm.AgentV3ImageRef
+}
+
+func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3SessionReplyProof) ([]*schema.Message, []int, error) {
+	current := *tc.Message
+	if target, valid := replySessionEmbeddedParent(current.ReplyTo, current.Chat); valid && current.Chat.ID == tc.ChatID {
+		if proof != nil && proof.ContainsReplyMessageID(target.ID) {
+			current.ReplyTo = nil
+		} else {
+			quote := *target
+			quote.ReplyTo = nil
+			current.ReplyTo = &quote
+		}
+	} else {
 		current.ReplyTo = nil
-		currentTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+	}
+	currentTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+	if !tc.Config.UsesReplyChain() {
 		message, err := buildAgentV3UserMessage(cc, currentTC, &RichHistory{}, nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []*schema.Message{message}, nil
+		return []*schema.Message{message}, nil, nil
 	}
-	current, err := buildReplySessionMessages(cc, tc, replySession{Blocks: []replySessionBlock{{Messages: []*tb.Message{tc.Message}, Current: true}}}, 0)
+	currentMessages, err := buildReplySessionMessages(cc, currentTC, replySession{Blocks: []replySessionBlock{{Messages: []*tb.Message{&current}, Current: true}}}, 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	addition, err := buildReplySessionPromptAddition(cc, tc)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return append([]*schema.Message{addition}, current...), nil
+	messages := []*schema.Message{addition}
+	if current.ReplyTo != nil {
+		quoteTarget := *current.ReplyTo
+		quoteTarget.AlbumID = ""
+		quoteTC := replySessionEncodingContext(currentTC, []*tb.Message{&quoteTarget})
+		quote := buildUserMessage("<current_user_quote>\n"+replySessionRenderedMessageText(current.ReplyTo)+"\n</current_user_quote>", quoteTC, nil)
+		messages = append(messages, quote)
+		tc.V3.ImageRefs = normalizeAgentV3ImageRefs(append(tc.V3.ImageRefs, replySessionMessageImageRefs(current.ReplyTo)...))
+	}
+	return append(messages, currentMessages...), []int{0}, nil
+}
+
+func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory string, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {
+	current, offsets, err := buildAgentV3SessionInput(cc, tc, proof)
+	if err != nil {
+		return agentV3PreparedSessionInput{}, err
+	}
+	prepared := agentV3PreparedSessionInput{messages: []*schema.Message{schema.SystemMessage(prefix)}, frameIndexes: []int{0}}
+	prepared.messages = append(prepared.messages, replay...)
+	if message := buildAgentV3MemorySnapshotMessage(memory); message != nil {
+		prepared.frameIndexes = append(prepared.frameIndexes, len(prepared.messages))
+		prepared.messages = append(prepared.messages, message)
+	}
+	prepared.currentStart = len(prepared.messages)
+	for _, offset := range offsets {
+		prepared.frameIndexes = append(prepared.frameIndexes, prepared.currentStart+offset)
+	}
+	prepared.messages = append(prepared.messages, current...)
+	prepared.imageRefs = tc.V3.ImageRefs
+	return prepared, nil
+}
+
+func isPureAgentV3SessionError(err, sentinel error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !isPureAgentV3SessionError(child, sentinel) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return isPureAgentV3SessionError(wrapped.Unwrap(), sentinel)
+	}
+	return errors.Is(err, sentinel)
+}
+
+func logAgentV3SessionLoadError(tc *TurnContext, err error) {
+	fields := []zap.Field{zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Error(err)}
+	if isPureAgentV3SessionError(err, session.ErrMiss) {
+		zap.L().Debug("agentv3: session miss; using legacy context", fields...)
+	} else if !isPureAgentV3SessionError(err, errAgentV3SessionContextOverflow) {
+		zap.L().Warn("agentv3: session load rejected or failed; using legacy context", fields...)
+	}
 }
 
 func setAgentV3SessionBaseline(tc *TurnContext, messages []*schema.Message, frameIndexes []int, currentStart int) {

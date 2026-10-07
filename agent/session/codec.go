@@ -58,6 +58,9 @@ func Snapshot(c TurnCapture) (TurnCapture, error) {
 	if err != nil {
 		return TurnCapture{}, err
 	}
+	if bytes.Equal(b, canonical) {
+		return out, nil
+	}
 	var original, restored any
 	if err = decodeJSON(b, &original); err != nil {
 		return TurnCapture{}, err

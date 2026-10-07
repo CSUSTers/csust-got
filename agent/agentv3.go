@@ -30,6 +30,12 @@ var (
 func Init(ctx context.Context) error {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
+	closeAgentV3SessionService()
+	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		if err := config.BotConfig.AgentV3.Session.Validate(); err != nil {
+			return fmt.Errorf("agentv3: session configuration: %w", err)
+		}
+	}
 	if err := validateCronStartup(); err != nil {
 		return err
 	}
@@ -119,9 +125,7 @@ func HasCompiledAgent(name string) bool {
 func Close() {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
-	if s := agentSessionService.Swap(nil); s != nil {
-		s.close()
-	}
+	closeAgentV3SessionService()
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
 	}
@@ -168,22 +172,13 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		BotUser: tbCtx.Bot().Me,
 	}
 	ctx = WithTurnContext(ctx, tc)
-	loadAgentV3Session(ctx, tc)
+	setupAgentV3SessionTurn(tc)
 	defer closeAgentV3SessionTurn(tc)
 	if tc.Session != nil && tc.Session.capture != nil {
 		ctx = WithSessionCapture(ctx, tc.Session.capture)
 	}
 
-	var history *RichHistory
-	if tc.Session.parent == nil {
-		var err error
-		history, err = loadAgentHistory(tc)
-		if err != nil {
-			zap.L().Warn("agentv3: failed to load history", zap.Error(err))
-			history = &RichHistory{}
-		}
-	}
-	messages, err := prepareAgentV3Turn(ctx, compiled, tc, history)
+	messages, err := prepareAgentV3Turn(ctx, compiled, tc, nil)
 	if err != nil {
 		if tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)

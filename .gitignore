@@ -119,6 +119,7 @@ fabric.properties
 
 .token
 data/
+/agent-sessions/
 
 .vscode/
 .idea/

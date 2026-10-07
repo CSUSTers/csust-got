@@ -22,12 +22,14 @@ import (
 // it streams every turn (not only the final), refuses tool calls on the final
 // step, detects duplicate tool calls and sanitises history before each model call.
 type CustomAgent struct {
-	name         string
-	boundModel   model.ToolCallingChatModel
-	invokables   map[string]tool.InvokableTool
-	toolNames    []string
-	maxSteps     int
-	dupThreshold int
+	name                   string
+	boundModel             model.ToolCallingChatModel
+	invokables             map[string]tool.InvokableTool
+	toolNames              []string
+	maxSteps               int
+	dupThreshold           int
+	sessionToolEstimate    sessionContextEstimate
+	sessionToolEstimateErr error
 }
 
 // CustomAgentConfig configures a CustomAgent.
@@ -90,13 +92,16 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 		}
 	}
 
+	toolEstimate, toolEstimateErr := estimateSessionTools(ctx, infos)
 	return &CustomAgent{
-		name:         cfg.Name,
-		boundModel:   bound,
-		invokables:   invokables,
-		toolNames:    names,
-		maxSteps:     cfg.MaxSteps,
-		dupThreshold: 3,
+		name:                   cfg.Name,
+		boundModel:             bound,
+		invokables:             invokables,
+		toolNames:              names,
+		maxSteps:               cfg.MaxSteps,
+		dupThreshold:           3,
+		sessionToolEstimate:    toolEstimate,
+		sessionToolEstimateErr: toolEstimateErr,
 	}, nil
 }
 
@@ -166,11 +171,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		defer sw.Close()
 	}
 
-	history := append([]*schema.Message{}, input...)
-	history = sanitizeHistory(history)
-	if len(a.invokables) > 0 {
-		history = injectLoopDirectives(ctx, history)
-	}
+	history := a.sessionModelBaseline(ctx, input)
 	capture.recordModelInput(history)
 	var toolRounds []*schema.Message
 
@@ -184,9 +185,8 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		isFinal := round == a.maxSteps-1
-		guidanceText := a.computeGuidanceText(toolRounds, isFinal, dupWarnInjected)
 		beforeGuidance := len(history)
-		history = appendLoopGuidance(history, guidanceText)
+		history = a.appendSessionLoopGuidance(history, toolRounds, isFinal, dupWarnInjected)
 		if len(history) > beforeGuidance {
 			capture.record(history[len(history)-1], true)
 		}
@@ -530,11 +530,7 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 		)
 	}
 
-	toolCtx := ctx
-	if name == agentV3ToolDelegate {
-		toolCtx = WithSessionCapture(ctx, nil)
-	}
-	result, err := t.InvokableRun(toolCtx, args)
+	result, err := t.InvokableRun(WithSessionCapture(ctx, nil), args)
 	if err != nil {
 		toolErr := err
 		errText := err.Error()
@@ -601,6 +597,22 @@ func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, du
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+func (a *CustomAgent) sessionModelBaseline(ctx context.Context, input []*schema.Message) []*schema.Message {
+	history := sanitizeHistory(input)
+	if len(a.invokables) > 0 {
+		history = injectLoopDirectives(ctx, history)
+	}
+	return history
+}
+
+func (a *CustomAgent) previewSessionModelInput(ctx context.Context, input []*schema.Message) []*schema.Message {
+	return a.appendSessionLoopGuidance(a.sessionModelBaseline(ctx, input), nil, a.maxSteps == 1, false)
+}
+
+func (a *CustomAgent) appendSessionLoopGuidance(history, toolRounds []*schema.Message, final, duplicate bool) []*schema.Message {
+	return appendLoopGuidance(history, a.computeGuidanceText(toolRounds, final, duplicate))
 }
 
 func appendLoopGuidance(history []*schema.Message, guidance string) []*schema.Message {

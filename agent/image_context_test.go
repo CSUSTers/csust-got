@@ -1,6 +1,7 @@
 package agentv3
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -134,12 +135,12 @@ func TestBuildUserMessageFallsBackWhenMultimodalDisabled(t *testing.T) {
 }
 
 func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
-	oldLoader := loadStoredTelegramMessage
+	oldLoader := loadStoredTelegramMessageContext
 	oldWait := currentAlbumCompletionWait
 	oldPoll := currentAlbumCompletionPollInterval
 	oldWindow := currentAlbumSiblingWindow
 	defer func() {
-		loadStoredTelegramMessage = oldLoader
+		loadStoredTelegramMessageContext = oldLoader
 		currentAlbumCompletionWait = oldWait
 		currentAlbumCompletionPollInterval = oldPoll
 		currentAlbumSiblingWindow = oldWindow
@@ -148,7 +149,7 @@ func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
 	currentAlbumCompletionWait = 0
 	currentAlbumCompletionPollInterval = 0
 	currentAlbumSiblingWindow = 2
-	loadStoredTelegramMessage = func(chatID int64, messageID int) (*tb.Message, error) {
+	loadStoredTelegramMessageContext = func(_ context.Context, chatID int64, messageID int) (*tb.Message, error) {
 		switch messageID {
 		case 99, 101:
 			return &tb.Message{

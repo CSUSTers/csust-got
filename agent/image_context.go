@@ -2,6 +2,8 @@ package agentv3
 
 import (
 	"bytes"
+	"context"
+	"csust-got/config"
 	"csust-got/orm"
 	"encoding/base64"
 	"errors"
@@ -9,7 +11,11 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"net/http"
+	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +40,7 @@ var (
 	currentAlbumCompletionPollInterval = 100 * time.Millisecond
 	currentAlbumSiblingWindow          = 16
 	loadStoredTelegramMessage          = orm.GetMessage
+	loadStoredTelegramMessageContext   = orm.GetMessageContext
 	encodeTelegramPhotoDataURL         = encodePhotoForLLM
 	errMissingTelegramPhotoContext     = errors.New("missing telegram photo context")
 )
@@ -125,7 +132,7 @@ func collectImageContextEntries(tc *TurnContext, history *RichHistory) []imageCo
 	seen := make(map[int]struct{})
 	var entries []imageContextEntry
 
-	entries = append(entries, collectImageEntriesFromMessages(tc, loadCurrentAlbumMessages(tc.Message), imageContextSourceCurrent, seen)...)
+	entries = append(entries, collectImageEntriesFromMessages(tc, loadCurrentAlbumMessagesContext(agentV3RenderContext(tc), tc.Message), imageContextSourceCurrent, seen)...)
 
 	if tc.Message.ReplyTo != nil {
 		entries = append(entries, collectImageEntriesFromMessages(tc, []*tb.Message{tc.Message.ReplyTo}, imageContextSourceReply, seen)...)
@@ -143,6 +150,9 @@ func collectImageEntriesFromMessages(
 ) []imageContextEntry {
 	entries := make([]imageContextEntry, 0, len(messages))
 	for _, msg := range messages {
+		if agentV3RenderContext(tc).Err() != nil {
+			break
+		}
 		if msg == nil || msg.Photo == nil {
 			continue
 		}
@@ -172,6 +182,10 @@ func collectImageEntriesFromMessages(
 }
 
 func loadCurrentAlbumMessages(msg *tb.Message) []*tb.Message {
+	return loadCurrentAlbumMessagesContext(context.Background(), msg)
+}
+
+func loadCurrentAlbumMessagesContext(ctx context.Context, msg *tb.Message) []*tb.Message {
 	if msg == nil {
 		return nil
 	}
@@ -182,12 +196,21 @@ func loadCurrentAlbumMessages(msg *tb.Message) []*tb.Message {
 	messages := map[int]*tb.Message{msg.ID: msg}
 	deadline := time.Now().Add(currentAlbumCompletionWait)
 
-	for {
-		loadAlbumSiblingMessages(msg.Chat.ID, msg.ID, msg.AlbumID, messages)
+	for ctx.Err() == nil {
+		if ctx.Done() == nil {
+			loadAlbumSiblingMessages(msg.Chat.ID, msg.ID, msg.AlbumID, messages)
+		} else {
+			loadAlbumSiblingMessagesContext(ctx, msg.Chat.ID, msg.ID, msg.AlbumID, messages)
+		}
 		if time.Now().After(deadline) {
 			break
 		}
-		time.Sleep(currentAlbumCompletionPollInterval)
+		timer := time.NewTimer(currentAlbumCompletionPollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
 
 	ids := make([]int, 0, len(messages))
@@ -204,15 +227,22 @@ func loadCurrentAlbumMessages(msg *tb.Message) []*tb.Message {
 }
 
 func loadAlbumSiblingMessages(chatID int64, messageID int, albumID string, messages map[int]*tb.Message) {
+	loadAlbumSiblingMessagesContext(context.Background(), chatID, messageID, albumID, messages)
+}
+
+func loadAlbumSiblingMessagesContext(ctx context.Context, chatID int64, messageID int, albumID string, messages map[int]*tb.Message) {
 	startID := max(messageID-currentAlbumSiblingWindow, 1)
 	endID := messageID + currentAlbumSiblingWindow
 
 	for id := startID; id <= endID; id++ {
+		if ctx.Err() != nil {
+			return
+		}
 		if _, ok := messages[id]; ok {
 			continue
 		}
 
-		msg, err := loadStoredTelegramMessage(chatID, id)
+		msg, err := loadStoredTelegramMessageContext(ctx, chatID, id)
 		if err != nil || msg == nil || msg.AlbumID != albumID {
 			continue
 		}
@@ -319,24 +349,45 @@ func encodePhotoForLLM(tc *TurnContext, photo *tb.Photo) (string, error) {
 		return "", errMissingTelegramPhotoContext
 	}
 
-	file, err := tc.Bot.FileByID(photo.FileID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get photo file info: %w", err)
+	ctx, cancel := context.WithTimeout(agentV3RenderContext(tc), 10*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	reader, err := tc.Bot.File(&file)
+	transport := http.DefaultTransport
+	if config.BotConfig != nil && config.BotConfig.Proxy != "" {
+		proxy, err := url.Parse(config.BotConfig.Proxy)
+		if err != nil {
+			return "", safeTelegramPhotoError(err, tc.Bot)
+		}
+		local := &http.Transport{Proxy: http.ProxyURL(proxy)}
+		defer local.CloseIdleConnections()
+		transport = local
+	}
+	// Telebot has no context-aware File API. Use a private downloader, not the
+	// live bot's client, so both metadata and body reads honor the load deadline.
+	bot, err := tb.NewBot(tb.Settings{Token: tc.Bot.Token, URL: tc.Bot.URL, Offline: true, Client: &http.Client{Transport: photoContextTransport{ctx: ctx, base: transport}}})
 	if err != nil {
-		return "", fmt.Errorf("failed to download photo: %w", err)
+		return "", safeTelegramPhotoError(err, tc.Bot)
+	}
+	file := tb.File{FileID: photo.FileID}
+	reader, err := bot.File(&file)
+	if err != nil {
+		return "", fmt.Errorf("failed to download photo: %w", safeTelegramPhotoError(err, tc.Bot))
 	}
 	defer func() { _ = reader.Close() }()
 
-	data, err := io.ReadAll(io.LimitReader(reader, 10*1024*1024))
+	data, err := io.ReadAll(io.LimitReader(photoContextReader{ctx: ctx, reader: reader}, 10*1024*1024))
 	if err != nil {
-		return "", fmt.Errorf("failed to read photo data: %w", err)
+		return "", fmt.Errorf("failed to read photo data: %w", safeTelegramPhotoError(err, tc.Bot))
 	}
 
-	original, _, err := image.Decode(bytes.NewReader(data))
+	original, _, err := image.Decode(photoContextReader{ctx: ctx, reader: bytes.NewReader(data)})
 	if err != nil {
 		return "", fmt.Errorf("failed to decode photo: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 
 	bounds := original.Bounds()
@@ -351,12 +402,116 @@ func encodePhotoForLLM(tc *TurnContext, photo *tb.Photo) (string, error) {
 		draw.ApproxBiLinear.Scale(dst, dst.Rect, original, bounds, draw.Over, nil)
 		resized = dst
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	buf := bytes.NewBuffer(nil)
-	if err := jpeg.Encode(buf, resized, &jpeg.Options{Quality: 90}); err != nil {
+	if err := jpeg.Encode(photoContextWriter{ctx: ctx, writer: buf}, resized, &jpeg.Options{Quality: 90}); err != nil {
 		return "", fmt.Errorf("failed to encode photo as jpeg: %w", err)
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	return "data:image/jpeg;base64," + encoded, nil
+}
+
+var telegramPhotoErrorURL = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s]+`)
+
+type telegramPhotoError struct {
+	message string
+	cause   error
+}
+
+func (e *telegramPhotoError) Error() string { return e.message }
+
+// Do not unwrap the unsafe cause into verbose logging; preserve identity via Is.
+func (e *telegramPhotoError) Is(target error) bool { return errors.Is(e.cause, target) }
+
+func (e *telegramPhotoError) Format(state fmt.State, _ rune) { _, _ = io.WriteString(state, e.message) }
+
+func safeTelegramPhotoError(err error, bot *tb.Bot) error {
+	for {
+		var requestErr *url.Error
+		if !errors.As(err, &requestErr) {
+			break
+		}
+		err = requestErr.Err
+	}
+	message := "Telegram photo operation failed"
+	switch {
+	case errors.Is(err, context.Canceled):
+		message = context.Canceled.Error()
+	case errors.Is(err, context.DeadlineExceeded):
+		message = context.DeadlineExceeded.Error()
+	case strings.HasPrefix(err.Error(), "telegram:"):
+		message = err.Error()
+		if len(message) > 256 || strings.ContainsAny(message, "\r\n{}<>") {
+			message = "Telegram API request rejected"
+			if index := strings.LastIndex(err.Error(), "("); index >= 0 {
+				code, parseErr := strconv.Atoi(strings.TrimSuffix(err.Error()[index+1:], ")"))
+				if parseErr == nil && code >= 100 && code <= 599 {
+					message = fmt.Sprintf("Telegram API request rejected (%d)", code)
+				}
+			}
+		}
+	case strings.HasPrefix(err.Error(), "telebot: expected status 200 but got "):
+		status := strings.TrimPrefix(err.Error(), "telebot: expected status 200 but got ")
+		fields := strings.Fields(status)
+		if len(fields) > 0 {
+			code, parseErr := strconv.Atoi(fields[0])
+			if parseErr == nil && code >= 100 && code <= 599 {
+				message = fmt.Sprintf("telebot: expected status 200 but got %d %s", code, http.StatusText(code))
+			}
+		}
+	}
+	message = telegramPhotoErrorURL.ReplaceAllString(message, "[redacted URL]")
+	for _, secret := range []string{bot.Token, url.PathEscape(bot.Token), url.QueryEscape(bot.Token), bot.URL} {
+		if secret != "" {
+			message = strings.ReplaceAll(message, secret, "[redacted]")
+		}
+	}
+	return &telegramPhotoError{message: message, cause: err}
+}
+
+func agentV3RenderContext(tc *TurnContext) context.Context {
+	if tc != nil && tc.V3 != nil && tc.V3.renderCtx != nil {
+		return tc.V3.renderCtx
+	}
+	return context.Background()
+}
+
+type photoContextTransport struct {
+	ctx  context.Context
+	base http.RoundTripper
+}
+
+func (t photoContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.base.RoundTrip(req.WithContext(t.ctx))
+}
+
+type photoContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r photoContextReader) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(data)
+}
+
+type photoContextWriter struct {
+	ctx    context.Context
+	writer io.Writer
+}
+
+func (w photoContextWriter) Write(data []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return w.writer.Write(data)
 }

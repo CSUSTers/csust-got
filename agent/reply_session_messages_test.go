@@ -1,6 +1,7 @@
 package agentv3
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -205,19 +206,19 @@ func assertReplySessionEntityBounds(t *testing.T, message *tb.Message) {
 
 func TestReplySessionMessagesKeepImagesInTheirBlocks(t *testing.T) {
 	oldEncoder := encodeTelegramPhotoDataURL
-	oldLoader := loadStoredTelegramMessage
+	oldLoader := loadStoredTelegramMessageContext
 	encoded := make([]string, 0)
 	encodeTelegramPhotoDataURL = func(_ *TurnContext, photo *tb.Photo) (string, error) {
 		encoded = append(encoded, photo.FileID)
 		return "data:image/jpeg;base64,aA==", nil
 	}
-	loadStoredTelegramMessage = func(int64, int) (*tb.Message, error) {
+	loadStoredTelegramMessageContext = func(context.Context, int64, int) (*tb.Message, error) {
 		t.Fatal("reply-session rendering must not load album siblings")
 		return nil, nil
 	}
 	t.Cleanup(func() {
 		encodeTelegramPhotoDataURL = oldEncoder
-		loadStoredTelegramMessage = oldLoader
+		loadStoredTelegramMessageContext = oldLoader
 	})
 
 	cfg := &config.AgentConfig{

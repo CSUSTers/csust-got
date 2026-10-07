@@ -38,7 +38,7 @@ type sessionTestRedis interface {
 	configureClient(*redis.Client)
 }
 
-func newSessionFixture(t *testing.T, options session.Options) *sessionFixture {
+func newSessionFixture(t testing.TB, options session.Options) *sessionFixture {
 	t.Helper()
 	mr := newSessionTestRedis(t)
 	now := time.Date(2026, 10, 7, 10, 0, 0, 0, time.UTC)
@@ -53,7 +53,7 @@ func newSessionFixture(t *testing.T, options session.Options) *sessionFixture {
 	return &sessionFixture{mr: mr, repo: repo, service: svc, dir: dir, scope: session.Scope{Namespace: repo.Namespace(), Bot: "bot", Platform: "telegram", ChatID: -100}, now: now}
 }
 
-func fixtureService(t *testing.T, repo session.Repository, dir string, options session.Options) *session.Service {
+func fixtureService(t testing.TB, repo session.Repository, dir string, options session.Options) *session.Service {
 	t.Helper()
 	files, err := session.NewFileStore(dir)
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func fixtureService(t *testing.T, repo session.Repository, dir string, options s
 	return svc
 }
 
-func sessionRun(t *testing.T) string {
+func sessionRun(t testing.TB) string {
 	t.Helper()
 	id, err := session.NewID()
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func sessionCapture(text string) session.TurnCapture {
 	return session.TurnCapture{Frame: []session.Record{{Source: session.SourceFrame, Message: schema.SystemMessage("new agent system")}}, Delta: session.History(schema.UserMessage(text), schema.AssistantMessage("answer "+text, nil)), Complete: true}
 }
 
-func sessionRequest(t *testing.T, scope session.Scope, agent string, parent *session.LoadedParent, messageID int, text string) session.CommitRequest {
+func sessionRequest(t testing.TB, scope session.Scope, agent string, parent *session.LoadedParent, messageID int, text string) session.CommitRequest {
 	t.Helper()
 	return session.CommitRequest{Scope: scope, Agent: agent, RunID: sessionRun(t), Parent: parent, Capture: sessionCapture(text), Receipt: session.DeliveryReceipt{MessageIDs: []int{messageID}}}
 }
@@ -96,13 +96,9 @@ func sessionArchivePath(dir string, n session.Node) string {
 	return filepath.Join(dir, n.Scope.Namespace, hex.EncodeToString(h[:]), strconv.FormatInt(n.Scope.ChatID, 10), n.Ref.DAGID, n.FileName)
 }
 
-func sessionReadState(t *testing.T, f *sessionFixture) sessionState {
+func sessionReadState(t testing.TB, f *sessionFixture) sessionState {
 	t.Helper()
-	key, err := f.repo.scopeKey(f.scope)
-	require.NoError(t, err)
-	state, err := readSessionState(t.Context(), f.repo.client, key, f.scope)
-	require.NoError(t, err)
-	return state
+	return sessionFixtureState(t, f)
 }
 
 func TestAgentV3SessionBranchesSelectionAndIsolation(t *testing.T) {
@@ -187,7 +183,7 @@ func TestAgentV3SessionBrokenChainNeverReturnsParent(t *testing.T) {
 			case "truncated":
 				require.NoError(t, os.WriteFile(sessionArchivePath(f.dir, root), []byte("{}\n"), 0600))
 			default:
-				require.NoError(t, f.repo.mutate(t.Context(), f.scope, func(s *sessionState, _ int64) error {
+				require.NoError(t, sessionInjectFixture(t, f, func(s *sessionState, _ int64) (bool, error) {
 					d := s.DAGs[root.Ref.DAGID]
 					n := d.Nodes[root.Ref.NodeID]
 					switch kind {
@@ -203,7 +199,7 @@ func TestAgentV3SessionBrokenChainNeverReturnsParent(t *testing.T) {
 						n.Digest = strings.Repeat("0", 64)
 					}
 					d.Nodes[n.Ref.NodeID] = n
-					return nil
+					return true, nil
 				}))
 			}
 			loaded, err := f.service.Load(t.Context(), session.Selection{Scope: f.scope, Mode: session.SelectReply, ReplyMessageID: 101})
@@ -277,9 +273,9 @@ func TestAgentV3SessionLeaseRenewalAndExpiredParentRoot(t *testing.T) {
 	require.NoError(t, err)
 	// Simulate a lost lease under the same atomic seam used by GC; the retained
 	// LoadedParent proof can no longer connect to the old DAG.
-	require.NoError(t, f.repo.mutate(t.Context(), f.scope, func(s *sessionState, _ int64) error {
+	require.NoError(t, sessionInjectFixture(t, f, func(s *sessionState, _ int64) (bool, error) {
 		s.DAGs[root.Ref.DAGID].Leases = map[string]session.Lease{}
-		return nil
+		return true, nil
 	}))
 	f.mr.SetTime(f.now.Add(2 * time.Hour))
 	require.NoError(t, f.service.Collect(t.Context()))
@@ -560,7 +556,10 @@ func TestAgentV3SessionGCRejectsCrossDAGManifest(t *testing.T) {
 	f.mr.SetTime(f.now.Add(2 * time.Hour))
 	live, err := f.service.Commit(t.Context(), sessionRequest(t, f.scope, "B", nil, 102, "live"))
 	require.NoError(t, err)
-	require.NoError(t, f.repo.mutate(t.Context(), f.scope, func(s *sessionState, _ int64) error { s.DAGs[old.Ref.DAGID].Nodes[old.Ref.NodeID] = live; return nil }))
+	require.NoError(t, sessionInjectFixture(t, f, func(s *sessionState, _ int64) (bool, error) {
+		s.DAGs[old.Ref.DAGID].Nodes[old.Ref.NodeID] = live
+		return true, nil
+	}))
 	require.ErrorIs(t, f.service.Collect(t.Context()), session.ErrCorrupt)
 	_, err = os.Stat(sessionArchivePath(f.dir, live))
 	require.NoError(t, err)

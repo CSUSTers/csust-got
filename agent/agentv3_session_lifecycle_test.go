@@ -3,6 +3,8 @@ package agentv3
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,7 +41,7 @@ func TestAgentV3SessionInitRecoversWithoutCollectingExpiredActiveDAG(t *testing.
 	require.Len(t, deletions, 1)
 	f.mini.SetTime(now.Add(2 * time.Hour))
 	config.BotConfig.AgentV3.Session.TTL = "1h"
-	config.BotConfig.Agents = nil
+	config.BotConfig.Agents = &config.AgentV3Configs{cfg}
 	oldManager, oldCron := mcpManager, cronService.Load()
 	mcpManager = nil
 	cronService.Store(nil)
@@ -194,7 +196,7 @@ func TestAgentV3SessionBackgroundDoesNotLoadCaptureOrCommit(t *testing.T) {
 	compiled := f.compile(t, cfg, mdl)
 	tc := &TurnContext{Bot: f.bot, BotUser: f.bot.Me, Message: sessionMessage(100, 7, 0, "background input"), ChatID: -100, Config: cfg, Background: true}
 	ctx := WithTurnContext(t.Context(), tc)
-	loadAgentV3Session(ctx, tc)
+	setupAgentV3SessionTurn(tc)
 	require.Nil(t, tc.Session)
 	messages, err := prepareAgentV3Turn(ctx, compiled, tc, nil)
 	require.NoError(t, err)
@@ -245,7 +247,89 @@ func TestAgentV3SessionParentReleasedOnEveryLoadedExit(t *testing.T) {
 				f.failDelivery = true
 			}
 			_ = Chat(f.bot.NewContext(tb.Update{Message: sessionMessage(200, 7, 60, "second input")}), cfg, nil)
-			require.EqualValues(t, 1, repo.releases.Load())
+			if exit == "prepare error" {
+				require.Zero(t, repo.releases.Load(), "common-frame errors now occur before any pin is acquired")
+			} else {
+				require.EqualValues(t, 1, repo.releases.Load())
+			}
 		})
 	}
+}
+
+func TestAgentV3SessionInitGatesAndRevokesOldService(t *testing.T) {
+	for _, mode := range []string{"no agents", "agent disabled", "global disabled", "session disabled", "nil config", "bad directory"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newAgentSessionFixture(t)
+			old := agentSessionService.Load()
+			oldManager, oldCron := mcpManager, cronService.Load()
+			mcpManager = nil
+			cronService.Store(nil)
+			t.Cleanup(func() { Close(); mcpManager = oldManager; cronService.Store(oldCron) })
+			cfg := &config.AgentConfig{Name: "enabled", Model: &config.Model{Model: "fixture", ApiKey: "fixture-key", BaseUrl: "http://model.invalid"}, Agent: &config.AgentOptions{Enable: true}}
+			config.BotConfig.Agents = &config.AgentV3Configs{cfg}
+			unused := filepath.Join(t.TempDir(), "must-not-be-created")
+			config.BotConfig.AgentV3.Session.Directory = unused
+			switch mode {
+			case "no agents":
+				config.BotConfig.Agents = nil
+				compiledAgents.Store("stale", &CompiledAgent{Name: "stale"})
+			case "agent disabled":
+				cfg.Agent.Enable = false
+			case "global disabled":
+				config.BotConfig.AgentV3.Enable = false
+			case "session disabled":
+				enabled := false
+				config.BotConfig.AgentV3.Session.Enable = &enabled
+			case "nil config":
+				config.BotConfig = nil
+			case "bad directory":
+				file := filepath.Join(t.TempDir(), "not-a-directory")
+				require.NoError(t, os.WriteFile(file, []byte("occupied"), 0o600))
+				config.BotConfig.AgentV3.Session.Directory = file
+			}
+			require.NoError(t, Init(t.Context()), "valid optional storage failure must not fail bot startup")
+			require.Nil(t, agentSessionService.Load())
+			require.ErrorIs(t, old.service.Recover(t.Context()), session.ErrClosed)
+			select {
+			case <-old.done:
+			default:
+				t.Fatal("old maintenance is still running")
+			}
+			_, err := os.Stat(unused)
+			require.True(t, os.IsNotExist(err), "disabled session must not probe/create storage")
+			if mode == "bad directory" {
+				require.True(t, HasCompiledAgent(cfg.Name), "optional storage degradation must retain the enabled agent")
+				f.compile(t, cfg, &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("fallback is usable", nil)}}})
+				f.chat(t, cfg, sessionMessage(1100, 8, 60, "still works"), nil)
+				scopes, err := f.repo.Scopes(t.Context())
+				require.NoError(t, err)
+				require.Empty(t, scopes, "degraded fallback cannot write the old session directory")
+			}
+		})
+	}
+}
+
+func TestAgentV3SessionReloadClosesOldDirectory(t *testing.T) {
+	f := newAgentSessionFixture(t)
+	old := agentSessionService.Load()
+	config.BotConfig.Agents = &config.AgentV3Configs{{Name: "enabled", Agent: &config.AgentOptions{Enable: true}}}
+	config.BotConfig.AgentV3.Session.Directory = t.TempDir()
+	require.NoError(t, initAgentV3SessionService(t.Context()))
+	current := agentSessionService.Load()
+	require.NotNil(t, current)
+	t.Cleanup(closeAgentV3SessionService)
+	require.NotSame(t, old, current)
+	require.ErrorIs(t, old.service.Recover(t.Context()), session.ErrClosed)
+	require.NoError(t, current.service.Recover(t.Context()))
+	_, err := old.service.Commit(t.Context(), session.CommitRequest{Scope: f.scope()})
+	require.ErrorIs(t, err, session.ErrClosed)
+}
+
+func TestAgentV3SessionInvalidConfigStillFailsWhenDisabled(t *testing.T) {
+	newAgentSessionFixture(t)
+	enabled := false
+	config.BotConfig.AgentV3.Session.Enable = &enabled
+	config.BotConfig.AgentV3.Session.ContextOverflow.MaxTokens = -1
+	require.Error(t, initAgentV3SessionService(t.Context()))
+	require.Nil(t, agentSessionService.Load())
 }

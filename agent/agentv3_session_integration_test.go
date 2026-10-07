@@ -51,6 +51,7 @@ func newAgentSessionFixture(t *testing.T) *agentSessionFixture {
 	t.Helper()
 	f := &agentSessionFixture{mini: setupReplySessionRedis(t), directory: t.TempDir(), nextID: 1000}
 	config.BotConfig.AgentV3 = setupReplySessionTurnConfig()
+	config.BotConfig.AgentV3.Enable = true
 	config.BotConfig.AgentV3.Session.Directory = f.directory
 	config.BotConfig.WhiteListConfig.Enabled = false
 	f.client = redis.NewClient(&redis.Options{Addr: f.mini.Addr()})
@@ -199,9 +200,9 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			root := f.node(t, firstID)
 			require.Nil(t, root.Parent)
 			rootCapture := f.archive(t, root)
-			require.Len(t, rootCapture.Delta, 6)
-			require.Equal(t, firstCalls, rootCapture.Delta[2].Message)
-			require.Equal(t, firstFinal, rootCapture.Delta[5].Message)
+			require.Len(t, rootCapture.Delta, 5)
+			require.Equal(t, firstCalls, rootCapture.Delta[1].Message)
+			require.Equal(t, firstFinal, rootCapture.Delta[4].Message)
 			second := sessionMessage(20, 8, 60, "SECOND_INPUT")
 			second.ReplyTo = &tb.Message{ID: firstID, Text: "UNTRUSTED_EMBEDDED_ANCESTOR"}
 			secondID := f.chat(t, cfg, second, &config.AgentTrigger{Reply: true})
@@ -209,7 +210,7 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			require.Equal(t, &root.Ref, child.Parent)
 			childCapture := f.archive(t, child)
 			require.Empty(t, childCapture.Bootstrap)
-			require.Len(t, childCapture.Delta, 5)
+			require.Len(t, childCapture.Delta, 4)
 			input := mdl.capturedInputs()[2]
 			conversation := sessionConversation(input)
 			require.Equal(t, sessionRecordMessages(rootCapture.Delta), conversation[:len(rootCapture.Delta)])
@@ -254,7 +255,7 @@ func TestAgentV3SessionDefaultsLatestAndReplySelection(t *testing.T) {
 	command.ReplyTo = &tb.Message{ID: one}
 	three := f.chat(t, cfg, command, &config.AgentTrigger{Command: "ask"})
 	require.Contains(t, replySessionSchemaText(mdl.capturedInputs()[2]), "two input")
-	require.NotContains(t, replySessionSchemaText(mdl.capturedInputs()[2]), "one input")
+	require.Contains(t, replySessionSchemaText(mdl.capturedInputs()[2]), "current_user_quote", "latest selected another root: direct quote must remain")
 	_, err := f.service.Load(t.Context(), session.Selection{Scope: f.scope(), Mode: session.SelectReply, ReplyMessageID: three})
 	require.ErrorIs(t, err, session.ErrMiss)
 	cfg.Session.LoadContext = false
@@ -369,11 +370,11 @@ func TestAgentV3SessionReplyChainCaptionMultimodalCurrentOnce(t *testing.T) {
 	secondID := f.chat(t, cfg, second, &config.AgentTrigger{Reply: true})
 	rootCapture := f.archive(t, f.node(t, first))
 	childCapture := f.archive(t, f.node(t, secondID))
-	require.Len(t, rootCapture.Delta[1].Message.UserInputMultiContent, 2)
-	require.Len(t, childCapture.Delta[1].Message.UserInputMultiContent, 2)
-	require.Equal(t, "data:image/jpeg;base64,aA==", *childCapture.Delta[1].Message.UserInputMultiContent[1].Image.URL)
+	require.Len(t, rootCapture.Delta[0].Message.UserInputMultiContent, 2)
+	require.Len(t, childCapture.Delta[0].Message.UserInputMultiContent, 2)
+	require.Equal(t, "data:image/jpeg;base64,aA==", *childCapture.Delta[0].Message.UserInputMultiContent[1].Image.URL)
 	input := mdl.capturedInputs()[1]
-	require.Equal(t, rootCapture.Delta[1].Message, input[2])
+	require.Equal(t, rootCapture.Delta[0].Message, input[1])
 	text := replySessionSchemaText(input)
 	require.Equal(t, 1, strings.Count(text, "SECOND_CAPTION"))
 	require.NotContains(t, text, "DO_NOT_REBUILD_ANCESTOR")
@@ -433,7 +434,7 @@ func TestAgentV3SessionCommitIsIndependentOfModelDeadline(t *testing.T) {
 	tc := &TurnContext{Bot: f.bot, BotUser: f.bot.Me, Message: sessionMessage(10, 7, 0, "input"), ChatID: -100, Config: cfg}
 	ctx, cancel := context.WithCancel(WithTurnContext(t.Context(), tc))
 	defer cancel()
-	loadAgentV3Session(ctx, tc)
+	setupAgentV3SessionTurn(tc)
 	defer closeAgentV3SessionTurn(tc)
 	messages, err := prepareAgentV3Turn(ctx, compiled, tc, nil)
 	require.NoError(t, err)
@@ -526,9 +527,9 @@ func TestAgentV3SessionDelegatePrivateHistoryIsNotArchived(t *testing.T) {
 	id := f.chat(t, cfg, sessionMessage(100, 7, 0, "parent input"), nil)
 	capture := f.archive(t, f.node(t, id))
 	require.Len(t, childModel.capturedInputs(), 2)
-	require.Len(t, capture.Delta, 5)
-	require.Equal(t, "TOP_CHILD_CALL", capture.Delta[2].Message.ToolCalls[0].ID)
-	require.Equal(t, "child result", capture.Delta[3].Message.Content)
+	require.Len(t, capture.Delta, 4)
+	require.Equal(t, "TOP_CHILD_CALL", capture.Delta[1].Message.ToolCalls[0].ID)
+	require.Equal(t, "child result", capture.Delta[2].Message.Content)
 	encoded, err := json.Marshal(capture)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "PRIVATE_CHILD_TOOL")

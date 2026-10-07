@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// Version identifies the archive and Redis state format.
+// Version identifies the archive and session record format, not the Redis key layout.
 const Version = 1
 
 var (
@@ -216,7 +216,13 @@ type Repository interface {
 	GetPublication(context.Context, Scope, string) (*Node, error)
 	AbortIntent(context.Context, Scope, Intent) (bool, error)
 	FinishIntent(context.Context, Scope, Intent) error
+	// Scopes may return valid scopes together with ErrCorrupt for invalid catalog entries.
+	// A failed catalog read returns no trustworthy scopes; invalid entries are retained.
 	Scopes(context.Context) ([]Scope, error)
+	// Pending, Deleting, and ClaimDeleting return healthy results alongside pure per-DAG
+	// ErrCorrupt diagnostics, retaining corrupt DAG data and membership without partial manifests.
+	// Non-corruption failures return no partial results and are never joined with ErrCorrupt;
+	// already-claimed deleting DAGs remain durable for retry.
 	Pending(context.Context, Scope) ([]Intent, error)
 	Deleting(context.Context, Scope) ([]Deletion, error)
 	ClaimDeleting(context.Context, Scope, time.Duration) ([]Deletion, error)
@@ -231,6 +237,22 @@ type CommitRequest struct {
 	Parent  *LoadedParent
 	Capture TurnCapture
 	Receipt DeliveryReceipt
+}
+
+// LoadCandidate borrows complete validated replay, but provides no Commit parent proof.
+// Messages are read-only and must not be retained after the acceptance callback.
+type LoadCandidate struct {
+	Messages         []*schema.Message
+	ancestorReplyIDs map[int]struct{}
+}
+
+// ContainsReplyMessageID reports coverage of the selected chain, not sibling branches.
+func (c *LoadCandidate) ContainsReplyMessageID(id int) bool {
+	if c == nil || id <= 0 {
+		return false
+	}
+	_, ok := c.ancestorReplyIDs[id]
+	return ok
 }
 
 // LoadResult provides complete replay and its opaque, renewable parent proof.
