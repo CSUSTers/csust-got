@@ -122,6 +122,8 @@ const (
 	agentV3DefaultObservabilityJSONL    = "logs/agentv3-traces.jsonl"
 	agentV3DefaultCaptureContent        = "preview"
 	agentV3DefaultContextCacheRedisTTL  = "30d"
+	agentV3DefaultSessionDirectory      = "data/agent-sessions"
+	agentV3DefaultSessionTTL            = "24h"
 	agentV3DefaultSearXNGTimeout        = "10s"
 	agentV3DefaultSearXNGMaxBody        = int64(1024 * 1024)
 	agentV3DefaultSearXNGMaxResults     = 10
@@ -136,6 +138,7 @@ var agentV3FixedTools = []string{"read", "grep", "write", "edit", "bash"}
 var (
 	errAgentConfigNil              = errors.New("agent config is nil")
 	errAgentContextModeUnsupported = errors.New("unsupported context_mode")
+	errInvalidAgentV3SessionTTL    = errors.New("invalid agent_v3.session.ttl: must be a positive Go duration")
 )
 
 var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -248,23 +251,51 @@ type AgentV3Configs []*AgentConfig
 
 // AgentConfig is the configuration for a single configured agent.
 type AgentConfig struct {
-	Name            string            `mapstructure:"name"`
-	Model           *Model            `mapstructure:"model"`
-	MessageContext  int               `mapstructure:"message_context"`
-	ContextMode     string            `mapstructure:"context_mode"`
-	Temperature     *float32          `mapstructure:"temperature"`
-	PlaceHolder     string            `mapstructure:"place_holder"`
-	ErrorMessage    string            `mapstructure:"error_message"` // 添加错误提示消息配置
-	SystemPrompt    JoinableString    `mapstructure:"system_prompt"`
-	PromptTemplate  JoinableString    `mapstructure:"prompt_template"`
-	Trigger         []*AgentTrigger   `mapstructure:"trigger"`
-	Timeout         int               `mapstructure:"timeout"` // seconds
-	Format          AgentOutputConfig `mapstructure:"format"`
-	ReasoningEffort string            `mapstructure:"reasoning_effort"`
+	Name            string             `mapstructure:"name"`
+	Model           *Model             `mapstructure:"model"`
+	MessageContext  int                `mapstructure:"message_context"`
+	ContextMode     string             `mapstructure:"context_mode"`
+	Temperature     *float32           `mapstructure:"temperature"`
+	PlaceHolder     string             `mapstructure:"place_holder"`
+	ErrorMessage    string             `mapstructure:"error_message"` // 添加错误提示消息配置
+	SystemPrompt    JoinableString     `mapstructure:"system_prompt"`
+	PromptTemplate  JoinableString     `mapstructure:"prompt_template"`
+	Trigger         []*AgentTrigger    `mapstructure:"trigger"`
+	Timeout         int                `mapstructure:"timeout"` // seconds
+	Format          AgentOutputConfig  `mapstructure:"format"`
+	ReasoningEffort string             `mapstructure:"reasoning_effort"`
+	Session         AgentSessionConfig `mapstructure:"session"`
 
 	Agent    *AgentOptions       `mapstructure:"agent"`
 	Features FeatureSetting      `mapstructure:"features"`
 	Filters  AgentFilterSettings `mapstructure:"filters"`
+}
+
+// AgentSessionConfig controls per-agent DAG context saving and loading.
+type AgentSessionConfig struct {
+	SaveContext *bool `mapstructure:"save_context"`
+	LoadContext bool  `mapstructure:"load_context"`
+}
+
+// SaveEnabled reports whether context saving is enabled, defaulting to true.
+func (c AgentSessionConfig) SaveEnabled() bool {
+	return c.SaveContext == nil || *c.SaveContext
+}
+
+// LoadEnabled reports whether context loading is enabled, defaulting to false.
+func (c AgentSessionConfig) LoadEnabled() bool {
+	return c.LoadContext
+}
+
+// EffectiveSessionSettings returns session switches, forcing both on for reply invocations.
+func (ccs *AgentConfig) EffectiveSessionSettings(trigger *AgentTrigger) (save, load bool) {
+	if trigger != nil && trigger.Reply {
+		return true, true
+	}
+	if ccs == nil {
+		return true, false
+	}
+	return ccs.Session.SaveEnabled(), ccs.Session.LoadEnabled()
 }
 
 // SubAgentConfig defines a subagent that can be invoked by the main agent as a tool
@@ -324,11 +355,52 @@ type AgentV3Config struct {
 	SoulPath      string                     `mapstructure:"soul_path"`
 	Cron          AgentV3CronConfig          `mapstructure:"cron"`
 	ContextCache  AgentV3ContextCacheConfig  `mapstructure:"context_cache"`
+	Session       AgentV3SessionConfig       `mapstructure:"session"`
 	Memory        AgentV3MemoryConfig        `mapstructure:"memory"`
 	Runtime       AgentV3RuntimeConfig       `mapstructure:"runtime"`
 	Tools         AgentV3ToolsConfig         `mapstructure:"tools"`
 	Skills        AgentV3SkillsConfig        `mapstructure:"skills"`
 	Observability AgentV3ObservabilityConfig `mapstructure:"observability"`
+}
+
+// AgentV3SessionConfig defines the shared session archive directory and idle TTL.
+type AgentV3SessionConfig struct {
+	Directory string `mapstructure:"directory"`
+	TTL       string `mapstructure:"ttl"`
+
+	invalidTTLType bool
+}
+
+// DirectoryPath returns the archive directory, defaulting to data/agent-sessions.
+func (c AgentV3SessionConfig) DirectoryPath() string {
+	if c.Directory == "" {
+		return agentV3DefaultSessionDirectory
+	}
+	return c.Directory
+}
+
+// IdleTTL assumes the configuration has passed Validate.
+func (c AgentV3SessionConfig) IdleTTL() time.Duration {
+	if c.TTL == "" {
+		return 24 * time.Hour
+	}
+	ttl, _ := time.ParseDuration(c.TTL)
+	return ttl
+}
+
+// Validate rejects invalid or nonpositive session TTL values.
+func (c AgentV3SessionConfig) Validate() error {
+	if c.invalidTTLType {
+		return errInvalidAgentV3SessionTTL
+	}
+	if c.TTL == "" {
+		return nil
+	}
+	ttl, err := time.ParseDuration(c.TTL)
+	if err != nil || ttl <= 0 {
+		return errInvalidAgentV3SessionTTL
+	}
+	return nil
 }
 
 // AgentV3ContextCacheConfig controls agent-v3 prompt cache and history windows.
@@ -595,6 +667,12 @@ func (c *AgentV3Config) readConfig() {
 	if err != nil {
 		zap.L().Warn("cannot parse agent_v3 config")
 	}
+	rawTTL := viper.Get("agent_v3.session.ttl")
+	ttl, ttlIsString := rawTTL.(string)
+	c.Session.invalidTTLType = rawTTL != nil && !ttlIsString
+	if ttlIsString {
+		c.Session.TTL = ttl
+	}
 	c.Runtime.Env = make(map[string]string, len(runtimeEnvConfig))
 	for name, value := range runtimeEnvConfig {
 		c.Runtime.Env[name] = value
@@ -604,6 +682,15 @@ func (c *AgentV3Config) readConfig() {
 func (c *AgentV3Config) checkConfig() {
 	if c == nil {
 		return
+	}
+	if err := c.Session.Validate(); err != nil {
+		zap.L().Panic("invalid agent_v3 session config", zap.Error(err))
+	}
+	if c.Session.Directory == "" {
+		c.Session.Directory = agentV3DefaultSessionDirectory
+	}
+	if c.Session.TTL == "" {
+		c.Session.TTL = agentV3DefaultSessionTTL
 	}
 	if c.ContextCache.RawTurns <= 0 {
 		c.ContextCache.RawTurns = 12

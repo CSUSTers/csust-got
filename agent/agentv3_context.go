@@ -72,7 +72,9 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	}
 	loadedSkillNames := make(map[string]struct{})
 
-	if !tc.Background || tc.RunID == "" {
+	if !tc.Background && tc.Session != nil && tc.Session.runID != "" {
+		tc.RunID = tc.Session.runID
+	} else if !tc.Background || tc.RunID == "" {
 		tc.RunID = newAgentV3RunID()
 	}
 	scope := orm.AgentV3Scope{
@@ -199,10 +201,11 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 
 	finishHotAppendSpan := trace.StartSpan("hot_append", nil)
 	replyChain := tc.Config != nil && tc.Config.UsesReplyChain()
+	sessionLoaded := tc.Session != nil && tc.Session.parent != nil && !tc.Background
 	summary := ""
 	var summaryVersion int64
 	var rawTurns []orm.AgentV3Turn
-	if !replyChain && !tc.Background {
+	if !sessionLoaded && !replyChain && !tc.Background {
 		summary, summaryVersion, err = orm.AgentV3GetSummary(ctx, scope)
 		if err != nil {
 			err = fmt.Errorf("agent v3 summary: %w", err)
@@ -252,6 +255,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	}
 
 	var messages []*schema.Message
+	var frameIndexes []int
+	currentStart := 0
 	switch {
 	case tc.Background:
 		userMsg, err := buildAgentV3UserMessage(cc, tc, history, nil)
@@ -263,6 +268,21 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		if !strings.Contains(userMsg.Content, tc.Message.Text) {
 			messages = append(messages, schema.UserMessage(tc.Message.Text))
 		}
+	case sessionLoaded:
+		current, err := buildAgentV3SessionInput(cc, tc)
+		if err != nil {
+			finishContextSpan(err, nil)
+			return nil, err
+		}
+		messages = []*schema.Message{schema.SystemMessage(prefixText)}
+		frameIndexes = append(frameIndexes, 0)
+		messages = append(messages, tc.Session.replay...)
+		if memoryMsg := buildAgentV3MemorySnapshotMessage(memoryText); memoryMsg != nil {
+			frameIndexes = append(frameIndexes, len(messages))
+			messages = append(messages, memoryMsg)
+		}
+		currentStart = len(messages)
+		messages = append(messages, current...)
 	case replyChain:
 		session, err := loadReplySession(ctx, tc.Message, tc.Config.MessageContext)
 		if err != nil {
@@ -289,10 +309,13 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			return nil, err
 		}
 		messages = []*schema.Message{schema.SystemMessage(prefixText)}
+		frameIndexes = append(frameIndexes, 0)
 		messages = append(messages, sessionMessages[:len(sessionMessages)-1]...)
 		if memoryMsg := buildAgentV3MemorySnapshotMessage(memoryText); memoryMsg != nil {
+			frameIndexes = append(frameIndexes, len(messages))
 			messages = append(messages, memoryMsg)
 		}
+		currentStart = len(messages)
 		messages = append(messages, promptAddition, sessionMessages[len(sessionMessages)-1])
 	default:
 		userMsg, err := buildAgentV3UserMessage(cc, tc, history, rawTurns)
@@ -302,6 +325,14 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		}
 		fallbackHistory := agentV3FallbackHistoryMessages(rawTurns, history, tc)
 		messages = buildAgentV3TurnMessages(prefixText, memoryText, summary, fallbackHistory, rawTurns, userMsg)
+		frameIndexes = append(frameIndexes, 0)
+		if strings.TrimSpace(memoryText) != "" {
+			frameIndexes = append(frameIndexes, 1)
+		}
+		currentStart = len(messages) - 1
+	}
+	if !tc.Background {
+		setAgentV3SessionBaseline(tc, messages, frameIndexes, currentStart)
 	}
 
 	finishContextSpan(nil, map[string]any{

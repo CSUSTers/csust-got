@@ -16,16 +16,20 @@ import (
 )
 
 var errNoCompiledConfig = errors.New("no compiled config found")
+var streamAgentV3 = (*CustomAgent).Stream
 
 // compiledAgents stores pre-compiled agent configurations, keyed by agent name.
 var (
-	compiledAgents sync.Map // map[string]*CompiledAgent
-	mcpManager     *McpManager
+	compiledAgents   sync.Map // map[string]*CompiledAgent
+	mcpManager       *McpManager
+	agentResourcesMu sync.Mutex
 )
 
 // Init compiles all enabled agent configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
+	agentResourcesMu.Lock()
+	defer agentResourcesMu.Unlock()
 	if err := validateCronStartup(); err != nil {
 		return err
 	}
@@ -44,7 +48,7 @@ func Init(ctx context.Context) error {
 	mcpManager = NewMcpManager()
 
 	if config.BotConfig == nil || config.BotConfig.Agents == nil || len(*config.BotConfig.Agents) == 0 {
-		return nil
+		return initAgentV3SessionService(ctx)
 	}
 
 	for _, agentConfig := range *config.BotConfig.Agents {
@@ -64,7 +68,7 @@ func Init(ctx context.Context) error {
 	}
 
 	initCronService()
-	return nil
+	return initAgentV3SessionService(ctx)
 }
 
 func validateAgentV3StartupConfig() error {
@@ -113,6 +117,11 @@ func HasCompiledAgent(name string) bool {
 
 // Close shuts down all agent resources.
 func Close() {
+	agentResourcesMu.Lock()
+	defer agentResourcesMu.Unlock()
+	if s := agentSessionService.Swap(nil); s != nil {
+		s.close()
+	}
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
 	}
@@ -159,13 +168,21 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		BotUser: tbCtx.Bot().Me,
 	}
 	ctx = WithTurnContext(ctx, tc)
-
-	history, err := loadAgentHistory(tc)
-	if err != nil {
-		zap.L().Warn("agentv3: failed to load history", zap.Error(err))
-		history = &RichHistory{}
+	loadAgentV3Session(ctx, tc)
+	defer closeAgentV3SessionTurn(tc)
+	if tc.Session != nil && tc.Session.capture != nil {
+		ctx = WithSessionCapture(ctx, tc.Session.capture)
 	}
 
+	var history *RichHistory
+	if tc.Session.parent == nil {
+		var err error
+		history, err = loadAgentHistory(tc)
+		if err != nil {
+			zap.L().Warn("agentv3: failed to load history", zap.Error(err))
+			history = &RichHistory{}
+		}
+	}
 	messages, err := prepareAgentV3Turn(ctx, compiled, tc, history)
 	if err != nil {
 		if tc.V3 != nil && tc.V3.Trace != nil {
@@ -232,7 +249,7 @@ func handleStreaming(
 	chatCfg *config.AgentConfig,
 ) error {
 	tc := GetTurnContext(ctx)
-	reader, err := compiled.Agent.Stream(ctx, messages)
+	reader, err := streamAgentV3(compiled.Agent, ctx, messages)
 	if err != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
@@ -240,9 +257,11 @@ func handleStreaming(
 		zap.L().Error("agentv3: agent stream failed", zap.Error(err))
 		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
+	defer reader.Close()
 
 	tc.streamingStarted.Store(true)
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
+	delivery, streamErr := streamToTelegramWithDelivery(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
+	response, sentMsg := delivery.response, delivery.sent
 	if streamErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(streamErr)
@@ -253,6 +272,7 @@ func handleStreaming(
 		}
 		return streamErr
 	}
+	commitAgentV3Session(tc, delivery.delivered)
 	// Save response to Redis for future context
 	if response != "" && sentMsg != nil {
 		sentMsg.Text = response
@@ -290,7 +310,8 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	sent, visibleResponse, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	delivery, sendErr := nonStreamResponseWithDelivery(tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	sent, visibleResponse := delivery.sent, delivery.response
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(sendErr)
@@ -299,6 +320,7 @@ func handleNonStreaming(
 		return sendErr
 	}
 
+	commitAgentV3Session(tc, delivery.delivered)
 	if sent != nil {
 		sent.Text = visibleResponse
 		SaveResponse(sent, tbCtx.Message())

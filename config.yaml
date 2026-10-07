@@ -55,6 +55,14 @@ message:
 agent_v3:
   enable: true
   soul_path: "docs/agent_v3_soul.md"
+  # 完整模型会话归档，详见 docs/agent_session_context.md；默认目录 data/agent-sessions。
+  # 同 Redis prefix/bot/platform/chat 的实例须共享同卷（sharedVolume）并支持跨进程锁。
+  # 群内会话不按 user 隔离；归档含工具/媒体等敏感数据，建议文件 0600 或等效 ACL。
+  session:
+    directory: "data/agent-sessions"
+    ttl: "24h" # 默认 24h，正数 Go duration 字符串（不支持 1d）；整 DAG 闲置 TTL，非每节点/Redis EXPIRE。
+    # 有效完整加载/成功提交刷新活跃时间，失败加载不刷新；仅本地每日 02:00 清过期 active DAG。
+    # 启动/短周期仅恢复已登记 intent/deleting；不自动重建丢失的 Redis 索引或扫描陌生文件。
   # 设置 runner_agent 并启用同名专用 agent 后才开放 cron 工具。详见 docs/agent-cron.md。
   cron:
     runner_agent: ""
@@ -182,6 +190,13 @@ agents:
     model: *qwen
     message_context: 6
     # context_mode: reply_chain # [可选] 仅用回复链构建上下文, 默认 chat
+    # session 缺省 save_context=true/load_context=false；不关闭 raw turns / summaries / memory 等旧存储。
+    # 实际 reply 分支强制 true/true；带 ReplyTo 的 command/regex 仍使用下列开关。
+    # reply 精确续接被回复的 bot 消息，可同 chat 跨 agent 分叉；非 reply load=true 续接同 agent 最近成功提交。
+    # 加载缺失/损坏/Redis 失败时完整回退 context_mode，保存时新建 root；最终实际发送成功才存增量 JSONL。
+    session:
+      save_context: true
+      load_context: false
     trigger:
       - command: "chat"
       - reply: true

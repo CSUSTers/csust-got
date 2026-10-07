@@ -102,9 +102,31 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 
 // Stream runs the agent loop, forwarding chunks from every turn to the reader.
 func (a *CustomAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	sr, sw := schema.Pipe[*schema.Message](32)
-	go a.runLoop(ctx, input, sw)
-	return sr, nil
+	capture := sessionCaptureFromContext(ctx)
+	if capture == nil {
+		sr, sw := schema.Pipe[*schema.Message](32)
+		go a.runLoop(ctx, input, sw, nil, nil)
+		return sr, nil
+	}
+	input, started := capture.begin(input)
+	if !started {
+		return a.Stream(WithSessionCapture(ctx, nil), input)
+	}
+	// An unbuffered, filtered end marker acknowledges downstream consumption
+	// before Complete becomes visible and the writer closes.
+	sr, sw := schema.Pipe[*schema.Message](0)
+	end := &schema.Message{}
+	go func() {
+		defer sw.Close()
+		defer close(capture.done)
+		a.runLoop(ctx, input, sw, capture, end)
+	}()
+	return schema.StreamReaderWithConvert(sr, func(message *schema.Message) (*schema.Message, error) {
+		if message == end {
+			return nil, schema.ErrNoValue
+		}
+		return message, nil
+	}), nil
 }
 
 // Generate runs the loop and returns the concatenated assistant message.
@@ -139,14 +161,18 @@ func (a *CustomAgent) Generate(ctx context.Context, input []*schema.Message) (*s
 	return schema.ConcatMessages(chunks)
 }
 
-func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message]) {
-	defer sw.Close()
+func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message], capture *SessionCapture, end *schema.Message) {
+	if capture == nil {
+		defer sw.Close()
+	}
 
 	history := append([]*schema.Message{}, input...)
 	history = sanitizeHistory(history)
 	if len(a.invokables) > 0 {
 		history = injectLoopDirectives(ctx, history)
 	}
+	capture.recordModelInput(history)
+	var toolRounds []*schema.Message
 
 	dupCounts := map[string]int{}
 	dupWarnInjected := false
@@ -158,8 +184,12 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		isFinal := round == a.maxSteps-1
-		guidanceText := a.computeGuidanceText(history, isFinal, dupWarnInjected)
+		guidanceText := a.computeGuidanceText(toolRounds, isFinal, dupWarnInjected)
+		beforeGuidance := len(history)
 		history = appendLoopGuidance(history, guidanceText)
+		if len(history) > beforeGuidance {
+			capture.record(history[len(history)-1], true)
+		}
 
 		assistantMsg, reasoningChunks, sendErr := a.streamOneTurn(ctx, a.boundModel, history, sw)
 		if sendErr != nil {
@@ -171,11 +201,17 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 				zap.String("agent", a.name), zap.Int("round", round))
 			return
 		}
+		capture.record(assistantMsg, false)
 
 		if len(assistantMsg.ToolCalls) == 0 {
 			for _, rc := range reasoningChunks {
 				if closed := sw.Send(rc, nil); closed {
 					return
+				}
+			}
+			if capture != nil && completeSessionAssistant(assistantMsg) && ctx.Err() == nil {
+				if closed := sw.Send(end, nil); !closed {
+					capture.complete(ctx)
 				}
 			}
 			return
@@ -198,6 +234,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		history = append(history, assistantMsg)
+		toolRounds = append(toolRounds, assistantMsg)
 		sawNewDup := false
 		for _, tc := range assistantMsg.ToolCalls {
 			key := dupKey(tc.Function.Name, tc.Function.Arguments)
@@ -211,8 +248,18 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		for _, tc := range assistantMsg.ToolCalls {
 			toolMsg := a.executeToolCall(ctx, tc)
 			history = append(history, toolMsg)
+			capture.record(toolMsg, false)
 		}
 	}
+}
+
+func completeSessionAssistant(message *schema.Message) bool {
+	if message.ResponseMeta != nil && (message.ResponseMeta.FinishReason == "length" || message.ResponseMeta.FinishReason == "content_filter") {
+		return false
+	}
+	return message.Role == schema.Assistant && len(message.ToolCalls) == 0 &&
+		(strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.ReasoningContent) != "" ||
+			len(message.MultiContent) > 0 || len(message.AssistantGenMultiContent) > 0)
 }
 
 func (a *CustomAgent) streamOneTurn(
@@ -483,7 +530,11 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 		)
 	}
 
-	result, err := t.InvokableRun(ctx, args)
+	toolCtx := ctx
+	if name == agentV3ToolDelegate {
+		toolCtx = WithSessionCapture(ctx, nil)
+	}
+	result, err := t.InvokableRun(toolCtx, args)
 	if err != nil {
 		toolErr := err
 		errText := err.Error()
