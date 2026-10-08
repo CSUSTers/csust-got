@@ -652,7 +652,7 @@ func TestAgentV3SessionReplayRestoresRichActivationButNotRuntimePermissions(t *t
 		environment, _ = tc.runtimeEnvironment()
 		return nil
 	}
-	f.compile(t, cross, currentModel)
+	f.compile(t, cross, currentModel).AgentV3SkillSources = []agentV3SkillSnapshot{buildAgentV3BuiltinSkillSnapshot(cross, config.BotConfig.AgentV3)}
 	current := sessionMessage(200, 8, 60, "current input")
 	current.ReplyTo = &tb.Message{ID: first}
 	f.chat(t, cross, current, &config.AgentTrigger{Reply: true})

@@ -61,6 +61,7 @@ type agentV3SessionTurn struct {
 	selection   session.Selection
 	memoryEpoch int64
 	load        bool
+	save        bool
 	ownsHistory bool
 	committed   bool
 }
@@ -232,8 +233,12 @@ func setupAgentV3SessionTurn(tc *TurnContext) {
 	state.service = s.service
 	if save {
 		state.runID, state.baselineErr = session.NewID()
+	}
+	if save || load {
+		// Load-only turns also capture so a context-limit error can be attributed to the first model call.
 		state.capture = NewSessionCapture()
 	}
+	state.save = save
 	if !load {
 		return
 	}
@@ -376,8 +381,9 @@ func agentV3SessionContextKey(cfg *config.AgentConfig) string {
 }
 
 // rejectAgentV3SessionContext reports provider context-limit failures. The loaded node is
-// only marked rejected when the first model call of the turn failed; later failures stem from
-// this turn's own tool growth, not from the restored history.
+// only marked rejected when the capture proves the first model call of the turn failed; later
+// failures stem from this turn's own tool growth, not from the restored history. Without a
+// capture that cannot be proven, so the node is kept.
 func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 	if !isAgentV3ProviderContextLimit(err) {
 		return false
@@ -385,8 +391,15 @@ func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 	if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 		setAgentV3ContextLimitTraceError(tc.V3.Trace, err)
 	}
-	if tc != nil && tc.Session != nil && tc.Session.parent != nil && tc.Session.capture.ModelResponses() == 0 {
-		state := tc.Session
+	if tc == nil || tc.Session == nil || tc.Session.parent == nil {
+		return true
+	}
+	state := tc.Session
+	if state.capture == nil {
+		zap.L().Debug("agentv3: provider context limit without session capture; loaded context kept")
+		return true
+	}
+	if state.capture.ModelResponses() == 0 {
 		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
 		defer cancel()
 		if markErr := state.service.RejectContext(ctx, state.scope, state.parent.Ref(), state.selection.ContextKey); markErr != nil {
@@ -567,7 +580,7 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) bool {
 			ids = append(ids, message.ID)
 		}
 	}
-	if tc == nil || tc.Background || tc.Session == nil || tc.Session.capture == nil || len(ids) == 0 {
+	if tc == nil || tc.Background || tc.Session == nil || !tc.Session.save || tc.Session.capture == nil || len(ids) == 0 {
 		return false
 	}
 	state := tc.Session

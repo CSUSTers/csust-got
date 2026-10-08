@@ -109,13 +109,31 @@ func TestUnimplementedConfigKeys(t *testing.T) {
 		nil,
 		{Name: "a", Temperature: &temperature, ReasoningEffort: "medium", Model: &Model{Proxy: "http://p", PromptLimit: 1000}},
 		{Name: "b", Agent: &AgentOptions{SubAgents: []*SubAgentConfig{{Model: &Model{Proxy: "socks5://p"}}}}},
+		{
+			Name: "c",
+			Agent: &AgentOptions{
+				ToolModels: map[string]*Model{"web_search": {Model: "x"}, "analyze_image": {Proxy: "http://p"}},
+				SubAgents:  []*SubAgentConfig{nil, {ToolModels: map[string]*Model{"analyze_image": {PromptLimit: 5}}}},
+				Skills:     []*SkillConfig{{ToolModels: map[string]*Model{"analyze_image": {Proxy: "http://p"}}}},
+			},
+			Format: AgentOutputConfig{ProgressSummary: &ProgressSummaryConfig{Model: &Model{Proxy: "http://p"}}},
+		},
 	}
-	v3 := &AgentV3Config{Model: &Model{PromptLimit: 10}, ContextCache: AgentV3ContextCacheConfig{PromptCacheRetention: "in_memory"}}
+	v3 := &AgentV3Config{
+		Model:        &Model{PromptLimit: 10},
+		ContextCache: AgentV3ContextCacheConfig{PromptCacheRetention: "in_memory"},
+		Session:      AgentV3SessionConfig{Compact: AgentV3SessionCompactConfig{Model: &Model{Proxy: "http://p"}}},
+	}
 	require.Equal(t, []string{
 		"agents[1].model.proxy",
 		"agents[1].model.prompt_limit",
 		"agents[2].agent.subagents[0].model.proxy",
+		"agents[3].agent.tool_models.analyze_image.proxy",
+		"agents[3].agent.subagents[1].tool_models.analyze_image.prompt_limit",
+		"agents[3].agent.skills[0].tool_models.analyze_image.proxy",
+		"agents[3].format.progress_summary.model.proxy",
 		"agent_v3.model.prompt_limit",
+		"agent_v3.session.compact.model.proxy",
 		"agent_v3.context_cache.prompt_cache_retention",
 	}, UnimplementedConfigKeys(agents, v3))
 	require.Empty(t, UnimplementedConfigKeys(nil, nil))

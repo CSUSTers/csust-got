@@ -64,6 +64,33 @@ func TestAgentV3SessionDropLatestKeepsNewerAndReplies(t *testing.T) {
 	require.ErrorIs(t, err, session.ErrMiss)
 }
 
+func TestAgentV3SessionDropLatestRemovesCompactedRedirect(t *testing.T) {
+	f := newSessionFixture(t, session.Options{})
+	parent, err := f.service.Commit(t.Context(), sessionRequest(t, f.scope, "A", nil, 101, "turn"))
+	require.NoError(t, err)
+	compacted, err := f.service.Commit(t.Context(), sessionCompactedRequest(t, f.scope, parent))
+	require.NoError(t, err)
+	require.Greater(t, compacted.CommitSequence, parent.CommitSequence)
+	latest, err := sessionLatestRef(t, f, "A")
+	require.NoError(t, err)
+	require.Equal(t, compacted.Ref, latest)
+
+	require.NoError(t, f.service.DropLatest(t.Context(), f.scope, "A", parent.Ref))
+	_, err = sessionLatestRef(t, f, "A")
+	require.ErrorIs(t, err, session.ErrMiss, "a compacted root of the dropped parent must not hide raw turns")
+
+	parent, err = f.service.Commit(t.Context(), sessionRequest(t, f.scope, "A", nil, 102, "turn"))
+	require.NoError(t, err)
+	_, err = f.service.Commit(t.Context(), sessionCompactedRequest(t, f.scope, parent))
+	require.NoError(t, err)
+	newer, err := f.service.Commit(t.Context(), sessionRequest(t, f.scope, "A", nil, 103, "turn"))
+	require.NoError(t, err)
+	require.NoError(t, f.service.DropLatest(t.Context(), f.scope, "A", parent.Ref))
+	latest, err = sessionLatestRef(t, f, "A")
+	require.NoError(t, err)
+	require.Equal(t, newer.Ref, latest, "a genuinely newer commit stays selectable")
+}
+
 func TestAgentV3SessionMemoryEpochRoundTrip(t *testing.T) {
 	f := newSessionFixture(t, session.Options{})
 	req := sessionRequest(t, f.scope, "A", nil, 101, "root")

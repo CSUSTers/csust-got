@@ -324,6 +324,7 @@ func TestStreamFinalLongOutputIsSplitIntoOrderedMessages(t *testing.T) {
 	require.Equal(t, ids[1], deliveryReplyTo(calls[2]), "third chunk replies to the second")
 	require.Equal(t, ids[2], sent.ID, "the last chunk becomes the response message")
 	require.Equal(t, ids[2], sp.deliveredMsg.ID)
+	require.Nil(t, sp.partial, "a fully delivered reply is not partial")
 	joined := make([]string, 0, len(calls))
 	for _, call := range calls {
 		joined = append(joined, deliveryText(call))
@@ -353,18 +354,19 @@ func TestFinalLongOutputPartialDelivery(t *testing.T) {
 			text := longDeliveryText(100)
 			var delivered []*tb.Message
 			var last, sent *tb.Message
+			var partial *telegramPartialDelivery
 			var err error
 			if tt.stream {
 				sp := newDeliveryStreamProcessor(t, d, &config.AgentOutputConfig{})
 				sp.processChunk(schema.AssistantMessage(text, nil))
 				_, _, sent, err = sp.finalize()
-				delivered, last = sp.deliveredMsgs, sp.deliveredMsg
+				delivered, last, partial = sp.deliveredMsgs, sp.deliveredMsg, sp.partial
 			} else {
 				tbCtx := d.bot.NewContext(tb.Update{Message: sessionMessage(10, 7, 0, "input")})
 				placeholder := &tb.Message{ID: 42, Chat: &tb.Chat{ID: -100}}
 				var result telegramResponseResult
 				result, err = nonStreamResponseWithDelivery(t.Context(), d.bot, tbCtx, text, "", &config.AgentOutputConfig{}, placeholder, false, false)
-				delivered, last, sent = result.deliveredAll, result.delivered, result.sent
+				delivered, last, sent, partial = result.deliveredAll, result.delivered, result.sent, result.partial
 			}
 
 			calls := d.finalCalls()
@@ -373,8 +375,14 @@ func TestFinalLongOutputPartialDelivery(t *testing.T) {
 				require.Empty(t, delivered)
 				require.Nil(t, last)
 				require.Len(t, calls, 2, "no later chunk and no notice after the first chunk failed")
+				require.Nil(t, partial)
 				return
 			}
+			require.NotNil(t, partial)
+			require.Equal(t, tt.delivered, partial.sent)
+			require.Greater(t, partial.total, partial.sent)
+			require.True(t, strings.HasPrefix(text, partial.visible), "visible text is the delivered prefix")
+			require.Less(t, len(partial.visible), len(text), "only the delivered chunks are visible")
 			require.NoError(t, err, "visible partial content is committed, not reported as a failure")
 			require.Len(t, delivered, tt.delivered)
 			require.Equal(t, 42, delivered[0].ID)

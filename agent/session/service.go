@@ -576,8 +576,8 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	return node, nil
 }
 
-// DropLatest stops latest selection from returning ref or any older node of agent; reply
-// selection of those nodes is unaffected.
+// DropLatest stops latest selection from returning ref, any older node of agent, or a
+// compacted root redirected from ref; reply selection of those nodes is unaffected.
 func (s *Service) DropLatest(ctx context.Context, scope Scope, agent string, ref NodeRef) error {
 	op, done, err := s.begin(ctx)
 	if err != nil {

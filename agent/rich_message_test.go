@@ -8,6 +8,7 @@ import (
 
 	"csust-got/config"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -379,4 +380,49 @@ func setConfigField(t *testing.T, cfg *config.AgentOutputConfig, name string, va
 		return
 	}
 	t.Fatalf("cannot assign %s to %s", input.Type(), field.Type())
+}
+
+func TestRestoreAgentV3ReplayedRichSkill(t *testing.T) {
+	old := config.BotConfig
+	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
+	t.Cleanup(func() { config.BotConfig = old })
+	richCall := schema.ToolCall{ID: "load", Function: schema.FunctionCall{Name: agentV3ToolLoadSkill, Arguments: `{"name":"rich-message"}`}}
+	otherCall := schema.ToolCall{ID: "other", Function: schema.FunctionCall{Name: agentV3ToolLoadSkill, Arguments: `{"name":"searxng"}`}}
+	assistantCalls := func(calls ...schema.ToolCall) *schema.Message {
+		return &schema.Message{Role: schema.Assistant, ToolCalls: calls}
+	}
+	toolResult := func(id, content string) *schema.Message {
+		return &schema.Message{Role: schema.Tool, ToolCallID: id, ToolName: agentV3ToolLoadSkill, Content: content}
+	}
+	richOK := toolResult("load", "<loaded_skill name=\"rich-message\" source=\"builtin\" sha256=\"x\">\nbody\n</loaded_skill>\n")
+	otherOK := toolResult("other", "<loaded_skill name=\"searxng\" source=\"builtin\" sha256=\"x\">\nbody\n</loaded_skill>\n")
+	rich := &config.AgentConfig{Name: "rich", Agent: &config.AgentOptions{Enable: true, Rich: true}}
+	plain := &config.AgentConfig{Name: "plain", Agent: &config.AgentOptions{Enable: true}}
+	withRich := agentV3SkillCatalog{ByName: map[string]agentV3SkillDescriptor{agentV3RichMessageSkillName: {Name: agentV3RichMessageSkillName}}}
+	tests := []struct {
+		name    string
+		cfg     *config.AgentConfig
+		catalog agentV3SkillCatalog
+		replay  []*schema.Message
+		want    bool
+	}{
+		{"nil config", nil, withRich, []*schema.Message{assistantCalls(richCall), richOK}, false},
+		{"rich disabled", plain, withRich, []*schema.Message{assistantCalls(richCall), richOK}, false},
+		{"no load_skill call", rich, withRich, []*schema.Message{schema.UserMessage("hi"), schema.AssistantMessage("answer", nil)}, false},
+		{"other skill", rich, withRich, []*schema.Message{assistantCalls(otherCall), otherOK}, false},
+		{"user-authored lookalike", rich, withRich, []*schema.Message{{Role: schema.User, ToolCalls: []schema.ToolCall{richCall}}, richOK}, false},
+		{"failed load", rich, withRich, []*schema.Message{assistantCalls(richCall), toolResult("load", agentV3SkillUnavailableText)}, false},
+		{"missing tool result", rich, withRich, []*schema.Message{assistantCalls(richCall)}, false},
+		{"result paired with another call", rich, withRich, []*schema.Message{assistantCalls(otherCall, richCall), toolResult("other", richOK.Content), toolResult("load", agentV3SkillUnavailableText)}, false},
+		{"skill absent from catalog", rich, agentV3SkillCatalog{}, []*schema.Message{assistantCalls(richCall), richOK}, false},
+		{"rich skill loaded earlier", rich, withRich, []*schema.Message{schema.UserMessage("hi"), assistantCalls(otherCall, richCall), otherOK, richOK, schema.AssistantMessage("answer", nil)}, true},
+		{"nil message tolerated", rich, withRich, []*schema.Message{nil, assistantCalls(richCall), richOK}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := &TurnContext{Config: tt.cfg, V3: &AgentV3TurnState{SkillCatalog: tt.catalog}}
+			require.Equal(t, tt.want, restoreAgentV3ReplayedRichSkill(tc, tt.replay))
+			require.Equal(t, tt.want, tc.hasLoadedSkill(agentV3RichMessageSkillName))
+		})
+	}
 }

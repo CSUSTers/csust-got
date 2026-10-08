@@ -86,37 +86,6 @@ func TestAgentV3SessionBotReplyContinuesSessionRegardlessOfTrigger(t *testing.T)
 	require.NotContains(t, replySessionSchemaText(mdl.capturedInputs()[4]), "ROOT_INPUT")
 }
 
-func TestRestoreAgentV3ReplayedRichSkill(t *testing.T) {
-	old := config.BotConfig
-	config.BotConfig = &config.Config{AgentV3: &config.AgentV3Config{Enable: true}}
-	t.Cleanup(func() { config.BotConfig = old })
-	richCall := schema.ToolCall{ID: "load", Function: schema.FunctionCall{Name: agentV3ToolLoadSkill, Arguments: `{"name":"rich-message"}`}}
-	otherCall := schema.ToolCall{ID: "other", Function: schema.FunctionCall{Name: agentV3ToolLoadSkill, Arguments: `{"name":"searxng"}`}}
-	rich := &config.AgentConfig{Name: "rich", Agent: &config.AgentOptions{Enable: true, Rich: true}}
-	plain := &config.AgentConfig{Name: "plain", Agent: &config.AgentOptions{Enable: true}}
-	tests := []struct {
-		name   string
-		cfg    *config.AgentConfig
-		replay []*schema.Message
-		want   bool
-	}{
-		{"nil config", nil, []*schema.Message{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{richCall}}}, false},
-		{"rich disabled", plain, []*schema.Message{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{richCall}}}, false},
-		{"no load_skill call", rich, []*schema.Message{schema.UserMessage("hi"), schema.AssistantMessage("answer", nil)}, false},
-		{"other skill", rich, []*schema.Message{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{otherCall}}}, false},
-		{"user-authored lookalike", rich, []*schema.Message{{Role: schema.User, ToolCalls: []schema.ToolCall{richCall}}}, false},
-		{"rich skill loaded earlier", rich, []*schema.Message{schema.UserMessage("hi"), {Role: schema.Assistant, ToolCalls: []schema.ToolCall{otherCall, richCall}}, schema.AssistantMessage("answer", nil)}, true},
-		{"nil message tolerated", rich, []*schema.Message{nil, {Role: schema.Assistant, ToolCalls: []schema.ToolCall{richCall}}}, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tc := &TurnContext{Config: tt.cfg, V3: &AgentV3TurnState{}}
-			require.Equal(t, tt.want, restoreAgentV3ReplayedRichSkill(tc, tt.replay))
-			require.Equal(t, tt.want, tc.hasLoadedSkill(agentV3RichMessageSkillName))
-		})
-	}
-}
-
 func TestSessionCaptureModelResponsesCountsCompletedCalls(t *testing.T) {
 	var nilCapture *SessionCapture
 	require.Zero(t, nilCapture.ModelResponses())

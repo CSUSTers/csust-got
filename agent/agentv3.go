@@ -306,17 +306,9 @@ func handleStreaming(
 		}
 		return streamErr
 	}
-	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
-	// Save response to Redis for future context
+	visible := commitAgentV3Delivery(tc, delivery, response)
 	if response != "" && sentMsg != nil {
-		sentMsg.Text = response
-		SaveResponse(sentMsg, tbCtx.Message())
-		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sentMsg.ID); err != nil {
-			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
-				tc.V3.Trace.SetError(err)
-			}
-			zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
-		}
+		saveAgentV3Delivery(ctx, tbCtx, tc, delivery.deliveredAll, sentMsg, visible)
 	}
 
 	return streamErr
@@ -358,19 +350,52 @@ func handleNonStreaming(
 		return sendErr
 	}
 
-	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
+	visibleResponse = commitAgentV3Delivery(tc, delivery, visibleResponse)
 	if sent != nil {
-		sent.Text = visibleResponse
-		SaveResponse(sent, tbCtx.Message())
-		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), visibleResponse, sent.ID); err != nil {
-			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
-				tc.V3.Trace.SetError(err)
-			}
-			zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
-		}
+		saveAgentV3Delivery(ctx, tbCtx, tc, delivery.deliveredAll, sent, visibleResponse)
 	}
 
 	return nil
+}
+
+// commitAgentV3Delivery publishes the session turn and returns the text the user actually saw.
+// A partially delivered reply keeps its archive append-only: a note after the final answer
+// tells later turns which chunks were visible.
+func commitAgentV3Delivery(tc *TurnContext, delivery telegramResponseResult, response string) string {
+	if partial := delivery.partial; partial != nil {
+		response = partial.visible
+		if tc != nil && tc.Session != nil {
+			tc.Session.capture.AppendNote(schema.AssistantMessage(agentV3PartialDeliveryNote(partial), nil))
+		}
+	}
+	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
+	return response
+}
+
+func agentV3PartialDeliveryNote(partial *telegramPartialDelivery) string {
+	return fmt.Sprintf("<delivery_note>回答共 %d 段，仅前 %d 段成功发送；用户只看到了前 %d 段。</delivery_note>", partial.total, partial.sent, partial.sent)
+}
+
+// saveAgentV3Delivery stores the delivered reply after Telegram accepted it. The turn context
+// may already be expired by then, so persistence runs on its own deadline. Multi-chunk replies
+// cache every chunk with the text Telegram returned for it.
+func saveAgentV3Delivery(ctx context.Context, tbCtx tb.Context, tc *TurnContext, delivered []*tb.Message, sent *tb.Message, response string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentV3SessionCommitTimeout)
+	defer cancel()
+	if len(delivered) > 1 {
+		for _, msg := range delivered {
+			SaveResponse(msg, tbCtx.Message())
+		}
+	} else {
+		sent.Text = response
+		SaveResponse(sent, tbCtx.Message())
+	}
+	if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sent.ID); err != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(err)
+		}
+		zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
+	}
 }
 
 // sendErrorMessage sends the configured error message to the user.

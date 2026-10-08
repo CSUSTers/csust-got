@@ -46,3 +46,24 @@ func TestAgentV3ObservabilityAndShutdownDefaults(t *testing.T) {
 	cfg.ShutdownGrace = "bogus"
 	require.Equal(t, 60*time.Second, cfg.ShutdownGraceDuration())
 }
+
+func TestAgentV3ShutdownGraceRejectsNegative(t *testing.T) {
+	tests := []struct {
+		grace  string
+		panics bool
+	}{
+		{grace: "0s"},
+		{grace: "15s"},
+		{grace: "-1s", panics: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.grace, func(t *testing.T) {
+			cfg := &AgentV3Config{ShutdownGrace: tt.grace}
+			if tt.panics {
+				require.PanicsWithValue(t, "invalid agent_v3 shutdown_grace", cfg.checkConfig)
+				return
+			}
+			require.NotPanics(t, cfg.checkConfig)
+		})
+	}
+}

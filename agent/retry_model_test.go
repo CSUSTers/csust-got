@@ -408,6 +408,25 @@ func TestRetryingChatModelIdleWatchdogIsDisabledByZero(t *testing.T) {
 	assert.Equal(t, 1, stub.streamCalls())
 }
 
+func TestIdleWatchdogLateCallbackAfterTouchDoesNotCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	attempt := &streamAttempt{cancel: cancel}
+	attempt.armWatchdog(time.Hour)
+	defer attempt.close()
+
+	attempt.touch()
+	attempt.onIdleTimer()
+	require.False(t, attempt.idle.Load())
+	require.NoError(t, ctx.Err())
+
+	attempt.mu.Lock()
+	attempt.deadline = time.Now().Add(-time.Millisecond)
+	attempt.mu.Unlock()
+	attempt.onIdleTimer()
+	require.True(t, attempt.idle.Load())
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
 func TestIdleWatchdogErrorIsRetryable(t *testing.T) {
 	assert.True(t, isRetryableModelError(errModelStreamIdle))
 	assert.True(t, isRetryableModelError(fmt.Errorf("wrapped: %w", errModelStreamIdle)))

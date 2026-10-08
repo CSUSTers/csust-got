@@ -1192,6 +1192,9 @@ func (c *AgentV3Config) checkConfig() {
 	if err := c.Session.Validate(); err != nil {
 		zap.L().Panic("invalid agent_v3 session config", zap.Error(err))
 	}
+	if c.ShutdownGraceDuration() < 0 {
+		zap.L().Panic("invalid agent_v3 shutdown_grace", zap.String("shutdown_grace", c.ShutdownGrace))
+	}
 	if c.Session.Directory == "" {
 		c.Session.Directory = agentV3DefaultSessionDirectory
 	}

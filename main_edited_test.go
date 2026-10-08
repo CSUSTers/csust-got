@@ -116,22 +116,42 @@ func TestShutdownMiddlewarePassesEditsInShutdownChat(t *testing.T) {
 	}
 }
 
-func TestMessageStoreMiddlewareOrdersSameSecondEditsByReceiveOrder(t *testing.T) {
+func TestMessageStoreMiddlewareOrdersSameSecondEditsByUpdateID(t *testing.T) {
 	setupMainTestRedis(t)
 	chat := &Chat{ID: -100, Type: ChatSuperGroup, Title: "group"}
 	handler := messageStoreMiddleware(func(Context) error { return nil })
 	before := messageStoreSeq.Load()
-	for _, text := range []string{"first edit", "second edit"} {
-		edited := &Message{ID: 7, Chat: chat, Sender: &User{ID: 42}, Text: text, Unixtime: 1700000000, LastEdit: 1700000100}
-		require.NoError(t, handler(&editedTestContext{update: Update{ID: 1, EditedMessage: edited}}))
+	for _, edit := range []struct {
+		updateID int
+		text     string
+	}{{updateID: 3, text: "second edit"}, {updateID: 2, text: "first edit"}} {
+		edited := &Message{ID: 7, Chat: chat, Sender: &User{ID: 42}, Text: edit.text, Unixtime: 1700000000, LastEdit: 1700000100}
+		require.NoError(t, handler(&editedTestContext{update: Update{ID: edit.updateID, EditedMessage: edited}}))
 	}
-	require.Equal(t, before+2, messageStoreSeq.Load())
+	require.Equal(t, before, messageStoreSeq.Load())
 
 	require.Eventually(t, func() bool {
 		stream, err := orm.GetMessagesFromStream(chat.ID, orm.MessageStreamQuery{})
 		if err != nil || len(stream) != 1 || stream[0].Text != "second edit" {
 			return false
 		}
+		full, err := orm.GetMessage(chat.ID, 7)
+		return err == nil && full.Text == "second edit"
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestMessageStoreMiddlewareFallsBackToCounterWithoutUpdateID(t *testing.T) {
+	setupMainTestRedis(t)
+	chat := &Chat{ID: -101, Type: ChatSuperGroup, Title: "group"}
+	handler := messageStoreMiddleware(func(Context) error { return nil })
+	before := messageStoreSeq.Load()
+	for _, text := range []string{"first edit", "second edit"} {
+		edited := &Message{ID: 7, Chat: chat, Sender: &User{ID: 42}, Text: text, Unixtime: 1700000000, LastEdit: 1700000100}
+		require.NoError(t, handler(&editedTestContext{update: Update{EditedMessage: edited}}))
+	}
+	require.Equal(t, before+2, messageStoreSeq.Load())
+
+	require.Eventually(t, func() bool {
 		full, err := orm.GetMessage(chat.ID, 7)
 		return err == nil && full.Text == "second edit"
 	}, 2*time.Second, 10*time.Millisecond)

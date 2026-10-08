@@ -195,18 +195,28 @@ func joinTelegramRichSegments(segments ...string) string {
 }
 
 // restoreAgentV3ReplayedRichSkill re-activates rich output when the replayed history shows
-// the rich-message skill was loaded, so a continued session keeps its output format.
+// a successful rich-message load_skill call and the skill is still in the current catalog,
+// so a continued session keeps its output format.
 // Runtime environment and other permissions are never restored from history.
 func restoreAgentV3ReplayedRichSkill(tc *TurnContext, replay []*schema.Message) bool {
-	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() {
+	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() || tc.V3 == nil {
 		return false
+	}
+	if _, ok := tc.V3.SkillCatalog.ByName[agentV3RichMessageSkillName]; !ok {
+		return false
+	}
+	loaded := make(map[string]bool)
+	for _, message := range replay {
+		if message != nil && message.Role == schema.Tool && message.ToolCallID != "" {
+			loaded[message.ToolCallID] = strings.HasPrefix(strings.TrimSpace(message.Content), `<loaded_skill name="`+agentV3RichMessageSkillName+`"`)
+		}
 	}
 	for _, message := range replay {
 		if message == nil || message.Role != schema.Assistant {
 			continue
 		}
 		for _, call := range message.ToolCalls {
-			if call.Function.Name == agentV3ToolLoadSkill && isRichMessageLoadSkillArgs(call.Function.Arguments) {
+			if call.Function.Name == agentV3ToolLoadSkill && loaded[call.ID] && isRichMessageLoadSkillArgs(call.Function.Arguments) {
 				tc.markSkillLoaded(agentV3RichMessageSkillName)
 				return true
 			}

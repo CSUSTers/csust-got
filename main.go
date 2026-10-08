@@ -595,7 +595,10 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
 		if shouldStoreMessage(m) {
-			seq := messageStoreSeq.Add(1)
+			seq := uint64(max(ctx.Update().ID, 0))
+			if seq == 0 {
+				seq = messageStoreSeq.Add(1)
+			}
 			// 异步存储完整消息结构体到Redis
 			go func() {
 				// Store to stream

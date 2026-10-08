@@ -91,21 +91,41 @@ func UnimplementedConfigKeys(agents *AgentV3Configs, v3 *AgentV3Config) []string
 			prefix := fmt.Sprintf("agents[%d]", i)
 			keys = append(keys, unimplementedModelKeys(agent.Model, prefix+".model")...)
 			if agent.Agent != nil {
+				keys = append(keys, unimplementedToolModelKeys(agent.Agent.ToolModels, prefix+".agent.tool_models")...)
 				for j, sub := range agent.Agent.SubAgents {
 					if sub != nil {
-						keys = append(keys, unimplementedModelKeys(sub.Model, fmt.Sprintf("%s.agent.subagents[%d].model", prefix, j))...)
+						subPrefix := fmt.Sprintf("%s.agent.subagents[%d]", prefix, j)
+						keys = append(keys, unimplementedModelKeys(sub.Model, subPrefix+".model")...)
+						keys = append(keys, unimplementedToolModelKeys(sub.ToolModels, subPrefix+".tool_models")...)
 					}
 				}
+				for j, skill := range agent.Agent.Skills {
+					if skill != nil {
+						keys = append(keys, unimplementedToolModelKeys(skill.ToolModels, fmt.Sprintf("%s.agent.skills[%d].tool_models", prefix, j))...)
+					}
+				}
+			}
+			if agent.Format.ProgressSummary != nil {
+				keys = append(keys, unimplementedModelKeys(agent.Format.ProgressSummary.Model, prefix+".format.progress_summary.model")...)
 			}
 		}
 	}
 	if v3 != nil {
 		keys = append(keys, unimplementedModelKeys(v3.Model, "agent_v3.model")...)
+		keys = append(keys, unimplementedModelKeys(v3.Session.Compact.Model, "agent_v3.session.compact.model")...)
 		if v3.ContextCache.PromptCacheRetention != "" {
 			keys = append(keys, "agent_v3.context_cache.prompt_cache_retention")
 		}
 	}
 	return keys
+}
+
+func unimplementedToolModelKeys(models map[string]*Model, prefix string) []string {
+	names := lo.Keys(models)
+	sort.Strings(names)
+	return lo.FlatMap(names, func(name string, _ int) []string {
+		return unimplementedModelKeys(models[name], prefix+"."+name)
+	})
 }
 
 func unimplementedModelKeys(model *Model, prefix string) []string {

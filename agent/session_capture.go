@@ -137,6 +137,11 @@ func (c *SessionCapture) record(message *schema.Message, guidance bool) {
 	}
 }
 
+// AppendNote records a framework note after the invocation's final message, as guidance.
+func (c *SessionCapture) AppendNote(message *schema.Message) {
+	c.record(message, true)
+}
+
 // ModelResponses counts model calls that completed within this invocation.
 func (c *SessionCapture) ModelResponses() int {
 	if c == nil {

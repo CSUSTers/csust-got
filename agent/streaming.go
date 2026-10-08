@@ -14,6 +14,7 @@ import (
 	"csust-got/util"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
@@ -40,6 +41,23 @@ type telegramResponseResult struct {
 	// delivered is the last message proven to carry final content; deliveredAll lists every final message in order.
 	delivered    *tb.Message
 	deliveredAll []*tb.Message
+	partial      *telegramPartialDelivery
+}
+
+// telegramPartialDelivery records a final reply cut short after its first sent chunks;
+// visible joins the raw text of those chunks.
+type telegramPartialDelivery struct {
+	sent    int
+	total   int
+	visible string
+}
+
+func newTelegramPartialDelivery(chunks []telegramChunk, sent int) *telegramPartialDelivery {
+	if sent <= 0 || sent >= len(chunks) {
+		return nil
+	}
+	visible := strings.Join(lo.Map(chunks[:sent], func(chunk telegramChunk, _ int) string { return chunk.raw }), "\n")
+	return &telegramPartialDelivery{sent: sent, total: len(chunks), visible: visible}
 }
 
 func streamToTelegramWithDelivery(
@@ -65,7 +83,7 @@ func streamToTelegramWithDelivery(
 	}
 
 	response, reasoning, sent, err := sp.process(existingMsg)
-	return telegramResponseResult{response: response, reasoning: reasoning, sent: sent, delivered: sp.deliveredMsg, deliveredAll: sp.deliveredMsgs}, err
+	return telegramResponseResult{response: response, reasoning: reasoning, sent: sent, delivered: sp.deliveredMsg, deliveredAll: sp.deliveredMsgs, partial: sp.partial}, err
 }
 
 // telegramTextSender is the subset of *tb.Bot used to deliver text; tests substitute fakes.
@@ -94,6 +112,7 @@ type streamProcessor struct {
 	placeholderMsg   *tb.Message
 	deliveredMsg     *tb.Message
 	deliveredMsgs    []*tb.Message
+	partial          *telegramPartialDelivery
 	tc               *TurnContext // For editMu locking and lifecycle flags
 	deleteOnError    bool
 
@@ -314,6 +333,7 @@ func (sp *streamProcessor) updateMessage() {
 func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	sp.deliveredMsg = nil
 	sp.deliveredMsgs = nil
+	sp.partial = nil
 	text := sp.getResponse()
 	reason := sp.getReasoning()
 	if text == "" && reason == "" {
@@ -373,13 +393,14 @@ func (sp *streamProcessor) deliverPlainFinal(text, reason string) error {
 	if len(chunks) == 0 || sp.placeholderMsg == nil {
 		return nil
 	}
-	delivered, err := sp.deliverer().deliverChunks(chunks, sp.placeholderMsg, func(chunk telegramChunk) (*tb.Message, error) {
+	delivered, sent, err := sp.deliverer().deliverChunks(chunks, sp.placeholderMsg, func(chunk telegramChunk) (*tb.Message, error) {
 		return sp.editPlaceholder(chunk, true)
 	})
 	if err != nil {
 		return err
 	}
 	sp.deliveredMsgs = delivered
+	sp.partial = newTelegramPartialDelivery(chunks, sent)
 	if len(delivered) > 0 {
 		sp.deliveredMsg = delivered[len(delivered)-1]
 	}
@@ -619,7 +640,8 @@ func (d telegramDeliverer) sendChunk(replyTo *tb.Message, chunk telegramChunk, w
 // is returned; otherwise the chunks the user already sees are the delivery proof and no error is returned, so
 // the turn stays continuable (deleting them would destroy content already read) and a short notice is sent.
 // An accepted call that yields no usable message is not an error, it simply contributes no proof.
-func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Message, first func(telegramChunk) (*tb.Message, error)) ([]*tb.Message, error) {
+// sent counts the leading chunks Telegram accepted.
+func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Message, first func(telegramChunk) (*tb.Message, error)) ([]*tb.Message, int, error) {
 	delivered := make([]*tb.Message, 0, len(chunks))
 	for i, chunk := range chunks {
 		var msg *tb.Message
@@ -631,17 +653,17 @@ func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Mes
 		}
 		if err != nil {
 			if len(delivered) == 0 {
-				return nil, err
+				return nil, 0, err
 			}
 			d.notifyPartialDelivery(delivered[len(delivered)-1], i, len(chunks), err)
-			return delivered, nil
+			return delivered, i, nil
 		}
 		if msg != nil {
 			delivered = append(delivered, msg)
 			replyTo = msg
 		}
 	}
-	return delivered, nil
+	return delivered, len(chunks), nil
 }
 
 const telegramPartialDeliveryNotice = "后续内容发送失败，可回复上一条继续"
@@ -752,7 +774,7 @@ func nonStreamResponseWithDelivery(
 	if replyTo == nil {
 		replyTo = tbCtx.Message()
 	}
-	delivered, err := d.deliverChunks(chunks, replyTo, func(chunk telegramChunk) (*tb.Message, error) {
+	delivered, sent, err := d.deliverChunks(chunks, replyTo, func(chunk telegramChunk) (*tb.Message, error) {
 		if existingMsg != nil {
 			return d.editChunk(existingMsg, chunk, true)
 		}
@@ -770,6 +792,7 @@ func nonStreamResponseWithDelivery(
 	}
 	result.deliveredAll = delivered
 	result.delivered = delivered[len(delivered)-1]
+	result.partial = newTelegramPartialDelivery(chunks, sent)
 	if existingMsg == nil || len(delivered) > 1 {
 		result.sent = result.delivered
 	}

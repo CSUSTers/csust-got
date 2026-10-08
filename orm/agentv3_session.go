@@ -602,8 +602,9 @@ func (t *sessionTxn) memoryEpoch(d sessionDAGKeys, ref session.NodeRef) (int64, 
 	return source.MemoryEpoch, nil
 }
 
-// DropLatest removes ref and every older member of agent's latest index. Members sort by their
-// zero-padded commit sequence, so newer concurrent commits stay selectable.
+// DropLatest removes ref, every older member of agent's latest index, and any newer compacted
+// root redirected from ref. Members sort by their zero-padded commit sequence, so newer
+// concurrent commits stay selectable.
 func (r *AgentV3SessionRepository) DropLatest(ctx context.Context, scope session.Scope, agent string, ref session.NodeRef) error {
 	if agent == "" || ref.Validate() != nil {
 		return session.ErrCorrupt
@@ -625,9 +626,41 @@ func (r *AgentV3SessionRepository) DropLatest(ctx context.Context, scope session
 		if node.Ref != ref || node.Agent != agent || node.CommitSequence <= 0 {
 			return session.ErrCorrupt
 		}
-		t.write("zremrangebylex", key, "-", "["+sessionLatestMember(node))
+		member := sessionLatestMember(node)
+		newer, err := t.tx.ZRangeArgs(ctx, redis.ZRangeArgs{Key: key, Start: "(" + member, Stop: "+", ByLex: true}).Result()
+		if err != nil {
+			return err
+		}
+		t.write("zremrangebylex", key, "-", "["+member)
+		for _, candidate := range newer {
+			redirected, err := t.redirectedFrom(s, candidate, ref)
+			if err != nil {
+				return err
+			}
+			if redirected {
+				t.write("zrem", key, candidate)
+			}
+		}
 		return nil
 	})
+}
+
+// redirectedFrom reports whether the latest member is a compacted root published from ref.
+func (t *sessionTxn) redirectedFrom(s sessionScopeKeys, member string, ref session.NodeRef) (bool, error) {
+	candidate, _, err := sessionParseLatest(member)
+	if err != nil {
+		return false, err
+	}
+	d := s.dag(candidate.DAGID)
+	if err := t.check(map[string]string{d.nodes: sessionRedisHash}); err != nil {
+		return false, err
+	}
+	var node session.Node
+	found, err := sessionReadJSON(t.ctx, t.tx.HGet(t.ctx, d.nodes, candidate.NodeID), &node)
+	if err != nil || !found {
+		return false, err
+	}
+	return node.RedirectedFrom != nil && *node.RedirectedFrom == ref, nil
 }
 
 func (t *sessionTxn) latestIs(key string, ref session.NodeRef) (bool, error) {

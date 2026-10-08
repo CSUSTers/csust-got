@@ -251,8 +251,9 @@ type Repository interface {
 	Deleting(context.Context, Scope) ([]Deletion, error)
 	ClaimDeleting(context.Context, Scope, time.Duration) ([]Deletion, error)
 	FinishDelete(context.Context, Scope, Deletion) error
-	// DropLatest removes ref and every older entry from the agent's latest index, leaving
-	// message mappings intact, so latest selection misses until the agent's next commit.
+	// DropLatest removes ref, every older entry, and any compacted root redirected from ref
+	// from the agent's latest index, leaving message mappings intact, so latest selection
+	// misses until the agent's next commit.
 	DropLatest(context.Context, Scope, string, NodeRef) error
 }
 

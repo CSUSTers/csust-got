@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,27 +52,47 @@ func newRetryingChatModel(inner model.ToolCallingChatModel, cfg *config.Model) m
 
 // streamAttempt is one upstream stream whose context can be cancelled by the idle watchdog.
 type streamAttempt struct {
-	reader  *schema.StreamReader[*schema.Message]
-	cancel  context.CancelFunc
-	timer   *time.Timer
-	timeout time.Duration
-	idle    atomic.Bool
+	reader   *schema.StreamReader[*schema.Message]
+	cancel   context.CancelFunc
+	timer    *time.Timer
+	timeout  time.Duration
+	idle     atomic.Bool
+	mu       sync.Mutex
+	deadline time.Time
 }
 
 func (a *streamAttempt) armWatchdog(timeout time.Duration) {
 	if a == nil || timeout <= 0 {
 		return
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.timeout = timeout
-	a.timer = time.AfterFunc(timeout, func() {
-		a.idle.Store(true)
-		a.cancel()
-	})
+	a.deadline = time.Now().Add(timeout)
+	a.timer = time.AfterFunc(timeout, a.onIdleTimer)
+}
+
+// onIdleTimer re-arms instead of cancelling when a chunk moved the deadline after the timer was scheduled.
+func (a *streamAttempt) onIdleTimer() {
+	a.mu.Lock()
+	if remaining := time.Until(a.deadline); remaining > 0 {
+		a.timer.Reset(remaining)
+		a.mu.Unlock()
+		return
+	}
+	a.mu.Unlock()
+	a.idle.Store(true)
+	a.cancel()
 }
 
 func (a *streamAttempt) touch() {
-	if a != nil && a.timer != nil {
-		a.timer.Reset(a.timeout)
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.timer != nil {
+		a.deadline = time.Now().Add(a.timeout)
 	}
 }
 
@@ -79,9 +100,11 @@ func (a *streamAttempt) close() {
 	if a == nil {
 		return
 	}
+	a.mu.Lock()
 	if a.timer != nil {
 		a.timer.Stop()
 	}
+	a.mu.Unlock()
 	if a.reader != nil {
 		a.reader.Close()
 	}

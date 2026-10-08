@@ -35,7 +35,7 @@ Bot 进程的文件日志、Agent v3 trace JSONL 的落盘方式，以及收到�
 | `agent_v3.observability.trace_max_size_mb` | 配置项 | `50` | trace JSONL 写满 50 MB 后轮转 | 无 |
 | `agent_v3.observability.trace_max_backups` | 配置项 | `5` | 最多保留 5 个轮转 trace 文件 | 无 |
 | `agent_v3.observability.trace_queue` | 配置项 | `256` | 异步写入队列容量 256 条，满则丢弃并计数 | 无 |
-| `agent_v3.shutdown_grace` | 配置项 | `60s` | 退出信号后最多等 60s 让进行中的轮次完成 | 无；编排层 stop grace 需大于该值 |
+| `agent_v3.shutdown_grace` | 配置项 | `60s` | 退出信号后最多等 60s 让进行中的轮次完成；`0s` 表示不等待，负值在启动时报配置错误 | 无；编排层 stop grace 需大于该值 |
 | `<log_file_dir>/` | 挂载 | `logs` | 日志与 trace 在容器可写层，重建即丢 | 需要挂载（已有） |
 
 轮转文件名使用本地时间（`LocalTime: true`），依赖进程 `TZ`，只影响备份文件名，不影响内容。

@@ -110,6 +110,9 @@ func isPublicIP(ip net.IP) bool {
 		return false
 	}
 	addr := netip.AddrFrom16([16]byte(ip))
+	if slices.ContainsFunc(globalIPv6Exceptions, func(p netip.Prefix) bool { return p.Contains(addr) }) {
+		return true
+	}
 	for _, r := range nonGlobalIPv6Ranges {
 		if r.prefix.Contains(addr) {
 			return r.ipv4At > 0 && !slices.ContainsFunc(ip[r.zeroFrom:r.ipv4At], func(b byte) bool { return b != 0 }) &&
@@ -127,6 +130,16 @@ type ipv6SpecialRange struct {
 	zeroFrom int
 }
 
+// globalIPv6Exceptions are the IANA special-purpose entries inside 2001::/23 marked globally reachable.
+var globalIPv6Exceptions = []netip.Prefix{
+	netip.MustParsePrefix("2001:1::1/128"),
+	netip.MustParsePrefix("2001:1::2/128"),
+	netip.MustParsePrefix("2001:1::3/128"),
+	netip.MustParsePrefix("2001:3::/32"),
+	netip.MustParsePrefix("2001:4:112::/48"),
+	netip.MustParsePrefix("2001:30::/28"),
+}
+
 // The local-use NAT64 prefix only admits the /96 layout with zero subnet bits: every other RFC 6052 decoding of
 // such an address yields a 0.0.0.0/8 destination, so the low 32 bits are the only IPv4 a translator can reach.
 var nonGlobalIPv6Ranges = []ipv6SpecialRange{
@@ -134,10 +147,12 @@ var nonGlobalIPv6Ranges = []ipv6SpecialRange{
 	{prefix: netip.MustParsePrefix("64:ff9b::/96"), ipv4At: 12, zeroFrom: 12},
 	{prefix: netip.MustParsePrefix("64:ff9b:1::/48"), ipv4At: 12, zeroFrom: 6},
 	{prefix: netip.MustParsePrefix("100::/64")},
+	{prefix: netip.MustParsePrefix("100:0:0:1::/64")},
 	{prefix: netip.MustParsePrefix("2001::/32")}, // Teredo hides the real IPv4 peer
 	{prefix: netip.MustParsePrefix("2001:2::/48")},
 	{prefix: netip.MustParsePrefix("2001:10::/28")},
 	{prefix: netip.MustParsePrefix("2001:20::/28")},
+	{prefix: netip.MustParsePrefix("2001::/23")},
 	{prefix: netip.MustParsePrefix("2001:db8::/32")},
 	{prefix: netip.MustParsePrefix("2002::/16"), ipv4At: 2, zeroFrom: 2},
 	{prefix: netip.MustParsePrefix("3fff::/20")},
