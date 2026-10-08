@@ -24,6 +24,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/redis/go-redis/v9"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	tb "gopkg.in/telebot.v3"
 )
@@ -239,6 +240,59 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			require.Equal(t, sessionRecordMessages(rootCapture.Delta), sessionConversation(crossInput)[:len(rootCapture.Delta)])
 		})
 	}
+}
+
+func TestAgentV3SessionForcedSummaryArchivesWithoutDanglingToolCalls(t *testing.T) {
+	f := newAgentSessionFixture(t)
+	cfg := &config.AgentConfig{Name: "forced", ContextMode: "reply_chain"}
+	unexecuted := sessionToolMessage("never-executed")
+	mdl := &scriptedToolModel{turns: [][]*schema.Message{
+		{sessionToolMessage("call-1")}, {sessionToolMessage("call-2")}, {unexecuted}, {schema.AssistantMessage("FORCED_FINAL", nil)},
+	}}
+	counter := &countingLookupTool{}
+	f.compile(t, cfg, mdl, counter)
+
+	finalID := f.chat(t, cfg, sessionMessage(10, 7, 0, "FORCED_INPUT"), &config.AgentTrigger{Command: "ask"})
+	counter.mu.Lock()
+	require.Equal(t, 2, counter.calls, "the final round's tool calls are never executed")
+	counter.mu.Unlock()
+	require.Len(t, mdl.capturedInputs(), 4)
+	for _, message := range mdl.capturedInputs()[3] {
+		require.NotEqual(t, unexecuted, message, "the forced summary never saw the unexecuted tool calls")
+	}
+
+	node := f.node(t, finalID)
+	require.Nil(t, node.Parent)
+	messages := sessionRecordMessages(f.archive(t, node).Delta)
+	require.Equal(t, "FORCED_FINAL", messages[len(messages)-1].Content)
+	require.NotContains(t, messages, unexecuted)
+	pending := map[string]bool{}
+	for _, message := range messages {
+		switch message.Role {
+		case schema.Assistant:
+			require.Empty(t, pending, "every tool call is answered before the next assistant message")
+			for _, call := range message.ToolCalls {
+				pending[call.ID] = true
+			}
+		case schema.Tool:
+			require.True(t, pending[message.ToolCallID])
+			delete(pending, message.ToolCallID)
+		case schema.User, schema.System:
+		}
+	}
+	require.Empty(t, pending)
+	require.Equal(t, []string{"call-1", "call-2"}, lo.FilterMap(messages, func(message *schema.Message, _ int) (string, bool) {
+		return message.ToolCallID, message.Role == schema.Tool
+	}))
+
+	follow := sessionMessage(20, 8, 60, "FOLLOW_INPUT")
+	follow.ReplyTo = &tb.Message{ID: finalID}
+	followModel := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("FOLLOW_FINAL", nil)}}}
+	f.compile(t, cfg, followModel)
+	followID := f.chat(t, cfg, follow, &config.AgentTrigger{Reply: true})
+	require.Equal(t, &node.Ref, f.node(t, followID).Parent)
+	replay := sessionConversation(followModel.capturedInputs()[0])
+	require.Equal(t, messages, replay[:len(messages)], "the reply replays the archived history including the forced final answer")
 }
 
 func TestAgentV3SessionDefaultsLatestAndReplySelection(t *testing.T) {

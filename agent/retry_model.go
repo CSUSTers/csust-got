@@ -95,21 +95,46 @@ func (a *streamAttempt) classify(err error) error {
 	return err
 }
 
+// Generate and Stream hold one process-wide model-call slot for the whole call, so every model built by
+// buildModel (main agents, subagents, vision and progress models) is bounded by max_model_calls.
 func (m *retryingChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	limiter, err := acquireModelCallSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer limiter.release()
 	return retryModelCall(ctx, m, "generate", func() (*schema.Message, error) {
 		return m.inner.Generate(ctx, input, opts...)
 	})
 }
 
+// Stream keeps the slot until the forwarding goroutine finishes: upstream EOF, a non-retryable error, or the
+// caller closing the returned reader (observed at the next upstream chunk or idle timeout).
 func (m *retryingChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	retriesUsed := 0
-	attempt, err := m.openStreamWithRetry(ctx, input, opts, &retriesUsed)
+	limiter, err := acquireModelCallSlot(ctx)
 	if err != nil {
 		return nil, err
 	}
+	retriesUsed := 0
+	attempt, err := m.openStreamWithRetry(ctx, input, opts, &retriesUsed)
+	if err != nil {
+		limiter.release()
+		return nil, err
+	}
 	out, writer := schema.Pipe[*schema.Message](32)
-	go m.forwardStreamWithRetry(ctx, input, opts, attempt, retriesUsed, writer)
+	go func() {
+		defer limiter.release()
+		m.forwardStreamWithRetry(ctx, input, opts, attempt, retriesUsed, writer)
+	}()
 	return out, nil
+}
+
+func acquireModelCallSlot(ctx context.Context) (*slotLimiter, error) {
+	limiter := limiters.model()
+	if err := limiter.acquire(ctx); err != nil {
+		return nil, fmt.Errorf("model call slot: %w", err)
+	}
+	return limiter, nil
 }
 
 func (m *retryingChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {

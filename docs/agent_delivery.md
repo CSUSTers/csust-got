@@ -41,7 +41,8 @@
 
 `streamProcessor.editPlaceholder` 维护以下状态：
 
-- `lastSentFormatted`：上次成功发送的格式化文本。格式化结果未变化时跳过编辑；最终编辑若与之相同，直接把 placeholder 作为投递凭证，不再调用 API。
+- `lastSentFormatted` / `lastSentVersion`：上次成功发送的格式化文本及当时的 `TurnContext.placeholderVer`。周期性 tick 在文本未变化且版本未变时跳过编辑。最终编辑（`force`）**不走**这条去重：placeholder 由流式预览和 `update_progress` 共用，进度文本会在流式代码路径之外覆盖它，缓存无法代表 Telegram 上的实际内容，所以最终编辑总是真正发出请求，由 Telegram 给出凭证（`message is not modified` 视为已投递，见 `telegramDeliveryProof`）。
+- `TurnContext.MarkPlaceholderOverwritten()`：非流式写入方（`update_progress`、阶段标记）成功改写 placeholder 后调用，使下一次 tick 不再把相同预览文本当作已可见而跳过。
 - `floodNotBefore`：收到 `tb.FloodError` 时记为 `now + RetryAfter`，在此之前的 tick 一律跳过。
 - `floodBackoff`：flood 持续时有效编辑间隔翻倍（基数为配置的 `edit_interval`，至少 1s），上限 `streamingEditBackoffCap` = 10s；编辑成功后清零。
 - 任何一次编辑尝试（无论成败）都会调用 `TurnContext.MarkEdited()`，避免门控每个 tick 都重新触发。
@@ -50,7 +51,7 @@
 
 ## 3. 测试
 
-- `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestStreamFinalLongOutputStopsAtFirstFailedChunk`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
+- `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestStreamFinalLongOutputStopsAtFirstFailedChunk`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite`、`TestUpdateMessageResendsAfterPlaceholderOverwrittenHook`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
 - `agent/format_test.go`：`TestTakeTelegramChunkPrefersParagraphsAndAvoidsCodeFences`、`TestChunkPlainTelegramTextRoundTrips`、`TestFormatTelegramChunksFormatsEachChunkSeparately`、`TestFormatTelegramChunksKeepsReasonOnFirstChunk`、`TestTailTelegramPreview`。
 - `util/utils_test.go`：`TestUTF16Len`、`TestFloodRetryAfterIgnoresOtherErrors`。
 

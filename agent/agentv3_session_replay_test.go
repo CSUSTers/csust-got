@@ -1,8 +1,13 @@
 package agentv3
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"csust-got/agent/session"
 	"csust-got/config"
@@ -73,7 +78,7 @@ func TestAgentV3SessionArchiveKeepsGuidanceInlineAsHistory(t *testing.T) {
 	require.Len(t, replayed.Delta, 5)
 }
 
-func TestAgentV3SessionLoadedInputReplaysVerbatimAndDeduplicatesMemory(t *testing.T) {
+func TestAgentV3SessionLoadedInputReplaysVerbatimAndSupersedesMemory(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "memory-dedupe", ContextMode: "reply_chain"}
 	compiled := f.compile(t, cfg, &scriptedToolModel{})
@@ -85,7 +90,7 @@ func TestAgentV3SessionLoadedInputReplaysVerbatimAndDeduplicatesMemory(t *testin
 	snapshot := buildAgentV3MemorySnapshotMessage(memory)
 	replay := []*schema.Message{snapshot, schema.UserMessage("<reply_session_metadata>OLD_ADDITION</reply_session_metadata>"), schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}
 	count := func(messages []*schema.Message) int {
-		return strings.Count(replySessionSchemaText(messages), agentV3MemorySnapshotHeader)
+		return strings.Count(replySessionSchemaText(messages), "<group_memory_snapshot")
 	}
 
 	prepared, err := buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, replay, nil)
@@ -100,20 +105,117 @@ func TestAgentV3SessionLoadedInputReplaysVerbatimAndDeduplicatesMemory(t *testin
 	require.NoError(t, err)
 	require.Equal(t, 2, count(prepared.messages), "a changed memory snapshot is appended after the replay")
 	require.Equal(t, 1+len(replay), prepared.currentStart, "the fresh snapshot belongs to this turn's delta")
-	require.Contains(t, prepared.messages[prepared.currentStart].Content, "- changed fact")
+	require.Equal(t, replay, prepared.messages[1:1+len(replay)], "the stale snapshot is never rewritten")
+	appended := prepared.messages[prepared.currentStart]
+	require.True(t, strings.HasPrefix(appended.Content, agentV3MemorySnapshotSupersedeHeader), "the appended snapshot declares that it supersedes earlier ones")
+	require.Contains(t, appended.Content, "- changed fact")
 
 	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", replay, nil)
 	require.NoError(t, err)
-	require.Equal(t, 1, count(prepared.messages), "no memory means nothing new is appended")
+	require.Equal(t, 2, count(prepared.messages), "cleared memory appends an explicit marker")
+	require.Equal(t, agentV3MemorySnapshotCleared, prepared.messages[prepared.currentStart].Content)
+	require.Contains(t, prepared.messages[prepared.currentStart].Content, "群记忆已清空")
+
+	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
+	require.NoError(t, err)
+	require.Zero(t, count(prepared.messages), "no memory and no earlier snapshot appends nothing")
+
+	cleared := []*schema.Message{snapshot, schema.UserMessage("a"), schema.AssistantMessage("b", nil), schema.UserMessage(agentV3MemorySnapshotCleared), schema.UserMessage("c"), schema.AssistantMessage("d", nil)}
+	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", cleared, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, count(prepared.messages), "an already cleared history gets no second marker")
+	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, cleared, nil)
+	require.NoError(t, err)
+	require.Equal(t, 3, count(prepared.messages), "memory restored after a clear is appended as superseding")
+	require.True(t, strings.HasPrefix(prepared.messages[prepared.currentStart].Content, agentV3MemorySnapshotSupersedeHeader))
 
 	older := []*schema.Message{buildAgentV3MemorySnapshotMessage("- stale"), schema.UserMessage("a"), schema.AssistantMessage("b", nil), snapshot, schema.UserMessage("c"), schema.AssistantMessage("d", nil)}
 	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, older, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, count(prepared.messages), "comparison uses the latest archived snapshot")
+	superseded := []*schema.Message{snapshot, schema.UserMessage("a"), buildAgentV3MemorySnapshotUpdate("- second"), schema.UserMessage("c")}
+	require.Nil(t, agentV3MemorySnapshotDelta(superseded, "- second"), "a superseding snapshot counts as the latest state")
 
-	require.False(t, agentV3ReplayHasMemorySnapshot(nil, snapshot))
-	require.False(t, agentV3ReplayHasMemorySnapshot([]*schema.Message{schema.UserMessage(agentV3MemorySnapshotHeader + "other\n</group_memory_snapshot>")}, snapshot))
-	require.False(t, agentV3ReplayHasMemorySnapshot([]*schema.Message{{Role: schema.Assistant, Content: snapshot.Content}}, snapshot), "only user-role snapshots count")
+	tests := []struct {
+		name    string
+		message *schema.Message
+		body    string
+		found   bool
+	}{
+		{name: "nil", message: nil},
+		{name: "plain", message: snapshot, body: memory, found: true},
+		{name: "superseding", message: buildAgentV3MemorySnapshotUpdate("- next"), body: "- next", found: true},
+		{name: "cleared", message: schema.UserMessage(agentV3MemorySnapshotCleared), body: "", found: true},
+		{name: "assistant role", message: &schema.Message{Role: schema.Assistant, Content: snapshot.Content}},
+		{name: "look-alike user text", message: schema.UserMessage("<group_memory_snapshot>REAL_USER")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, found := agentV3MemorySnapshotBody(tt.message)
+			require.Equal(t, tt.found, found)
+			require.Equal(t, tt.body, body)
+		})
+	}
+}
+
+type agentSessionPublishFailureRepository struct {
+	session.Repository
+	fail atomic.Bool
+}
+
+func (r *agentSessionPublishFailureRepository) Publish(ctx context.Context, scope session.Scope, intent session.Intent, digest string, size int64, receipt session.DeliveryReceipt) (session.Node, error) {
+	if r.fail.Load() {
+		return session.Node{}, errAgentSessionPublishFailure
+	}
+	return r.Repository.Publish(ctx, scope, intent, digest, size, receipt)
+}
+
+var errAgentSessionPublishFailure = errors.New("fixture publish failure")
+
+func TestAgentV3SessionLoadedTurnFallsBackToRawTurnsWhenCommitFails(t *testing.T) {
+	for _, failPublish := range []bool{false, true} {
+		t.Run(fmt.Sprintf("publish_fails=%t", failPublish), func(t *testing.T) {
+			f := newAgentSessionFixture(t)
+			require.NoError(t, f.service.Close())
+			files, err := session.NewFileStore(f.directory)
+			require.NoError(t, err)
+			repo := &agentSessionPublishFailureRepository{Repository: f.repo}
+			f.service, err = session.NewService(repo, files, session.Options{TTL: time.Hour})
+			require.NoError(t, err)
+			f.files = files
+			done := make(chan struct{})
+			close(done)
+			agentSessionService.Store(&agentV3SessionService{service: f.service, cancel: func() {}, done: done})
+
+			cfg := &config.AgentConfig{Name: "commit-fallback", ContextMode: "chat", Session: config.AgentSessionConfig{LoadContext: true}}
+			mdl := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ROOT_FINAL", nil)}, {schema.AssistantMessage("CHILD_FINAL", nil)}}}
+			f.compile(t, cfg, mdl)
+			scope := orm.AgentV3Scope{Bot: f.scope().Bot, Platform: agentV3Platform, ChatID: -100}
+			first := f.chat(t, cfg, sessionMessage(10, 7, 0, "ROOT_INPUT"), nil)
+			require.Nil(t, f.node(t, first).Parent)
+			turns, err := orm.AgentV3LoadTurns(t.Context(), scope, 12)
+			require.NoError(t, err)
+			require.Len(t, turns, 2, "a new root always keeps the fallback raw turns")
+
+			repo.fail.Store(failPublish)
+			second := f.chat(t, cfg, sessionMessage(20, 7, 60, "CHILD_INPUT"), nil)
+			turns, err = orm.AgentV3LoadTurns(t.Context(), scope, 12)
+			require.NoError(t, err)
+			text := replySessionSchemaText(mdl.capturedInputs()[1])
+			require.Contains(t, text, "ROOT_FINAL", "the second turn loaded the root as its parent")
+			if failPublish {
+				require.Len(t, turns, 4, "a loaded turn whose publish failed must still reach the raw-turn fallback")
+				require.Equal(t, "CHILD_INPUT", turns[2].Content)
+				require.Equal(t, "CHILD_FINAL", turns[3].Content)
+				_, err = f.service.Load(t.Context(), session.Selection{Scope: f.scope(), Mode: session.SelectReply, ReplyMessageID: second})
+				require.ErrorIs(t, err, session.ErrMiss)
+			} else {
+				require.Len(t, turns, 2, "a published session hit skips the raw-turn fallback")
+				root := f.node(t, first)
+				require.Equal(t, &root.Ref, f.node(t, second).Parent)
+			}
+		})
+	}
 }
 
 func TestAgentV3DeliveredMessagesFallback(t *testing.T) {
@@ -136,7 +238,10 @@ func TestAgentV3SessionCommitIndexesEveryDeliveredChunk(t *testing.T) {
 	require.NoError(t, err)
 	_, err = compiled.Agent.Generate(WithSessionCapture(ctx, tc.Session.capture), messages)
 	require.NoError(t, err)
-	commitAgentV3Session(tc, []*tb.Message{{ID: 501}, nil, {ID: 502}, {ID: 0}, {ID: 503}})
+	require.False(t, tc.Session.committed)
+	require.True(t, commitAgentV3Session(tc, []*tb.Message{{ID: 501}, nil, {ID: 502}, {ID: 0}, {ID: 503}}))
+	require.True(t, tc.Session.committed)
+	require.False(t, commitAgentV3Session(tc, nil), "no delivered ID means nothing was published")
 	node := f.node(t, 503)
 	require.Equal(t, []int{501, 502, 503}, node.ReplyMessageIDs, "invalid entries are skipped; the first ID stays primary")
 	require.Equal(t, node, f.node(t, 501))

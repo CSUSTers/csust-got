@@ -35,8 +35,10 @@ type deliveryTelegram struct {
 	failFinal       bool
 	failFormatted   bool
 	invalidFinalID  bool
+	rejectSameText  bool
 	editError       string
 	responses       []string
+	texts           map[int]string
 }
 
 func newDeliveryTelegram(t *testing.T) *deliveryTelegram {
@@ -78,6 +80,17 @@ func newDeliveryTelegram(t *testing.T) *deliveryTelegram {
 		if value, ok := payload["message_id"]; ok {
 			_, _ = fmt.Sscan(fmt.Sprint(value), &id)
 		}
+		text, _ := payload["text"].(string)
+		if method == "editMessageText" && d.rejectSameText && d.texts[id] == text {
+			_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":400,"description":%q}`, tb.ErrMessageNotModified.Description)
+			return
+		}
+		if method == "editMessageText" || method == "sendMessage" {
+			if d.texts == nil {
+				d.texts = map[int]string{}
+			}
+			d.texts[id] = text
+		}
 		if !placeholder {
 			if d.invalidFinalID {
 				id = 0
@@ -105,6 +118,21 @@ func (d *deliveryTelegram) finalCalls() []deliveryTelegramCall {
 		}
 	}
 	return calls
+}
+
+func (d *deliveryTelegram) overwrite(id int, text string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.texts == nil {
+		d.texts = map[int]string{}
+	}
+	d.texts[id] = text
+}
+
+func (d *deliveryTelegram) currentText(id int) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.texts[id]
 }
 
 func isDeliveryPlaceholder(text any) bool {
@@ -450,11 +478,66 @@ func TestUpdateMessageSkipsUnchangedText(t *testing.T) {
 	sp.updateMessage()
 	require.Len(t, d.finalCalls(), 2)
 
+	d.rejectSameText = true
 	_, _, _, err := sp.finalize()
 	require.NoError(t, err)
-	require.Len(t, d.finalCalls(), 2, "the final edit is skipped when the placeholder already shows the final text")
+	calls := d.finalCalls()
+	require.Len(t, calls, 3, "the final edit is always issued even when the preview already shows the final text")
+	require.Equal(t, "editMessageText", calls[2].method)
+	require.NotNil(t, sp.deliveredMsg, "message is not modified is a delivery proof")
+	require.Equal(t, 42, sp.deliveredMsg.ID)
+}
+
+func TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite(t *testing.T) {
+	setupDeliveryConfig(t)
+	d := newDeliveryTelegram(t)
+	d.rejectSameText = true
+	sp := newDeliveryStreamProcessor(t, d, &config.AgentOutputConfig{})
+	sp.processChunk(schema.AssistantMessage("final answer", nil))
+
+	sp.updateMessage()
+	require.Len(t, d.finalCalls(), 1)
+	require.Equal(t, "final answer", d.currentText(42))
+	sp.updateMessage()
+	require.Len(t, d.finalCalls(), 1, "a periodic tick still skips identical text")
+
+	d.overwrite(42, "正在搜索…")
+	sp.processChunk(newClearStreamOutputMessage())
+	require.Empty(t, sp.getResponse())
+	sp.processChunk(schema.AssistantMessage("final answer", nil))
+
+	_, _, sent, err := sp.finalize()
+	require.NoError(t, err)
+	calls := d.finalCalls()
+	require.Len(t, calls, 2, "the forced final edit must not trust the dedupe cache")
+	require.Equal(t, "editMessageText", calls[1].method)
+	require.Equal(t, 42, deliveryMessageID(calls[1]))
+	require.Equal(t, "final answer", deliveryText(calls[1]))
+	require.Equal(t, "final answer", d.currentText(42))
 	require.NotNil(t, sp.deliveredMsg)
 	require.Equal(t, 42, sp.deliveredMsg.ID)
+	require.Equal(t, 42, sent.ID)
+}
+
+func TestUpdateMessageResendsAfterPlaceholderOverwrittenHook(t *testing.T) {
+	setupDeliveryConfig(t)
+	d := newDeliveryTelegram(t)
+	sp := newDeliveryStreamProcessor(t, d, &config.AgentOutputConfig{})
+	sp.editInterval = 0
+	sp.tc = &TurnContext{}
+	sp.processChunk(schema.AssistantMessage("hello", nil))
+
+	sp.updateMessage()
+	sp.updateMessage()
+	require.Len(t, d.finalCalls(), 1, "identical text is not re-sent while the placeholder still shows it")
+
+	d.overwrite(42, "正在搜索…")
+	sp.tc.MarkPlaceholderOverwritten()
+	sp.updateMessage()
+	require.Len(t, d.finalCalls(), 2, "an overwritten placeholder invalidates the dedupe cache")
+	require.Equal(t, "hello", d.currentText(42))
+	sp.updateMessage()
+	require.Len(t, d.finalCalls(), 2)
 }
 
 func TestUpdateMessagePausesEditsUntilFloodWindowPasses(t *testing.T) {

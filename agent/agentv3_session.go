@@ -60,6 +60,7 @@ type agentV3SessionTurn struct {
 	selection   session.Selection
 	load        bool
 	ownsHistory bool
+	committed   bool
 }
 
 func initAgentV3SessionService(ctx context.Context) error {
@@ -397,7 +398,9 @@ func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 
 // buildAgentV3LoadedInput replays the loaded history verbatim after the current system
 // prefix so the provider prompt cache can align on the archived byte sequence. Only the
-// system message is rebuilt; a fresh memory snapshot is appended only when it changed.
+// system message is rebuilt; replayed memory snapshots are never rewritten. When the current
+// memory differs from the last replayed snapshot, a superseding snapshot (or an explicit
+// cleared marker) is appended so the model stops trusting the stale text.
 func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory string, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {
 	current, err := buildAgentV3SessionInput(cc, tc, proof)
 	if err != nil {
@@ -406,7 +409,7 @@ func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory 
 	prepared := agentV3PreparedSessionInput{messages: []*schema.Message{schema.SystemMessage(prefix)}, frameIndexes: []int{0}}
 	prepared.messages = append(prepared.messages, replay...)
 	prepared.currentStart = len(prepared.messages)
-	if message := buildAgentV3MemorySnapshotMessage(memory); message != nil && !agentV3ReplayHasMemorySnapshot(replay, message) {
+	if message := agentV3MemorySnapshotDelta(replay, memory); message != nil {
 		prepared.messages = append(prepared.messages, message)
 	}
 	prepared.messages = append(prepared.messages, current...)
@@ -414,15 +417,29 @@ func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory 
 	return prepared, nil
 }
 
-func agentV3ReplayHasMemorySnapshot(replay []*schema.Message, message *schema.Message) bool {
-	for i := len(replay) - 1; i >= 0; i-- {
-		previous := replay[i]
-		if previous == nil || previous.Role != schema.User || !strings.HasPrefix(previous.Content, agentV3MemorySnapshotHeader) {
-			continue
-		}
-		return previous.Content == message.Content
+// agentV3MemorySnapshotDelta returns the snapshot message to append after the replay, or nil
+// when the replayed history already ends in the current memory state.
+func agentV3MemorySnapshotDelta(replay []*schema.Message, memory string) *schema.Message {
+	memory = strings.TrimSpace(memory)
+	last, found := agentV3ReplayLastMemorySnapshot(replay)
+	switch {
+	case !found:
+		return buildAgentV3MemorySnapshotMessage(memory)
+	case last == memory:
+		return nil
+	default:
+		return buildAgentV3MemorySnapshotUpdate(memory)
 	}
-	return false
+}
+
+// agentV3ReplayLastMemorySnapshot returns the body of the latest snapshot in the replay.
+func agentV3ReplayLastMemorySnapshot(replay []*schema.Message) (string, bool) {
+	for i := len(replay) - 1; i >= 0; i-- {
+		if body, ok := agentV3MemorySnapshotBody(replay[i]); ok {
+			return body, true
+		}
+	}
+	return "", false
 }
 
 func isPureAgentV3SessionError(err, sentinel error) bool {
@@ -538,8 +555,10 @@ func agentV3DeliveredMessages(all []*tb.Message, last *tb.Message) []*tb.Message
 }
 
 // commitAgentV3Session publishes the turn under every delivered chunk ID so a reply to any
-// chunk resolves to the node; the first ID is the primary message.
-func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) {
+// chunk resolves to the node; the first ID is the primary message. It reports whether the
+// node was published and records that on the turn state so the fallback raw-turn save knows
+// whether the DAG actually holds this turn.
+func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) bool {
 	ids := make([]int, 0, len(sent))
 	for _, message := range sent {
 		if message != nil && message.ID > 0 {
@@ -547,7 +566,7 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) {
 		}
 	}
 	if tc == nil || tc.Background || tc.Session == nil || tc.Session.capture == nil || len(ids) == 0 {
-		return
+		return false
 	}
 	state := tc.Session
 	snapshot := state.capture.Snapshot()
@@ -558,11 +577,12 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) {
 		var node session.Node
 		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}})
 		if err == nil {
+			state.committed = true
 			// The next replay of this node is its full model input plus this turn's new messages.
 			scheduleAgentV3SessionCompaction(tc, node, append(slices.Clone(state.input), snapshot.Messages...))
+			return true
 		}
 	}
-	if err != nil {
-		zap.L().Warn("agentv3: delivered response was not saved to session", zap.String("run_id", tc.RunID), zap.Ints("message_ids", ids), zap.Error(err))
-	}
+	zap.L().Warn("agentv3: delivered response was not saved to session", zap.String("run_id", tc.RunID), zap.Ints("message_ids", ids), zap.Error(err))
+	return false
 }

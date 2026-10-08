@@ -420,3 +420,24 @@ func configWithProgressSummary() *config.AgentConfig {
 		},
 	}
 }
+
+func TestProgressUpdateMarksPlaceholderOverwritten(t *testing.T) {
+	setupDeliveryConfig(t)
+	d := newDeliveryTelegram(t)
+	tc := &TurnContext{Config: configWithProgressSummary(), ChatID: -100}
+	ctx := WithTurnContext(t.Context(), tc)
+
+	require.Zero(t, tc.placeholderContentVersion())
+	require.Equal(t, "ok", updateProgressMessage(ctx, updateProgressArgs{}, "first", wholeTextTypePlain))
+	require.NotNil(t, tc.progressMsg)
+	require.Equal(t, uint64(1), tc.placeholderContentVersion(), "sending the progress message bumps the version")
+
+	tc.lastEditAt.Store(0)
+	require.Equal(t, "ok", updateProgressMessage(ctx, updateProgressArgs{}, "second", wholeTextTypePlain))
+	require.Equal(t, uint64(2), tc.placeholderContentVersion(), "editing the progress message bumps the version")
+
+	tc.lastEditAt.Store(0)
+	d.script(`{"ok":false,"error_code":500,"description":"fixture edit failure"}`)
+	require.Equal(t, "ok", updateProgressMessage(ctx, updateProgressArgs{}, "third", wholeTextTypePlain))
+	require.Equal(t, uint64(2), tc.placeholderContentVersion(), "a failed edit leaves the version unchanged")
+}

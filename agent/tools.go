@@ -106,6 +106,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 		}
 		tc.progressMsg = msg
 		tc.MarkEdited()
+		tc.MarkPlaceholderOverwritten()
 		return "ok"
 	}
 
@@ -114,6 +115,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 		zap.L().Debug("agentv3: failed to edit progress message", zap.Error(err))
 	} else {
 		tc.MarkEdited()
+		tc.MarkPlaceholderOverwritten()
 	}
 	return "ok"
 }

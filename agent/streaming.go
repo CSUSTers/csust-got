@@ -100,6 +100,7 @@ type streamProcessor struct {
 	// Edit dedupe and flood backoff state, protected by editStateMu
 	editStateMu       sync.Mutex
 	lastSentFormatted string
+	lastSentVersion   uint64
 	lastEditAttempt   time.Time
 	floodNotBefore    time.Time
 	floodBackoff      time.Duration
@@ -450,8 +451,10 @@ func (sp *streamProcessor) deletePlaceholderAfterRichSend(sent *tb.Message) {
 }
 
 // editPlaceholder edits the placeholder message with new content and returns the delivery proof.
-// Unchanged text is not re-sent, flood errors pause periodic edits and widen the edit interval,
-// and a final (force) edit waits out one flood window before giving up.
+// Periodic ticks skip text the stream itself already sent unless another writer (update_progress)
+// has overwritten the placeholder since; a final (force) edit is always issued so the proof comes
+// from Telegram ("message is not modified" counts as delivered), and it waits out one flood window
+// before giving up. Flood errors pause periodic edits and widen the edit interval.
 // If a TurnContext is available, uses editMu to prevent races with update_progress.
 func (sp *streamProcessor) editPlaceholder(chunk telegramChunk, force bool) (*tb.Message, error) {
 	if sp.placeholderMsg == nil || chunk.formatted == "" {
@@ -465,7 +468,8 @@ func (sp *streamProcessor) editPlaceholder(chunk telegramChunk, force bool) (*tb
 	sp.editStateMu.Lock()
 	defer sp.editStateMu.Unlock()
 
-	if chunk.formatted == sp.lastSentFormatted {
+	version := sp.tc.placeholderContentVersion()
+	if !force && chunk.formatted == sp.lastSentFormatted && version == sp.lastSentVersion {
 		return sp.placeholderMsg, nil
 	}
 	now := sp.clock()
@@ -491,6 +495,7 @@ func (sp *streamProcessor) editPlaceholder(chunk telegramChunk, force bool) (*tb
 		return nil, err
 	}
 	sp.lastSentFormatted = chunk.formatted
+	sp.lastSentVersion = version
 	sp.floodNotBefore = time.Time{}
 	sp.floodBackoff = 0
 	sp.mu.Lock()

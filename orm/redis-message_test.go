@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"csust-got/log"
@@ -279,4 +280,119 @@ func addRawMessageStreamRecord(t *testing.T, chatID int64, id string, values map
 		Values: values,
 	}).Err()
 	require.NoError(t, err)
+}
+
+func TestMessageStreamReaderPrefersNewestSnapshotOverInsertionOrder(t *testing.T) {
+	tests := []struct {
+		name  string
+		first func(*Message)
+		last  func(*Message)
+		want  string
+	}{
+		{name: "edit_then_late_original", first: func(m *Message) { m.LastEdit = 1700000100 }, last: func(*Message) {}, want: "first"},
+		{name: "later_edit_wins", first: func(m *Message) { m.LastEdit = 1700000100 }, last: func(m *Message) { m.LastEdit = 1700000200 }, want: "last"},
+		{name: "same_edit_newer_date_wins", first: func(m *Message) { m.LastEdit = 1700000100; m.Unixtime = 1700000050 }, last: func(m *Message) { m.LastEdit = 1700000100; m.Unixtime = 1700000040 }, want: "first"},
+		{name: "identical_times_keep_last_insert", first: func(*Message) {}, last: func(*Message) {}, want: "last"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			first := cachedTextMessage(2, "first")
+			tt.first(first)
+			last := cachedTextMessage(2, "last")
+			tt.last(last)
+			require.NoError(t, PushMessageToStream(cachedTextMessage(1, "one")))
+			require.NoError(t, PushMessageToStream(first))
+			require.NoError(t, PushMessageToStream(last))
+
+			messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+			require.NoError(t, err)
+			require.Equal(t, []int{1, 2}, cachedMessageIDs(messages))
+			require.Equal(t, tt.want, messages[1].Text)
+
+			best, _, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{MinID: 2})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, best[0].Text)
+		})
+	}
+}
+
+func TestMessageStreamStrictSkipsCorruptDuplicateOfSeenMessage(t *testing.T) {
+	setupMessageCacheRedis(t)
+	addRawMessageStreamRecord(t, -100, "1-0", map[string]any{"id": "2", "message": `{"message_id":2`})
+	require.NoError(t, PushMessageToStream(cachedTextMessage(2, "valid")))
+
+	messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, []int{2}, cachedMessageIDs(messages))
+	require.Equal(t, "valid", messages[0].Text)
+}
+
+func TestSetMessageKeepsNewerSnapshot(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored func(*Message)
+		next   func(*Message)
+		want   string
+	}{
+		{name: "older_original_does_not_overwrite_edit", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(*Message) {}, want: "stored"},
+		{name: "newer_edit_overwrites", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(m *Message) { m.LastEdit = 1700000200 }, want: "next"},
+		{name: "equal_times_overwrite", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(m *Message) { m.LastEdit = 1700000100 }, want: "next"},
+		{name: "same_edit_older_date_does_not_overwrite", stored: func(m *Message) { m.Unixtime = 1700000050 }, next: func(m *Message) { m.Unixtime = 1700000040 }, want: "stored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			stored := cachedTextMessage(3, "stored")
+			tt.stored(stored)
+			next := cachedTextMessage(3, "next")
+			tt.next(next)
+			require.NoError(t, SetMessage(stored))
+			require.NoError(t, SetMessage(next))
+
+			got, err := GetMessage(-100, 3)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Text)
+		})
+	}
+}
+
+func TestSetMessageReplacesCorruptSnapshot(t *testing.T) {
+	miniRedis := setupMessageCacheRedis(t)
+	key := wrapKeyWithChatMsg("message_full", -100, 4)
+	miniRedis.Set(key, `{"message_id":4`)
+
+	require.NoError(t, SetMessage(cachedTextMessage(4, "fresh")))
+	got, err := GetMessage(-100, 4)
+	require.NoError(t, err)
+	require.Equal(t, "fresh", got.Text)
+	require.Greater(t, miniRedis.TTL(key).Seconds(), float64(0))
+}
+
+func TestSetMessageConcurrentSnapshotsConvergeOnNewest(t *testing.T) {
+	setupMessageCacheRedis(t)
+	edited := cachedTextMessage(5, "edited")
+	edited.LastEdit = 1700000100
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				errs <- SetMessage(edited)
+			} else {
+				errs <- SetMessage(cachedTextMessage(5, "original"))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	got, err := GetMessage(-100, 5)
+	require.NoError(t, err)
+	require.Equal(t, "edited", got.Text)
 }

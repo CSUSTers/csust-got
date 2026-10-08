@@ -17,7 +17,7 @@
 | 自动更新器（Watchtower 等） | 该部署是否对 `csust/csust-got:latest` 启用了自动拉取 | 新镜像会在无人值守时上线，上面所有项都没人检查。要么关掉 bot 服务的自动更新、钉住 tag，要么确认每个合入 dev 的 PR 都带了部署文档 |
 | 回滚路径 | 目标版本每个「部署与配置」段的「回滚方式」 | 不知道回滚后旧版本能否读新 key 布局 / 新挂载内的数据 |
 
-升级后看启动日志：有未知配置键 warning，先对照文档确认是文档漏写还是键已删除，再决定是否清理 `config.yaml`。
+升级后看启动日志：有未知配置键 warning（`unknown config key`，覆盖 `config.yaml` 与 `custom.yaml` 的整棵配置树，路径形如 `log.max_size_mbb`、`agents[0].typo`），先对照文档确认是文档漏写还是键已删除，再决定是否清理 `config.yaml`。
 
 ## PR 作者：改了部署面要做什么
 

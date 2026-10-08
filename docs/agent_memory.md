@@ -12,14 +12,32 @@
 - 私聊中所有人视为管理员；群内管理员判定为「可限制成员」权限。
 - 容量：所有条目按 `- 内容` 行累计，超过 `snapshot_max_tokens × 4` 字符即视为写满。写满后新写入被**拒绝并明确回复**
   （命令与「记住：」两条路径都一样），不再静默成功。
+- 配额与容量检查和写入在同一个 Redis 事务里完成（`orm.AgentV3AddMemoryChecked`：WATCH `memory:active` 及全部条目 key，
+  检查通过后 MULTI 写入，冲突时最多重试 5 次）。并发写入不会突破 `max_entries_per_user` 或容量；重试耗尽返回
+  `ErrAgentV3StateConflict`，用户看到「写入 memory 失败，请稍后重试」。
 - snapshot 超出预算时（例如升级前已经写满）**丢弃最旧条目**、保留最新条目，并在开头标注 `[earlier memory omitted: N entries]`。
 - memory 项与 snapshot **不再设置 TTL**：升级后首次写入 / 删除会把现有 memory key 转为持久 key。
 
-## 会话命中时不再重复写入
+## 会话中的 memory snapshot 只追加、不改写
 
-当某轮成功加载了完整会话 DAG（session hit，`tc.Session.parent != nil`），这一轮**不再**追加 raw turns，也不再重建 rolling summary，
-只保存 Telegram 回复消息（`SaveResponse`）。raw turns / summary 只是会话不可用时的回退上下文，session hit 的内容已经在 DAG 中。
-后果：在 reply 续聊之后再用 `load_context=false` 的命令触发时，回退上下文看不到这些 session 轮次。
+session 命中时归档里的历史 `<group_memory_snapshot>` 会原样回放（保证 prompt cache 前缀对齐），不会被删除或改写。本轮用**当前 memory**
+与回放历史中**最后一条** snapshot 的正文比较：
+
+| 情况 | 追加的消息 |
+| --- | --- |
+| 历史中没有 snapshot，且 memory 非空 | 普通 `<group_memory_snapshot>` |
+| 正文相同 | 不追加 |
+| 正文不同，memory 非空 | `<group_memory_snapshot supersedes="earlier">`，header 声明它取代此前所有 snapshot |
+| memory 已清空（例如 `/memory forget` 删光） | `<group_memory_snapshot cleared="true">群记忆已清空，忽略此前所有记忆快照。</group_memory_snapshot>` |
+
+追加的消息位于回放之后、本轮输入之前，并作为 history 归档进本节点，后续轮次同样原样回放；下一次比较以这条新 snapshot 为准。
+
+## 会话命中且发布成功时不再重复写入
+
+当某轮成功加载了完整会话 DAG，**并且**本轮节点发布成功（`tc.Session.parent != nil && tc.Session.committed`），这一轮**不再**追加 raw turns，
+也不再重建 rolling summary，只保存 Telegram 回复消息（`SaveResponse`）。raw turns / summary 只是会话不可用时的回退上下文，session hit 的内容已经在 DAG 中。
+若加载了父节点但 commit 失败（Redis / 文件 / 10 秒超时），这一轮仍走 raw turns + summary 的回退保存，避免该轮在两边都丢失。
+后果：在 reply 续聊之后再用 `load_context=false` 的命令触发时，回退上下文看不到成功发布的 session 轮次。
 
 ## 已删除的 Redis key
 

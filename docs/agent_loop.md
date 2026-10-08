@@ -25,6 +25,7 @@
 - 配置键：`agents[].agent.final_reserve`，时长字符串，默认 `90s`；`"0s"` 关闭。
 - 为避免短 `timeout`（默认 30s）被 90s 预留直接吞掉，运行时会把预留压到 `min(final_reserve, 剩余总时长/3)`。
 - 测试可通过 `CustomAgentConfig.FinalReserve` 直接覆盖。
+- 仓库 `config.yaml` 示例在 `assistant` 的 `agent.final_reserve` 处列出了默认值。
 
 ## 3. 模型流式看门狗（`model.stream_idle_timeout`）
 
@@ -32,6 +33,7 @@
 
 - 配置键：`model.stream_idle_timeout`，默认 `60s`；`"0s"` 关闭看门狗。
 - 配置键：`model.request_timeout`，默认 `0`（不限制），作用于 OpenAI HTTP client 的整请求超时。流式请求的总时长可能很长，一般只需 `stream_idle_timeout`，`request_timeout` 保持可选。
+- 仓库 `config.yaml` 示例在 `&main_model` 锚点处列出了这两个键及默认值，复用该锚点的 agent 自动继承。
 
 ## 4. 空响应
 
@@ -48,6 +50,15 @@ agent_v3:
 ```
 
 - `max_runs`：`Chat()` 在过滤器和输入解析之后、构建上下文之前非阻塞获取名额；拿不到就直接回复 `busy_message` 并返回，不排队。没有按 chat 的队列（按 chat 的并发是产品决策，保持现状）。
-- `max_model_calls`：`streamOneTurn` 在每次模型流式调用前获取名额，拿不到则等待，受 turn ctx 期限约束；cron runner 和子 agent 同样经过该限制。
-- 两个限制默认 0（保持原有行为）。容量变化时限流器会重建；`AgentConcurrencySnapshot()` 返回当前占用数，并作为 `runs_in_flight` / `model_in_flight` 写入 `model_stream` trace span。
+- `max_model_calls`：名额在 `buildModel` 统一包裹的 `retryingChatModel.Generate/Stream` 内获取，因此主 agent、ADK 子 agent、`analyze_image` 的视觉模型、进度摘要模型和 cron runner 都受同一限制；拿不到则等待，受调用 ctx 期限约束。流式调用整条流都持有名额，直到上游 EOF、不可重试错误或调用方关闭 reader（关闭后在下一个上游 chunk 或空闲看门狗触发时释放），重试期间不释放。
+- 两个限制默认 0（保持原有行为）。容量变化时限流器会重建；`AgentConcurrencySnapshot()` 返回当前占用数，并在 `streamOneTurn` 发起模型调用前作为 `runs_in_flight` / `model_in_flight` 写入 `model_stream` trace span（不含本次调用）。
 - `Chat()` 同时调用 `BeginInflightTurn/EndInflightTurn`，供优雅退出（`shutdown_grace`）等待进行中的轮次。
+
+## 6. 图片 URL 下载与代理（`analyze_image` / `fetch_image`）
+
+`fetchPublicImageURL` 只允许 http/https、80/443 端口且解析结果全部为公网地址的 URL。重定向不交给 `http.Client` 自动跟随，而是手动处理（最多 5 跳），每一跳都重新解析、校验并固定到校验过的 IP：
+
+- 直连：拨号器在连接时再次解析并校验，只连接校验过的 IP。
+- HTTP/HTTPS 代理（`proxy`）：不使用 `Transport.Proxy`，而是由拨号器向代理发起 `CONNECT <校验过的 IP>:<端口>` 隧道，Host 头和 TLS SNI 仍是原始主机名，代理不会自行解析主机名。代理必须允许对 80/443 端口的 CONNECT；被拒绝时下载失败并返回 `errImageURLProxyConnect`。
+- SOCKS5 代理：请求 URL 的 host 改写为校验过的 IP，`req.Host` 与 TLS `ServerName` 保持原始主机名，SOCKS 服务端收到的是 IP 而非域名。
+- 其他代理 scheme 无法固定 IP，直接按策略错误拒绝下载。

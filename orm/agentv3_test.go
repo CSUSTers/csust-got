@@ -490,3 +490,68 @@ func TestAgentV3SetPrefixWritesOnlyCurrentRecord(t *testing.T) {
 	require.NoError(t, AgentV3SetPrefix(ctx, scope, rec, time.Hour))
 	assert.Equal(t, []string{agentV3PrefixCurrentKey(scope, "agent", "model")}, mr.Keys())
 }
+
+func TestAgentV3AddMemoryCheckedEnforcesQuotaUnderConcurrency(t *testing.T) {
+	setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	const quota = 3
+	checkFor := func(user int64) AgentV3MemoryAddCheck {
+		return func(items []AgentV3MemoryItem) string {
+			used := 0
+			for _, item := range items {
+				if item.CreatedBy == user {
+					used++
+				}
+			}
+			if used >= quota {
+				return fmt.Sprintf("quota %d/%d", used, quota)
+			}
+			return ""
+		}
+	}
+	check := checkFor(7)
+
+	var wg sync.WaitGroup
+	results := make([]string, 10)
+	errs := make([]error, 10)
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], errs[i] = AgentV3AddMemoryChecked(ctx, scope, AgentV3MemoryItem{ID: fmt.Sprintf("item-%d", i), Content: "fact", CreatedBy: 7}, 0, check)
+		}()
+	}
+	wg.Wait()
+
+	stored, denied := 0, 0
+	for i := range results {
+		switch {
+		case errors.Is(errs[i], ErrAgentV3StateConflict):
+		case errs[i] != nil:
+			t.Fatalf("writer %d: %v", i, errs[i])
+		case results[i] != "":
+			denied++
+		default:
+			stored++
+		}
+	}
+	items, err := AgentV3ListMemory(ctx, scope)
+	require.NoError(t, err)
+	require.Len(t, items, quota, "racing writers must not exceed the quota")
+	require.Equal(t, quota, stored)
+	require.Positive(t, denied)
+
+	denial, err := AgentV3AddMemoryChecked(ctx, scope, AgentV3MemoryItem{ID: "late", Content: "fact", CreatedBy: 7}, 0, check)
+	require.NoError(t, err)
+	require.Equal(t, "quota 3/3", denial)
+	denial, err = AgentV3AddMemoryChecked(ctx, scope, AgentV3MemoryItem{ID: "other", Content: "fact", CreatedBy: 8}, 0, checkFor(8))
+	require.NoError(t, err)
+	require.Empty(t, denial)
+	denial, err = AgentV3AddMemoryChecked(ctx, scope, AgentV3MemoryItem{ID: "unchecked", Content: "fact", CreatedBy: 7}, 0, nil)
+	require.NoError(t, err)
+	require.Empty(t, denial, "a nil check writes unconditionally")
+	items, err = AgentV3ListMemory(ctx, scope)
+	require.NoError(t, err)
+	require.Len(t, items, quota+2)
+}

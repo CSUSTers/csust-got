@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -10,11 +11,71 @@ import (
 	"go.uber.org/zap"
 )
 
-// UnknownConfigKeys lists keys under agents[] and agent_v3 that no struct field accepts.
+// configSchema describes one root section: a mapstructure-tagged type, or the flat keys its viper.Get* reader consumes.
+type configSchema struct {
+	typ  reflect.Type
+	keys []string
+}
+
+var specialListConfigKeys = []string{"enabled", "chats"}
+
+// rootConfigSchema mirrors readConfig(); flat key lists must match the viper.Get* calls in the sibling config files.
+var rootConfigSchema = map[string]configSchema{
+	"debug":               {},
+	"url":                 {},
+	"token":               {},
+	"proxy":               {},
+	"listen":              {},
+	"skip_duration":       {},
+	"log_file_dir":        {},
+	"sentence_delimiters": {},
+	"log":                 {keys: []string{"max_size_mb", "max_backups", "max_age_days", "compress"}},
+	"redis":               {keys: []string{"addr", "pass", "key_prefix"}},
+	"restrict":            {keys: []string{"kill_duration", "fake_ban_max_add"}},
+	"rate_limit":          {keys: []string{"max_token", "limit", "cost", "cost_sticker", "cost_command", "expire_time"}},
+	"message":             {keys: []string{"restrict_bot", "fake_ban_in_cd", "hitokoto_not_found", "no_sleep", "boot_failed", "welcome"}},
+	"black_list":          {keys: specialListConfigKeys},
+	"white_list":          {keys: specialListConfigKeys},
+	"meili":               {keys: []string{"enabled", "address", "api_key", "index_prefix"}},
+	"mc":                  {keys: []string{"mc2dead", "sacrifices", "odds", "timeout"}},
+	"debugopt":            {keys: []string{"show_this"}},
+	"get_voice":           {typ: reflect.TypeFor[GetVoiceConfig]()},
+	"agents":              {typ: reflect.TypeFor[AgentV3Configs]()},
+	"agent_v3":            {typ: reflect.TypeFor[AgentV3Config]()},
+}
+
+// UnknownConfigKeys lists loaded keys (config.yaml, custom.yaml) that no config field or reader accepts.
 func UnknownConfigKeys() []string {
-	keys := unknownConfigKeys(viper.Get("agents"), reflect.TypeFor[AgentV3Configs](), "agents")
-	keys = append(keys, unknownConfigKeys(viper.Get("agent_v3"), reflect.TypeFor[AgentV3Config](), "agent_v3")...)
+	var keys []string
+	for name, raw := range viper.AllSettings() {
+		schema, known := rootConfigSchema[strings.ToLower(name)]
+		if !known {
+			keys = append(keys, name)
+			continue
+		}
+		keys = append(keys, schema.unknownKeys(raw, name)...)
+	}
 	sort.Strings(keys)
+	return keys
+}
+
+func (s configSchema) unknownKeys(raw any, path string) []string {
+	if s.typ != nil {
+		return unknownConfigKeys(raw, s.typ, path)
+	}
+	if len(s.keys) == 0 {
+		return nil
+	}
+	values, ok := agentV3SessionConfigMap(raw)
+	if !ok {
+		return nil
+	}
+	var keys []string
+	for name := range values {
+		if !slices.Contains(s.keys, name) {
+			keys = append(keys, path+"."+name)
+		}
+	}
 	return keys
 }
 

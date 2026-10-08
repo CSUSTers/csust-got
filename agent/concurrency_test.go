@@ -2,6 +2,8 @@ package agentv3
 
 import (
 	"context"
+	"errors"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -113,7 +115,7 @@ func (m *concurrencyProbeModel) WithTools([]*schema.ToolInfo) (model.ToolCalling
 func TestModelCallLimitSerializesModelStreams(t *testing.T) {
 	withConcurrencyConfig(t, config.AgentV3ConcurrencyConfig{MaxModelCalls: 1})
 	mdl := &concurrencyProbeModel{hold: 15 * time.Millisecond}
-	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "probe", Model: mdl, MaxSteps: 2})
+	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "probe", Model: newRetryingChatModel(mdl, &config.Model{}), MaxSteps: 2})
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -137,13 +139,164 @@ func TestModelCallLimitWaitHonoursContext(t *testing.T) {
 	defer limiter.release()
 
 	mdl := &concurrencyProbeModel{}
-	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "probe", Model: mdl, MaxSteps: 2})
+	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "probe", Model: newRetryingChatModel(mdl, &config.Model{}), MaxSteps: 2})
 	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	_, err = agent.Generate(ctx, []*schema.Message{schema.UserMessage("request")})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Zero(t, mdl.peak.Load(), "the model is never called while the slot is held")
+}
+
+var errConcurrencyStubFatal = errors.New("stub fatal")
+
+// streamHoldModel keeps a stream open for hold and tracks how many streams overlap across all instances sharing a probe.
+type streamHoldModel struct {
+	probe *concurrencyProbeModel
+}
+
+func (m *streamHoldModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	stream, err := m.Stream(ctx, input, opts...)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	var chunks []*schema.Message
+	for {
+		chunk, recvErr := stream.Recv()
+		if recvErr != nil {
+			return schema.ConcatMessages(chunks)
+		}
+		chunks = append(chunks, chunk)
+	}
+}
+
+func (m *streamHoldModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	n := m.probe.active.Add(1)
+	for {
+		peak := m.probe.peak.Load()
+		if n <= peak || m.probe.peak.CompareAndSwap(peak, n) {
+			break
+		}
+	}
+	sr, sw := schema.Pipe[*schema.Message](1)
+	go func() {
+		defer sw.Close()
+		sw.Send(schema.AssistantMessage("o", nil), nil)
+		time.Sleep(m.probe.hold)
+		sw.Send(schema.AssistantMessage("k", nil), nil)
+		m.probe.active.Add(-1)
+	}()
+	return sr, nil
+}
+
+func (m *streamHoldModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func TestModelCallLimitCoversEveryWrappedModel(t *testing.T) {
+	withConcurrencyConfig(t, config.AgentV3ConcurrencyConfig{MaxModelCalls: 1})
+	probe := &concurrencyProbeModel{hold: 10 * time.Millisecond}
+	mainModel := newRetryingChatModel(&streamHoldModel{probe: probe}, &config.Model{})
+	subModel := newRetryingChatModel(&streamHoldModel{probe: probe}, &config.Model{})
+	visionModel := newRetryingChatModel(&streamHoldModel{probe: probe}, &config.Model{})
+	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: "main", Model: mainModel, MaxSteps: 2})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			result, err := agent.Generate(t.Context(), []*schema.Message{schema.UserMessage("main")})
+			assert.NoError(t, err)
+			assert.Equal(t, "ok", result.Content)
+		})
+		wg.Go(func() {
+			stream, err := subModel.Stream(t.Context(), []*schema.Message{schema.UserMessage("sub")})
+			require.NoError(t, err)
+			defer stream.Close()
+			for {
+				if _, recvErr := stream.Recv(); recvErr != nil {
+					assert.ErrorIs(t, recvErr, io.EOF)
+					return
+				}
+			}
+		})
+		wg.Go(func() {
+			result, err := visionModel.Generate(t.Context(), []*schema.Message{schema.UserMessage("vision")})
+			assert.NoError(t, err)
+			assert.Equal(t, "ok", result.Content)
+		})
+	}
+	wg.Wait()
+	assert.EqualValues(t, 1, probe.peak.Load(), "main, subagent and vision models share one slot")
+	_, inFlight := AgentConcurrencySnapshot()
+	assert.Zero(t, inFlight)
+}
+
+func TestRetryingChatModelReleasesSlot(t *testing.T) {
+	withConcurrencyConfig(t, config.AgentV3ConcurrencyConfig{MaxModelCalls: 1})
+	chunks := make([]*schema.Message, 100)
+	for i := range chunks {
+		chunks[i] = schema.AssistantMessage("x", nil)
+	}
+	newModel := func(steps ...retryStreamStep) model.ToolCallingChatModel {
+		return newRetryingChatModel(&retryStubModel{streamSteps: steps}, &config.Model{})
+	}
+	released := func() bool {
+		_, inFlight := AgentConcurrencySnapshot()
+		return inFlight == 0
+	}
+
+	t.Run("drained", func(t *testing.T) {
+		stream, err := newModel(retryStreamStep{chunks: chunks}).Stream(t.Context(), nil)
+		require.NoError(t, err)
+		defer stream.Close()
+		_, inFlight := AgentConcurrencySnapshot()
+		assert.EqualValues(t, 1, inFlight)
+		count := 0
+		for {
+			if _, recvErr := stream.Recv(); recvErr != nil {
+				require.ErrorIs(t, recvErr, io.EOF)
+				break
+			}
+			count++
+		}
+		assert.Equal(t, len(chunks), count)
+		assert.Eventually(t, released, time.Second, time.Millisecond)
+	})
+
+	t.Run("early close", func(t *testing.T) {
+		stream, err := newModel(retryStreamStep{chunks: chunks}).Stream(t.Context(), nil)
+		require.NoError(t, err)
+		_, err = stream.Recv()
+		require.NoError(t, err)
+		stream.Close()
+		assert.Eventually(t, released, time.Second, time.Millisecond)
+	})
+
+	t.Run("open error", func(t *testing.T) {
+		_, err := newModel(retryStreamStep{err: errConcurrencyStubFatal}).Stream(t.Context(), nil)
+		require.ErrorIs(t, err, errConcurrencyStubFatal)
+		assert.True(t, released())
+	})
+
+	t.Run("generate", func(t *testing.T) {
+		mdl := newRetryingChatModel(&retryStubModel{}, &config.Model{})
+		_, err := mdl.Generate(t.Context(), nil)
+		require.NoError(t, err)
+		assert.True(t, released())
+	})
+
+	t.Run("second stream waits for the first", func(t *testing.T) {
+		first, err := newModel(retryStreamStep{chunks: chunks}).Stream(t.Context(), nil)
+		require.NoError(t, err)
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		defer cancel()
+		_, err = newModel().Stream(ctx, nil)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		first.Close()
+		assert.Eventually(t, released, time.Second, time.Millisecond)
+	})
 }
 
 type replyCaptureContext struct {

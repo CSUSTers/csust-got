@@ -1,7 +1,10 @@
 package agentv3
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -14,18 +17,20 @@ import (
 )
 
 var (
-	errImageURLScheme     = errors.New("image url must use http or https")
-	errImageURLHost       = errors.New("image url has no host")
-	errImageURLPort       = errors.New("image url port must be 80 or 443")
-	errImageURLResolve    = errors.New("image url host does not resolve")
-	errImageURLNotPublic  = errors.New("image url resolves to a non-public address")
-	errImageURLRedirects  = errors.New("image url has too many redirects")
-	errImageURLDialTarget = errors.New("image download dial target is not a public address")
+	errImageURLScheme       = errors.New("image url must use http or https")
+	errImageURLHost         = errors.New("image url has no host")
+	errImageURLPort         = errors.New("image url port must be 80 or 443")
+	errImageURLResolve      = errors.New("image url host does not resolve")
+	errImageURLNotPublic    = errors.New("image url resolves to a non-public address")
+	errImageURLRedirects    = errors.New("image url has too many redirects")
+	errImageURLDialTarget   = errors.New("image download dial target is not a public address")
+	errImageURLProxyConnect = errors.New("image download proxy refused the tunnel")
 )
 
 const (
-	agentImageURLMaxRedirects  = 5
-	agentImageURLResolveWindow = 5 * time.Second
+	agentImageURLMaxRedirects    = 5
+	agentImageURLResolveWindow   = 5 * time.Second
+	agentImageProxyConnectWindow = 15 * time.Second
 )
 
 // lookupPublicImageHost resolves hosts for public-address checks; tests override it.
@@ -103,101 +108,246 @@ func isPublicIP(ip net.IP) bool {
 
 // validatePublicImageURL enforces http(s), a standard port and a public resolved address.
 func validatePublicImageURL(ctx context.Context, raw string) (*url.URL, error) {
+	parsed, _, err := resolvePublicImageURL(ctx, raw)
+	return parsed, err
+}
+
+// resolvePublicImageURL validates the URL and returns the addresses every later connection must be pinned to.
+func resolvePublicImageURL(ctx context.Context, raw string) (*url.URL, []net.IP, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return nil, errImageURLScheme
+	if !isHTTPScheme(parsed.Scheme) {
+		return nil, nil, errImageURLScheme
 	}
 	host := parsed.Hostname()
 	if host == "" {
-		return nil, errImageURLHost
+		return nil, nil, errImageURLHost
 	}
 	if err := checkImageTarget(nil, parsed.Port()); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
 		if err := checkImageTarget(ip, ""); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return parsed, nil
+		return parsed, []net.IP{ip}, nil
 	}
 	ips, err := lookupPublicImageHost(ctx, host)
 	if err != nil || len(ips) == 0 {
-		return nil, fmt.Errorf("%w: %s", errImageURLResolve, host)
+		return nil, nil, fmt.Errorf("%w: %s", errImageURLResolve, host)
 	}
 	for _, ip := range ips {
 		if err := checkImageTarget(ip, ""); err != nil {
-			return nil, fmt.Errorf("%w (%s)", err, host)
+			return nil, nil, fmt.Errorf("%w (%s)", err, host)
 		}
 	}
-	return parsed, nil
+	return parsed, ips, nil
 }
 
-// newPublicImageHTTPClient builds a client whose dials and redirects may only reach public addresses.
-// With a bot proxy configured the proxy performs the connection, so only URL validation applies.
-func newPublicImageHTTPClient() (*http.Client, error) {
+// imageDownloadProxy returns the configured bot proxy, or nil for direct downloads.
+func imageDownloadProxy() (*url.URL, error) {
+	if config.BotConfig == nil || config.BotConfig.Proxy == "" {
+		return nil, nil
+	}
+	proxyURL, err := url.Parse(config.BotConfig.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	scheme := strings.ToLower(proxyURL.Scheme)
+	if !isHTTPScheme(scheme) && scheme != "socks5" && scheme != "socks5h" {
+		return nil, fmt.Errorf("%w: unsupported proxy scheme %q", errImageURLDialTarget, proxyURL.Scheme)
+	}
+	return proxyURL, nil
+}
+
+func isHTTPScheme(scheme string) bool {
+	return strings.EqualFold(scheme, "http") || strings.EqualFold(scheme, "https")
+}
+
+func isHTTPProxy(proxyURL *url.URL) bool {
+	return proxyURL != nil && isHTTPScheme(proxyURL.Scheme)
+}
+
+// pinnedDialTarget re-resolves and validates a dial address and returns the validated ip:port to connect to.
+func pinnedDialTarget(ctx context.Context, addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", err
+	}
+	ips, err := lookupPublicImageHost(ctx, host)
+	if ip := net.ParseIP(host); ip != nil {
+		ips, err = []net.IP{ip}, nil
+	}
+	if err != nil || len(ips) == 0 {
+		return "", fmt.Errorf("%w: %s", errImageURLResolve, host)
+	}
+	for _, ip := range ips {
+		if err := checkImageTarget(ip, ""); err != nil {
+			return "", fmt.Errorf("%w: %w", errImageURLDialTarget, err)
+		}
+	}
+	return net.JoinHostPort(ips[0].String(), port), nil
+}
+
+// newPublicImageHTTPClient builds a single-hop client that never follows redirects itself.
+// Direct and HTTP-proxy hops pin the connection to a validated address in the dialer (HTTP proxies via CONNECT,
+// so Host and SNI stay the original hostname). SOCKS hops are pinned through the request URL, and serverName
+// restores certificate verification for https.
+func newPublicImageHTTPClient(proxyURL *url.URL, serverName string) *http.Client {
 	dialer := &net.Dialer{Timeout: 15 * time.Second}
 	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := lookupPublicImageHost(ctx, host)
-			if ip := net.ParseIP(host); ip != nil {
-				ips, err = []net.IP{ip}, nil
-			}
-			if err != nil || len(ips) == 0 {
-				return nil, fmt.Errorf("%w: %s", errImageURLResolve, host)
-			}
-			for _, ip := range ips {
-				if err := checkImageTarget(ip, ""); err != nil {
-					return nil, fmt.Errorf("%w: %w", errImageURLDialTarget, err)
-				}
-			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
-		},
 		TLSHandshakeTimeout:   15 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
-	if config.BotConfig != nil && config.BotConfig.Proxy != "" {
-		proxyURL, err := url.Parse(config.BotConfig.Proxy)
-		if err != nil {
-			return nil, err
+	switch {
+	case proxyURL == nil:
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			target, err := pinnedDialTarget(ctx, addr)
+			if err != nil {
+				return nil, err
+			}
+			return dialer.DialContext(ctx, network, target)
 		}
+	case isHTTPProxy(proxyURL):
+		transport.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			target, err := pinnedDialTarget(ctx, addr)
+			if err != nil {
+				return nil, err
+			}
+			return dialThroughHTTPProxy(ctx, dialer, proxyURL, target)
+		}
+	default:
 		transport.Proxy = http.ProxyURL(proxyURL)
 		transport.DialContext = dialer.DialContext
+		transport.TLSClientConfig = &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12}
 	}
 	return &http.Client{
 		Transport: transport,
 		Timeout:   60 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= agentImageURLMaxRedirects {
-				return errImageURLRedirects
-			}
-			_, err := validatePublicImageURL(req.Context(), req.URL.String())
-			return err
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
-	}, nil
+	}
 }
 
-// fetchPublicImageURL downloads an image from a public http(s) URL.
+// dialThroughHTTPProxy opens a CONNECT tunnel to an already validated ip:port.
+func dialThroughHTTPProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, target string) (net.Conn, error) {
+	proxyAddr := proxyURL.Host
+	if proxyURL.Port() == "" {
+		port := "80"
+		if strings.EqualFold(proxyURL.Scheme, "https") {
+			port = "443"
+		}
+		proxyAddr = net.JoinHostPort(proxyURL.Hostname(), port)
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(proxyURL.Scheme, "https") {
+		tlsConn := tls.Client(conn, &tls.Config{ServerName: proxyURL.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		conn = tlsConn
+	}
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: http.Header{}}
+	if proxyURL.User != nil {
+		password, _ := proxyURL.User.Password()
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(proxyURL.User.Username()+":"+password)))
+	}
+	_ = conn.SetDeadline(time.Now().Add(agentImageProxyConnectWindow))
+	if err := req.Write(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		_ = conn.Close()
+		return nil, fmt.Errorf("%w: %s", errImageURLProxyConnect, resp.Status)
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
+}
+
+// pinImageRequest rewrites the request target to the validated address while keeping the original Host.
+func pinImageRequest(req *http.Request, target *url.URL, ip net.IP) {
+	pinned := *target
+	host := ip.String()
+	if ip.To4() == nil {
+		host = "[" + host + "]"
+	}
+	if port := target.Port(); port != "" {
+		host = net.JoinHostPort(ip.String(), port)
+	}
+	pinned.Host = host
+	req.URL = &pinned
+	req.Host = target.Host
+}
+
+// fetchPublicImageURL downloads an image from a public http(s) URL, validating and pinning every redirect hop.
 func fetchPublicImageURL(ctx context.Context, rawURL string) (*http.Response, error) {
-	parsed, err := validatePublicImageURL(ctx, rawURL)
+	proxyURL, err := imageDownloadProxy()
 	if err != nil {
 		return nil, err
 	}
-	client, err := newPublicImageHTTPClient()
-	if err != nil {
-		return nil, err
+	target := rawURL
+	for hop := 0; hop <= agentImageURLMaxRedirects; hop++ {
+		resp, next, err := fetchPublicImageHop(ctx, proxyURL, target)
+		if err != nil {
+			return nil, err
+		}
+		if next == "" {
+			return resp, nil
+		}
+		target = next
 	}
+	return nil, errImageURLRedirects
+}
+
+func fetchPublicImageHop(ctx context.Context, proxyURL *url.URL, rawURL string) (*http.Response, string, error) {
+	target, ips, err := resolvePublicImageURL(ctx, rawURL)
+	if err != nil {
+		return nil, "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return nil, "", err
+	}
+	if proxyURL != nil && !isHTTPProxy(proxyURL) {
+		pinImageRequest(req, target, ips[0])
+	}
+	client := newPublicImageHTTPClient(proxyURL, target.Hostname())
 	defer client.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return client.Do(req)
+	location := resp.Header.Get("Location")
+	if !isImageRedirectStatus(resp.StatusCode) || location == "" {
+		return resp, "", nil
+	}
+	_ = resp.Body.Close()
+	next, err := target.Parse(location)
+	if err != nil {
+		return nil, "", err
+	}
+	return nil, next.String(), nil
+}
+
+func isImageRedirectStatus(status int) bool {
+	switch status {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	default:
+		return false
+	}
 }

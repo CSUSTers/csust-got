@@ -40,6 +40,7 @@ type TurnContext struct {
 	streamingStarted atomic.Bool                // Set true when streaming/final output begins
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
+	placeholderVer   atomic.Uint64              // Bumped when a non-stream writer overwrites progressMsg.
 	toolMu           sync.Mutex
 }
 
@@ -68,6 +69,22 @@ func (tc *TurnContext) MarkEdited() {
 		return
 	}
 	tc.lastEditAt.Store(time.Now().UnixNano())
+}
+
+// MarkPlaceholderOverwritten records that progressMsg now shows text the stream did not send,
+// so the streaming dedupe cache must not treat its last preview as still visible.
+func (tc *TurnContext) MarkPlaceholderOverwritten() {
+	if tc == nil {
+		return
+	}
+	tc.placeholderVer.Add(1)
+}
+
+func (tc *TurnContext) placeholderContentVersion() uint64 {
+	if tc == nil {
+		return 0
+	}
+	return tc.placeholderVer.Load()
 }
 
 func (tc *TurnContext) richMessageSkillLoadedForFinal() bool {

@@ -205,8 +205,8 @@ func TestSessionCaptureIncompleteExits(t *testing.T) {
 		{"truncated final", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Content: "truncated", ResponseMeta: &schema.ResponseMeta{FinishReason: "length"}}}}}, 4, nil, 0, 1},
 		{"filtered final", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Content: "filtered", ResponseMeta: &schema.ResponseMeta{FinishReason: "content_filter"}}}}}, 4, nil, 0, 1},
 		{"wrong role", []retryStreamStep{{chunks: []*schema.Message{schema.UserMessage("not assistant")}}}, 4, nil, 0, 1},
-		{"last step tool call", []retryStreamStep{{chunks: []*schema.Message{call}}}, 1, nil, 0, 3},
-		{"last step after executed tool", []retryStreamStep{{chunks: []*schema.Message{call}}, {chunks: []*schema.Message{call}}}, 2, nil, 1, 5},
+		{"last step tool call keeps unexecuted calls out", []retryStreamStep{{chunks: []*schema.Message{call}}}, 1, nil, 0, 2},
+		{"last step after executed tool keeps unexecuted calls out", []retryStreamStep{{chunks: []*schema.Message{call}}, {chunks: []*schema.Message{call}}}, 2, nil, 1, 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

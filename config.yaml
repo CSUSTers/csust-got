@@ -183,6 +183,8 @@ agents:
       retry_nums: 5
       retry_initial_interval: "500ms"
       retry_interval: 1 # 单位：秒
+      request_timeout: "0s" # 单次 HTTP 请求总超时，默认 0 不限制；流式请求通常只需 stream_idle_timeout
+      stream_idle_timeout: "60s" # 流式响应连续无新 chunk 的看门狗，默认 60s，"0s" 关闭 (见 docs/agent_loop.md)
     message_context: 6 # reply msg上下文数量
     # session 缺省 save_context=true/load_context=false；不关闭 raw turns / summaries / memory 等旧存储。
     # 全局 session 启用且可用时，实际 reply 分支强制 true/true；带 ReplyTo 的 command/regex 仍使用下列开关。
@@ -218,6 +220,7 @@ agents:
     error_message: "😔很抱歉，我无法处理您的请求"
     agent:
       enable: true
+      final_reserve: "90s" # 截止前为最后一次无工具模型调用预留的时间，默认 90s，"0s" 关闭 (见 docs/agent_loop.md)
       # subagents: 主 agent 可调用的子 agent；runtime/skills/max_result_chars 见 docs/agent_subagents.md
       subagents:
         - name: web_researcher

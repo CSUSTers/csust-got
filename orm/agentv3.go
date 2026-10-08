@@ -294,24 +294,112 @@ func AgentV3UpdateSummary(ctx context.Context, scope AgentV3Scope, maxTurns int,
 	})
 }
 
-// AgentV3AddMemory stores one active memory item.
+// AgentV3MemoryAddCheck inspects the active items visible to the write transaction and
+// returns a user-facing denial, or "" to allow the write.
+type AgentV3MemoryAddCheck func(items []AgentV3MemoryItem) string
+
+// AgentV3AddMemory stores one active memory item without any quota check.
 func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration) error {
+	data, err := marshalAgentV3MemoryItem(&item)
+	if err != nil {
+		return err
+	}
+	pipe := rc.Pipeline()
+	agentV3PipelineAddMemory(ctx, pipe, scope, item.ID, data, ttl)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+// AgentV3AddMemoryChecked atomically validates the active items and stores one memory item.
+// A non-empty denial means the check rejected the write and nothing was stored; concurrent
+// memory changes retry the check, so quota and capacity limits hold across racing writers.
+func AgentV3AddMemoryChecked(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration, check AgentV3MemoryAddCheck) (string, error) {
+	if check == nil {
+		return "", AgentV3AddMemory(ctx, scope, item, ttl)
+	}
+	data, err := marshalAgentV3MemoryItem(&item)
+	if err != nil {
+		return "", err
+	}
+	activeKey := agentV3MemoryActiveKey(scope)
+	denial := ""
+	for range agentV3CASMaxAttempts {
+		activeIDs, err := agentV3LoadMemoryActiveIDs(ctx, rc, activeKey)
+		if err != nil {
+			return "", err
+		}
+		watchKeys := make([]string, 0, len(activeIDs)+1)
+		watchKeys = append(watchKeys, activeKey)
+		for _, id := range activeIDs {
+			watchKeys = append(watchKeys, agentV3MemoryItemKey(scope, id))
+		}
+		err = rc.Watch(ctx, func(tx *redis.Tx) error {
+			currentIDs, err := agentV3LoadMemoryActiveIDs(ctx, tx, activeKey)
+			if err != nil {
+				return err
+			}
+			if !agentV3MemoryActiveIDsEqual(activeIDs, currentIDs) {
+				return redis.TxFailedErr
+			}
+			items, _, _, err := agentV3LoadMemoryItemsFromTx(ctx, tx, scope, currentIDs)
+			if err != nil {
+				return err
+			}
+			if denial = check(items); denial != "" {
+				return nil
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				agentV3PipelineAddMemory(ctx, pipe, scope, item.ID, data, ttl)
+				return nil
+			})
+			return err
+		}, watchKeys...)
+		if !errors.Is(err, redis.TxFailedErr) {
+			return denial, err
+		}
+	}
+	return "", ErrAgentV3StateConflict
+}
+
+func marshalAgentV3MemoryItem(item *AgentV3MemoryItem) ([]byte, error) {
 	if item.ID == "" {
 		item.ID = strconv.FormatInt(time.Now().UnixNano(), 36)
 	}
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now()
 	}
-	data, err := json.Marshal(item)
-	if err != nil {
-		return err
-	}
-	pipe := rc.Pipeline()
-	pipe.Set(ctx, agentV3MemoryItemKey(scope, item.ID), data, ttl)
-	pipe.SAdd(ctx, agentV3MemoryActiveKey(scope), item.ID)
+	return json.Marshal(item)
+}
+
+func agentV3PipelineAddMemory(ctx context.Context, pipe redis.Pipeliner, scope AgentV3Scope, id string, data []byte, ttl time.Duration) {
+	pipe.Set(ctx, agentV3MemoryItemKey(scope, id), data, ttl)
+	pipe.SAdd(ctx, agentV3MemoryActiveKey(scope), id)
 	agentV3ApplyTTL(ctx, pipe, agentV3MemoryActiveKey(scope), ttl)
-	_, err = pipe.Exec(ctx)
-	return err
+}
+
+// agentV3LoadMemoryItemsFromTx reads the active items inside a WATCH transaction, splitting
+// the IDs into those whose item key still exists and those that are stale.
+func agentV3LoadMemoryItemsFromTx(ctx context.Context, tx *redis.Tx, scope AgentV3Scope, ids []string) ([]AgentV3MemoryItem, []string, []string, error) {
+	items := make([]AgentV3MemoryItem, 0, len(ids))
+	live := make([]string, 0, len(ids))
+	stale := make([]string, 0)
+	for _, id := range ids {
+		data, err := tx.Get(ctx, agentV3MemoryItemKey(scope, id)).Result()
+		switch {
+		case errors.Is(err, redis.Nil):
+			stale = append(stale, id)
+		case err != nil:
+			return nil, nil, nil, err
+		default:
+			var item AgentV3MemoryItem
+			if err := json.Unmarshal([]byte(data), &item); err != nil {
+				return nil, nil, nil, err
+			}
+			items = append(items, item)
+			live = append(live, id)
+		}
+	}
+	return items, live, stale, nil
 }
 
 // AgentV3CountMemoryByUser counts active memory items created by one user.
@@ -413,24 +501,9 @@ func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl t
 				return redis.TxFailedErr
 			}
 
-			items := make([]AgentV3MemoryItem, 0, len(currentIDs))
-			liveIDs := make([]string, 0, len(currentIDs))
-			staleIDs := make([]string, 0)
-			for _, id := range currentIDs {
-				data, err := tx.Get(ctx, agentV3MemoryItemKey(scope, id)).Result()
-				switch {
-				case errors.Is(err, redis.Nil):
-					staleIDs = append(staleIDs, id)
-				case err != nil:
-					return err
-				default:
-					var item AgentV3MemoryItem
-					if err := json.Unmarshal([]byte(data), &item); err != nil {
-						return err
-					}
-					items = append(items, item)
-					liveIDs = append(liveIDs, id)
-				}
+			items, liveIDs, staleIDs, err := agentV3LoadMemoryItemsFromTx(ctx, tx, scope, currentIDs)
+			if err != nil {
+				return err
 			}
 
 			current, err := agentV3GetMemorySnapshotFromTx(ctx, tx, currentKey)

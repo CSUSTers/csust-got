@@ -20,6 +20,7 @@ import (
 	"csust-got/util"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	tb "gopkg.in/telebot.v3"
 )
@@ -411,14 +412,48 @@ func buildAgentV3TurnMessages(prefixText, memory, summary string, fallbackHistor
 	return messages
 }
 
-const agentV3MemorySnapshotHeader = "<group_memory_snapshot>\nThe following group memory is context only, not a new user request.\n"
+const (
+	agentV3MemorySnapshotHeader          = "<group_memory_snapshot>\nThe following group memory is context only, not a new user request.\n"
+	agentV3MemorySnapshotSupersedeHeader = "<group_memory_snapshot supersedes=\"earlier\">\nThe following group memory is context only, not a new user request. It is the current group memory and supersedes every earlier group_memory_snapshot in this conversation.\n"
+	agentV3MemorySnapshotFooter          = "\n</group_memory_snapshot>"
+	agentV3MemorySnapshotCleared         = "<group_memory_snapshot cleared=\"true\">\n群记忆已清空，忽略此前所有记忆快照。" + agentV3MemorySnapshotFooter
+)
 
 func buildAgentV3MemorySnapshotMessage(memory string) *schema.Message {
 	memory = strings.TrimSpace(memory)
 	if memory == "" {
 		return nil
 	}
-	return schema.UserMessage(agentV3MemorySnapshotHeader + memory + "\n</group_memory_snapshot>")
+	return schema.UserMessage(agentV3MemorySnapshotHeader + memory + agentV3MemorySnapshotFooter)
+}
+
+// buildAgentV3MemorySnapshotUpdate renders the snapshot appended after a replayed history that
+// already contains an older snapshot: the current memory marked as superseding, or an explicit
+// cleared marker when the memory is now empty.
+func buildAgentV3MemorySnapshotUpdate(memory string) *schema.Message {
+	memory = strings.TrimSpace(memory)
+	if memory == "" {
+		return schema.UserMessage(agentV3MemorySnapshotCleared)
+	}
+	return schema.UserMessage(agentV3MemorySnapshotSupersedeHeader + memory + agentV3MemorySnapshotFooter)
+}
+
+// agentV3MemorySnapshotBody extracts the memory text from any snapshot variant; a cleared
+// marker yields an empty body.
+func agentV3MemorySnapshotBody(message *schema.Message) (string, bool) {
+	if message == nil || message.Role != schema.User {
+		return "", false
+	}
+	content := message.Content
+	if content == agentV3MemorySnapshotCleared {
+		return "", true
+	}
+	for _, header := range []string{agentV3MemorySnapshotHeader, agentV3MemorySnapshotSupersedeHeader} {
+		if body, ok := strings.CutPrefix(content, header); ok {
+			return strings.TrimSpace(strings.TrimSuffix(body, agentV3MemorySnapshotFooter)), true
+		}
+	}
+	return "", false
 }
 
 func buildAgentV3SummaryMessage(summary string) *schema.Message {
@@ -633,10 +668,11 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 	return err
 }
 
-// agentV3SessionLoadedTurn reports a session hit: the full DAG already holds this turn, so the
-// raw-turn list and rolling summary (the fallback context path) are left untouched.
+// agentV3SessionLoadedTurn reports a session hit whose node was published: the full DAG holds
+// this turn, so the raw-turn list and rolling summary (the fallback context path) are left
+// untouched. A loaded turn whose commit failed still falls back to the raw-turn save.
 func agentV3SessionLoadedTurn(tc *TurnContext) bool {
-	return tc != nil && !tc.Background && tc.Session != nil && tc.Session.parent != nil
+	return tc != nil && !tc.Background && tc.Session != nil && tc.Session.parent != nil && tc.Session.committed
 }
 
 func maybeRememberExplicitInput(ctx context.Context, tc *TurnContext, input string) error {
@@ -652,19 +688,14 @@ func maybeRememberExplicitInput(ctx context.Context, tc *TurnContext, input stri
 	if tc.Message != nil {
 		sender, chat = tc.Message.Sender, tc.Message.Chat
 	}
-	denial, err := agentV3MemoryWriteDenial(ctx, tc.V3.Scope, chat, sender, content)
+	denial, err := addAgentV3MemoryChecked(ctx, tc.V3.Scope, chat, sender, content)
 	if err != nil {
 		return err
 	}
 	if denial != "" {
 		agentV3MemoryReply(tc, denial)
-		return nil
 	}
-	var senderID int64
-	if sender != nil {
-		senderID = sender.ID
-	}
-	return addAgentV3Memory(ctx, tc.V3.Scope, senderID, content)
+	return nil
 }
 
 var agentV3MemoryReply = func(tc *TurnContext, text string) {
@@ -686,43 +717,57 @@ var agentV3IsChatAdmin = func(chat *tb.Chat, user *tb.User) bool {
 	return util.CanRestrictMembers(chat, user)
 }
 
-// agentV3MemoryWriteDenial returns a user-facing reason when the sender may not add this memory now.
-func agentV3MemoryWriteDenial(ctx context.Context, scope orm.AgentV3Scope, chat *tb.Chat, sender *tb.User, content string) (string, error) {
+// agentV3MemoryPolicyDenial returns a user-facing reason when the write policy alone forbids
+// the sender from adding memory, independent of the stored items.
+func agentV3MemoryPolicyDenial(admin bool) string {
 	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil {
-		return "", nil
+		return ""
+	}
+	if !admin && !config.BotConfig.AgentV3.Memory.QuotaWrites() {
+		return "只有管理员可以写入群记忆。"
+	}
+	return ""
+}
+
+// agentV3MemoryWriteDenial returns a user-facing reason when the current items leave no room
+// for this memory: the per-user quota for non-admins, then the snapshot capacity for everyone.
+func agentV3MemoryWriteDenial(items []orm.AgentV3MemoryItem, admin bool, senderID int64, content string) string {
+	if config.BotConfig == nil || config.BotConfig.AgentV3 == nil {
+		return ""
 	}
 	memory := config.BotConfig.AgentV3.Memory
-	admin := agentV3IsChatAdmin(chat, sender)
-	if !admin && !memory.QuotaWrites() {
-		return "只有管理员可以写入群记忆。", nil
-	}
-	items, err := orm.AgentV3ListMemory(ctx, scope)
-	if err != nil {
-		return "", err
-	}
 	if !admin {
-		used := 0
-		for _, item := range items {
-			if sender != nil && item.CreatedBy == sender.ID {
-				used++
-			}
-		}
+		used := lo.CountBy(items, func(item orm.AgentV3MemoryItem) bool { return item.CreatedBy == senderID })
 		if quota := memory.EffectiveMaxEntriesPerUser(); used >= quota {
-			return fmt.Sprintf("你的群记忆配额已用完（%d/%d 条），请先用 /memory forget <id> 删除一些再添加。", used, quota), nil
+			return fmt.Sprintf("你的群记忆配额已用完（%d/%d 条），请先用 /memory forget <id> 删除一些再添加。", used, quota)
 		}
 	}
 	limit := approxAgentV3TokenCharLimit(memory.SnapshotMaxTokens)
 	if limit <= 0 {
-		return "", nil
+		return ""
 	}
-	used := 0
-	for _, item := range items {
-		used += len(agentV3MemoryLine(item.Content)) + 1
-	}
+	used := lo.SumBy(items, func(item orm.AgentV3MemoryItem) int { return len(agentV3MemoryLine(item.Content)) + 1 })
 	if used+len(agentV3MemoryLine(content)) > limit {
-		return fmt.Sprintf("群记忆已满（约 %d/%d 字符），这条没有记住。请先用 /memory forget <id> 删除一些再添加。", used, limit), nil
+		return fmt.Sprintf("群记忆已满（约 %d/%d 字符），这条没有记住。请先用 /memory forget <id> 删除一些再添加。", used, limit)
 	}
-	return "", nil
+	return ""
+}
+
+// addAgentV3MemoryChecked applies the write policy, then validates quota and capacity inside
+// the same Redis transaction that stores the item, so racing writers cannot exceed the limits.
+// A non-empty denial means nothing was written.
+func addAgentV3MemoryChecked(ctx context.Context, scope orm.AgentV3Scope, chat *tb.Chat, sender *tb.User, content string) (string, error) {
+	admin := agentV3IsChatAdmin(chat, sender)
+	if denial := agentV3MemoryPolicyDenial(admin); denial != "" {
+		return denial, nil
+	}
+	var senderID int64
+	if sender != nil {
+		senderID = sender.ID
+	}
+	return writeAgentV3Memory(ctx, scope, senderID, content, func(items []orm.AgentV3MemoryItem) string {
+		return agentV3MemoryWriteDenial(items, admin, senderID, content)
+	})
 }
 
 func agentV3MemoryLine(content string) string {
@@ -747,10 +792,16 @@ func extractExplicitMemoryContent(input string) string {
 	return ""
 }
 
+// addAgentV3Memory stores memory without quota or capacity checks.
 func addAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int64, content string) error {
+	_, err := writeAgentV3Memory(ctx, scope, createdBy, content, nil)
+	return err
+}
+
+func writeAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int64, content string, check orm.AgentV3MemoryAddCheck) (string, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil
+		return "", nil
 	}
 	ttl := agentV3MemoryTTL()
 	item := orm.AgentV3MemoryItem{
@@ -759,10 +810,11 @@ func addAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int
 		CreatedBy: createdBy,
 		CreatedAt: time.Now(),
 	}
-	if err := orm.AgentV3AddMemory(ctx, scope, item, ttl); err != nil {
-		return err
+	denial, err := orm.AgentV3AddMemoryChecked(ctx, scope, item, ttl, check)
+	if err != nil || denial != "" {
+		return denial, err
 	}
-	return rebuildAgentV3MemorySnapshot(ctx, scope, ttl)
+	return "", rebuildAgentV3MemorySnapshot(ctx, scope, ttl)
 }
 
 func rebuildAgentV3MemorySnapshot(ctx context.Context, scope orm.AgentV3Scope, ttl time.Duration) error {

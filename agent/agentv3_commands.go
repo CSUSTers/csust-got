@@ -30,15 +30,12 @@ func MemoryCommand(ctx tb.Context) error {
 		if rest == "" {
 			return ctx.Reply("要记住的内容不能为空。")
 		}
-		denial, err := agentV3MemoryWriteDenial(context.Background(), scope, ctx.Chat(), ctx.Sender(), rest)
+		denial, err := addAgentV3MemoryChecked(context.Background(), scope, ctx.Chat(), ctx.Sender(), rest)
 		if err != nil {
 			return replyAgentV3CommandError(ctx, "memory_add", err)
 		}
 		if denial != "" {
 			return ctx.Reply(denial)
-		}
-		if err := addAgentV3Memory(context.Background(), scope, agentV3SenderID(ctx), rest); err != nil {
-			return replyAgentV3CommandError(ctx, "memory_add", err)
 		}
 		return ctx.Reply("已记住。")
 	case agentV3ActionList:

@@ -2,6 +2,7 @@ package orm
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,7 @@ import (
 // ErrInvalidCachedMessage distinguishes recoverable cache corruption from Redis failures.
 var ErrInvalidCachedMessage = errors.New("invalid cached message")
 
-// SetMessage 将完整的消息结构体保存到 Redis
+// SetMessage stores the full snapshot unless the cache already holds a newer edit of the same message.
 func SetMessage(msg *Message) error {
 	if msg == nil {
 		return ErrMessageIsNil
@@ -32,19 +33,49 @@ func SetMessage(msg *Message) error {
 
 	key := wrapKeyWithChatMsg("message_full", msg.Chat.ID, msg.ID)
 
-	// 序列化消息对象为JSON
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
 		log.Error("marshal message to json failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
 		return err
 	}
 
-	err = rc.Set(context.TODO(), key, jsonData, 24*time.Hour).Err()
-	if err != nil {
+	if err = setMessageIfNewer(context.TODO(), key, msg, jsonData); err != nil {
 		log.Error("set message to redis failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
 		return err
 	}
 	return nil
+}
+
+// setMessageScript replaces the snapshot only when the incoming edit_date/date are at least as new as the stored ones.
+var setMessageScript = redis.NewScript(`
+local stored = redis.call('GET', KEYS[1])
+if stored then
+  local ok, current = pcall(cjson.decode, stored)
+  if ok and type(current) == 'table' then
+    local edit = tonumber(current['edit_date']) or 0
+    local date = tonumber(current['date']) or 0
+    local newEdit = tonumber(ARGV[2])
+    local newDate = tonumber(ARGV[3])
+    if newEdit < edit or (newEdit == edit and newDate < date) then
+      return 0
+    end
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4])
+return 1
+`)
+
+func setMessageIfNewer(ctx context.Context, key string, msg *Message, jsonData []byte) error {
+	ttl := int64((24 * time.Hour).Seconds())
+	return setMessageScript.Run(ctx, rc, []string{key}, jsonData, msg.LastEdit, msg.Unixtime, ttl).Err()
+}
+
+// compareMessageSnapshots orders snapshots of one message by edit time, then send time.
+func compareMessageSnapshots(a, b *Message) int {
+	if c := cmp.Compare(a.LastEdit, b.LastEdit); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Unixtime, b.Unixtime)
 }
 
 const (
@@ -214,7 +245,7 @@ func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, 
 	return msg, nil
 }
 
-// GetMessagesFromStream returns distinct messages in the query range sorted by message ID, newest snapshot per ID.
+// GetMessagesFromStream returns distinct messages in the query range sorted by message ID, keeping the newest snapshot per ID by edit time, send time, then stream order.
 func GetMessagesFromStream(chatID int64, query MessageStreamQuery) ([]*Message, error) {
 	messages, _, err := getMessagesFromStream(chatID, query, false)
 	return messages, err
@@ -235,22 +266,28 @@ func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bo
 		return nil, 0, err
 	}
 
+	// Snapshots are stored concurrently, so an older snapshot may be appended after a newer edit.
 	latest := make(map[int]*Message, len(records))
 	for _, record := range records {
+		seen := false
 		if id, ok := streamRecordMessageID(record); ok {
-			if _, seen := latest[id]; seen || !query.contains(id) {
+			if !query.contains(id) {
 				continue
 			}
+			_, seen = latest[id]
 		}
 
 		message, err := decodeStreamRecord(chatID, record)
 		if err != nil {
-			if bestEffort {
+			if bestEffort || seen {
 				continue
 			}
 			return nil, len(records), err
 		}
-		if _, seen := latest[message.ID]; seen || !query.contains(message.ID) {
+		if !query.contains(message.ID) {
+			continue
+		}
+		if current, ok := latest[message.ID]; ok && compareMessageSnapshots(message, current) <= 0 {
 			continue
 		}
 		latest[message.ID] = message

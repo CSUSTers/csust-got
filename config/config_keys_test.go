@@ -13,6 +13,21 @@ func TestUnknownConfigKeysReportsOnlyUnacceptedPaths(t *testing.T) {
 	t.Cleanup(viper.Reset)
 	viper.SetConfigType("yaml")
 	require.NoError(t, viper.ReadConfig(strings.NewReader(`
+token: x
+tokenn: y
+log:
+  max_size_mb: 100
+  max_size_mbb: 100
+redis:
+  addr: "redis:6379"
+white_list:
+  enabled: true
+  chats: [1]
+get_voice:
+  enable: true
+  indexes:
+    - name: genshin
+      index_uids: x
 agent_v3:
   enable: true
   memory:
@@ -58,7 +73,26 @@ agents:
 		"agents[0].agent.subagents[0].unknown_sub",
 		"agents[0].trigger[1].hints",
 		"agents[0].typo",
+		"get_voice.indexes[0].index_uids",
+		"log.max_size_mbb",
+		"tokenn",
 	}, UnknownConfigKeys())
+}
+
+func TestUnknownConfigKeysIgnoresNonObjectSections(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigType("yaml")
+	require.NoError(t, viper.ReadConfig(strings.NewReader("log: 3\nmc: [1]\nagents: {}\nget_voice: ~\n")))
+	require.Empty(t, UnknownConfigKeys())
+}
+
+func TestUnknownConfigKeysAcceptsExampleConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.SetConfigFile(repoConfigFile)
+	require.NoError(t, viper.ReadInConfig())
+	require.Empty(t, UnknownConfigKeys())
 }
 
 func TestUnknownConfigKeysIgnoresMissingSections(t *testing.T) {

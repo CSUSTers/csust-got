@@ -223,9 +223,8 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			sw.Send(schema.AssistantMessage(emptyModelResponseNotice, nil), nil)
 			return
 		}
-		capture.record(assistantMsg, false)
-
 		if len(assistantMsg.ToolCalls) == 0 {
+			capture.record(assistantMsg, false)
 			a.finishTurn(ctx, sw, capture, end, assistantMsg, reasoningChunks)
 			return
 		}
@@ -234,6 +233,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
+		// The forced summary never sends these tool calls to the model, so they stay out of the capture too.
 		if final {
 			a.forceSummary(ctx, history, sw, capture, end)
 			return
@@ -243,6 +243,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
+		capture.record(assistantMsg, false)
 		history = append(history, assistantMsg)
 		toolRounds = append(toolRounds, assistantMsg)
 		sawNewDup := false
@@ -405,11 +406,6 @@ func (a *CustomAgent) streamOneTurn(
 			"prompt_cache_key": tc.V3.PromptCacheKey,
 		}))
 	}
-	limiter := limiters.model()
-	if err := limiter.acquire(ctx); err != nil {
-		return nil, nil, fmt.Errorf("model call slot: %w", err)
-	}
-	defer limiter.release()
 	var finishSpan func(error, map[string]any)
 	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 		runs, modelCalls := AgentConcurrencySnapshot()

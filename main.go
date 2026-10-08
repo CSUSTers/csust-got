@@ -381,7 +381,7 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 		}
 
 		if m != nil {
-			d := time.Since(m.Time())
+			d := time.Since(updateTime(ctx, m))
 			if skipSec > 0 && int64(d.Seconds()) > skipSec {
 				log.Debug("bot skip expired update", zap.Int("update_id", ctx.Update().ID))
 				return nil
@@ -610,4 +610,12 @@ func isChatMessageHasSender(ctx Context) bool {
 func isEditedUpdate(ctx Context) bool {
 	update := ctx.Update()
 	return update.EditedMessage != nil || update.EditedChannelPost != nil
+}
+
+// updateTime is the edit time for edited updates so late edits of old messages still refresh the cache.
+func updateTime(ctx Context, m *Message) time.Time {
+	if m.LastEdit != 0 && isEditedUpdate(ctx) {
+		return time.Unix(m.LastEdit, 0)
+	}
+	return m.Time()
 }

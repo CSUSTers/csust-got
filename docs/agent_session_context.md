@@ -57,7 +57,7 @@ agents:
 
 reply 查不到目标节点时**不改查最近节点**。无节点、祖先链损坏、文件读失败、Redis 失败、版本不支持或无法完整验证时，整体回退现有 `context_mode` 构建，不使用半条历史。没有成功完整加载就没有父节点；需要保存时只能以实际回退上下文创建新 DAG 的根节点。回退自身失败时沿用既有错误行为，“session 失败可回退”不承诺 Redis 整体故障时仍可成功回答或成功归档。
 
-通过接受检查并成功恢复时只回放完整对话历史，再追加一次本轮输入，不重复叠加旧 raw turns、summary、无关群历史或 Telegram 回复链。**只有 system 消息不回放**：每轮都重新构建**当前 agent** 的 system / stable prefix 与工具权限，跨 agent 回复同样如此。除 system 外的归档消息——包括历史 memory snapshot、`reply_chain` 的模板/时间 addition、首轮 loop 指令和 runtime guidance、工具调用与结果——按原始顺序**原样回放**，保证本轮模型输入的前缀与上一轮最后一次模型输入逐字节一致，让 provider 的 prompt cache 能命中归档前缀。代价是过期的 datetime 文本、旧 memory 文本和旧 guidance 文本会留在历史里；它们是历史证据，不是新指令。本轮新的 memory snapshot 只在内容与回放历史中最后一条 snapshot 不同时才追加，位于回放之后、本轮输入之前，并归档进本节点。
+通过接受检查并成功恢复时只回放完整对话历史，再追加一次本轮输入，不重复叠加旧 raw turns、summary、无关群历史或 Telegram 回复链。**只有 system 消息不回放**：每轮都重新构建**当前 agent** 的 system / stable prefix 与工具权限，跨 agent 回复同样如此。除 system 外的归档消息——包括历史 memory snapshot、`reply_chain` 的模板/时间 addition、首轮 loop 指令和 runtime guidance、工具调用与结果——按原始顺序**原样回放**，保证本轮模型输入的前缀与上一轮最后一次模型输入逐字节一致，让 provider 的 prompt cache 能命中归档前缀。代价是过期的 datetime 文本、旧 memory 文本和旧 guidance 文本会留在历史里；它们是历史证据，不是新指令。本轮把当前 memory 与回放历史中最后一条 snapshot 的正文比较：相同则不追加；不同则追加 `<group_memory_snapshot supersedes="earlier">`，header 声明它取代此前所有 snapshot；memory 已清空而历史里仍有 snapshot 时追加 `<group_memory_snapshot cleared="true">` 标记。追加的消息位于回放之后、本轮输入之前，并归档进本节点，之后同样原样回放（详见 `docs/agent_memory.md`）。
 
 历史工具调用只是数据，不重执行，不恢复 Runtime 环境或权限，也不消耗本轮工具预算。唯一的例外是输出格式：若当前 agent 启用了 rich 且回放历史中包含 `load_skill(rich-message)` 的调用，则本轮直接视为 rich 已激活，让续聊保持同一输出格式；这不会恢复技能的环境变量或其他权限。无论是否激活，`<telegram_rich_message>` 标签都不会原样发到 Telegram：未授权或未启用 rich 时发送 envelope 的纯文本回退，解析失败时剥去标签后发送内部文本。
 
@@ -138,7 +138,7 @@ Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leas
 
 归档保存完整成功的**顶层模型轮次**，包括 user、assistant tool calls、匹配的 tool responses、最终 assistant、推理和多模态字段；不是 Telegram 可见文本问答对。每个成功轮次写入独立的**增量 JSONL** 文件，后续节点不重复保存整条祖先链；根节点保留实际起始上下文。恢复时沿父链重建历史，单个增量文件不等于完整可恢复会话。Redis 分区不改变 JSONL 的统一读写路径；`schema.ParamsOneOf`、`schema.ToolInfo` 及 `schema.Message.MultiContent` 等正式 SDK 类型和字段，不是过时的 feature 数据。
 
-只有完整模型轮次且最终回答实际发送到 Telegram 成功、具有有效消息 ID 时才保存并发布节点。流式占位消息或中途更新成功不代表最终交付成功。半截流、错误提示、未完成工具链、取消或最终发送失败不得成为可回复节点。归档失败不重新运行模型、不重复发送回答，也不阻止仍独立运行的 `SaveResponse`、raw-turn 和 summary 保存机制。
+只有完整模型轮次且最终回答实际发送到 Telegram 成功、具有有效消息 ID 时才保存并发布节点。流式占位消息或中途更新成功不代表最终交付成功。半截流、错误提示、未完成工具链、取消或最终发送失败不得成为可回复节点。归档失败不重新运行模型、不重复发送回答，也不阻止仍独立运行的 `SaveResponse`、raw-turn 和 summary 保存机制。`commitAgentV3Session` 返回节点是否发布成功并记录在本轮状态上：只有**加载了父节点且发布成功**的轮次才跳过 raw-turn / summary 的回退保存；父节点已加载但发布失败（Redis、文件或 10 秒超时）的轮次仍写入回退上下文。
 
 delegate/subagent **不接入交互 session**。任何工具启动的嵌套 agent 调用都不继承顶层捕获器，不以工具名称判断；子调用内部不加载或保存 DAG、不建立 session 租约，其私有内层 history 不进入顶层归档。顶层模型发出的工具请求及其返回结果，仍作为**普通顶层工具消息**随完整成功的顶层轮次保存，不展开子调用内部 history。后台 cron 同样不加载或保存交互 session。
 
