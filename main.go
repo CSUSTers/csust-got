@@ -212,8 +212,9 @@ func registerBaseHandler(bot *Bot) {
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
 
-	// edited messages only refresh the message cache through the middleware chain
+	// edited messages and channel posts only refresh the message cache through the middleware chain
 	bot.Handle(OnEdited, base.DoNothing)
+	bot.Handle(OnEditedChannelPost, base.DoNothing)
 
 	// download sticker in private chat
 	bot.Handle(OnSticker, stickerDlHandler)

@@ -135,11 +135,11 @@ func HasCompiledAgent(name string) bool {
 func Close() {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
-	closeAgentV3TraceWriter(context.Background())
-	closeAgentV3SessionService()
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
 	}
+	closeAgentV3TraceWriter(context.Background())
+	closeAgentV3SessionService()
 	if mcpManager != nil {
 		mcpManager.Close()
 	}

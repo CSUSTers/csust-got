@@ -20,9 +20,16 @@ type editedTestContext struct {
 }
 
 func (c *editedTestContext) Update() Update    { return c.update }
-func (c *editedTestContext) Message() *Message { return c.update.EditedMessage }
-func (c *editedTestContext) Chat() *Chat       { return c.update.EditedMessage.Chat }
-func (c *editedTestContext) Sender() *User     { return c.update.EditedMessage.Sender }
+func (c *editedTestContext) Message() *Message { return c.edited() }
+func (c *editedTestContext) Chat() *Chat       { return c.edited().Chat }
+func (c *editedTestContext) Sender() *User     { return c.edited().Sender }
+
+func (c *editedTestContext) edited() *Message {
+	if c.update.EditedChannelPost != nil {
+		return c.update.EditedChannelPost
+	}
+	return c.update.EditedMessage
+}
 
 func TestEditedMessagesBypassSideEffectMiddlewares(t *testing.T) {
 	edited := &Message{
@@ -36,7 +43,8 @@ func TestEditedMessagesBypassSideEffectMiddlewares(t *testing.T) {
 	ctx := &editedTestContext{update: Update{ID: 1, EditedMessage: edited}}
 	require.True(t, isEditedUpdate(ctx))
 	require.False(t, isEditedUpdate(&editedTestContext{update: Update{ID: 2}}))
-	require.True(t, isEditedUpdate(&editedTestContext{update: Update{ID: 3, EditedChannelPost: edited}}))
+	channelCtx := &editedTestContext{update: Update{ID: 3, EditedChannelPost: edited}}
+	require.True(t, isEditedUpdate(channelCtx))
 
 	tests := []struct {
 		name       string
@@ -49,16 +57,18 @@ func TestEditedMessagesBypassSideEffectMiddlewares(t *testing.T) {
 		{name: "shutdown", middleware: shutdownMiddleware},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			called := false
-			handler := tt.middleware(func(Context) error {
-				called = true
-				return nil
+		for kind, c := range map[string]Context{"message": ctx, "channel post": channelCtx} {
+			t.Run(tt.name+"/"+kind, func(t *testing.T) {
+				called := false
+				handler := tt.middleware(func(Context) error {
+					called = true
+					return nil
+				})
+				// Redis is not initialised in this test: any side effect would panic instead of passing through.
+				require.NoError(t, handler(c))
+				require.True(t, called)
 			})
-			// Redis is not initialised in this test: any side effect would panic instead of passing through.
-			require.NoError(t, handler(ctx))
-			require.True(t, called)
-		})
+		}
 	}
 }
 

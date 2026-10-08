@@ -99,6 +99,8 @@ func isPublicIP(ip net.IP) bool {
 			return false
 		case ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2, ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100, ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113:
 			return false
+		case ip4[0] == 192 && ip4[1] == 88 && ip4[2] == 99: // 192.88.99.0/24 deprecated 6to4 relay anycast
+			return false
 		case ip4[0] == 198 && ip4[1]&0xfe == 18: // 198.18.0.0/15 benchmarking
 			return false
 		case ip4[0] >= 240: // 240.0.0.0/4 reserved and broadcast
