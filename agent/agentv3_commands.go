@@ -27,47 +27,65 @@ func MemoryCommand(ctx tb.Context) error {
 
 	switch cmd {
 	case "add":
-		if !canManageAgentV3Memory(ctx) {
-			return ctx.Reply("只有管理员可以写入群记忆。")
-		}
 		if rest == "" {
 			return ctx.Reply("要记住的内容不能为空。")
+		}
+		denial, err := agentV3MemoryWriteDenial(context.Background(), scope, ctx.Chat(), ctx.Sender(), rest)
+		if err != nil {
+			return replyAgentV3CommandError(ctx, "memory_add", err)
+		}
+		if denial != "" {
+			return ctx.Reply(denial)
 		}
 		if err := addAgentV3Memory(context.Background(), scope, agentV3SenderID(ctx), rest); err != nil {
 			return replyAgentV3CommandError(ctx, "memory_add", err)
 		}
 		return ctx.Reply("已记住。")
 	case agentV3ActionList:
-		if !canManageAgentV3Memory(ctx) {
+		admin := canManageAgentV3Memory(ctx)
+		if !admin && !agentV3MemoryQuotaWrites() {
 			return ctx.Reply("只有管理员可以查看群记忆。")
 		}
 		items, err := orm.AgentV3ListMemory(context.Background(), scope)
 		if err != nil {
 			return replyAgentV3CommandError(ctx, "memory_list", err)
 		}
-		if len(items) == 0 {
-			return ctx.Reply("当前没有 memory。")
-		}
 		var b strings.Builder
 		for _, item := range items {
+			if !admin && item.CreatedBy != agentV3SenderID(ctx) {
+				continue
+			}
 			b.WriteString(item.ID)
 			b.WriteString(": ")
 			b.WriteString(item.Content)
 			b.WriteByte('\n')
 		}
+		if b.Len() == 0 {
+			return ctx.Reply("当前没有 memory。")
+		}
 		return replyAgentV3Pre(ctx, b.String())
 	case "forget":
-		if !canManageAgentV3Memory(ctx) {
+		admin := canManageAgentV3Memory(ctx)
+		if !admin && !agentV3MemoryQuotaWrites() {
 			return ctx.Reply("只有管理员可以删除群记忆。")
 		}
 		if rest == "" {
 			return ctx.Reply("请提供 memory id。")
 		}
+		if !admin {
+			owned, err := agentV3MemoryOwnedBy(context.Background(), scope, rest, agentV3SenderID(ctx))
+			if err != nil {
+				return replyAgentV3CommandError(ctx, "memory_forget", err)
+			}
+			if !owned {
+				return ctx.Reply("只能删除你自己添加的群记忆。")
+			}
+		}
 		if err := orm.AgentV3ForgetMemory(context.Background(), scope, rest); err != nil {
 			return replyAgentV3CommandError(ctx, "memory_forget", err)
 		}
 		if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
-			if err := rebuildAgentV3MemorySnapshot(context.Background(), scope, config.BotConfig.AgentV3.ContextCacheTTL()); err != nil {
+			if err := rebuildAgentV3MemorySnapshot(context.Background(), scope, agentV3MemoryTTL()); err != nil {
 				return replyAgentV3CommandError(ctx, "memory_snapshot_rebuild", err)
 			}
 		}
@@ -189,6 +207,23 @@ func RuntimeResetCommand(ctx tb.Context) error {
 	}
 	data, _ := json.MarshalIndent(resp, "", "  ")
 	return replyAgentV3Pre(ctx, string(data))
+}
+
+func agentV3MemoryQuotaWrites() bool {
+	return config.BotConfig != nil && config.BotConfig.AgentV3 != nil && config.BotConfig.AgentV3.Memory.QuotaWrites()
+}
+
+func agentV3MemoryOwnedBy(ctx context.Context, scope orm.AgentV3Scope, id string, userID int64) (bool, error) {
+	items, err := orm.AgentV3ListMemory(ctx, scope)
+	if err != nil {
+		return false, err
+	}
+	for _, item := range items {
+		if item.ID == id {
+			return item.CreatedBy == userID && userID != 0, nil
+		}
+	}
+	return false, nil
 }
 
 func canManageAgentV3Memory(ctx tb.Context) bool {

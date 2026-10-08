@@ -180,26 +180,57 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		assert.NoError(t, delivery.Err)
 	})
 
-	t.Run("gate disabled keeps envelope on ordinary output path", func(t *testing.T) {
+	t.Run("gate disabled delivers fallback text without envelope tags", func(t *testing.T) {
 		text := mustTelegramRichEnvelope("*hello*")
 
 		delivery := resolveTelegramRichDelivery(text, "", cfg, false, false)
 
-		assert.Equal(t, text, delivery.VisibleText)
+		assert.Equal(t, "hello", delivery.VisibleText)
+		assert.NotContains(t, delivery.VisibleText, telegramRichEnvelopeStart)
 		assert.False(t, delivery.ShouldSendRich)
 		assert.True(t, delivery.RichCandidate)
 		assert.NoError(t, delivery.Err)
 	})
 
-	t.Run("gate enabled but not authorized keeps ordinary text", func(t *testing.T) {
+	t.Run("gate enabled but not authorized delivers fallback text without envelope tags", func(t *testing.T) {
 		text := mustTelegramRichEnvelope("# hello")
 
 		delivery := resolveTelegramRichDelivery(text, "", cfg, true, false)
 
-		assert.Equal(t, text, delivery.VisibleText)
+		assert.Equal(t, "hello", delivery.VisibleText)
+		assert.NotContains(t, delivery.VisibleText, telegramRichEnvelopeEnd)
 		assert.False(t, delivery.ShouldSendRich)
 		assert.True(t, delivery.RichCandidate)
 		assert.Empty(t, delivery.RichMessage)
+	})
+
+	t.Run("unauthorized envelope keeps surrounding prose and strips tags", func(t *testing.T) {
+		text := "preface\n" + mustTelegramRichEnvelope("**bold** body") + "\nsuffix"
+
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, false)
+
+		assert.Equal(t, "preface\nbold body\nsuffix", delivery.VisibleText)
+		assert.False(t, delivery.ShouldSendRich)
+	})
+
+	t.Run("unauthorized unparsable envelope strips tags and keeps inner text", func(t *testing.T) {
+		text := telegramRichEnvelopeStart + "   " + telegramRichEnvelopeEnd + "\ntrailing"
+
+		delivery := resolveTelegramRichDelivery(text, "", cfg, true, false)
+
+		assert.Equal(t, "trailing", delivery.VisibleText)
+		assert.NotContains(t, delivery.VisibleText, "telegram_rich_message")
+		assert.False(t, delivery.ShouldSendRich)
+		assert.ErrorIs(t, delivery.Err, errTelegramRichMissingContent)
+	})
+
+	t.Run("unauthorized unterminated envelope strips the open tag", func(t *testing.T) {
+		text := telegramRichEnvelopeStart + "## heading"
+
+		delivery := resolveTelegramRichDelivery(text, "", cfg, false, false)
+
+		assert.Equal(t, "heading", delivery.VisibleText)
+		assert.False(t, delivery.ShouldSendRich)
 	})
 
 	t.Run("gate enabled and authorized keeps raw markdown and derived fallback", func(t *testing.T) {

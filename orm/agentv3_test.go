@@ -71,15 +71,12 @@ func TestAgentV3PrefixTurnsMemoryAndTrace(t *testing.T) {
 		PromptCacheKey: "cache-key",
 		UpdatedAt:      time.Now(),
 	}
-	require.NoError(t, AgentV3SetPrefix(ctx, scope, rec, "stable-prefix", ttl))
+	require.NoError(t, AgentV3SetPrefix(ctx, scope, rec, ttl))
 
 	got, err := AgentV3GetPrefixCurrent(ctx, scope, "agent", "model")
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, "prefix-hash", got.Hash)
-	msgs, err := AgentV3GetPrefixMessages(ctx, scope, 1)
-	require.NoError(t, err)
-	assert.Equal(t, "stable-prefix", msgs)
 
 	require.NoError(t, AgentV3AppendTurn(ctx, scope, AgentV3Turn{Role: "user", Content: "one"}, 2, ttl))
 	require.NoError(t, AgentV3AppendTurn(ctx, scope, AgentV3Turn{Role: "assistant", Content: "two"}, 2, ttl))
@@ -425,7 +422,6 @@ func TestAgentV3MemoryRebuildCleansStaleIDsAndAlignsTTLs(t *testing.T) {
 		agentV3MemoryItemKey(scope, "second"),
 		agentV3MemoryActiveKey(scope),
 		agentV3MemorySnapshotCurrentKey(scope),
-		agentV3MemorySnapshotVersionKey(scope, snapshot.Version),
 	} {
 		assert.Equal(t, ttl, mr.TTL(key), key)
 	}
@@ -458,4 +454,39 @@ func TestAgentV3MemoryRetryExhaustionReturnsConflict(t *testing.T) {
 	require.NotNil(t, snapshot)
 	assert.Equal(t, int64(1), snapshot.Version)
 	assert.Equal(t, "baseline", snapshot.Content)
+}
+
+func TestAgentV3MemoryZeroTTLPersistsKeys(t *testing.T) {
+	mr := setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "first", Content: "first", CreatedBy: 7}, time.Hour))
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "second", Content: "second", CreatedBy: 8}, 0))
+
+	require.NoError(t, agentV3RebuildMemorySnapshotUnderTest(ctx, scope, 0, buildAgentV3MemorySnapshotForTest))
+
+	for _, key := range []string{
+		agentV3MemoryItemKey(scope, "first"),
+		agentV3MemoryItemKey(scope, "second"),
+		agentV3MemoryActiveKey(scope),
+		agentV3MemorySnapshotCurrentKey(scope),
+	} {
+		assert.Equal(t, time.Duration(0), mr.TTL(key), key)
+	}
+
+	count, err := AgentV3CountMemoryByUser(ctx, scope, 7)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	count, err = AgentV3CountMemoryByUser(ctx, scope, 9)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+}
+
+func TestAgentV3SetPrefixWritesOnlyCurrentRecord(t *testing.T) {
+	mr := setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	rec := AgentV3PrefixRecord{Agent: "agent", Model: "model", Version: 3, Hash: "h"}
+	require.NoError(t, AgentV3SetPrefix(ctx, scope, rec, time.Hour))
+	assert.Equal(t, []string{agentV3PrefixCurrentKey(scope, "agent", "model")}, mr.Keys())
 }

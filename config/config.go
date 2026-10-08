@@ -59,6 +59,7 @@ func NewBotConfig() *Config {
 		MeiliConfig:     new(meiliConfig),
 		McConfig:        new(mcConfig),
 		DebugOptConfig:  new(debugOptConfig),
+		LogConfig:       new(LogConfig),
 		Agents:          new(AgentV3Configs),
 		AgentV3:         new(AgentV3Config),
 	}
@@ -80,6 +81,7 @@ type Config struct {
 	DebugMode    bool
 	SkipDuration int64
 	LogFileDir   string
+	LogConfig    *LogConfig
 
 	// SentenceDelimiters for intelligent sentence breaking in streaming
 	SentenceDelimiters []string
@@ -289,6 +291,7 @@ func readConfig() {
 	BotConfig.Listen = viper.GetString("listen")
 	BotConfig.SkipDuration = viper.GetInt64("skip_duration")
 	BotConfig.LogFileDir = viper.GetString("log_file_dir")
+	BotConfig.LogConfig.readConfig()
 
 	// sentence delimiters for streaming
 	BotConfig.SentenceDelimiters = viper.GetStringSlice("sentence_delimiters")
@@ -341,6 +344,7 @@ func checkConfig() {
 	}
 
 	BotConfig.LogFileDir = strings.TrimRight(BotConfig.LogFileDir, "/")
+	BotConfig.LogConfig.checkConfig()
 
 	BotConfig.RedisConfig.checkConfig()
 	BotConfig.RestrictConfig.checkConfig()
@@ -363,8 +367,15 @@ func checkConfig() {
 			if err := agent.ValidateContextMode(); err != nil {
 				zap.L().Panic("invalid agent config", zap.Error(err))
 			}
+			if err := agent.ValidateTriggers(); err != nil {
+				zap.L().Panic("invalid agent config", zap.Error(err))
+			}
+			if err := agent.ValidateSubAgents(); err != nil {
+				zap.L().Panic("invalid agent config", zap.Error(err))
+			}
 		}
 	}
+	warnConfigHygiene()
 
 	BotConfig.DebugOptConfig.checkConfig()
 }

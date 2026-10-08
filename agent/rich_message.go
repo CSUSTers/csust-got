@@ -8,6 +8,7 @@ import (
 
 	"csust-got/config"
 
+	"github.com/cloudwego/eino/schema"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -151,6 +152,7 @@ func resolveTelegramRichDelivery(text string, nativeReason string, format *confi
 		RichCandidate: true,
 	}
 	if !richEnabled || !richAuthorized {
+		delivery.VisibleText = telegramRichUnauthorizedVisibleText(text, parsed)
 		return delivery
 	}
 	if parsed.Err != nil {
@@ -165,6 +167,52 @@ func resolveTelegramRichDelivery(text string, nativeReason string, format *confi
 	delivery.ShouldSendRich = true
 	delivery.RichMessage = parsed.RichMessage
 	return delivery
+}
+
+// telegramRichUnauthorizedVisibleText replaces the envelope with its plain fallback text
+// so envelope tags never reach Telegram when rich output is disabled or unauthorized.
+func telegramRichUnauthorizedVisibleText(text string, parsed telegramRichParseResult) string {
+	prefix, rest, ok := strings.Cut(text, telegramRichEnvelopeStart)
+	if !ok {
+		return text
+	}
+	inner, suffix, _ := strings.Cut(rest, telegramRichEnvelopeEnd)
+	replacement := strings.TrimSpace(inner)
+	if parsed.Err == nil && strings.TrimSpace(parsed.FallbackText) != "" {
+		replacement = parsed.FallbackText
+	}
+	return strings.TrimSpace(joinTelegramRichSegments(prefix, replacement, suffix))
+}
+
+func joinTelegramRichSegments(segments ...string) string {
+	parts := make([]string, 0, len(segments))
+	for _, segment := range segments {
+		if trimmed := strings.TrimSpace(segment); trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// restoreAgentV3ReplayedRichSkill re-activates rich output when the replayed history shows
+// the rich-message skill was loaded, so a continued session keeps its output format.
+// Runtime environment and other permissions are never restored from history.
+func restoreAgentV3ReplayedRichSkill(tc *TurnContext, replay []*schema.Message) bool {
+	if tc == nil || tc.Config == nil || !tc.Config.IsAgentV3RichEnabled() {
+		return false
+	}
+	for _, message := range replay {
+		if message == nil || message.Role != schema.Assistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if call.Function.Name == agentV3ToolLoadSkill && isRichMessageLoadSkillArgs(call.Function.Arguments) {
+				tc.markSkillLoaded(agentV3RichMessageSkillName)
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isRichMessageLoadSkillArgs(argsJSON string) bool {

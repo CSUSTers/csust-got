@@ -147,8 +147,16 @@ func TestAgentV3SessionDeliveryRichRequiresSuccessfulFinalReceipt(t *testing.T) 
 					require.NoError(t, err)
 				}
 				calls := d.finalCalls()
-				require.Len(t, calls, 1)
 				require.Equal(t, telegramSendRichMessageMethod, calls[0].method)
+				if outcome == "send failure" {
+					require.Len(t, calls, 3, "a failed rich send falls back to plain text, which fails here too")
+					for _, call := range calls[1:] {
+						require.Equal(t, "editMessageText", call.method)
+						require.Equal(t, "rich final", call.payload["text"])
+					}
+				} else {
+					require.Len(t, calls, 1)
+				}
 				if outcome == "success" {
 					capture := f.archive(t, f.node(t, d.finalID))
 					require.Equal(t, final, capture.Delta[len(capture.Delta)-1].Message)

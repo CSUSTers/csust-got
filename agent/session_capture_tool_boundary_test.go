@@ -67,7 +67,7 @@ func TestSessionCaptureOrdinaryNestedToolBoundaryArchiveCommitLoad(t *testing.T)
 				{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "outer-call", Function: schema.FunctionCall{Name: ordinary.name, Arguments: "{}"}}}}},
 				{schema.AssistantMessage("top complete", nil)},
 			}}
-			parent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{ordinary}, 4)
+			parent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{ordinary}, 3)
 			capture := NewSessionCapture()
 			input := []*schema.Message{schema.UserMessage("parent input")}
 			ctx = WithSessionCapture(ctx, capture)
@@ -86,7 +86,7 @@ func TestSessionCaptureOrdinaryNestedToolBoundaryArchiveCommitLoad(t *testing.T)
 			result := capture.Snapshot()
 			require.NoError(t, result.Err)
 			require.True(t, result.Complete)
-			require.Len(t, result.Messages, 3)
+			require.Len(t, result.Messages, 4)
 			require.Equal(t, "outer-call", result.Messages[0].ToolCalls[0].ID)
 			require.Equal(t, "outer-call", result.Messages[1].ToolCallID)
 			archive, err := agentV3SessionArchive(&agentV3SessionTurn{input: input, kinds: []agentV3SessionInputKind{agentV3SessionCurrent}}, result)
@@ -98,7 +98,7 @@ func TestSessionCaptureOrdinaryNestedToolBoundaryArchiveCommitLoad(t *testing.T)
 			loaded, err := f.service.Load(t.Context(), session.Selection{Scope: f.scope(), Mode: session.SelectReply, ReplyMessageID: 77})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, loaded.Parent.Close()) })
-			require.Len(t, loaded.Messages, 4)
+			require.Len(t, loaded.Messages, 5)
 			for _, message := range loaded.Messages {
 				require.NotContains(t, message.Content, "private child input")
 				require.NotContains(t, message.ReasoningContent, "private child reasoning")

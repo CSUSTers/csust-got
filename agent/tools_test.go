@@ -20,6 +20,7 @@ import (
 )
 
 func TestGetImageToolCancelsDirectAndTelegramHTTP(t *testing.T) {
+	allowLoopbackImageTargets(t)
 	tests := []struct {
 		name     string
 		telegram bool
@@ -161,6 +162,47 @@ func TestGetContextToolReturnsStoredPhotoMetadataAndMarkdown(t *testing.T) {
 	assert.Contains(t, output, `<image file_id="captionless-photo" />`)
 	assert.Contains(t, output, `<image file_id="captioned-photo" />`)
 	assert.Contains(t, output, "😀 **bold**")
+}
+
+func TestGetContextToolReturnsLatestEditedContent(t *testing.T) {
+	oldConfig := config.BotConfig
+	testConfig := config.NewBotConfig()
+	miniRedis := miniredis.RunT(t)
+	testConfig.RedisConfig.RedisAddr = miniRedis.Addr()
+	testConfig.RedisConfig.KeyPrefix = "get-context-edited:"
+	config.BotConfig = testConfig
+	orm.InitRedis()
+	t.Cleanup(func() {
+		config.BotConfig = oldConfig
+		if oldConfig != nil && oldConfig.RedisConfig != nil {
+			orm.InitRedis()
+		}
+	})
+
+	chat := &tb.Chat{ID: -102}
+	now := time.Now().Unix()
+	original := &tb.Message{ID: 200, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "original wording", Unixtime: now}
+	later := &tb.Message{ID: 201, Chat: chat, Sender: &tb.User{Username: "bob"}, Text: "next message", Unixtime: now}
+	edited := &tb.Message{ID: 200, Chat: chat, Sender: &tb.User{Username: "alice"}, Text: "edited wording", Unixtime: now, LastEdit: now + 5}
+	for _, message := range []*tb.Message{original, later, edited} {
+		require.NoError(t, orm.PushMessageToStream(message))
+		require.NoError(t, orm.SetMessage(message))
+	}
+
+	tc := &TurnContext{Message: &tb.Message{ID: 202, Chat: chat, Sender: &tb.User{Username: "caller"}}}
+	output, err := (&getContextTool{}).InvokableRun(WithTurnContext(t.Context(), tc), `{"limit":10}`)
+	require.NoError(t, err)
+	assert.Contains(t, output, "edited wording")
+	assert.NotContains(t, output, "original wording")
+	assert.Equal(t, 1, strings.Count(output, `id="200"`))
+	assert.Less(t, strings.Index(output, `id="200"`), strings.Index(output, `id="201"`))
+
+	history, err := GetMessageContext(nil, tc.Message, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 2)
+	assert.Equal(t, 200, history[0].ID)
+	assert.Equal(t, "edited wording", history[0].Text)
+	assert.Equal(t, 201, history[1].ID)
 }
 
 func TestGetContextToolAdvancedFilters(t *testing.T) {

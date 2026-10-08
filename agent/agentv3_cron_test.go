@@ -666,6 +666,7 @@ func TestCronPollContinuesAfterRejectedClaimAtLocalCapacityOne(t *testing.T) {
 
 func TestCronImageToolWorkerJoinsAtRunDeadline(t *testing.T) {
 	f := newCronFixture(t)
+	allowLoopbackImageTargets(t)
 	requestCanceled := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")

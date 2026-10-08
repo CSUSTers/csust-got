@@ -52,7 +52,7 @@ func TestSessionCaptureFullToolHistory(t *testing.T) {
 			}}
 			capture := NewSessionCapture()
 			ctx := WithSessionCapture(t.Context(), capture)
-			agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{echoLookupTool{}}, 12)
+			agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{echoLookupTool{}}, 4)
 			input := []*schema.Message{
 				schema.SystemMessage("system"),
 				{Role: schema.User, Content: "current input", UserInputMultiContent: []schema.MessageInputPart{{
@@ -87,21 +87,22 @@ func TestSessionCaptureFullToolHistory(t *testing.T) {
 			result := capture.Snapshot()
 			require.NoError(t, result.Err)
 			require.True(t, result.Complete)
-			require.Len(t, result.Messages, 7)
+			require.Len(t, result.Messages, 8)
 			assert.Equal(t, input, result.Input)
 			expectedFirst, err := schema.ConcatMessages([]*schema.Message{first})
 			require.NoError(t, err)
 			expectedFinal, err := schema.ConcatMessages([]*schema.Message{final})
 			require.NoError(t, err)
 			assert.Equal(t, expectedFirst, result.Messages[0])
-			assert.Equal(t, expectedFinal, result.Messages[6])
+			assert.Equal(t, expectedFinal, result.Messages[7])
 			assertLookupToolResultPair(t, result.Messages, 0, "first-a", `{"q":"first-a"}`)
 			assertLookupToolResultPair(t, result.Messages, 0, "first-b", `{"q":"first-b"}`)
 			assertLookupToolResultPair(t, result.Messages, 3, "second-a", `{"q":"second-a"}`)
 			assertLookupToolResultPair(t, result.Messages, 3, "second-b", `{"q":"second-b"}`)
 			require.Len(t, result.Guidance, 1)
-			assert.Equal(t, 6, result.Guidance[0].BeforeMessage)
-			assert.Contains(t, result.Guidance[0].Message.Content, "已经进行了 2 轮工具调用")
+			assert.Equal(t, 6, result.Guidance[0].Index)
+			assert.Equal(t, result.Messages[6], result.Guidance[0].Message, "guidance is stored inline in model order")
+			assert.Contains(t, result.Guidance[0].Message.Content, finalTurnGuidance)
 			assert.Contains(t, result.ModelInput[0].Content, loopDirectiveText)
 			assert.Equal(t, mdl.capturedInputs()[0][0].Content, result.ModelInput[0].Content)
 			index = 99
@@ -136,7 +137,7 @@ func TestSessionCaptureNormalLastStepCompletes(t *testing.T) {
 			require.True(t, result.Complete)
 			require.Len(t, result.Guidance, 1)
 			assert.Contains(t, result.Guidance[0].Message.Content, finalTurnGuidance)
-			assert.Equal(t, len(result.Messages)-1, result.Guidance[0].BeforeMessage)
+			assert.Equal(t, len(result.Messages)-2, result.Guidance[0].Index, "guidance precedes the final assistant inline")
 		})
 	}
 }
@@ -196,16 +197,16 @@ func TestSessionCaptureIncompleteExits(t *testing.T) {
 	}{
 		{"initial error", []retryStreamStep{{err: errAgentFailureUnderTest}}, 4, errAgentFailureUnderTest, 0, 0},
 		{"partial error", []retryStreamStep{{chunks: []*schema.Message{schema.AssistantMessage("partial", nil)}, recvErr: errAgentFailureUnderTest}}, 4, errAgentFailureUnderTest, 0, 0},
-		{"error after tool", []retryStreamStep{{chunks: []*schema.Message{call}}, {err: errAgentFailureUnderTest}}, 4, errAgentFailureUnderTest, 1, 2},
+		{"error after tool", []retryStreamStep{{chunks: []*schema.Message{call}}, {err: errAgentFailureUnderTest}}, 3, errAgentFailureUnderTest, 1, 3},
 		{"empty stream", []retryStreamStep{{}}, 4, nil, 0, 0},
 		{"nil response", []retryStreamStep{{chunks: []*schema.Message{nil}}}, 4, nil, 0, 0},
-		{"empty assistant", []retryStreamStep{{chunks: []*schema.Message{schema.AssistantMessage("", nil)}}}, 4, nil, 0, 1},
-		{"metadata only", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Extra: map[string]any{"metadata": true}}}}}, 4, nil, 0, 1},
+		{"empty assistant", []retryStreamStep{{chunks: []*schema.Message{schema.AssistantMessage("", nil)}}}, 4, nil, 0, 0},
+		{"metadata only", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Extra: map[string]any{"metadata": true}}}}}, 4, nil, 0, 0},
 		{"truncated final", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Content: "truncated", ResponseMeta: &schema.ResponseMeta{FinishReason: "length"}}}}}, 4, nil, 0, 1},
 		{"filtered final", []retryStreamStep{{chunks: []*schema.Message{{Role: schema.Assistant, Content: "filtered", ResponseMeta: &schema.ResponseMeta{FinishReason: "content_filter"}}}}}, 4, nil, 0, 1},
 		{"wrong role", []retryStreamStep{{chunks: []*schema.Message{schema.UserMessage("not assistant")}}}, 4, nil, 0, 1},
-		{"last step tool call", []retryStreamStep{{chunks: []*schema.Message{call}}}, 1, nil, 0, 1},
-		{"last step after executed tool", []retryStreamStep{{chunks: []*schema.Message{call}}, {chunks: []*schema.Message{call}}}, 2, nil, 1, 3},
+		{"last step tool call", []retryStreamStep{{chunks: []*schema.Message{call}}}, 1, nil, 0, 3},
+		{"last step after executed tool", []retryStreamStep{{chunks: []*schema.Message{call}}, {chunks: []*schema.Message{call}}}, 2, nil, 1, 5},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -300,7 +301,7 @@ func TestSessionCaptureSuccessfulRetryDiscardsFailedAttempt(t *testing.T) {
 	}}
 	mdl := &retryingChatModel{inner: stub, retries: 2, sleep: func(context.Context, time.Duration) error { return nil }}
 	counting := &countingLookupTool{}
-	agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{counting}, 4)
+	agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{counting}, 3)
 	capture := NewSessionCapture()
 	message, err := agent.Generate(WithSessionCapture(t.Context(), capture), []*schema.Message{schema.UserMessage("input")})
 	require.NoError(t, err)
@@ -308,10 +309,12 @@ func TestSessionCaptureSuccessfulRetryDiscardsFailedAttempt(t *testing.T) {
 	result := capture.Snapshot()
 	require.NoError(t, result.Err)
 	require.True(t, result.Complete)
-	require.Len(t, result.Messages, 3)
+	require.Len(t, result.Messages, 4)
 	assert.Equal(t, "successful", result.Messages[0].ToolCalls[0].ID)
 	assert.Equal(t, "successful", result.Messages[1].ToolCallID)
-	assert.Equal(t, "successful final", result.Messages[2].Content)
+	require.Len(t, result.Guidance, 1)
+	assert.Equal(t, 2, result.Guidance[0].Index)
+	assert.Equal(t, "successful final", result.Messages[3].Content)
 	assert.Equal(t, 1, counting.callCount())
 	assert.Equal(t, 5, stub.streamCalls)
 }
@@ -325,14 +328,14 @@ func TestSessionCaptureToolErrorsCanComplete(t *testing.T) {
 				{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{call}}},
 				{schema.AssistantMessage("recovered answer", nil)},
 			}}
-			agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{sessionCaptureFailingTool{}}, 4)
+			agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{sessionCaptureFailingTool{}}, 3)
 			capture := NewSessionCapture()
 			_, err := agent.Generate(WithSessionCapture(t.Context(), capture), []*schema.Message{schema.UserMessage("input")})
 			require.NoError(t, err)
 			result := capture.Snapshot()
 			require.NoError(t, result.Err)
 			require.True(t, result.Complete)
-			require.Len(t, result.Messages, 3)
+			require.Len(t, result.Messages, 4)
 			assert.Equal(t, "call", result.Messages[1].ToolCallID)
 			assert.Equal(t, name, result.Messages[1].ToolName)
 			assert.Contains(t, result.Messages[1].Content, "[Tool Error]")
@@ -367,15 +370,14 @@ func TestSessionCaptureAncestorToolCallsDoNotConsumeBudget(t *testing.T) {
 			assert.NotContains(t, message.Content, "停止重复调用")
 		}
 	}
-	assert.Contains(t, inputs[2][len(inputs[2])-1].Content, "已经进行了 2 轮工具调用")
+	assert.Equal(t, schema.Tool, inputs[2][len(inputs[2])-1].Role, "two current rounds of twelve calls need no guidance; counting ancestors would force a hard stop")
 	assert.NotContains(t, inputs[2][len(inputs[2])-1].Content, finalTurnGuidance)
 	result := capture.Snapshot()
 	require.NoError(t, result.Err)
 	require.True(t, result.Complete)
 	assert.Len(t, result.Input, 41)
 	assert.Len(t, result.Messages, 5)
-	require.Len(t, result.Guidance, 1)
-	assert.Equal(t, 4, result.Guidance[0].BeforeMessage)
+	require.Empty(t, result.Guidance)
 	assert.Contains(t, result.Input[len(result.Input)-1].Content, "user-owned lookalike")
 }
 
@@ -394,7 +396,7 @@ func TestSessionCaptureConcurrentSharedCompiledAgent(t *testing.T) {
 		}
 		return schema.StreamReaderFromArray([]*schema.Message{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{lookupToolCall(request, `{}`)}}}), nil
 	}}
-	compiled := &CompiledAgent{Agent: newSessionCaptureAgent(t, mdl, []tool.BaseTool{lookupTool{}}, 4)}
+	compiled := &CompiledAgent{Agent: newSessionCaptureAgent(t, mdl, []tool.BaseTool{lookupTool{}}, 3)}
 	type invocationResult struct {
 		request string
 		capture SessionCaptureResult
@@ -417,11 +419,11 @@ func TestSessionCaptureConcurrentSharedCompiledAgent(t *testing.T) {
 		require.NoError(t, result.capture.Err)
 		require.True(t, result.capture.Complete)
 		require.Len(t, result.capture.Input, 1)
-		require.Len(t, result.capture.Messages, 3)
+		require.Len(t, result.capture.Messages, 4)
 		assert.Equal(t, result.request, result.capture.Input[0].Content)
 		assert.Equal(t, result.request, result.capture.Messages[0].ToolCalls[0].ID)
 		assert.Equal(t, result.request, result.capture.Messages[1].ToolCallID)
-		assert.Equal(t, "final "+result.request, result.capture.Messages[2].Content)
+		assert.Equal(t, "final "+result.request, result.capture.Messages[3].Content)
 	}
 }
 
@@ -443,7 +445,7 @@ func TestSessionCaptureSubAgentContextIsExplicitlyDisabled(t *testing.T) {
 		{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "child-call", Function: schema.FunctionCall{Name: "same-name", Arguments: `{"request":"private work"}`}}}}},
 		{schema.AssistantMessage("parent answer", nil)},
 	}}
-	parent := newSessionCaptureAgent(t, parentModel, []tool.BaseTool{childTool}, 4)
+	parent := newSessionCaptureAgent(t, parentModel, []tool.BaseTool{childTool}, 3)
 	capture := NewSessionCapture()
 	_, err = parent.Generate(WithSessionCapture(WithTurnContext(t.Context(), turn), capture), []*schema.Message{schema.UserMessage("parent request")})
 	require.NoError(t, err)
@@ -452,10 +454,10 @@ func TestSessionCaptureSubAgentContextIsExplicitlyDisabled(t *testing.T) {
 	result := capture.Snapshot()
 	require.NoError(t, result.Err)
 	require.True(t, result.Complete)
-	require.Len(t, result.Messages, 3)
+	require.Len(t, result.Messages, 4)
 	assert.Equal(t, "child-call", result.Messages[1].ToolCallID)
 	assert.Equal(t, "private child answer", result.Messages[1].Content)
-	assert.Equal(t, "parent answer", result.Messages[2].Content)
+	assert.Equal(t, "parent answer", result.Messages[3].Content)
 }
 
 func TestSessionCaptureUnsupportedSnapshotsDoNotChangeOutput(t *testing.T) {

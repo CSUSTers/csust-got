@@ -31,6 +31,8 @@ var (
 	ErrUnknown = errors.New("session publication outcome unknown; retained for recovery")
 	// ErrContextRejected reports a candidate rejected for the selected agent/model context.
 	ErrContextRejected = errors.New("session context rejected")
+	// ErrStale reports that no delivered message still maps to the redirect source node.
+	ErrStale = errors.New("session redirect source is no longer mapped")
 )
 
 // Scope isolates storage by deployment, bot, platform, and chat.
@@ -151,8 +153,11 @@ type TurnCapture struct {
 }
 
 // DeliveryReceipt lists the final bot messages successfully delivered for this turn.
+// RedirectFrom publishes a compacted root: only MessageIDs still mapped to that node are
+// moved to the new node, and the publish fails with ErrStale when none remain.
 type DeliveryReceipt struct {
-	MessageIDs []int `json:"message_ids"`
+	MessageIDs   []int    `json:"message_ids"`
+	RedirectFrom *NodeRef `json:"redirect_from,omitempty"`
 }
 
 // Node is immutable committed metadata for one archive and its optional parent.
@@ -168,6 +173,15 @@ type Node struct {
 	Size            int64    `json:"size"`
 	Version         int      `json:"version"`
 	CommitSequence  int64    `json:"commit_sequence"`
+	// RedirectedFrom records the compacted node whose message mappings this root took over.
+	RedirectedFrom *NodeRef `json:"redirected_from,omitempty"`
+}
+
+// ReplayTurn is one archived node with its replayable history; Bootstrap is set on the root only.
+type ReplayTurn struct {
+	Node      Node
+	Bootstrap []*schema.Message
+	Delta     []*schema.Message
 }
 
 // Lease pins a DAG with a generation-fenced token and Redis millisecond deadline.
@@ -212,6 +226,8 @@ type Deletion struct {
 type Repository interface {
 	Namespace() string
 	ResolveAndPin(context.Context, Selection, string, time.Duration) (Pinned, error)
+	// Chain returns root-to-node metadata of an active DAG without pinning or refreshing activity.
+	Chain(context.Context, Scope, NodeRef) ([]Node, error)
 	RejectContext(context.Context, Scope, NodeRef, string) error
 	ConfirmLoaded(context.Context, Scope, Lease, time.Duration) error
 	Renew(context.Context, Scope, Lease, time.Duration) error

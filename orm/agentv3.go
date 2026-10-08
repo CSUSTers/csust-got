@@ -134,28 +134,14 @@ func AgentV3GetPrefixCurrent(ctx context.Context, scope AgentV3Scope, agent, mod
 	return &rec, nil
 }
 
-// AgentV3SetPrefix stores stable-prefix metadata and messages.
-func AgentV3SetPrefix(ctx context.Context, scope AgentV3Scope, rec AgentV3PrefixRecord, messages string, ttl time.Duration) error {
+// AgentV3SetPrefix stores stable-prefix metadata. The rendered prefix text is not persisted
+// because nothing reads it back; the hash in the record is enough to detect prefix changes.
+func AgentV3SetPrefix(ctx context.Context, scope AgentV3Scope, rec AgentV3PrefixRecord, ttl time.Duration) error {
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
-	pipe := rc.Pipeline()
-	currentKey := agentV3PrefixCurrentKey(scope, rec.Agent, rec.Model)
-	messagesKey := agentV3PrefixMessagesKey(scope, rec.Version)
-	pipe.Set(ctx, currentKey, data, ttl)
-	pipe.Set(ctx, messagesKey, messages, ttl)
-	_, err = pipe.Exec(ctx)
-	return err
-}
-
-// AgentV3GetPrefixMessages loads stable-prefix messages by version.
-func AgentV3GetPrefixMessages(ctx context.Context, scope AgentV3Scope, version int64) (string, error) {
-	data, err := rc.Get(ctx, agentV3PrefixMessagesKey(scope, version)).Result()
-	if errors.Is(err, redis.Nil) {
-		return "", nil
-	}
-	return data, err
+	return rc.Set(ctx, agentV3PrefixCurrentKey(scope, rec.Agent, rec.Model), data, ttl).Err()
 }
 
 // AgentV3AppendTurn appends a raw turn to agent-v3 history.
@@ -323,9 +309,32 @@ func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3Memor
 	pipe := rc.Pipeline()
 	pipe.Set(ctx, agentV3MemoryItemKey(scope, item.ID), data, ttl)
 	pipe.SAdd(ctx, agentV3MemoryActiveKey(scope), item.ID)
-	pipe.Expire(ctx, agentV3MemoryActiveKey(scope), ttl)
+	agentV3ApplyTTL(ctx, pipe, agentV3MemoryActiveKey(scope), ttl)
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+// AgentV3CountMemoryByUser counts active memory items created by one user.
+func AgentV3CountMemoryByUser(ctx context.Context, scope AgentV3Scope, userID int64) (int, error) {
+	items, err := AgentV3ListMemory(ctx, scope)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, item := range items {
+		if item.CreatedBy == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func agentV3ApplyTTL(ctx context.Context, pipe redis.Pipeliner, key string, ttl time.Duration) {
+	if ttl <= 0 {
+		pipe.Persist(ctx, key)
+		return
+	}
+	pipe.Expire(ctx, key, ttl)
 }
 
 // AgentV3ListMemory lists active memory items.
@@ -373,11 +382,7 @@ func AgentV3SetMemorySnapshot(ctx context.Context, scope AgentV3Scope, snapshot 
 	if err != nil {
 		return err
 	}
-	pipe := rc.Pipeline()
-	pipe.Set(ctx, agentV3MemorySnapshotCurrentKey(scope), data, ttl)
-	pipe.Set(ctx, agentV3MemorySnapshotVersionKey(scope, snapshot.Version), data, ttl)
-	_, err = pipe.Exec(ctx)
-	return err
+	return rc.Set(ctx, agentV3MemorySnapshotCurrentKey(scope), data, ttl).Err()
 }
 
 // AgentV3RebuildMemorySnapshot atomically rebuilds a memory snapshot from active memory items.
@@ -450,11 +455,10 @@ func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl t
 					pipe.SRem(ctx, activeKey, staleMembers...)
 				}
 				for _, id := range liveIDs {
-					pipe.Expire(ctx, agentV3MemoryItemKey(scope, id), ttl)
+					agentV3ApplyTTL(ctx, pipe, agentV3MemoryItemKey(scope, id), ttl)
 				}
-				pipe.Expire(ctx, activeKey, ttl)
+				agentV3ApplyTTL(ctx, pipe, activeKey, ttl)
 				pipe.Set(ctx, currentKey, data, ttl)
-				pipe.Set(ctx, agentV3MemorySnapshotVersionKey(scope, next.Version), data, ttl)
 				return nil
 			})
 			return err
@@ -644,10 +648,6 @@ func agentV3PrefixCurrentKey(scope AgentV3Scope, agent, model string) string {
 	return fmt.Sprintf("%s:prefix:current:%s:%s", agentV3BaseKey(scope), agent, model)
 }
 
-func agentV3PrefixMessagesKey(scope AgentV3Scope, version int64) string {
-	return fmt.Sprintf("%s:prefix:%d:messages", agentV3BaseKey(scope), version)
-}
-
 func agentV3TurnsKey(scope AgentV3Scope) string {
 	return agentV3BaseKey(scope) + ":turns"
 }
@@ -670,10 +670,6 @@ func agentV3MemoryActiveKey(scope AgentV3Scope) string {
 
 func agentV3MemorySnapshotCurrentKey(scope AgentV3Scope) string {
 	return agentV3BaseKey(scope) + ":memory:snapshot:current"
-}
-
-func agentV3MemorySnapshotVersionKey(scope AgentV3Scope, version int64) string {
-	return fmt.Sprintf("%s:memory:snapshot:%d", agentV3BaseKey(scope), version)
 }
 
 func agentV3TraceLastKey(scope AgentV3Scope) string {

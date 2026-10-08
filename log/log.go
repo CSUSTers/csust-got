@@ -2,11 +2,20 @@ package log
 
 import (
 	"csust-got/config"
+	"errors"
 	"os"
+	"path/filepath"
+	"syscall"
+	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
+)
+
+const (
+	logFileName    = "got.log"
+	errLogFileName = "got_err.log"
 )
 
 var logger *zap.Logger
@@ -19,7 +28,6 @@ func InitLogger() {
 
 // NewLogger new logger.
 func NewLogger() *zap.Logger {
-	var logConfig zap.Config
 	// create log dir if not exists
 	if config.BotConfig.LogFileDir != "" {
 		if err := os.MkdirAll(config.BotConfig.LogFileDir, 0755); err != nil {
@@ -27,22 +35,66 @@ func NewLogger() *zap.Logger {
 		}
 	}
 	if config.BotConfig.DebugMode {
-		logConfig = devConfig()
+		return buildLogger(devConfig())
+	}
+	return buildLogger(prodConfig())
+}
+
+func buildLogger(cfg zap.Config) *zap.Logger {
+	encoder := zapcore.NewJSONEncoder(cfg.EncoderConfig)
+	core := zapcore.NewCore(encoder, outputSyncer(logFileName), cfg.Level)
+	if cfg.Sampling != nil {
+		core = zapcore.NewSamplerWithOptions(core, time.Second, cfg.Sampling.Initial, cfg.Sampling.Thereafter)
+	}
+	opts := []zap.Option{
+		zap.ErrorOutput(outputSyncer(errLogFileName)),
+		zap.AddCaller(),
+		zap.AddCallerSkip(1),
+	}
+	if cfg.Development {
+		opts = append(opts, zap.Development(), zap.AddStacktrace(zapcore.WarnLevel))
 	} else {
-		logConfig = prodConfig()
+		opts = append(opts, zap.AddStacktrace(zapcore.ErrorLevel))
 	}
-	tmpLogger, err := logConfig.Build(zap.AddCallerSkip(1))
-	if err == nil {
-		return tmpLogger
+	return zap.New(core, opts...)
+}
+
+func outputSyncer(fileName string) zapcore.WriteSyncer {
+	syncers := []zapcore.WriteSyncer{stderrSyncer{}}
+	if dir := config.BotConfig.LogFileDir; dir != "" {
+		syncers = append(syncers, zapcore.AddSync(rotatingFile(filepath.Join(dir, fileName), config.BotConfig.LogConfig)))
 	}
-	zap.L().Error("NewLogger failed, using default logger", zap.Error(err))
-	return zap.L()
+	return zapcore.NewMultiWriteSyncer(syncers...)
+}
+
+func rotatingFile(path string, cfg *config.LogConfig) *lumberjack.Logger {
+	out := &lumberjack.Logger{Filename: path, LocalTime: true, Compress: cfg.CompressEnabled()}
+	if cfg != nil {
+		out.MaxSize = cfg.MaxSizeMB
+		out.MaxBackups = cfg.MaxBackups
+		out.MaxAge = cfg.MaxAgeDays
+	}
+	return out
+}
+
+type stderrSyncer struct{}
+
+func (stderrSyncer) Write(p []byte) (int, error) {
+	return os.Stderr.Write(p)
+}
+
+func (stderrSyncer) Sync() error {
+	return ignoreUnsyncable(os.Stderr.Sync())
+}
+
+func ignoreUnsyncable(err error) error {
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTTY) || errors.Is(err, syscall.EBADF) {
+		return nil
+	}
+	return err
 }
 
 func devConfig() zap.Config {
-	logPath := lo.FilterMap([]string{config.BotConfig.LogFileDir}, func(p string, _ int) (string, bool) {
-		return p, p != ""
-	})
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.DebugLevel),
 		Development: true,
@@ -61,15 +113,10 @@ func devConfig() zap.Config {
 			EncodeDuration: zapcore.StringDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      append(lo.Map(logPath, func(p string, _ int) string { return p + "/got.log" }), "stderr"),
-		ErrorOutputPaths: append(lo.Map(logPath, func(p string, _ int) string { return p + "/got_err.log" }), "stderr"),
 	}
 }
 
 func prodConfig() zap.Config {
-	logPath := lo.FilterMap([]string{config.BotConfig.LogFileDir}, func(p string, _ int) (string, bool) {
-		return p, p != ""
-	})
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
 		Development: false,
@@ -92,8 +139,6 @@ func prodConfig() zap.Config {
 			EncodeDuration: zapcore.SecondsDurationEncoder,
 			EncodeCaller:   zapcore.ShortCallerEncoder,
 		},
-		OutputPaths:      append(lo.Map(logPath, func(p string, _ int) string { return p + "/got.log" }), "stderr"),
-		ErrorOutputPaths: append(lo.Map(logPath, func(p string, _ int) string { return p + "/got_err.log" }), "stderr"),
 	}
 }
 
@@ -129,7 +174,7 @@ func Panic(msg string, fields ...zap.Field) {
 
 // Sync sync logger.
 func Sync() {
-	if err := logger.Sync(); err != nil {
+	if err := ignoreUnsyncable(logger.Sync()); err != nil {
 		logger.Error("Logger Sync failed", zap.Error(err))
 	}
 }

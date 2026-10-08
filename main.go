@@ -80,6 +80,20 @@ func main() {
 		bot.Stop()
 	}()
 	bot.Start()
+	drainInflightTurns()
+}
+
+func drainInflightTurns() {
+	grace := config.BotConfig.AgentV3.ShutdownGraceDuration()
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	defer cancelDrain()
+	if pending := agentv3.InflightTurns(); pending > 0 {
+		log.Info("shutdown: waiting for in-flight agent turns", zap.Int64("inflight", pending), zap.Duration("grace", grace))
+	}
+	if err := agentv3.WaitInflight(drainCtx); err != nil {
+		log.Warn("shutdown: in-flight agent turns did not finish within grace",
+			zap.Int64("inflight", agentv3.InflightTurns()), zap.Duration("grace", grace), zap.Error(err))
+	}
 }
 
 func initBot() (*Bot, error) {
@@ -192,6 +206,9 @@ func registerBaseHandler(bot *Bot) {
 
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
+
+	// edited messages only refresh the message cache through the middleware chain
+	bot.Handle(OnEdited, base.DoNothing)
 
 	// download sticker in private chat
 	bot.Handle(OnSticker, stickerDlHandler)
@@ -319,11 +336,11 @@ const (
 func agentInvocationTrigger(trigger *config.AgentTrigger, kind agentTriggerKind) *config.AgentTrigger {
 	switch kind {
 	case agentTriggerCommand:
-		return &config.AgentTrigger{Command: trigger.Command}
+		return &config.AgentTrigger{Command: trigger.Command, Hint: trigger.Hint}
 	case agentTriggerRegex:
-		return &config.AgentTrigger{Regex: trigger.Regex}
+		return &config.AgentTrigger{Regex: trigger.Regex, Hint: trigger.Hint}
 	case agentTriggerReply:
-		return &config.AgentTrigger{Reply: true}
+		return &config.AgentTrigger{Reply: true, Hint: trigger.Hint}
 	default:
 		return &config.AgentTrigger{}
 	}
@@ -391,7 +408,7 @@ func blockMiddleware(next HandlerFunc) HandlerFunc {
 
 func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -413,7 +430,7 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 
 func rateMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
+		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -434,7 +451,7 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
-		if !isChatMessageHasSender(ctx) || m.Sticker == nil {
+		if !isChatMessageHasSender(ctx) || m.Sticker == nil || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -468,7 +485,7 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 // byeWorldMiddleware auto delete message.
 func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -587,4 +604,10 @@ func shouldStoreMessage(m *Message) bool {
 
 func isChatMessageHasSender(ctx Context) bool {
 	return ctx.Chat() != nil && ctx.Message() != nil && ctx.Sender() != nil
+}
+
+// isEditedUpdate reports an edited message or channel post; edits only refresh the message cache.
+func isEditedUpdate(ctx Context) bool {
+	update := ctx.Update()
+	return update.EditedMessage != nil || update.EditedChannelPost != nil
 }

@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +47,22 @@ func SetMessage(msg *Message) error {
 	return nil
 }
 
-// PushMessageToStream 将完整的消息结构体保存到 Redis
+const (
+	messageStreamMaxLen       int64 = 1000
+	messageStreamFieldMessage       = "message"
+	messageStreamFieldID            = "id"
+	messageStreamFieldEdited        = "edited"
+)
+
+// MessageStreamQuery selects cached messages by Telegram message ID; zero bounds are open.
+type MessageStreamQuery struct {
+	MinID   int
+	MaxID   int
+	Count   int64
+	Reverse bool
+}
+
+// PushMessageToStream appends a message snapshot; entry IDs are server-generated so late or edited pushes never fail.
 func PushMessageToStream(msg *Message) error {
 	if msg == nil {
 		return ErrMessageIsNil
@@ -52,19 +70,22 @@ func PushMessageToStream(msg *Message) error {
 
 	key := wrapKeyWithChat("message_stream", msg.Chat.ID)
 
-	// 序列化消息对象为JSON
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
 		log.Error("marshal message to json failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
 		return err
 	}
 
+	values := []any{messageStreamFieldID, strconv.Itoa(msg.ID), messageStreamFieldMessage, jsonData}
+	if msg.LastEdit != 0 {
+		values = append(values, messageStreamFieldEdited, "1")
+	}
 	resp := rc.XAdd(context.TODO(), &redis.XAddArgs{
 		Stream: key,
-		MaxLen: 1000,
+		MaxLen: messageStreamMaxLen,
 		Approx: true,
-		ID:     strconv.Itoa(msg.ID),
-		Values: []any{"message", jsonData},
+		ID:     "*",
+		Values: values,
 	})
 	if resp.Err() != nil {
 		log.Error("push message to redis stream failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(resp.Err()))
@@ -193,60 +214,103 @@ func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, 
 	return msg, nil
 }
 
-// GetMessagesFromStream 从 Redis 获取消息
-func GetMessagesFromStream(chatID int64, beginID, endID string, count int64, reverse bool) ([]*Message, error) {
-	messages, _, err := getMessagesFromStream(chatID, beginID, endID, count, reverse, false)
+// GetMessagesFromStream returns distinct messages in the query range sorted by message ID, newest snapshot per ID.
+func GetMessagesFromStream(chatID int64, query MessageStreamQuery) ([]*Message, error) {
+	messages, _, err := getMessagesFromStream(chatID, query, false)
 	return messages, err
 }
 
 // GetMessagesFromStreamBestEffort skips malformed stream records and returns the number of records scanned.
-func GetMessagesFromStreamBestEffort(chatID int64, beginID, endID string, count int64, reverse bool) ([]*Message, int, error) {
-	return getMessagesFromStream(chatID, beginID, endID, count, reverse, true)
+func GetMessagesFromStreamBestEffort(chatID int64, query MessageStreamQuery) ([]*Message, int, error) {
+	return getMessagesFromStream(chatID, query, true)
 }
 
-func getMessagesFromStream(chatID int64, beginID, endID string, count int64, reverse, bestEffort bool) ([]*Message, int, error) {
+func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bool) ([]*Message, int, error) {
 	key := wrapKeyWithChat("message_stream", chatID)
 
-	var resp *redis.XMessageSliceCmd
-	if reverse {
-		resp = rc.XRevRangeN(context.TODO(), key, beginID, endID, count)
-	} else {
-		resp = rc.XRangeN(context.TODO(), key, beginID, endID, count)
-	}
-	if resp.Err() != nil {
+	records, err := rc.XRevRangeN(context.TODO(), key, "+", "-", messageStreamMaxLen).Result()
+	if err != nil {
 		log.Error("get messages from redis stream failed", zap.Int64("chat", chatID),
-			zap.String("begin", beginID), zap.String("end", endID), zap.Error(resp.Err()))
-		return nil, 0, resp.Err()
+			zap.Int("min", query.MinID), zap.Int("max", query.MaxID), zap.Error(err))
+		return nil, 0, err
 	}
 
-	records := resp.Val()
-	messages := make([]*Message, 0, len(records))
-
+	latest := make(map[int]*Message, len(records))
 	for _, record := range records {
-		encoded, ok := record.Values["message"].(string)
-		if !ok {
-			err := fmt.Errorf("%w: invalid_stream_message_field", ErrInvalidCachedMessage)
-			log.Error("decode cached stream message failed", zap.Int64("chat", chatID), zap.String("stream", record.ID),
-				zap.String("field", "message"), zap.Error(err))
-			if bestEffort {
+		if id, ok := streamRecordMessageID(record); ok {
+			if _, seen := latest[id]; seen || !query.contains(id) {
 				continue
 			}
-			return nil, len(records), err
 		}
 
-		message, err := decodeCachedMessage([]byte(encoded))
+		message, err := decodeStreamRecord(chatID, record)
 		if err != nil {
-			log.Error("decode cached stream message failed", zap.Int64("chat", chatID), zap.String("stream", record.ID),
-				zap.String("field", "message"), zap.Error(err))
 			if bestEffort {
 				continue
 			}
 			return nil, len(records), err
 		}
+		if _, seen := latest[message.ID]; seen || !query.contains(message.ID) {
+			continue
+		}
+		latest[message.ID] = message
+	}
+
+	messages := make([]*Message, 0, len(latest))
+	for _, message := range latest {
 		messages = append(messages, message)
 	}
-
+	sort.Slice(messages, func(i, j int) bool { return messages[i].ID < messages[j].ID })
+	if query.Count > 0 && int64(len(messages)) > query.Count {
+		if query.Reverse {
+			messages = messages[int64(len(messages))-query.Count:]
+		} else {
+			messages = messages[:query.Count]
+		}
+	}
+	if query.Reverse {
+		slices.Reverse(messages)
+	}
 	return messages, len(records), nil
+}
+
+func (q MessageStreamQuery) contains(id int) bool {
+	return (q.MinID <= 0 || id >= q.MinID) && (q.MaxID <= 0 || id <= q.MaxID)
+}
+
+func streamRecordMessageID(record redis.XMessage) (int, bool) {
+	if raw, ok := record.Values[messageStreamFieldID].(string); ok {
+		if id, err := strconv.Atoi(raw); err == nil && id > 0 {
+			return id, true
+		}
+		return 0, false
+	}
+	seq, _, found := strings.Cut(record.ID, "-")
+	if !found {
+		return 0, false
+	}
+	id, err := strconv.Atoi(seq)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func decodeStreamRecord(chatID int64, record redis.XMessage) (*Message, error) {
+	encoded, ok := record.Values[messageStreamFieldMessage].(string)
+	if !ok {
+		err := fmt.Errorf("%w: invalid_stream_message_field", ErrInvalidCachedMessage)
+		log.Error("decode cached stream message failed", zap.Int64("chat", chatID), zap.String("stream", record.ID),
+			zap.String("field", messageStreamFieldMessage), zap.Error(err))
+		return nil, err
+	}
+	message, err := decodeCachedMessage([]byte(encoded))
+	if err != nil {
+		log.Error("decode cached stream message failed", zap.Int64("chat", chatID), zap.String("stream", record.ID),
+			zap.String("field", messageStreamFieldMessage), zap.Error(err))
+		return nil, err
+	}
+	return message, nil
 }
 
 func decodeCachedMessage(data []byte) (*Message, error) {

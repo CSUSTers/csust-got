@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -36,7 +37,9 @@ type telegramResponseResult struct {
 	response  string
 	reasoning string
 	sent      *tb.Message
-	delivered *tb.Message
+	// delivered is the last message proven to carry final content; deliveredAll lists every final message in order.
+	delivered    *tb.Message
+	deliveredAll []*tb.Message
 }
 
 func streamToTelegramWithDelivery(
@@ -62,7 +65,13 @@ func streamToTelegramWithDelivery(
 	}
 
 	response, reasoning, sent, err := sp.process(existingMsg)
-	return telegramResponseResult{response: response, reasoning: reasoning, sent: sent, delivered: sp.deliveredMsg}, err
+	return telegramResponseResult{response: response, reasoning: reasoning, sent: sent, delivered: sp.deliveredMsg, deliveredAll: sp.deliveredMsgs}, err
+}
+
+// telegramTextSender is the subset of *tb.Bot used to deliver text; tests substitute fakes.
+type telegramTextSender interface {
+	Send(to tb.Recipient, what any, opts ...any) (*tb.Message, error)
+	Edit(msg tb.Editable, what any, opts ...any) (*tb.Message, error)
 }
 
 // streamProcessor manages the streaming output lifecycle.
@@ -73,6 +82,8 @@ type streamProcessor struct {
 	format         *config.AgentOutputConfig
 	richEnabled    bool
 	rawCaller      telegramRawCaller
+	sender         telegramTextSender
+	now            func() time.Time
 	sentenceDelims []string
 	editInterval   time.Duration
 
@@ -82,16 +93,41 @@ type streamProcessor struct {
 	reasoningContent strings.Builder
 	placeholderMsg   *tb.Message
 	deliveredMsg     *tb.Message
+	deliveredMsgs    []*tb.Message
 	tc               *TurnContext // For editMu locking and lifecycle flags
 	deleteOnError    bool
+
+	// Edit dedupe and flood backoff state, protected by editStateMu
+	editStateMu       sync.Mutex
+	lastSentFormatted string
+	lastEditAttempt   time.Time
+	floodNotBefore    time.Time
+	floodBackoff      time.Duration
 
 	// Ticker control
 	done chan struct{}
 	wg   sync.WaitGroup
 }
 
-const defaultEditInterval = 3 * time.Second
-const streamControlClearOutputKey = "csust-got:clear-stream-output"
+const (
+	defaultEditInterval         = 3 * time.Second
+	streamingEditBackoffCap     = 10 * time.Second
+	telegramFloodRetryCap       = 60 * time.Second
+	streamControlClearOutputKey = "csust-got:clear-stream-output"
+)
+
+var errTelegramDeliveryNoChat = errors.New("agentv3: no target chat for delivery")
+
+var telegramFloodSleep = func(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 func newClearStreamOutputMessage() *schema.Message {
 	return &schema.Message{Extra: map[string]any{streamControlClearOutputKey: true}}
@@ -265,17 +301,18 @@ func (sp *streamProcessor) updateMessage() {
 		}
 	}
 
-	formatted := FormatOutputWithReason(displayText, reason, sp.format)
-	if formatted == "" {
+	preview := tailTelegramPreview(displayText, reason, sp.format, telegramMessageLimit)
+	if preview.formatted == "" {
 		return
 	}
 
-	_ = sp.editPlaceholder(formatted, false)
+	_, _ = sp.editPlaceholder(preview, false)
 }
 
 // finalize sends the final complete message and sets the finalized lifecycle flag.
 func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	sp.deliveredMsg = nil
+	sp.deliveredMsgs = nil
 	text := sp.getResponse()
 	reason := sp.getReasoning()
 	if text == "" && reason == "" {
@@ -284,6 +321,7 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		}
 		return "", "", sp.placeholderMsg, nil
 	}
+	var richErr error
 	delivery := resolveTelegramRichDelivery(text, reason, sp.format, sp.richEnabled, sp.richAuthorized())
 	if delivery.ShouldSendRich {
 		replyToID := 0
@@ -293,6 +331,9 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		sent, err := sendTelegramRichMessage(sp.telegramRaw(), sp.targetChatID(), replyToID, delivery.RichMessage)
 		if err == nil {
 			sp.deliveredMsg, _ = telegramDeliveryProof(sent, nil, err)
+			if sp.deliveredMsg != nil {
+				sp.deliveredMsgs = []*tb.Message{sp.deliveredMsg}
+			}
 			if sp.tc != nil {
 				sp.tc.finalized.Store(true)
 			}
@@ -302,19 +343,17 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 			}
 			return delivery.VisibleText, reason, sp.placeholderMsg, nil
 		}
-		zap.L().Debug("agentv3: failed to send rich streaming message", zap.Error(err))
-		if sp.shouldDeletePlaceholderOnStreamError() {
-			sp.deletePlaceholderAfterClearedStreamError()
-			return "", "", nil, err
-		}
-		return delivery.VisibleText, "", sp.placeholderMsg, err
-	}
-	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		zap.L().Warn("agentv3: failed to send rich streaming message, falling back to plain text", zap.Error(err))
+		richErr = err
+		text, reason = delivery.VisibleText, ""
+	} else if delivery.VisibleText != "" && delivery.VisibleText != text {
 		text = delivery.VisibleText
 		reason = ""
 	}
-	formatted := FormatOutputWithReason(text, reason, sp.format)
-	if err := sp.editPlaceholder(formatted, true); err != nil {
+	if err := sp.deliverPlainFinal(text, reason); err != nil {
+		if richErr != nil {
+			err = fmt.Errorf("%w; plain fallback: %w", richErr, err)
+		}
 		if sp.shouldDeletePlaceholderOnStreamError() {
 			sp.deletePlaceholderAfterClearedStreamError()
 			return "", "", nil, err
@@ -324,7 +363,33 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 	if sp.tc != nil {
 		sp.tc.finalized.Store(true)
 	}
-	return text, reason, sp.placeholderMsg, nil
+	return text, reason, sp.finalSent(), nil
+}
+
+// deliverPlainFinal edits the placeholder with the first chunk of the final text and sends any further chunks as replies.
+func (sp *streamProcessor) deliverPlainFinal(text, reason string) error {
+	chunks := formatTelegramChunks(text, reason, sp.format, telegramMessageLimit)
+	if len(chunks) == 0 || sp.placeholderMsg == nil {
+		return nil
+	}
+	delivered, err := sp.deliverer().deliverChunks(chunks, sp.placeholderMsg, func(chunk telegramChunk) (*tb.Message, error) {
+		return sp.editPlaceholder(chunk, true)
+	})
+	if err != nil {
+		return err
+	}
+	sp.deliveredMsgs = delivered
+	if len(delivered) > 0 {
+		sp.deliveredMsg = delivered[len(delivered)-1]
+	}
+	return nil
+}
+
+func (sp *streamProcessor) finalSent() *tb.Message {
+	if len(sp.deliveredMsgs) > 1 {
+		return sp.deliveredMsgs[len(sp.deliveredMsgs)-1]
+	}
+	return sp.placeholderMsg
 }
 
 func (sp *streamProcessor) telegramRaw() telegramRawCaller {
@@ -334,15 +399,37 @@ func (sp *streamProcessor) telegramRaw() telegramRawCaller {
 	return sp.tbCtx.Bot()
 }
 
+func (sp *streamProcessor) textSender() telegramTextSender {
+	if sp.sender != nil {
+		return sp.sender
+	}
+	return sp.tbCtx.Bot()
+}
+
+func (sp *streamProcessor) clock() time.Time {
+	if sp.now != nil {
+		return sp.now()
+	}
+	return time.Now()
+}
+
+func (sp *streamProcessor) deliverer() telegramDeliverer {
+	return telegramDeliverer{ctx: sp.ctx, sender: sp.textSender(), format: sp.format, chat: sp.targetChat()}
+}
+
 func (sp *streamProcessor) richAuthorized() bool {
 	return sp.richEnabled && sp.tc != nil && sp.tc.richMessageSkillLoadedForFinal()
 }
 
-func (sp *streamProcessor) targetChatID() int64 {
+func (sp *streamProcessor) targetChat() *tb.Chat {
 	if sp.placeholderMsg != nil && sp.placeholderMsg.Chat != nil && sp.placeholderMsg.Chat.ID != 0 {
-		return sp.placeholderMsg.Chat.ID
+		return sp.placeholderMsg.Chat
 	}
-	if chat := sp.tbCtx.Chat(); chat != nil {
+	return sp.tbCtx.Chat()
+}
+
+func (sp *streamProcessor) targetChatID() int64 {
+	if chat := sp.targetChat(); chat != nil {
 		return chat.ID
 	}
 	return 0
@@ -362,47 +449,77 @@ func (sp *streamProcessor) deletePlaceholderAfterRichSend(sent *tb.Message) {
 	}
 }
 
-// editPlaceholder edits the placeholder message with new content.
+// editPlaceholder edits the placeholder message with new content and returns the delivery proof.
+// Unchanged text is not re-sent, flood errors pause periodic edits and widen the edit interval,
+// and a final (force) edit waits out one flood window before giving up.
 // If a TurnContext is available, uses editMu to prevent races with update_progress.
-func (sp *streamProcessor) editPlaceholder(formatted string, force bool) error {
-	if sp.placeholderMsg == nil || formatted == "" {
-		return nil
+func (sp *streamProcessor) editPlaceholder(chunk telegramChunk, force bool) (*tb.Message, error) {
+	if sp.placeholderMsg == nil || chunk.formatted == "" {
+		return nil, nil
 	}
 
 	if sp.tc != nil {
 		sp.tc.editMu.Lock()
 		defer sp.tc.editMu.Unlock()
-		if !force && !sp.tc.ShouldAllowEdit(sp.editInterval) {
-			return nil
-		}
 	}
-	parseMode := GetParseMode(sp.format)
-	edited, err := util.EditMessageWithError(
-		sp.placeholderMsg,
-		util.RawTgText(formatted),
-		&tb.SendOptions{ParseMode: parseMode},
-	)
-	proof, err := telegramDeliveryProof(edited, sp.placeholderMsg, err)
-	if err != nil {
-		edited, err = sp.tbCtx.Bot().Edit(sp.placeholderMsg, formatted)
-		proof, err = telegramDeliveryProof(edited, sp.placeholderMsg, err)
-		if err != nil {
-			zap.L().Debug("agentv3: failed to edit streaming message",
-				zap.Error(err),
-			)
-			return err
-		}
+	sp.editStateMu.Lock()
+	defer sp.editStateMu.Unlock()
+
+	if chunk.formatted == sp.lastSentFormatted {
+		return sp.placeholderMsg, nil
 	}
-	if force {
-		sp.deliveredMsg = proof
+	now := sp.clock()
+	if !force && !sp.editGateOpen(now) {
+		return nil, nil
 	}
-	sp.mu.Lock()
-	sp.deleteOnError = false
-	sp.mu.Unlock()
+	sp.lastEditAttempt = now
 	if sp.tc != nil {
 		sp.tc.MarkEdited()
 	}
-	return nil
+
+	proof, err := sp.deliverer().editChunk(sp.placeholderMsg, chunk, force)
+	if err != nil {
+		if wait, flooded := util.FloodRetryAfter(err); flooded {
+			sp.recordFlood(now, wait)
+			zap.L().Warn("agentv3: telegram flood limit hit while editing streaming message",
+				zap.Duration("retry_after", wait),
+				zap.Duration("edit_backoff", sp.floodBackoff),
+			)
+		} else {
+			zap.L().Debug("agentv3: failed to edit streaming message", zap.Error(err))
+		}
+		return nil, err
+	}
+	sp.lastSentFormatted = chunk.formatted
+	sp.floodNotBefore = time.Time{}
+	sp.floodBackoff = 0
+	sp.mu.Lock()
+	sp.deleteOnError = false
+	sp.mu.Unlock()
+	return proof, nil
+}
+
+func (sp *streamProcessor) editGateOpen(now time.Time) bool {
+	if now.Before(sp.floodNotBefore) {
+		return false
+	}
+	interval := sp.editInterval
+	if sp.floodBackoff > interval {
+		interval = sp.floodBackoff
+	}
+	if sp.tc != nil {
+		return sp.tc.ShouldAllowEdit(interval)
+	}
+	if sp.floodBackoff <= 0 || sp.lastEditAttempt.IsZero() {
+		return true
+	}
+	return now.Sub(sp.lastEditAttempt) >= interval
+}
+
+func (sp *streamProcessor) recordFlood(now time.Time, wait time.Duration) {
+	sp.floodNotBefore = now.Add(wait)
+	base := max(sp.floodBackoff, sp.editInterval, time.Second)
+	sp.floodBackoff = min(base*2, streamingEditBackoffCap)
 }
 
 // getResponse returns the accumulated response text.
@@ -417,6 +534,103 @@ func (sp *streamProcessor) getReasoning() string {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	return sp.reasoningContent.String()
+}
+
+// telegramDeliverer sends final text with flood retry, raw-text fallback and chunking.
+type telegramDeliverer struct {
+	ctx    context.Context
+	sender telegramTextSender
+	format *config.AgentOutputConfig
+	chat   *tb.Chat
+}
+
+func (d telegramDeliverer) context() context.Context {
+	if d.ctx != nil {
+		return d.ctx
+	}
+	return context.Background()
+}
+
+// withFloodRetry runs op and, when Telegram answers with a flood error and waitOnFlood is set,
+// waits out the requested window (capped) once before retrying.
+func (d telegramDeliverer) withFloodRetry(waitOnFlood bool, op func() (*tb.Message, error)) (*tb.Message, error) {
+	sent, err := op()
+	wait, flooded := util.FloodRetryAfter(err)
+	if !flooded || !waitOnFlood {
+		return sent, err
+	}
+	zap.L().Warn("agentv3: telegram flood limit hit during final delivery, waiting before retry", zap.Duration("retry_after", wait))
+	if sleepErr := telegramFloodSleep(d.context(), min(wait, telegramFloodRetryCap)); sleepErr != nil {
+		return nil, errors.Join(err, sleepErr)
+	}
+	return op()
+}
+
+// editChunk edits target with the formatted chunk, falling back to the raw text when formatting is rejected.
+func (d telegramDeliverer) editChunk(target *tb.Message, chunk telegramChunk, waitOnFlood bool) (*tb.Message, error) {
+	edited, err := d.withFloodRetry(waitOnFlood, func() (*tb.Message, error) {
+		return d.sender.Edit(target, chunk.formatted, &tb.SendOptions{ParseMode: GetParseMode(d.format)})
+	})
+	proof, err := telegramDeliveryProof(edited, target, err)
+	if err == nil {
+		return proof, nil
+	}
+	if _, flooded := util.FloodRetryAfter(err); flooded || chunk.raw == "" {
+		return nil, err
+	}
+	zap.L().Debug("agentv3: formatted edit rejected, retrying with raw text", zap.Error(err))
+	edited, err = d.withFloodRetry(waitOnFlood, func() (*tb.Message, error) {
+		return d.sender.Edit(target, chunk.raw, &tb.SendOptions{ParseMode: tb.ModeDefault})
+	})
+	return telegramDeliveryProof(edited, target, err)
+}
+
+// sendChunk sends the formatted chunk as a reply, falling back to the raw text when formatting is rejected.
+func (d telegramDeliverer) sendChunk(replyTo *tb.Message, chunk telegramChunk, waitOnFlood bool) (*tb.Message, error) {
+	if d.chat == nil {
+		return nil, errTelegramDeliveryNoChat
+	}
+	opts := func(mode tb.ParseMode) *tb.SendOptions {
+		return &tb.SendOptions{ParseMode: mode, ReplyTo: replyTo, AllowWithoutReply: replyTo != nil}
+	}
+	sent, err := d.withFloodRetry(waitOnFlood, func() (*tb.Message, error) {
+		return d.sender.Send(d.chat, chunk.formatted, opts(GetParseMode(d.format)))
+	})
+	if err == nil {
+		return telegramDeliveryProof(sent, nil, nil)
+	}
+	if _, flooded := util.FloodRetryAfter(err); flooded || chunk.raw == "" {
+		return nil, err
+	}
+	zap.L().Debug("agentv3: formatted send rejected, retrying with raw text", zap.Error(err))
+	sent, err = d.withFloodRetry(waitOnFlood, func() (*tb.Message, error) {
+		return d.sender.Send(d.chat, chunk.raw, opts(tb.ModeDefault))
+	})
+	return telegramDeliveryProof(sent, nil, err)
+}
+
+// deliverChunks delivers the first chunk through first and every later chunk as a reply to the previous one.
+// It returns the messages proven delivered so far together with the first error; an accepted call that
+// yields no usable message is not an error, it simply contributes no proof.
+func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Message, first func(telegramChunk) (*tb.Message, error)) ([]*tb.Message, error) {
+	delivered := make([]*tb.Message, 0, len(chunks))
+	for i, chunk := range chunks {
+		var msg *tb.Message
+		var err error
+		if i == 0 {
+			msg, err = first(chunk)
+		} else {
+			msg, err = d.sendChunk(replyTo, chunk, true)
+		}
+		if err != nil {
+			return delivered, err
+		}
+		if msg != nil {
+			delivered = append(delivered, msg)
+			replyTo = msg
+		}
+	}
+	return delivered, nil
 }
 
 // NonStreamResponse sends a complete response without streaming.
@@ -444,11 +658,12 @@ func nonStreamResponseWithCaller(
 	richEnabled bool,
 	richAuthorized bool,
 ) (*tb.Message, string, error) {
-	result, err := nonStreamResponseWithDelivery(raw, tbCtx, text, reasoning, format, existingMsg, richEnabled, richAuthorized)
+	result, err := nonStreamResponseWithDelivery(context.Background(), raw, tbCtx, text, reasoning, format, existingMsg, richEnabled, richAuthorized)
 	return result.sent, result.response, err
 }
 
 func nonStreamResponseWithDelivery(
+	ctx context.Context,
 	raw telegramRawCaller,
 	tbCtx tb.Context,
 	text string,
@@ -459,6 +674,7 @@ func nonStreamResponseWithDelivery(
 	richAuthorized bool,
 ) (telegramResponseResult, error) {
 	result := telegramResponseResult{sent: existingMsg, response: text}
+	var richErr error
 	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled, richAuthorized)
 	if delivery.ShouldSendRich {
 		replyToID := 0
@@ -477,59 +693,61 @@ func nonStreamResponseWithDelivery(
 			deleteExistingPlaceholderAfterRichSend(tbCtx, existingMsg, msg)
 			result.sent = msg
 			result.delivered, _ = telegramDeliveryProof(msg, nil, err)
+			if result.delivered != nil {
+				result.deliveredAll = []*tb.Message{result.delivered}
+			}
 			return result, nil
 		}
-		zap.L().Debug("agentv3: failed to send rich non-stream message", zap.Error(err))
-		return result, err
-	}
-	if delivery.VisibleText != "" && delivery.VisibleText != text {
+		zap.L().Warn("agentv3: failed to send rich non-stream message, falling back to plain text", zap.Error(err))
+		richErr = err
+		text, reasoning = delivery.VisibleText, ""
+	} else if delivery.VisibleText != "" && delivery.VisibleText != text {
 		text = delivery.VisibleText
 		reasoning = ""
 	}
 	result.response = text
-	formatted := FormatOutputWithReason(text, reasoning, format)
-	if formatted == "" {
-		return result, nil
-	}
-	parseMode := GetParseMode(format)
-	if existingMsg != nil {
-		// Edit existing progress placeholder
-		edited, err := util.EditMessageWithError(
-			existingMsg,
-			util.RawTgText(formatted),
-			&tb.SendOptions{ParseMode: parseMode},
-		)
-		result.delivered, err = telegramDeliveryProof(edited, existingMsg, err)
-		if err != nil {
-			// Fallback: edit without formatting
-			edited, err = tbCtx.Bot().Edit(existingMsg, text)
-			result.delivered, err = telegramDeliveryProof(edited, existingMsg, err)
-			if err != nil {
-				zap.L().Debug("agentv3: failed to edit non-stream message", zap.Error(err))
-				return result, err
-			}
-		}
-		return result, nil
+	chunks := formatTelegramChunks(text, reasoning, format, telegramMessageLimit)
+	if len(chunks) == 0 {
+		return result, richErr
 	}
 
-	// Send new message (original behavior)
-	sent, err := util.SendMessageWithError(
-		tbCtx.Chat(),
-		util.RawTgText(formatted),
-		&tb.SendOptions{
-			ParseMode: parseMode,
-			ReplyTo:   tbCtx.Message(),
-		},
-	)
-	if err != nil {
-		// Fallback: send without formatting
-		sent, err = tbCtx.Bot().Send(tbCtx.Chat(), text, &tb.SendOptions{
-			ReplyTo: tbCtx.Message(),
-		})
+	sender := telegramTextSender(tbCtx.Bot())
+	if s, ok := raw.(telegramTextSender); ok {
+		sender = s
 	}
-	result.sent = sent
-	result.delivered, err = telegramDeliveryProof(sent, nil, err)
-	return result, err
+	var chat *tb.Chat
+	if existingMsg != nil && existingMsg.Chat != nil {
+		chat = existingMsg.Chat
+	} else {
+		chat = tbCtx.Chat()
+	}
+	d := telegramDeliverer{ctx: ctx, sender: sender, format: format, chat: chat}
+	replyTo := existingMsg
+	if replyTo == nil {
+		replyTo = tbCtx.Message()
+	}
+	delivered, err := d.deliverChunks(chunks, replyTo, func(chunk telegramChunk) (*tb.Message, error) {
+		if existingMsg != nil {
+			return d.editChunk(existingMsg, chunk, true)
+		}
+		return d.sendChunk(tbCtx.Message(), chunk, true)
+	})
+	if err != nil {
+		if richErr != nil {
+			err = fmt.Errorf("%w; plain fallback: %w", richErr, err)
+		}
+		zap.L().Debug("agentv3: failed to deliver non-stream message", zap.Error(err))
+		return result, err
+	}
+	if len(delivered) == 0 {
+		return result, nil
+	}
+	result.deliveredAll = delivered
+	result.delivered = delivered[len(delivered)-1]
+	if existingMsg == nil || len(delivered) > 1 {
+		result.sent = result.delivered
+	}
+	return result, nil
 }
 
 func telegramDeliveryProof(sent, editTarget *tb.Message, err error) (*tb.Message, error) {

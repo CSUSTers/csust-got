@@ -1,6 +1,7 @@
 package util
 
 import (
+	"errors"
 	"html"
 	"io"
 	"math/rand"
@@ -8,7 +9,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
+	"unicode/utf16"
 
 	"csust-got/config"
 	"csust-got/log"
@@ -20,6 +23,31 @@ import (
 
 // RawTgText marks a Telegram message string as already formatted and safe to send as-is.
 type RawTgText string
+
+// TelegramMessageLimit is the maximum text length of one Telegram message in UTF-16 code units.
+const TelegramMessageLimit = 4096
+
+// UTF16Len returns the length of s in UTF-16 code units, which is how Telegram measures text.
+func UTF16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if l := utf16.RuneLen(r); l > 0 {
+			n += l
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+// FloodRetryAfter reports whether err is a Telegram flood error and how long Telegram asked to wait.
+func FloodRetryAfter(err error) (time.Duration, bool) {
+	var flood tb.FloodError
+	if !errors.As(err, &flood) {
+		return 0, false
+	}
+	return time.Duration(max(flood.RetryAfter, 1)) * time.Second, true
+}
 
 // ParseNumberAndHandleError is used to get a number from string or reply a error msg when get error.
 func ParseNumberAndHandleError(m *tb.Message, ns string, rng IRange[int]) (number int, ok bool) {

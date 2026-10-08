@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"csust-got/config"
 	"csust-got/cronjob"
@@ -224,14 +225,9 @@ func (s *agentCronService) sendReport(ctx context.Context, task cronjob.Task) (*
 	return receipt, nil
 }
 
+const cronReportChunkRunes = 1800
+
 func cronReportChunks(text string) []string {
 	// 1800 runes is <= 3600 UTF-16 units even for astral characters.
-	runes := []rune(text)
-	var chunks []string
-	for len(runes) > 0 {
-		n := min(1800, len(runes))
-		chunks = append(chunks, string(runes[:n]))
-		runes = runes[n:]
-	}
-	return chunks
+	return chunkTextBy(text, func(chunk string) bool { return utf8.RuneCountInString(chunk) <= cronReportChunkRunes })
 }

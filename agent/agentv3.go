@@ -31,6 +31,7 @@ func Init(ctx context.Context) error {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
 	closeAgentV3SessionService()
+	initAgentV3TraceWriter()
 	if config.BotConfig != nil && config.BotConfig.Agents != nil {
 		for _, cfg := range *config.BotConfig.Agents {
 			if cfg != nil {
@@ -134,6 +135,7 @@ func HasCompiledAgent(name string) bool {
 func Close() {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
+	closeAgentV3TraceWriter(context.Background())
 	closeAgentV3SessionService()
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
@@ -168,6 +170,19 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 	if input == "" {
 		return nil
 	}
+
+	runLimiter := limiters.run()
+	if !runLimiter.tryAcquire() {
+		zap.L().Warn("agentv3: run limit reached, rejecting turn",
+			zap.String("agent", agentConfig.Name),
+			zap.Int64("chat_id", msg.Chat.ID),
+			zap.Int64("runs_in_flight", runLimiter.current()),
+		)
+		return tbCtx.Reply(configuredConcurrency().GetBusyMessage())
+	}
+	defer runLimiter.release()
+	BeginInflightTurn()
+	defer EndInflightTurn()
 
 	// Create turn context
 	ctx, cancel := context.WithTimeout(context.Background(), agentConfig.GetTimeout())
@@ -288,7 +303,7 @@ func handleStreaming(
 		}
 		return streamErr
 	}
-	commitAgentV3Session(tc, delivery.delivered)
+	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
 	// Save response to Redis for future context
 	if response != "" && sentMsg != nil {
 		sentMsg.Text = response
@@ -330,7 +345,7 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	delivery, sendErr := nonStreamResponseWithDelivery(tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	delivery, sendErr := nonStreamResponseWithDelivery(ctx, tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
 	sent, visibleResponse := delivery.sent, delivery.response
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
@@ -340,7 +355,7 @@ func handleNonStreaming(
 		return sendErr
 	}
 
-	commitAgentV3Session(tc, delivery.delivered)
+	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
 	if sent != nil {
 		sent.Text = visibleResponse
 		SaveResponse(sent, tbCtx.Message())

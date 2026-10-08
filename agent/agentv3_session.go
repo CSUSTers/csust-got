@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,10 +32,11 @@ var (
 )
 
 type agentV3SessionService struct {
-	service *session.Service
-	cancel  context.CancelFunc
-	done    chan struct{}
-	once    sync.Once
+	service   *session.Service
+	compactor *agentV3SessionCompactor
+	cancel    context.CancelFunc
+	done      chan struct{}
+	once      sync.Once
 }
 
 type agentV3SessionInputKind uint8
@@ -89,6 +91,7 @@ func initAgentV3SessionService(ctx context.Context) error {
 		return nil
 	}
 	s := startAgentV3SessionMaintenance(ctx, service, time.Local)
+	s.compactor = newAgentV3SessionCompactor(ctx, service, cfg.Compact)
 	if old := agentSessionService.Swap(s); old != nil {
 		old.close()
 	}
@@ -112,6 +115,10 @@ func startAgentV3SessionMaintenance(ctx context.Context, service *session.Servic
 			return
 		}
 		s.recover(ctx)
+		if s.catchUpDue(ctx, time.Now(), location) {
+			zap.L().Info("agentv3: running catch-up session collection after missed daily schedule")
+			s.collect(ctx, location)
+		}
 		for ctx.Err() == nil {
 			next := time.Now().Add(time.Minute)
 			collect := !next.Before(nextCollection)
@@ -125,7 +132,7 @@ func startAgentV3SessionMaintenance(ctx context.Context, service *session.Servic
 				return
 			case <-timer.C:
 				if collect {
-					s.collect(ctx)
+					s.collect(ctx, location)
 					nextCollection, err = session.NextCollection(time.Now(), location)
 					if err != nil {
 						zap.L().Warn("agentv3: session maintenance schedule failed", zap.Error(err))
@@ -147,16 +154,53 @@ func (s *agentV3SessionService) recover(ctx context.Context) {
 	}
 }
 
-func (s *agentV3SessionService) collect(ctx context.Context) {
-	err := s.service.Collect(ctx)
-	if err != nil && ctx.Err() == nil {
-		zap.L().Warn("agentv3: session collection failed; pending/deleting recovery will retry", zap.Error(err))
+func (s *agentV3SessionService) collect(ctx context.Context, location *time.Location) {
+	if err := s.service.Collect(ctx); err != nil {
+		if ctx.Err() == nil {
+			zap.L().Warn("agentv3: session collection failed; pending/deleting recovery will retry", zap.Error(err))
+		}
+		return
 	}
+	err := s.service.MarkCollection(ctx, agentV3SessionCollectionDay(time.Now(), location))
+	if err != nil && !errors.Is(err, errors.ErrUnsupported) && ctx.Err() == nil {
+		zap.L().Warn("agentv3: session collection marker was not saved", zap.Error(err))
+	}
+}
+
+func (s *agentV3SessionService) catchUpDue(ctx context.Context, now time.Time, location *time.Location) bool {
+	last, err := s.service.LastCollection(ctx)
+	if err != nil {
+		if !errors.Is(err, errors.ErrUnsupported) && ctx.Err() == nil {
+			zap.L().Warn("agentv3: session collection marker unreadable; assuming no collection today", zap.Error(err))
+		}
+		last = ""
+	}
+	return agentV3SessionCatchUpDue(now, location, last)
+}
+
+func agentV3SessionCollectionDay(now time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.Local
+	}
+	return now.In(location).Format(time.DateOnly)
+}
+
+// agentV3SessionCatchUpDue reports whether today's 02:00 collection already passed without running.
+func agentV3SessionCatchUpDue(now time.Time, location *time.Location, lastCollection string) bool {
+	next, err := session.NextCollection(now, location)
+	if err != nil {
+		return false
+	}
+	today := agentV3SessionCollectionDay(now, location)
+	return agentV3SessionCollectionDay(next, location) != today && lastCollection != today
 }
 
 func (s *agentV3SessionService) close() {
 	s.once.Do(func() {
 		s.cancel()
+		if s.compactor != nil {
+			s.compactor.close()
+		}
 		if err := s.service.Close(); err != nil {
 			zap.L().Warn("agentv3: session close failed", zap.Error(err))
 		}
@@ -178,6 +222,10 @@ func setupAgentV3SessionTurn(tc *TurnContext) {
 		return
 	}
 	save, load := tc.Config.EffectiveSessionSettings(tc.Trigger)
+	replyTarget := agentV3SessionBotReplyTarget(tc)
+	if replyTarget != nil {
+		save, load = true, true
+	}
 	state.service = s.service
 	if save {
 		state.runID, state.baselineErr = session.NewID()
@@ -187,13 +235,33 @@ func setupAgentV3SessionTurn(tc *TurnContext) {
 		return
 	}
 	selection := session.Selection{Scope: state.scope, Agent: tc.Config.Name, Mode: session.SelectLatest, ContextKey: agentV3SessionContextKey(tc.Config), LoadOnly: !save}
-	if tc.Trigger != nil && tc.Trigger.Reply {
+	switch {
+	case replyTarget != nil:
+		selection.Mode, selection.ReplyMessageID = session.SelectReply, replyTarget.ID
+	case tc.Trigger != nil && tc.Trigger.Reply:
 		selection.Mode = session.SelectReply
 		if target, valid := replySessionEmbeddedParent(tc.Message.ReplyTo, tc.Message.Chat); valid && target.Chat.ID == tc.ChatID {
 			selection.ReplyMessageID = target.ID
 		}
 	}
 	state.selection, state.load = selection, true
+}
+
+// agentV3SessionBotReplyTarget returns the replied bot message when the current message
+// answers this bot directly, regardless of which trigger kind selected the agent.
+func agentV3SessionBotReplyTarget(tc *TurnContext) *tb.Message {
+	if tc == nil || tc.Message == nil || tc.Message.ReplyTo == nil || tc.BotUser == nil || tc.BotUser.ID == 0 {
+		return nil
+	}
+	replied := tc.Message.ReplyTo
+	if replied.Sender == nil || replied.Sender.ID != tc.BotUser.ID {
+		return nil
+	}
+	target, valid := replySessionEmbeddedParent(replied, tc.Message.Chat)
+	if !valid || target.Chat.ID != tc.ChatID {
+		return nil
+	}
+	return target
 }
 
 func closeAgentV3SessionTurn(tc *TurnContext) {
@@ -213,7 +281,7 @@ type agentV3PreparedSessionInput struct {
 	imageRefs    []orm.AgentV3ImageRef
 }
 
-func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3SessionReplyProof) ([]*schema.Message, []int, error) {
+func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3SessionReplyProof) ([]*schema.Message, error) {
 	current := *tc.Message
 	if target, valid := replySessionEmbeddedParent(current.ReplyTo, current.Chat); valid && current.Chat.ID == tc.ChatID {
 		if proof != nil && proof.ContainsReplyMessageID(target.ID) {
@@ -238,24 +306,24 @@ func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3S
 		}
 		quoted, err := agentV3SessionTemplateQuotesReply(cc, currentTC, history)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		message, err := buildAgentV3UserMessage(cc, currentTC, history, nil)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if current.ReplyTo != nil && !quoted {
-			return []*schema.Message{schema.UserMessage(FormatSingleTbMessage(current.ReplyTo, "reply_to_message")), message}, nil, nil
+			return []*schema.Message{schema.UserMessage(FormatSingleTbMessage(current.ReplyTo, "reply_to_message")), message}, nil
 		}
-		return []*schema.Message{message}, nil, nil
+		return []*schema.Message{message}, nil
 	}
 	currentMessages, err := buildReplySessionMessages(cc, currentTC, replySession{Blocks: []replySessionBlock{{Messages: []*tb.Message{&current}, Current: true}}}, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	addition, err := buildReplySessionPromptAddition(cc, tc)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	messages := []*schema.Message{addition}
 	if current.ReplyTo != nil {
@@ -266,7 +334,7 @@ func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3S
 		messages = append(messages, quote)
 		tc.V3.ImageRefs = normalizeAgentV3ImageRefs(append(tc.V3.ImageRefs, replySessionMessageImageRefs(current.ReplyTo)...))
 	}
-	return append(messages, currentMessages...), []int{0}, nil
+	return append(messages, currentMessages...), nil
 }
 
 func agentV3SessionTemplateQuotesReply(cc *CompiledAgent, tc *TurnContext, history *RichHistory) (bool, error) {
@@ -304,14 +372,17 @@ func agentV3SessionContextKey(cfg *config.AgentConfig) string {
 	return hashString(strings.Join(identity, "\x00"))
 }
 
+// rejectAgentV3SessionContext reports provider context-limit failures. The loaded node is
+// only marked rejected when the first model call of the turn failed; later failures stem from
+// this turn's own tool growth, not from the restored history.
 func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 	if !isAgentV3ProviderContextLimit(err) {
 		return false
 	}
 	if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
-		setAgentV3ContextLimitTraceError(tc.V3.Trace)
+		setAgentV3ContextLimitTraceError(tc.V3.Trace, err)
 	}
-	if tc != nil && tc.Session != nil && tc.Session.parent != nil {
+	if tc != nil && tc.Session != nil && tc.Session.parent != nil && tc.Session.capture.ModelResponses() == 0 {
 		state := tc.Session
 		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
 		defer cancel()
@@ -324,24 +395,34 @@ func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 	return true
 }
 
+// buildAgentV3LoadedInput replays the loaded history verbatim after the current system
+// prefix so the provider prompt cache can align on the archived byte sequence. Only the
+// system message is rebuilt; a fresh memory snapshot is appended only when it changed.
 func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory string, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {
-	current, offsets, err := buildAgentV3SessionInput(cc, tc, proof)
+	current, err := buildAgentV3SessionInput(cc, tc, proof)
 	if err != nil {
 		return agentV3PreparedSessionInput{}, err
 	}
 	prepared := agentV3PreparedSessionInput{messages: []*schema.Message{schema.SystemMessage(prefix)}, frameIndexes: []int{0}}
 	prepared.messages = append(prepared.messages, replay...)
-	if message := buildAgentV3MemorySnapshotMessage(memory); message != nil {
-		prepared.frameIndexes = append(prepared.frameIndexes, len(prepared.messages))
-		prepared.messages = append(prepared.messages, message)
-	}
 	prepared.currentStart = len(prepared.messages)
-	for _, offset := range offsets {
-		prepared.frameIndexes = append(prepared.frameIndexes, prepared.currentStart+offset)
+	if message := buildAgentV3MemorySnapshotMessage(memory); message != nil && !agentV3ReplayHasMemorySnapshot(replay, message) {
+		prepared.messages = append(prepared.messages, message)
 	}
 	prepared.messages = append(prepared.messages, current...)
 	prepared.imageRefs = tc.V3.ImageRefs
 	return prepared, nil
+}
+
+func agentV3ReplayHasMemorySnapshot(replay []*schema.Message, message *schema.Message) bool {
+	for i := len(replay) - 1; i >= 0; i-- {
+		previous := replay[i]
+		if previous == nil || previous.Role != schema.User || !strings.HasPrefix(previous.Content, agentV3MemorySnapshotHeader) {
+			continue
+		}
+		return previous.Content == message.Content
+	}
+	return false
 }
 
 func isPureAgentV3SessionError(err, sentinel error) bool {
@@ -440,25 +521,48 @@ func agentV3SessionArchive(state *agentV3SessionTurn, snapshot SessionCaptureRes
 	if index != len(snapshot.Input) {
 		return session.TurnCapture{}, errAgentV3SessionModelMessagesOmitted
 	}
-	for _, guidance := range snapshot.Guidance {
-		capture.Frame = append(capture.Frame, session.Record{Source: session.SourceGuidance, Message: guidance.Message})
-	}
+	// Guidance stays inline as history so the next turn replays the exact model sequence.
 	capture.Delta = append(capture.Delta, session.History(snapshot.Messages...)...)
 	return capture, nil
 }
 
-func commitAgentV3Session(tc *TurnContext, sent *tb.Message) {
-	if tc == nil || tc.Background || tc.Session == nil || tc.Session.capture == nil || sent == nil || sent.ID <= 0 {
+// agentV3DeliveredMessages prefers the full chunk list and falls back to the single proven message.
+func agentV3DeliveredMessages(all []*tb.Message, last *tb.Message) []*tb.Message {
+	if len(all) > 0 {
+		return all
+	}
+	if last != nil {
+		return []*tb.Message{last}
+	}
+	return nil
+}
+
+// commitAgentV3Session publishes the turn under every delivered chunk ID so a reply to any
+// chunk resolves to the node; the first ID is the primary message.
+func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) {
+	ids := make([]int, 0, len(sent))
+	for _, message := range sent {
+		if message != nil && message.ID > 0 {
+			ids = append(ids, message.ID)
+		}
+	}
+	if tc == nil || tc.Background || tc.Session == nil || tc.Session.capture == nil || len(ids) == 0 {
 		return
 	}
 	state := tc.Session
-	capture, err := agentV3SessionArchive(state, state.capture.Snapshot())
+	snapshot := state.capture.Snapshot()
+	capture, err := agentV3SessionArchive(state, snapshot)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
 		defer cancel()
-		_, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: []int{sent.ID}}})
+		var node session.Node
+		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}})
+		if err == nil {
+			// The next replay of this node is its full model input plus this turn's new messages.
+			scheduleAgentV3SessionCompaction(tc, node, append(slices.Clone(state.input), snapshot.Messages...))
+		}
 	}
 	if err != nil {
-		zap.L().Warn("agentv3: delivered response was not saved to session", zap.String("run_id", tc.RunID), zap.Int("message_id", sent.ID), zap.Error(err))
+		zap.L().Warn("agentv3: delivered response was not saved to session", zap.String("run_id", tc.RunID), zap.Ints("message_ids", ids), zap.Error(err))
 	}
 }

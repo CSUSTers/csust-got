@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 
 	"csust-got/orm"
 
@@ -41,7 +40,11 @@ func loadReplySession(ctx context.Context, current *tb.Message, maxContext int) 
 		return replySession{Incomplete: true}, nil
 	}
 
-	nearby, scanned, err := orm.GetMessagesFromStreamBestEffort(current.Chat.ID, strconv.Itoa(current.ID), "-", replySessionAncestorLimit, true)
+	nearby, scanned, err := orm.GetMessagesFromStreamBestEffort(current.Chat.ID, orm.MessageStreamQuery{
+		MaxID:   current.ID,
+		Count:   replySessionAncestorLimit,
+		Reverse: true,
+	})
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return replySession{}, fmt.Errorf("load reply session messages: %w", err)
 	}

@@ -3,12 +3,14 @@ package agentv3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"csust-got/config"
@@ -22,12 +24,15 @@ import (
 
 var _ model.ToolCallingChatModel = (*retryingChatModel)(nil)
 
+var errModelStreamIdle = errors.New("model stream idle timeout")
+
 type retrySleepFunc func(context.Context, time.Duration) error
 
 type retryingChatModel struct {
 	inner        model.ToolCallingChatModel
 	retries      int
 	initialDelay time.Duration
+	idleTimeout  time.Duration
 	sleep        retrySleepFunc
 }
 
@@ -39,8 +44,55 @@ func newRetryingChatModel(inner model.ToolCallingChatModel, cfg *config.Model) m
 		inner:        inner,
 		retries:      cfg.RetryCount(),
 		initialDelay: cfg.RetryInitialDelay(),
+		idleTimeout:  cfg.StreamIdleTimeoutDuration(),
 		sleep:        sleepWithContext,
 	}
+}
+
+// streamAttempt is one upstream stream whose context can be cancelled by the idle watchdog.
+type streamAttempt struct {
+	reader  *schema.StreamReader[*schema.Message]
+	cancel  context.CancelFunc
+	timer   *time.Timer
+	timeout time.Duration
+	idle    atomic.Bool
+}
+
+func (a *streamAttempt) armWatchdog(timeout time.Duration) {
+	if a == nil || timeout <= 0 {
+		return
+	}
+	a.timeout = timeout
+	a.timer = time.AfterFunc(timeout, func() {
+		a.idle.Store(true)
+		a.cancel()
+	})
+}
+
+func (a *streamAttempt) touch() {
+	if a != nil && a.timer != nil {
+		a.timer.Reset(a.timeout)
+	}
+}
+
+func (a *streamAttempt) close() {
+	if a == nil {
+		return
+	}
+	if a.timer != nil {
+		a.timer.Stop()
+	}
+	if a.reader != nil {
+		a.reader.Close()
+	}
+	a.cancel()
+}
+
+func (a *streamAttempt) classify(err error) error {
+	if a != nil && a.idle.Load() {
+		return fmt.Errorf("%w: no chunk for %s", errModelStreamIdle, a.timeout)
+	}
+	return err
 }
 
 func (m *retryingChatModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
@@ -51,12 +103,12 @@ func (m *retryingChatModel) Generate(ctx context.Context, input []*schema.Messag
 
 func (m *retryingChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	retriesUsed := 0
-	stream, err := m.openStreamWithRetry(ctx, input, opts, &retriesUsed)
+	attempt, err := m.openStreamWithRetry(ctx, input, opts, &retriesUsed)
 	if err != nil {
 		return nil, err
 	}
 	out, writer := schema.Pipe[*schema.Message](32)
-	go m.forwardStreamWithRetry(ctx, input, opts, stream, retriesUsed, writer)
+	go m.forwardStreamWithRetry(ctx, input, opts, attempt, retriesUsed, writer)
 	return out, nil
 }
 
@@ -69,6 +121,7 @@ func (m *retryingChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCalli
 		inner:        withTools,
 		retries:      m.retries,
 		initialDelay: m.initialDelay,
+		idleTimeout:  m.idleTimeout,
 		sleep:        m.sleep,
 	}, nil
 }
@@ -90,11 +143,11 @@ func retryModelCall[T any](ctx context.Context, m *retryingChatModel, op string,
 	}
 }
 
-func (m *retryingChatModel) openStreamWithRetry(ctx context.Context, input []*schema.Message, opts []model.Option, retriesUsed *int) (*schema.StreamReader[*schema.Message], error) {
+func (m *retryingChatModel) openStreamWithRetry(ctx context.Context, input []*schema.Message, opts []model.Option, retriesUsed *int) (*streamAttempt, error) {
 	for {
-		stream, err := m.inner.Stream(ctx, input, opts...)
+		attempt, err := m.openStreamAttempt(ctx, input, opts)
 		if err == nil {
-			return stream, nil
+			return attempt, nil
 		}
 		if !m.canRetry(ctx, err, *retriesUsed) {
 			return nil, err
@@ -106,9 +159,22 @@ func (m *retryingChatModel) openStreamWithRetry(ctx context.Context, input []*sc
 	}
 }
 
-func (m *retryingChatModel) forwardStreamWithRetry(ctx context.Context, input []*schema.Message, opts []model.Option, stream *schema.StreamReader[*schema.Message], retriesUsed int, out *schema.StreamWriter[*schema.Message]) {
+func (m *retryingChatModel) openStreamAttempt(ctx context.Context, input []*schema.Message, opts []model.Option) (*streamAttempt, error) {
+	attemptCtx, cancel := context.WithCancel(ctx)
+	attempt := &streamAttempt{cancel: cancel}
+	attempt.armWatchdog(m.idleTimeout)
+	reader, err := m.inner.Stream(attemptCtx, input, opts...)
+	if err != nil {
+		attempt.close()
+		return nil, attempt.classify(err)
+	}
+	attempt.reader = reader
+	return attempt, nil
+}
+
+func (m *retryingChatModel) forwardStreamWithRetry(ctx context.Context, input []*schema.Message, opts []model.Option, attempt *streamAttempt, retriesUsed int, out *schema.StreamWriter[*schema.Message]) {
 	defer out.Close()
-	current := stream
+	current := attempt
 	streamSent := false
 	clearPartial := func() bool {
 		if !streamSent {
@@ -119,18 +185,19 @@ func (m *retryingChatModel) forwardStreamWithRetry(ctx context.Context, input []
 	}
 	closeCurrent := func() {
 		if current != nil {
-			current.Close()
+			current.close()
 			current = nil
 		}
 	}
 	defer closeCurrent()
 
 	for {
-		chunk, err := current.Recv()
+		chunk, err := current.reader.Recv()
 		if errors.Is(err, io.EOF) {
 			return
 		}
 		if err != nil {
+			err = current.classify(err)
 			closeCurrent()
 			if !m.canRetry(ctx, err, retriesUsed) {
 				if clearPartial() {
@@ -162,6 +229,7 @@ func (m *retryingChatModel) forwardStreamWithRetry(ctx context.Context, input []
 			}
 			continue
 		}
+		current.touch()
 		if closed := out.Send(chunk, nil); closed {
 			return
 		}
@@ -212,7 +280,13 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 }
 
 func isRetryableModelError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errModelStreamIdle) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
 	status, ok := modelErrorHTTPStatus(err)

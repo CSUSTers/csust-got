@@ -17,7 +17,10 @@ import (
 )
 
 // FileStore confines archives and kernel locks to one stable directory root.
-type FileStore struct{ root *os.Root }
+type FileStore struct {
+	root   *os.Root
+	onLock func(Scope)
+}
 
 // NewFileStore opens the archive root and probes locking, sync, and hard-link support.
 func NewFileStore(directory string) (*FileStore, error) {
@@ -168,6 +171,9 @@ func (s *FileStore) WithScopeLock(ctx context.Context, scope Scope, fn func(*Sco
 		}
 	}
 	defer func() { err = errors.Join(err, unlock(f)) }()
+	if s.onLock != nil {
+		s.onLock(scope)
+	}
 	if err = ctx.Err(); err != nil {
 		return err
 	}

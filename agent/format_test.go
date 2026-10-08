@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"csust-got/config"
+	"csust-got/util"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFindLastSentenceDelimiter(t *testing.T) {
@@ -283,4 +285,182 @@ func TestFormatOutputWithReason(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTakeTelegramChunkPrefersParagraphsAndAvoidsCodeFences(t *testing.T) {
+	limitFits := func(limit int) func(string) bool {
+		return func(s string) bool { return util.UTF16Len(s) <= limit }
+	}
+	tests := []struct {
+		name      string
+		text      string
+		limit     int
+		wantChunk string
+		wantRest  string
+	}{
+		{
+			name:      "fits whole",
+			text:      "short",
+			limit:     10,
+			wantChunk: "short",
+			wantRest:  "",
+		},
+		{
+			name:      "paragraph boundary wins over line boundary",
+			text:      "para one\nstill one\n\npara two\nmore",
+			limit:     25,
+			wantChunk: "para one\nstill one",
+			wantRest:  "para two\nmore",
+		},
+		{
+			name:      "line boundary when no paragraph fits",
+			text:      "line one\nline two\nline three",
+			limit:     20,
+			wantChunk: "line one\nline two",
+			wantRest:  "line three",
+		},
+		{
+			name:      "boundary inside code fence is avoided",
+			text:      "intro\n```\ncode a\n\ncode b\n```\ntail",
+			limit:     20,
+			wantChunk: "intro",
+			wantRest:  "```\ncode a\n\ncode b\n```\ntail",
+		},
+		{
+			name:      "hard split between runes when no boundary",
+			text:      "abcdefghij",
+			limit:     4,
+			wantChunk: "abcd",
+			wantRest:  "efghij",
+		},
+		{
+			name:      "hard split respects utf16 width",
+			text:      "😀😀😀",
+			limit:     3,
+			wantChunk: "😀",
+			wantRest:  "😀😀",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunk, rest := takeTelegramChunk(tt.text, limitFits(tt.limit))
+			assert.Equal(t, tt.wantChunk, chunk)
+			assert.Equal(t, tt.wantRest, rest)
+		})
+	}
+}
+
+func TestChunkPlainTelegramTextRoundTrips(t *testing.T) {
+	text := strings.Repeat("第一行内容。\n", 400)
+	chunks := chunkPlainTelegramText(text, 500)
+	require.Greater(t, len(chunks), 1)
+	for _, chunk := range chunks {
+		assert.LessOrEqual(t, util.UTF16Len(chunk), 500)
+		assert.NotEmpty(t, strings.TrimSpace(chunk))
+	}
+	assert.Equal(t, text, strings.Join(chunks, "\n"), "boundary newlines are the only thing removed from each chunk")
+	assert.Empty(t, chunkPlainTelegramText("", 500))
+	assert.Equal(t, []string{"short\n\n"}, chunkPlainTelegramText("short\n\n", 500), "text that already fits is passed through unchanged")
+}
+
+func TestFormatTelegramChunksFormatsEachChunkSeparately(t *testing.T) {
+	line := "value.1 (x) [y] _z_"
+	text := strings.TrimRight(strings.Repeat(line+"\n", 300), "\n")
+
+	t.Run("markdown plain escapes per chunk", func(t *testing.T) {
+		format := &config.AgentOutputConfig{Format: "markdown"}
+		chunks := formatTelegramChunks(text, "", format, 1000)
+		require.Greater(t, len(chunks), 1)
+		formatted := make([]string, 0, len(chunks))
+		raw := make([]string, 0, len(chunks))
+		for _, chunk := range chunks {
+			assert.LessOrEqual(t, util.UTF16Len(chunk.formatted), 1000)
+			assert.Equal(t, util.EscapeTgMDv2ReservedChars(chunk.raw), chunk.formatted)
+			formatted = append(formatted, chunk.formatted)
+			raw = append(raw, chunk.raw)
+		}
+		assert.Equal(t, text, strings.Join(raw, "\n"))
+		assert.Equal(t, util.EscapeTgMDv2ReservedChars(text), strings.Join(formatted, "\n"))
+	})
+
+	t.Run("markdown block keeps fences balanced", func(t *testing.T) {
+		format := &config.AgentOutputConfig{Format: "markdown", Payload: "block"}
+		chunks := formatTelegramChunks(text, "", format, 1000)
+		require.Greater(t, len(chunks), 1)
+		for _, chunk := range chunks {
+			assert.LessOrEqual(t, util.UTF16Len(chunk.formatted), 1000)
+			assert.True(t, strings.HasPrefix(chunk.formatted, "```\n"))
+			assert.True(t, strings.HasSuffix(chunk.formatted, "\n```\n"))
+			assert.Equal(t, 2, strings.Count(chunk.formatted, "```"))
+		}
+	})
+
+	t.Run("html escapes per chunk", func(t *testing.T) {
+		format := &config.AgentOutputConfig{Format: "html"}
+		htmlText := strings.TrimRight(strings.Repeat("<b> & </b>\n", 300), "\n")
+		chunks := formatTelegramChunks(htmlText, "", format, 800)
+		require.Greater(t, len(chunks), 1)
+		for _, chunk := range chunks {
+			assert.LessOrEqual(t, util.UTF16Len(chunk.formatted), 800)
+			assert.Equal(t, util.EscapeTgHTMLReservedChars(chunk.raw), chunk.formatted)
+		}
+	})
+
+	t.Run("short text is a single chunk", func(t *testing.T) {
+		chunks := formatTelegramChunks("hello", "", &config.AgentOutputConfig{Format: "markdown"}, 4096)
+		require.Len(t, chunks, 1)
+		assert.Equal(t, "hello", chunks[0].formatted)
+		assert.Equal(t, "hello", chunks[0].raw)
+	})
+
+	t.Run("empty formatted output yields no chunks", func(t *testing.T) {
+		useNative := false
+		assert.Empty(t, formatTelegramChunks("<think>hidden</think>", "", &config.AgentOutputConfig{UseNativeReasoning: &useNative}, 4096))
+	})
+}
+
+func TestFormatTelegramChunksKeepsReasonOnFirstChunk(t *testing.T) {
+	useNative := true
+	format := &config.AgentOutputConfig{Format: "markdown", Reason: "quote", UseNativeReasoning: &useNative}
+	payload := strings.TrimRight(strings.Repeat("payload line\n", 200), "\n")
+
+	chunks := formatTelegramChunks(payload, "short reason", format, 600)
+
+	require.Greater(t, len(chunks), 1)
+	assert.True(t, strings.HasPrefix(chunks[0].formatted, ">short reason"))
+	assert.Contains(t, chunks[0].formatted, "payload line")
+	assert.True(t, strings.HasPrefix(chunks[0].raw, "short reason\n\n"))
+	for _, chunk := range chunks[1:] {
+		assert.False(t, strings.Contains(chunk.formatted, "short reason"))
+		assert.False(t, strings.HasPrefix(chunk.formatted, ">"))
+	}
+	for _, chunk := range chunks {
+		assert.LessOrEqual(t, util.UTF16Len(chunk.formatted), 600)
+	}
+
+	longReason := strings.TrimRight(strings.Repeat("reason line\n", 200), "\n")
+	chunks = formatTelegramChunks("tiny payload", longReason, format, 600)
+	require.Greater(t, len(chunks), 2)
+	for _, chunk := range chunks[:len(chunks)-1] {
+		assert.True(t, strings.HasPrefix(chunk.formatted, ">"), "oversized reasoning gets its own quoted chunks")
+		assert.LessOrEqual(t, util.UTF16Len(chunk.formatted), 600)
+	}
+	assert.Equal(t, "tiny payload", chunks[len(chunks)-1].formatted)
+}
+
+func TestTailTelegramPreview(t *testing.T) {
+	format := &config.AgentOutputConfig{Format: "markdown"}
+	short := tailTelegramPreview("hello", "", format, 100)
+	assert.Equal(t, "hello", short.formatted)
+	assert.Equal(t, "hello", short.raw)
+
+	text := strings.TrimRight(strings.Repeat("0123456789.\n", 100), "\n")
+	tail := tailTelegramPreview(text, "", format, 120)
+	assert.LessOrEqual(t, util.UTF16Len(tail.formatted), 120)
+	assert.True(t, strings.HasPrefix(tail.formatted, "…"))
+	assert.True(t, strings.HasPrefix(tail.raw, "…"))
+	assert.True(t, strings.HasSuffix(text, strings.TrimPrefix(tail.raw, "…")))
+	assert.Equal(t, util.EscapeTgMDv2ReservedChars(tail.raw), tail.formatted)
+
+	assert.Empty(t, tailTelegramPreview(text, "", format, 1).formatted)
 }
