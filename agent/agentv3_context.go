@@ -112,6 +112,15 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		finishContextSpan(err, nil)
 		return nil, err
 	}
+	if state := tc.Session; !tc.Background && state != nil && state.service != nil {
+		// Read before the snapshot: a deletion racing this turn leaves the node on an older epoch.
+		state.memoryEpoch, err = orm.AgentV3GetMemoryEpoch(ctx, scope)
+		if err != nil {
+			err = fmt.Errorf("agent v3 memory epoch: %w", err)
+			finishContextSpan(err, nil)
+			return nil, err
+		}
+	}
 	memoryText := ""
 	var memoryVersion int64
 	memoryHash := hashString("")
@@ -135,7 +144,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	finishMemorySpan(nil, map[string]any{
 		agentV3FieldVersion: memoryVersion,
 		"hash":              memoryHash,
-		"chars":             len(memoryText),
+		"chars":             utf8.RuneCountInString(memoryText),
 	})
 
 	includeLoadSkill := len(catalog.Sorted) > 0
@@ -223,6 +232,10 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		state.load = false
 		var prepared agentV3PreparedSessionInput
 		loaded, loadErr := state.service.LoadWithAcceptance(ctx, state.selection, func(op context.Context, candidate *session.LoadCandidate) error {
+			if candidate.MemoryEpoch != state.memoryEpoch {
+				zap.L().Debug("agentv3: memory deleted since session node; rebuilding as new root", zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Int64("node_memory_epoch", candidate.MemoryEpoch), zap.Int64("memory_epoch", state.memoryEpoch))
+				return errAgentV3SessionMemoryEpoch
+			}
 			candidateV3 := *tc.V3
 			candidateV3.renderCtx = op
 			candidateTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: tc.Message, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: &candidateV3}
@@ -746,8 +759,10 @@ func agentV3MemoryWriteDenial(items []orm.AgentV3MemoryItem, admin bool, senderI
 	if limit <= 0 {
 		return ""
 	}
-	used := lo.SumBy(items, func(item orm.AgentV3MemoryItem) int { return len(agentV3MemoryLine(item.Content)) + 1 })
-	if used+len(agentV3MemoryLine(content)) > limit {
+	used := lo.SumBy(items, func(item orm.AgentV3MemoryItem) int {
+		return utf8.RuneCountInString(agentV3MemoryLine(item.Content)) + 1
+	})
+	if used+utf8.RuneCountInString(agentV3MemoryLine(content)) > limit {
 		return fmt.Sprintf("群记忆已满（约 %d/%d 字符），这条没有记住。请先用 /memory forget <id> 删除一些再添加。", used, limit)
 	}
 	return ""
@@ -848,7 +863,7 @@ func rebuildAgentV3MemorySnapshot(ctx context.Context, scope orm.AgentV3Scope, t
 }
 
 // joinAgentV3MemoryLinesNewest joins oldest-to-newest memory lines, dropping from the head so the
-// newest entries always survive the snapshot budget.
+// newest entries always survive the snapshot budget, which counts Unicode characters.
 func joinAgentV3MemoryLinesNewest(lines []string, maxChars int) string {
 	if maxChars <= 0 {
 		return strings.Join(lines, "\n")
@@ -856,7 +871,7 @@ func joinAgentV3MemoryLinesNewest(lines []string, maxChars int) string {
 	total := 0
 	start := len(lines)
 	for i := len(lines) - 1; i >= 0; i-- {
-		next := total + len(lines[i])
+		next := total + utf8.RuneCountInString(lines[i])
 		if i != len(lines)-1 {
 			next++
 		}
@@ -871,7 +886,7 @@ func joinAgentV3MemoryLinesNewest(lines []string, maxChars int) string {
 		return strings.Join(kept, "\n")
 	}
 	if len(kept) == 0 {
-		return truncateAgentV3Text(lines[len(lines)-1], maxChars)
+		return truncateAgentV3Runes(lines[len(lines)-1], maxChars)
 	}
 	return fmt.Sprintf("[earlier memory omitted: %d entries]\n%s", start, strings.Join(kept, "\n"))
 }
@@ -1004,6 +1019,13 @@ func truncateAgentV3Text(s string, limit int) string {
 		return ""
 	}
 	return s[:end] + "\n[truncated]"
+}
+
+func truncateAgentV3Runes(s string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	return string([]rune(s)[:limit]) + "\n[truncated]"
 }
 
 func agentV3DynamicSystemField(templateText string) string {

@@ -50,14 +50,16 @@ agents:
 | --- | --- | --- |
 | 任意触发，且当前消息直接回复本 bot 的消息 | 只查当前 scope 下被回复的那条 bot 消息；允许同 chat 跨 agent、跨成员分叉 | 强制保存 |
 | reply（被回复消息缺少 sender 信息时） | 同上，按被回复消息 ID 精确选择 | 强制保存 |
-| command / regex，回复其他成员或无回复，load=true | 同 scope、同 agent 最近**成功提交**节点；最近按 Redis 提交顺序，不按请求开始顺序 | 由 save 开关决定 |
+| command / regex，回复其他成员或无回复，load=true | 同 scope、同 agent 最近**成功提交**节点；最近按 Redis 提交顺序，不按请求开始顺序；该节点之后的一轮提交失败时，它及更早节点退出最近选择（见「保存内容与调用边界」） | 由 save 开关决定 |
 | command / regex，回复其他成员或无回复，load=false | 不读完整会话，使用原有 `context_mode` 上下文构建 | save=true 时创建**新 DAG**，不续接最近节点 |
 
 例如，先用 agent A 得到回答 M，再由 agent B 的实际 reply 触发回复 M：B 接着 M 的祖先历史回答，并在 M 下建立新分支。另一位成员再次回复 M 会建立另一条分支，不会读到 B 分支后续的对话。回复 M 的消息即使先匹配了 command 或 regex，只要 M 是本 bot 发出的，同样续接 M；只有回复非 bot 消息时才按非 reply 开关处理。
 
 reply 查不到目标节点时**不改查最近节点**。无节点、祖先链损坏、文件读失败、Redis 失败、版本不支持或无法完整验证时，整体回退现有 `context_mode` 构建，不使用半条历史。没有成功完整加载就没有父节点；需要保存时只能以实际回退上下文创建新 DAG 的根节点。回退自身失败时沿用既有错误行为，“session 失败可回退”不承诺 Redis 整体故障时仍可成功回答或成功归档。
 
-通过接受检查并成功恢复时只回放完整对话历史，再追加一次本轮输入，不重复叠加旧 raw turns、summary、无关群历史或 Telegram 回复链。**只有 system 消息不回放**：每轮都重新构建**当前 agent** 的 system / stable prefix 与工具权限，跨 agent 回复同样如此。除 system 外的归档消息——包括历史 memory snapshot、`reply_chain` 的模板/时间 addition、首轮 loop 指令和 runtime guidance、工具调用与结果——按原始顺序**原样回放**，保证本轮模型输入的前缀与上一轮最后一次模型输入逐字节一致，让 provider 的 prompt cache 能命中归档前缀。代价是过期的 datetime 文本、旧 memory 文本和旧 guidance 文本会留在历史里；它们是历史证据，不是新指令。本轮把当前 memory 与回放历史中最后一条 snapshot 的正文比较：相同则不追加；不同则追加 `<group_memory_snapshot supersedes="earlier">`，header 声明它取代此前所有 snapshot；memory 已清空而历史里仍有 snapshot 时追加 `<group_memory_snapshot cleared="true">` 标记。追加的消息位于回放之后、本轮输入之前，并归档进本节点，之后同样原样回放（详见 `docs/agent_memory.md`）。
+通过接受检查并成功恢复时只回放完整对话历史，再追加一次本轮输入，不重复叠加旧 raw turns、summary、无关群历史或 Telegram 回复链。**只有 system 消息不回放**：每轮都重新构建**当前 agent** 的 system / stable prefix 与工具权限，跨 agent 回复同样如此。除 system 外的归档消息——包括历史 memory snapshot、`reply_chain` 的模板/时间 addition、首轮 loop 指令和 runtime guidance、工具调用与结果——按原始顺序**原样回放**，保证本轮模型输入的前缀与上一轮最后一次模型输入逐字节一致，让 provider 的 prompt cache 能命中归档前缀。代价是过期的 datetime 文本、旧 memory 文本和旧 guidance 文本会留在历史里；它们是历史证据，不是新指令。本轮把当前 memory 与回放历史中最后一条 snapshot 的正文比较：相同则不追加；不同则追加 `<group_memory_snapshot supersedes="earlier">`，header 声明它取代此前所有 snapshot；memory 已为空而历史里仍有 snapshot 时追加 `<group_memory_snapshot cleared="true">` 标记。追加的消息位于回放之后、本轮输入之前，并归档进本节点，之后同样原样回放（详见 `docs/agent_memory.md`）。
+
+**删除记忆**不走追加路径。每个节点记录提交时的群 memory epoch（节点 JSON 的 `memory_epoch`），`/memory forget` 删除条目时推进 epoch。加载时所选节点的 epoch 与当前不一致即视为未命中：整体回退原 `context_mode`（只含当前 memory snapshot），以新 root 保存，记 Debug 日志，不刷新旧 DAG 的活跃时间，行为与超限 rebuild 相同。记忆删除后，该群所有会话链从下一轮起重建为新根；旧 DAG 按 TTL 回收；首次调用缓存 miss 一次。
 
 历史工具调用只是数据，不重执行，不恢复 Runtime 环境或权限，也不消耗本轮工具预算。唯一的例外是输出格式：若当前 agent 启用了 rich 且回放历史中包含 `load_skill(rich-message)` 的调用，则本轮直接视为 rich 已激活，让续聊保持同一输出格式；这不会恢复技能的环境变量或其他权限。无论是否激活，`<telegram_rich_message>` 标签都不会原样发到 Telegram：未授权或未启用 rich 时发送 envelope 的纯文本回退，解析失败时剥去标签后发送内部文本。
 
@@ -121,7 +123,7 @@ context-length 错误的识别规则：OpenAI 风格 API 错误（eino-ext 或 g
 | `agent_v3.session.compact.summary_max_chars` | 配置项 | `6000` | 摘要按 6000 个 rune 截断；显式值必须为正整数 | 无 |
 | `agent_v3.session.compact.model` | 配置项（`Model` 对象） | 无 | 回退该 agent 的 `format.progress_summary.model`；都没有则跳过压缩 | 无；模型 API key 与现有 model 配置相同方式提供 |
 
-Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leases，scope 的 `messages`/`latest`/`runs`/`sequence`），节点 JSON 新增可选字段 `redirected_from`；没有新增 key 前缀或 TTL。文件：新 root 的 JSONL 写入同一 `session.directory`，受同样的锁与原子发布要求。
+Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leases，scope 的 `messages`/`latest`/`runs`/`sequence`），节点 JSON 新增可选字段 `redirected_from`，压缩 root 的 `memory_epoch` 继承被压缩节点；没有新增 key 前缀或 TTL。文件：新 root 的 JSONL 写入同一 `session.directory`，受同样的锁与原子发布要求。
 
 时区：不依赖 `TZ`；旧 DAG 的回收仍由每日 02:00 的 session GC 处理。
 
@@ -138,7 +140,7 @@ Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leas
 
 归档保存完整成功的**顶层模型轮次**，包括 user、assistant tool calls、匹配的 tool responses、最终 assistant、推理和多模态字段；不是 Telegram 可见文本问答对。每个成功轮次写入独立的**增量 JSONL** 文件，后续节点不重复保存整条祖先链；根节点保留实际起始上下文。恢复时沿父链重建历史，单个增量文件不等于完整可恢复会话。Redis 分区不改变 JSONL 的统一读写路径；`schema.ParamsOneOf`、`schema.ToolInfo` 及 `schema.Message.MultiContent` 等正式 SDK 类型和字段，不是过时的 feature 数据。
 
-只有完整模型轮次且最终回答实际发送到 Telegram 成功、具有有效消息 ID 时才保存并发布节点。流式占位消息或中途更新成功不代表最终交付成功。半截流、错误提示、未完成工具链、取消或最终发送失败不得成为可回复节点。归档失败不重新运行模型、不重复发送回答，也不阻止仍独立运行的 `SaveResponse`、raw-turn 和 summary 保存机制。`commitAgentV3Session` 返回节点是否发布成功并记录在本轮状态上：只有**加载了父节点且发布成功**的轮次才跳过 raw-turn / summary 的回退保存；父节点已加载但发布失败（Redis、文件或 10 秒超时）的轮次仍写入回退上下文。
+只有完整模型轮次且最终回答实际发送到 Telegram 成功、具有有效消息 ID 时才保存并发布节点。流式占位消息或中途更新成功不代表最终交付成功。半截流、错误提示、未完成工具链、取消或最终发送失败不得成为可回复节点。归档失败不重新运行模型、不重复发送回答，也不阻止仍独立运行的 `SaveResponse`、raw-turn 和 summary 保存机制。`commitAgentV3Session` 返回节点是否发布成功并记录在本轮状态上：只有**加载了父节点且发布成功**的轮次才跳过 raw-turn / summary 的回退保存；父节点已加载但发布失败（Redis、文件或 10 秒超时）的轮次仍写入回退上下文。若该父节点是按 `load_context: true` 的最近节点选中的，发布失败后还会把它及同 agent 更早的节点移出最近节点索引（节点和消息映射不变，回复这些回答仍能续聊），使下一次非 reply 调用未命中、走包含这一轮 raw turn 的回退上下文并保存新 root；否则下一次又会加载同一父节点、跳过 raw turns，这一轮就永远到不了模型。
 
 delegate/subagent **不接入交互 session**。任何工具启动的嵌套 agent 调用都不继承顶层捕获器，不以工具名称判断；子调用内部不加载或保存 DAG、不建立 session 租约，其私有内层 history 不进入顶层归档。顶层模型发出的工具请求及其返回结果，仍作为**普通顶层工具消息**随完整成功的顶层轮次保存，不展开子调用内部 history。后台 cron 同样不加载或保存交互 session。
 
@@ -186,7 +188,7 @@ Redis 按 DAG 分区保存状态：每个 DAG 使用小型 meta JSON，以及独
 ## 数据敏感性与部署约束
 
 - JSONL 可能包含群聊内容、工具结果、推理、system frame 和媒体/data URI。默认保存是 true；建议归档文件使用 `0600`，目录只允许 bot 服务账号访问，Windows 使用等效 ACL，并限制备份权限。不要向静态文件服务或远端 Runtime 工具暴露目录，日志不得打印会话全文、令牌、环境秘密或媒体载荷。
-- session 开关只控制**完整模型会话**，不关闭现有 `SaveResponse`、raw turns、summary、Telegram 消息缓存、memory 和 trace。DAG 回收不承诺擦除这些独立数据，memory forget 也不保证擦除历史归档。
+- session 开关只控制**完整模型会话**，不关闭现有 `SaveResponse`、raw turns、summary、Telegram 消息缓存、memory 和 trace。DAG 回收不承诺擦除这些独立数据。memory forget 不擦除历史归档，但会让记录了旧 memory epoch 的会话链不再被续接和回放给 provider；旧归档文件直到 DAG 按 TTL 回收前仍含已删除的记忆正文。
 - 不同实例使用同一 Redis session scope 时，必须挂载**同一共享数据卷（sharedVolume）**，且该卷对所有参与者提供可靠跨进程锁与同目录原子硬链接发布能力。建议将相同的 sharedVolume 挂载到各实例配置的 `directory`，并确认跨主机锁支持。各机器独立本地盘却共用同一个 Redis scope 不满足要求；单进程 mutex 不能代替跨进程锁。
 - 文件路径受固定根目录与安全 ID 约束，不能通过路径穿越、symlink / Windows reparse point 逃逸。回收仅按可信清单精确删除；未知文件保留，不递归删除整个 data、bot、chat 或锁目录。
 - 关闭保存或回滚不会立即清空目录。迁移 directory、改变 bot 用户名或 Redis key prefix 前要处理旧 namespace 的 DAG/intents；不能仅改路径就假定旧节点仍可恢复。不同 Redis prefix 共卷时仍需独立 storage namespace，防止相互回收。

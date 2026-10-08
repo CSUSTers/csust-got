@@ -171,7 +171,7 @@ func TestJoinAgentV3MemoryLinesNewest(t *testing.T) {
 		{name: "fits", limit: 100, want: "- one\n- two\n- three"},
 		{name: "drops oldest", limit: 14, want: "[earlier memory omitted: 1 entries]\n- two\n- three"},
 		{name: "keeps only newest", limit: 8, want: "[earlier memory omitted: 2 entries]\n- three"},
-		{name: "newest alone too long", limit: 4, want: truncateAgentV3Text("- three", 4)},
+		{name: "newest alone too long", limit: 4, want: truncateAgentV3Runes("- three", 4)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -179,6 +179,47 @@ func TestJoinAgentV3MemoryLinesNewest(t *testing.T) {
 		})
 	}
 	require.Empty(t, joinAgentV3MemoryLinesNewest(nil, 10))
+}
+
+func TestJoinAgentV3MemoryLinesNewestCountsRunes(t *testing.T) {
+	lines := []string{"- 一二三", "- 四五六七"}
+	tests := []struct {
+		name  string
+		limit int
+		want  string
+	}{
+		{name: "fits by characters", limit: 12, want: "- 一二三\n- 四五六七"},
+		{name: "drops oldest", limit: 11, want: "[earlier memory omitted: 1 entries]\n- 四五六七"},
+		{name: "newest alone too long", limit: 3, want: "- 四\n[truncated]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, joinAgentV3MemoryLinesNewest(lines, tt.limit))
+		})
+	}
+}
+
+func TestAgentV3MemoryWriteDenialCountsRunes(t *testing.T) {
+	setupMemoryPolicyTest(t, "explicit_or_admin", 10, 20, true)
+	items := []orm.AgentV3MemoryItem{{Content: strings.Repeat("记", 20), CreatedBy: 8}}
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "exactly at capacity", content: strings.Repeat("忆", 15)},
+		{name: "one character over", content: strings.Repeat("忆", 16), want: "约 23/40 字符"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agentV3MemoryWriteDenial(items, true, 7, tt.content)
+			if tt.want == "" {
+				require.Empty(t, got)
+			} else {
+				require.Contains(t, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestRebuildAgentV3MemorySnapshotKeepsNewestEntriesWithoutTTL(t *testing.T) {

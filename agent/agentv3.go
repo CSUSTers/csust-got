@@ -154,6 +154,11 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return fmt.Errorf("agentv3: %w for %q", errNoCompiledConfig, agentConfig.Name)
 	}
 	compiled := val.(*CompiledAgent)
+	if !BeginInflightTurn() {
+		zap.L().Debug("agentv3: shutting down, dropping turn", zap.String("agent", agentConfig.Name))
+		return nil
+	}
+	defer EndInflightTurn()
 
 	msg := tbCtx.Message()
 	if msg == nil {
@@ -181,8 +186,6 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return tbCtx.Reply(configuredConcurrency().GetBusyMessage())
 	}
 	defer runLimiter.release()
-	BeginInflightTurn()
-	defer EndInflightTurn()
 
 	// Create turn context
 	ctx, cancel := context.WithTimeout(context.Background(), agentConfig.GetTimeout())

@@ -29,6 +29,7 @@ var (
 	errAgentV3SessionModelMessagesChanged = errors.New("model session baseline changed non-system messages")
 	errAgentV3SessionModelMessagesOmitted = errors.New("model session baseline omitted input messages")
 	errAgentV3SessionContextOverflow      = errors.New("session context overflow rebuild")
+	errAgentV3SessionMemoryEpoch          = errors.New("session memory deleted since node commit")
 )
 
 type agentV3SessionService struct {
@@ -58,6 +59,7 @@ type agentV3SessionTurn struct {
 	kinds       []agentV3SessionInputKind
 	baselineErr error
 	selection   session.Selection
+	memoryEpoch int64
 	load        bool
 	ownsHistory bool
 	committed   bool
@@ -465,7 +467,7 @@ func logAgentV3SessionLoadError(tc *TurnContext, err error) {
 	fields := []zap.Field{zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Error(err)}
 	if isPureAgentV3SessionError(err, session.ErrMiss) {
 		zap.L().Debug("agentv3: session miss; using legacy context", fields...)
-	} else if !isPureAgentV3SessionError(err, errAgentV3SessionContextOverflow) {
+	} else if !isPureAgentV3SessionError(err, errAgentV3SessionContextOverflow) && !isPureAgentV3SessionError(err, errAgentV3SessionMemoryEpoch) {
 		zap.L().Warn("agentv3: session load rejected or failed; using legacy context", fields...)
 	}
 }
@@ -575,7 +577,7 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
 		defer cancel()
 		var node session.Node
-		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}})
+		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}, MemoryEpoch: state.memoryEpoch})
 		if err == nil {
 			state.committed = true
 			// The next replay of this node is its full model input plus this turn's new messages.
@@ -584,5 +586,21 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) bool {
 		}
 	}
 	zap.L().Warn("agentv3: delivered response was not saved to session", zap.String("run_id", tc.RunID), zap.Ints("message_ids", ids), zap.Error(err))
+	dropAgentV3SessionLatest(tc)
 	return false
+}
+
+// dropAgentV3SessionLatest keeps an unpublished turn reachable after a latest hit: the turn
+// only exists in the raw-turn fallback, so the next latest selection must miss instead of
+// loading the same parent and skipping raw turns. Replies to the parent still resolve.
+func dropAgentV3SessionLatest(tc *TurnContext) {
+	state := tc.Session
+	if state.parent == nil || state.selection.Mode != session.SelectLatest {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
+	defer cancel()
+	if err := state.service.DropLatest(ctx, state.scope, state.selection.Agent, state.parent.Ref()); err != nil {
+		zap.L().Warn("agentv3: latest session index was not cleared after a failed commit", zap.String("run_id", tc.RunID), zap.Error(err))
+	}
 }

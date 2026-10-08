@@ -16,10 +16,11 @@ Bot 进程的文件日志、Agent v3 trace JSONL 的落盘方式，以及收到�
 
 收到 `SIGINT` / `SIGTERM` 后：
 
-1. `bot.Stop()` 停止拉取更新；已经在处理的消息 handler 继续运行。
-2. 主进程等待所有进行中的交互式 agent 轮次结束，最长 `agent_v3.shutdown_grace`；超时则记录 warning 并继续。
-3. `agentv3.Close()`：刷 trace 队列 → 关闭 session 服务 → 停止 cron → 关闭 MCP 连接。
-4. `log.Close()`：`Sync` 后关闭 `got.log` / `got_err.log` 的文件句柄。
+1. `agentv3.BeginShutdown()` 关闭轮次入口：之后才进入 `agentv3.Chat()` 的 handler 不再登记轮次，直接丢弃（Debug 日志 `agentv3: shutting down, dropping turn`，不回复用户）。登记与关闭在同一把锁下完成，drain 开始后不会再有新轮次溜进来。
+2. `bot.Stop()` 停止拉取更新；已经在处理的消息 handler 继续运行。
+3. 主进程等待所有已登记的交互式 agent 轮次结束，最长 `agent_v3.shutdown_grace`；超时则记录 warning 并继续。
+4. `agentv3.Close()`：刷 trace 队列 → 关闭 session 服务 → 停止 cron → 关闭 MCP 连接。
+5. `log.Close()`：`Sync` 后关闭 `got.log` / `got_err.log` 的文件句柄。
 
 容器编排的 `stop_grace_period`（Compose）或 `terminationGracePeriodSeconds`（k8s）应大于 `shutdown_grace` 加几秒，否则进程会在 drain 完成前被 `SIGKILL`。
 

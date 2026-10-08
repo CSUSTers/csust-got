@@ -334,7 +334,7 @@ func (r *AgentV3SessionRepository) Release(ctx context.Context, scope session.Sc
 
 // Reserve durably registers one unique file attempt under a parent or a new root.
 func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Reservation, duration time.Duration) (session.Intent, error) {
-	if !session.ValidID(req.RunID) || req.Agent == "" || duration < time.Millisecond || (req.Parent == nil) != (req.Lease == nil) {
+	if !session.ValidID(req.RunID) || req.Agent == "" || duration < time.Millisecond || (req.Parent == nil) != (req.Lease == nil) || req.MemoryEpoch < 0 {
 		return session.Intent{}, session.ErrCorrupt
 	}
 	s, err := r.scopeKeys(req.Scope)
@@ -407,7 +407,7 @@ func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Rese
 		if err != nil {
 			return err
 		}
-		out = session.Intent{Node: session.Node{Scope: req.Scope, Ref: session.NodeRef{DAGID: meta.ID, NodeID: ids[0]}, Parent: req.Parent, Agent: req.Agent, RunID: req.RunID, FileName: ids[0] + ".jsonl", Version: session.Version}, Lease: lease, Status: sessionIntentPending}
+		out = session.Intent{Node: session.Node{Scope: req.Scope, Ref: session.NodeRef{DAGID: meta.ID, NodeID: ids[0]}, Parent: req.Parent, Agent: req.Agent, RunID: req.RunID, FileName: ids[0] + ".jsonl", Version: session.Version, MemoryEpoch: req.MemoryEpoch}, Lease: lease, Status: sessionIntentPending}
 		t.write("hset", d.intents, req.RunID, sessionEncode(out))
 		t.write("hset", s.runs, req.RunID, sessionEncode(sessionRunIndex{Ref: out.Node.Ref, Status: out.Status}))
 		return t.ensurePending(s, d)
@@ -530,6 +530,9 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 			if supersedesLatest, err = t.latestIs(s.latest(out.Agent), *receipt.RedirectFrom); err != nil {
 				return err
 			}
+			if out.MemoryEpoch, err = t.memoryEpoch(s.dag(receipt.RedirectFrom.DAGID), *receipt.RedirectFrom); err != nil {
+				return err
+			}
 		}
 		stored.Status, stored.Node = sessionIntentPublished, out
 		meta.LastActive = now.UnixMilli()
@@ -580,6 +583,51 @@ func (t *sessionTxn) redirectableMessages(s sessionScopeKeys, receipt session.De
 		return nil, session.ErrStale
 	}
 	return out, nil
+}
+
+// memoryEpoch returns the source node's memory epoch so a compacted root inherits the
+// invalidation state of the history it summarizes.
+func (t *sessionTxn) memoryEpoch(d sessionDAGKeys, ref session.NodeRef) (int64, error) {
+	if err := t.check(map[string]string{d.nodes: sessionRedisHash}); err != nil {
+		return 0, err
+	}
+	var source session.Node
+	found, err := sessionReadJSON(t.ctx, t.tx.HGet(t.ctx, d.nodes, ref.NodeID), &source)
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		return 0, session.ErrStale
+	}
+	return source.MemoryEpoch, nil
+}
+
+// DropLatest removes ref and every older member of agent's latest index. Members sort by their
+// zero-padded commit sequence, so newer concurrent commits stay selectable.
+func (r *AgentV3SessionRepository) DropLatest(ctx context.Context, scope session.Scope, agent string, ref session.NodeRef) error {
+	if agent == "" || ref.Validate() != nil {
+		return session.ErrCorrupt
+	}
+	s, err := r.scopeKeys(scope)
+	if err != nil {
+		return err
+	}
+	key, d := s.latest(agent), s.dag(ref.DAGID)
+	return r.atomic(ctx, func(t *sessionTxn) error {
+		if err := t.check(map[string]string{key: sessionRedisZSet, d.nodes: sessionRedisHash}); err != nil {
+			return err
+		}
+		var node session.Node
+		found, err := sessionReadJSON(ctx, t.tx.HGet(ctx, d.nodes, ref.NodeID), &node)
+		if err != nil || !found {
+			return err
+		}
+		if node.Ref != ref || node.Agent != agent || node.CommitSequence <= 0 {
+			return session.ErrCorrupt
+		}
+		t.write("zremrangebylex", key, "-", "["+sessionLatestMember(node))
+		return nil
+	})
 }
 
 func (t *sessionTxn) latestIs(key string, ref session.NodeRef) (bool, error) {

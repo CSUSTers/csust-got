@@ -69,6 +69,26 @@ func TestSubAgentConfigValidateSkills(t *testing.T) {
 	require.NoError(t, (&AgentConfig{Name: "plain"}).ValidateSubAgents())
 }
 
+func TestValidateSubAgentsRejectsNullEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		subs []*SubAgentConfig
+		want string
+	}{
+		{name: "only null", subs: []*SubAgentConfig{nil}, want: "agents[].agent.subagents[0] is null"},
+		{name: "null after valid", subs: []*SubAgentConfig{{Name: "r"}, nil}, want: "agents[].agent.subagents[1] is null"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &AgentConfig{Name: "assistant", Agent: &AgentOptions{SubAgents: tt.subs}}
+			err := agent.ValidateSubAgents()
+			require.ErrorIs(t, err, errSubAgentConfigNull)
+			require.ErrorContains(t, err, `agent "assistant"`)
+			require.ErrorContains(t, err, tt.want)
+		})
+	}
+}
+
 func TestAgentV3MemoryWritePolicyQuota(t *testing.T) {
 	cfg := &AgentV3Config{Memory: AgentV3MemoryConfig{WritePolicy: "explicit_quota"}}
 	cfg.checkConfig()

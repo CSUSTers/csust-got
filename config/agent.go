@@ -132,7 +132,10 @@ func (ccs *AgentConfig) ValidateSubAgents() error {
 	if ccs.Agent == nil {
 		return nil
 	}
-	for _, sub := range ccs.Agent.SubAgents {
+	for j, sub := range ccs.Agent.SubAgents {
+		if sub == nil {
+			return fmt.Errorf("agent %q: %w: agents[].agent.subagents[%d] is null", ccs.Name, errSubAgentConfigNull, j)
+		}
 		if err := sub.ValidateSkills(); err != nil {
 			return fmt.Errorf("agent %q: %w", ccs.Name, err)
 		}
@@ -235,6 +238,8 @@ var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 var agentV3SkillName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 var errInvalidSubAgentSkillName = errors.New("invalid agents[].agent.subagents[].skills entry")
+
+var errSubAgentConfigNull = errors.New("invalid agents[].agent.subagents entry")
 
 var (
 	errRuntimeEnvLimit    = errors.New("runtime_env_limit")

@@ -21,8 +21,12 @@
 - 超长时用 `formatTelegramChunks` 切分：对原文切分，再对每个原文片段单独格式化，确保 MarkdownV2/HTML 转义和 `quote`/`collapse`/`block` 包裹在每条消息内自洽（代码块围栏逐段闭合）。
 - 切分点由共享切分器 `takeTelegramChunk` 决定：优先段落边界，其次行边界；跳过 ``` 围栏内部的边界；避免把一条消息切得不足一半（防止"一行标题 + 一大段"产生碎片消息）；都不满足时在 rune 边界硬切。
 - 推理内容（reason）随第一段输出；若推理本身放不下，先按同样规则切成独立的引用段落。
-- 第一段编辑 placeholder，后续各段依次作为上一段的回复发送（`AllowWithoutReply`）。所有已投递消息按顺序写入 `telegramResponseResult.deliveredAll`，`delivered` 为最后一条；`commitAgentV3Session` 当前仍只接收最后一条消息（见 §4）。
-- 任一后续段失败即停止，并返回错误；已投递段保留。
+- 第一段编辑 placeholder，后续各段依次作为上一段的回复发送（`AllowWithoutReply`）。所有已投递消息按顺序写入 `telegramResponseResult.deliveredAll`，`delivered` 为最后一条；`commitAgentV3Session` 以全部已投递消息 ID 作为 `DeliveryReceipt.MessageIDs`，回复任意一段都能续接会话。
+- 某段在 §1.1/§1.2 的重试之后仍失败即停止投递（`deliverChunks`）：
+  - 还没有任何段被证明已投递（第一段就失败）时返回错误，与以前一致。
+  - 已有段投递成功时**不返回错误**：已投递段作为投递凭证（`deliveredAll`/`delivered` 只含真实存在的消息），调用方照常提交会话并以最后一条已投递段 `SaveResponse`；记录 `Warn` 日志（含失败段序号 `failed_chunk`），并尽力以回复最后一条已投递段的方式发送提示「后续内容发送失败，可回复上一条继续」（提示发送失败只记 `Debug`，提示本身不计入凭证）。
+  - 理由：用户已经看到这些内容，部分可见的回复必须可以续接；删除已投递段会毁掉用户已读的内容，而把整轮当失败又会让会话不提交、回复不入缓存。
+- 流式（`finalize` → `deliverPlainFinal`）与非流式（`nonStreamResponseWithDelivery`）共用这一规则。
 
 ### 1.4 Rich 消息回退
 
@@ -51,10 +55,6 @@
 
 ## 3. 测试
 
-- `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestStreamFinalLongOutputStopsAtFirstFailedChunk`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite`、`TestUpdateMessageResendsAfterPlaceholderOverwrittenHook`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
+- `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestFinalLongOutputPartialDelivery`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite`、`TestUpdateMessageResendsAfterPlaceholderOverwrittenHook`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
 - `agent/format_test.go`：`TestTakeTelegramChunkPrefersParagraphsAndAvoidsCodeFences`、`TestChunkPlainTelegramTextRoundTrips`、`TestFormatTelegramChunksFormatsEachChunkSeparately`、`TestFormatTelegramChunksKeepsReasonOnFirstChunk`、`TestTailTelegramPreview`。
 - `util/utils_test.go`：`TestUTF16Len`、`TestFloodRetryAfterIgnoresOtherErrors`。
-
-## 4. 待办
-
-- `commitAgentV3Session(tc, sent *tb.Message)` 仍只接收最后一条消息。多段投递时 `DeliveryReceipt.MessageIDs` 应包含全部消息 ID；需要把签名改为接收 `[]*tb.Message`（或直接接收 `telegramResponseResult`），由 session 模块接入 `deliveredAll`。

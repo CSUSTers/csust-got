@@ -42,6 +42,49 @@ func TestIsPublicIP(t *testing.T) {
 	require.False(t, isPublicIP(nil))
 }
 
+func TestIsPublicIPv6SpecialPurposeRanges(t *testing.T) {
+	tests := []struct {
+		name     string
+		rejected string
+		accepted string
+	}{
+		{name: "unspecified", rejected: "::", accepted: "2001:4860:4860::8888"},
+		{name: "loopback", rejected: "::1", accepted: "2606:4700::1111"},
+		{name: "ipv4-compatible", rejected: "::808:808", accepted: "1::808:808"},
+		{name: "ipv4-mapped private", rejected: "::ffff:192.168.0.1", accepted: "::ffff:8.8.8.8"},
+		{name: "nat64 private", rejected: "64:ff9b::a00:1", accepted: "64:ff9b::808:808"},
+		{name: "nat64 cgnat", rejected: "64:ff9b::6440:1", accepted: "64:ff9b::101:101"},
+		{name: "local nat64 private", rejected: "64:ff9b:1::7f00:1", accepted: "64:ff9b:1::808:808"},
+		{name: "local nat64 subnet bits", rejected: "64:ff9b:1:7f00:0:100:808:808", accepted: "64:ff9b:2::808:808"},
+		{name: "discard", rejected: "100::1", accepted: "100:0:0:1::1"},
+		{name: "teredo", rejected: "2001:0:4136:e378:8000:63bf:3fff:fdd2", accepted: "2001:4860:4860::8888"},
+		{name: "benchmarking", rejected: "2001:2::1", accepted: "2001:2:1::1"},
+		{name: "orchid", rejected: "2001:10::1", accepted: "2001:4860:4860::8888"},
+		{name: "orchidv2", rejected: "2001:2f:ffff::1", accepted: "2001:30::1"},
+		{name: "documentation", rejected: "2001:db8::1", accepted: "2001:db9::1"},
+		{name: "6to4 private", rejected: "2002:a00:1::1", accepted: "2002:808:808::1"},
+		{name: "6to4 loopback", rejected: "2002:7f00:1::1", accepted: "2003::1"},
+		{name: "documentation 3fff", rejected: "3fff:fff::1", accepted: "3fff:1000::1"},
+		{name: "srv6 sids", rejected: "5f00::1", accepted: "5f01::1"},
+		{name: "unique local", rejected: "fdff::1", accepted: "2606:4700::1111"},
+		{name: "link local", rejected: "febf::1", accepted: "2606:4700::1111"},
+		{name: "site local", rejected: "fec0::1", accepted: "2606:4700::1111"},
+		{name: "site local upper", rejected: "feff::1", accepted: "2606:4700::1111"},
+		{name: "multicast", rejected: "ff0e::1", accepted: "2606:4700::1111"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.False(t, isPublicIP(net.ParseIP(tt.rejected)), tt.rejected)
+			require.True(t, isPublicIP(net.ParseIP(tt.accepted)), tt.accepted)
+		})
+	}
+	for _, r := range nonGlobalIPv6Ranges {
+		t.Run(r.prefix.String(), func(t *testing.T) {
+			require.False(t, isPublicIP(net.IP(r.prefix.Addr().AsSlice())), "the first address of every special range is rejected")
+		})
+	}
+}
+
 // allowLoopbackImageTargets disables the public-address policy so tests can download from httptest servers.
 func allowLoopbackImageTargets(t *testing.T) {
 	t.Helper()
@@ -362,14 +405,19 @@ func TestDialThroughHTTPProxySendsBasicAuth(t *testing.T) {
 }
 
 // fakeSocks5 accepts one SOCKS5 CONNECT per connection, records the requested address and serves the origin.
+// rejectAuth demands username/password authentication and rejects it; replies overrides the CONNECT reply code.
 type fakeSocks5 struct {
-	mu       sync.Mutex
-	requests []string
-	hosts    []string
-	fail     map[string]bool
-	delay    map[string]time.Duration
-	stream   func(conn net.Conn, reader *bufio.Reader)
-	origin   http.Handler
+	mu         sync.Mutex
+	addr       string
+	conns      int
+	requests   []string
+	hosts      []string
+	fail       map[string]bool
+	replies    map[string]byte
+	rejectAuth bool
+	delay      map[string]time.Duration
+	stream     func(conn net.Conn, reader *bufio.Reader)
+	origin     http.Handler
 }
 
 func startFakeSocks5(t *testing.T, origin http.Handler) *fakeSocks5 {
@@ -377,7 +425,7 @@ func startFakeSocks5(t *testing.T, origin http.Handler) *fakeSocks5 {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
-	s := &fakeSocks5{origin: origin}
+	s := &fakeSocks5{origin: origin, addr: ln.Addr().String()}
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -393,12 +441,28 @@ func startFakeSocks5(t *testing.T, origin http.Handler) *fakeSocks5 {
 
 func (s *fakeSocks5) serve(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+	s.mu.Lock()
+	s.conns++
+	rejectAuth := s.rejectAuth
+	s.mu.Unlock()
 	reader := bufio.NewReader(conn)
 	greeting := make([]byte, 2)
 	if _, err := io.ReadFull(reader, greeting); err != nil || greeting[0] != 5 {
 		return
 	}
 	if _, err := io.ReadFull(reader, make([]byte, int(greeting[1]))); err != nil {
+		return
+	}
+	if rejectAuth {
+		_, _ = conn.Write([]byte{5, 2})
+		auth := make([]byte, 2)
+		if _, err := io.ReadFull(reader, auth); err != nil {
+			return
+		}
+		_, _ = io.ReadFull(reader, make([]byte, int(auth[1])))
+		n, _ := reader.ReadByte()
+		_, _ = io.ReadFull(reader, make([]byte, int(n)))
+		_, _ = conn.Write([]byte{1, 1})
 		return
 	}
 	_, _ = conn.Write([]byte{5, 0})
@@ -427,11 +491,14 @@ func (s *fakeSocks5) serve(conn net.Conn) {
 	s.mu.Lock()
 	request := fmt.Sprintf("%s:%d", addr, int(port[0])<<8|int(port[1]))
 	s.requests = append(s.requests, request)
-	fail, delay, stream := s.fail[request], s.delay[request], s.stream
+	reply, delay, stream := s.replies[request], s.delay[request], s.stream
+	if s.fail[request] {
+		reply = 5
+	}
 	s.mu.Unlock()
 	time.Sleep(delay)
-	if fail {
-		_, _ = conn.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
+	if reply != 0 {
+		_, _ = conn.Write([]byte{5, reply, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
 	_, _ = conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
@@ -450,6 +517,12 @@ func (s *fakeSocks5) snapshot() (requests, hosts []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.requests...), append([]string(nil), s.hosts...)
+}
+
+func (s *fakeSocks5) connCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conns
 }
 
 func TestFetchPublicImageURLThroughSocksPinsValidatedIP(t *testing.T) {
@@ -634,11 +707,7 @@ func TestFetchPublicImageURLDirectFallsBackToNextAddress(t *testing.T) {
 	t.Cleanup(server.Close)
 	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
 	require.NoError(t, err)
-	closed, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	_, closedPort, err := net.SplitHostPort(closed.Addr().String())
-	require.NoError(t, err)
-	require.NoError(t, closed.Close())
+	closedPort := reserveRefusingLoopbackPort(t)
 	stubPublicImageResolver(t, map[string][]string{"multi.test": {"::1", "127.0.0.1"}})
 
 	resp, err := fetchPublicImageURL(t.Context(), "http://multi.test:"+port+"/image.png")
@@ -742,6 +811,71 @@ func TestFetchPublicImageURLThroughSocksAllAddressesFail(t *testing.T) {
 	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests)
 	require.Empty(t, hosts)
 	requireOnlyIPTargets(t, requests)
+}
+
+func TestFetchPublicImageURLThroughSocksStopsWhenProxyRejectsSession(t *testing.T) {
+	tests := []struct {
+		name       string
+		rejectAuth bool
+		reply      byte
+		requests   []string
+	}{
+		{name: "authentication failure", rejectAuth: true},
+		{name: "general server failure", reply: 1, requests: []string{"93.184.216.34:80"}},
+		{name: "not allowed by ruleset", reply: 2, requests: []string{"93.184.216.34:80"}},
+		{name: "command not supported", reply: 7, requests: []string{"93.184.216.34:80"}},
+		{name: "address type not supported", reply: 8, requests: []string{"93.184.216.34:80"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubMultiAddressImageHost(t)
+			socks := startFakeSocks5(t, imageOriginHandler())
+			socks.mu.Lock()
+			socks.rejectAuth = tt.rejectAuth
+			socks.replies = map[string]byte{"93.184.216.34:80": tt.reply, "[2606:4700::1111]:80": tt.reply}
+			socks.mu.Unlock()
+			if tt.rejectAuth {
+				withImageProxy(t, "socks5://user:secret@"+socks.addr)
+			}
+
+			_, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+			require.ErrorIs(t, err, errImageProxyUnusable)
+			require.Equal(t, 1, socks.connCount(), "the second address is not retried through a rejecting proxy")
+			requests, hosts := socks.snapshot()
+			require.Equal(t, tt.requests, requests)
+			require.Empty(t, hosts)
+		})
+	}
+}
+
+func TestFetchPublicImageURLThroughSocksTriesNextAddressOnTargetReply(t *testing.T) {
+	for _, reply := range []byte{3, 4, 5, 6} {
+		t.Run(fmt.Sprintf("reply %d", reply), func(t *testing.T) {
+			stubMultiAddressImageHost(t)
+			socks := startFakeSocks5(t, imageOriginHandler())
+			socks.mu.Lock()
+			socks.replies = map[string]byte{"93.184.216.34:80": reply}
+			socks.mu.Unlock()
+
+			resp, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			requests, hosts := socks.snapshot()
+			require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests)
+			require.Equal(t, []string{"multi.test"}, hosts)
+		})
+	}
+}
+
+func TestFetchPublicImageURLThroughUnreachableSocksStops(t *testing.T) {
+	stubMultiAddressImageHost(t)
+	withImageProxy(t, "socks5://127.0.0.1:"+reserveRefusingLoopbackPort(t))
+
+	_, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+	require.ErrorIs(t, err, errImageProxyUnusable)
+	require.Contains(t, err.Error(), "proxy unreachable")
+	require.NotContains(t, err.Error(), "2606:4700::1111", "the second address is never attempted")
 }
 
 func TestFetchPublicImageURLThroughSocksSharesHopDeadline(t *testing.T) {

@@ -353,10 +353,6 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	require.Len(t, capture.Frame, 1)
 	require.Equal(t, schema.System, capture.Frame[0].Message.Role)
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "REAL_USER")
-	items, err := orm.AgentV3ListMemory(t.Context(), scope)
-	require.NoError(t, err)
-	require.NoError(t, orm.AgentV3ForgetMemory(t.Context(), scope, items[0].ID))
-	require.NoError(t, rebuildAgentV3MemorySnapshot(t.Context(), scope, time.Hour))
 	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "NEW_MEMORY"))
 	// A session hit must bypass every old summary/raw-turn read, even if those keys are broken.
 	keys, err := f.client.Keys(t.Context(), "*:hot:raw_turns").Result()
@@ -373,7 +369,7 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	require.Equal(t, &root.Ref, f.node(t, second).Parent, "legacy save failure must not prevent session commit")
 	text := replySessionSchemaText(mdl.capturedInputs()[1])
 	require.Equal(t, 1, strings.Count(text, "NEW_MEMORY"), "a changed memory snapshot is appended after the replay")
-	require.Equal(t, 1, strings.Count(text, "OLD_MEMORY"), "the archived snapshot is replayed verbatim for prefix-cache alignment")
+	require.Equal(t, 2, strings.Count(text, "OLD_MEMORY"), "the archived snapshot is replayed verbatim and the superseding one repeats the kept entry")
 	require.Equal(t, 1, strings.Count(text, "LEGACY_SUMMARY"))
 	require.Equal(t, 1, strings.Count(text, "LEGACY_USER"))
 }

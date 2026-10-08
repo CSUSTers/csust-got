@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -78,6 +79,7 @@ func main() {
 	}
 	go func() {
 		<-ctx.Done()
+		agentv3.BeginShutdown()
 		bot.Stop()
 	}()
 	bot.Start()
@@ -85,6 +87,7 @@ func main() {
 }
 
 func drainInflightTurns() {
+	agentv3.BeginShutdown()
 	grace := config.BotConfig.AgentV3.ShutdownGraceDuration()
 	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
 	defer cancelDrain()
@@ -468,7 +471,7 @@ func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 
 func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 		if isAllowedMessageCommand(ctx.Message(), "boot", "info") {
@@ -579,18 +582,28 @@ func isAllowedCommandName(commandName string, allowed ...string) bool {
 	return false
 }
 
+var messageStoreSeq = newMessageStoreSeq()
+
+// newMessageStoreSeq starts at the wall clock in microseconds so receive order also survives restarts and stays exact in Lua numbers.
+func newMessageStoreSeq() *atomic.Uint64 {
+	seq := &atomic.Uint64{}
+	seq.Store(uint64(time.Now().UnixMicro()))
+	return seq
+}
+
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
 		if shouldStoreMessage(m) {
+			seq := messageStoreSeq.Add(1)
 			// 异步存储完整消息结构体到Redis
 			go func() {
 				// Store to stream
-				if err := orm.PushMessageToStream(m); err != nil {
+				if err := orm.PushMessageToStreamWithSeq(m, seq); err != nil {
 					log.Error("Store message to Redis stream failed", zap.Error(err))
 				}
 				// Also store as a retrievable message
-				if err := orm.SetMessage(m); err != nil {
+				if err := orm.SetMessageWithSeq(m, seq); err != nil {
 					log.Error("Store message to Redis failed", zap.Error(err))
 				}
 			}()

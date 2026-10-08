@@ -367,8 +367,12 @@ func buildConfiguredAgentTools(ctx context.Context, chatName string, agentCfg *c
 	for _, subCfg := range agentCfg.SubAgents {
 		subTool, err := buildSubAgentTool(ctx, subCfg, mcpMgr)
 		if err != nil {
+			name := ""
+			if subCfg != nil {
+				name = subCfg.Name
+			}
 			zap.L().Error("agentv3/agent: failed to build subagent, skipping",
-				zap.String("subagent", subCfg.Name),
+				zap.String("subagent", name),
 				zap.Error(err),
 			)
 			continue

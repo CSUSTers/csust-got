@@ -175,6 +175,8 @@ type Node struct {
 	CommitSequence  int64    `json:"commit_sequence"`
 	// RedirectedFrom records the compacted node whose message mappings this root took over.
 	RedirectedFrom *NodeRef `json:"redirected_from,omitempty"`
+	// MemoryEpoch is the chat memory-deletion epoch read before this turn built its memory snapshot.
+	MemoryEpoch int64 `json:"memory_epoch,omitempty"`
 }
 
 // ReplayTurn is one archived node with its replayable history; Bootstrap is set on the root only.
@@ -201,11 +203,12 @@ type Intent struct {
 
 // Reservation requests a new root or a child under a pinned loaded parent.
 type Reservation struct {
-	Scope  Scope
-	Agent  string
-	RunID  string
-	Parent *NodeRef
-	Lease  *Lease
+	Scope       Scope
+	Agent       string
+	RunID       string
+	Parent      *NodeRef
+	Lease       *Lease
+	MemoryEpoch int64
 }
 
 // Pinned contains root-to-selected ancestor metadata protected by a lease.
@@ -248,22 +251,28 @@ type Repository interface {
 	Deleting(context.Context, Scope) ([]Deletion, error)
 	ClaimDeleting(context.Context, Scope, time.Duration) ([]Deletion, error)
 	FinishDelete(context.Context, Scope, Deletion) error
+	// DropLatest removes ref and every older entry from the agent's latest index, leaving
+	// message mappings intact, so latest selection misses until the agent's next commit.
+	DropLatest(context.Context, Scope, string, NodeRef) error
 }
 
 // CommitRequest combines a complete capture, delivery proof, and optional loaded parent.
 type CommitRequest struct {
-	Scope   Scope
-	Agent   string
-	RunID   string
-	Parent  *LoadedParent
-	Capture TurnCapture
-	Receipt DeliveryReceipt
+	Scope       Scope
+	Agent       string
+	RunID       string
+	Parent      *LoadedParent
+	Capture     TurnCapture
+	Receipt     DeliveryReceipt
+	MemoryEpoch int64
 }
 
 // LoadCandidate borrows complete validated replay, but provides no Commit parent proof.
 // Messages are read-only and must not be retained after the acceptance callback.
 type LoadCandidate struct {
-	Messages         []*schema.Message
+	Messages []*schema.Message
+	// MemoryEpoch is the selected node's recorded memory-deletion epoch.
+	MemoryEpoch      int64
 	ancestorReplyIDs map[int]struct{}
 }
 

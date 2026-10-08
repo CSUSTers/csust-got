@@ -70,6 +70,7 @@ type AgentV3MemorySnapshot struct {
 	Hash      string    `json:"hash"`
 	Content   string    `json:"content"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Epoch     int64     `json:"epoch,omitempty"`
 }
 
 // AgentV3Summary stores the rolling agent-v3 conversation summary.
@@ -452,13 +453,37 @@ func AgentV3ListMemory(ctx context.Context, scope AgentV3Scope) ([]AgentV3Memory
 	return items, nil
 }
 
-// AgentV3ForgetMemory removes one active memory item.
+var agentV3ForgetMemoryScript = redis.NewScript(`
+local removed = redis.call('SREM', KEYS[1], ARGV[1]) + redis.call('DEL', KEYS[2])
+if removed > 0 then
+	redis.call('INCR', KEYS[3])
+end
+return removed
+`)
+
+// AgentV3ForgetMemory removes one active memory item and, when anything was removed,
+// atomically advances the chat memory epoch.
 func AgentV3ForgetMemory(ctx context.Context, scope AgentV3Scope, id string) error {
-	pipe := rc.Pipeline()
-	pipe.Del(ctx, agentV3MemoryItemKey(scope, id))
-	pipe.SRem(ctx, agentV3MemoryActiveKey(scope), id)
-	_, err := pipe.Exec(ctx)
-	return err
+	keys := []string{agentV3MemoryActiveKey(scope), agentV3MemoryItemKey(scope, id), agentV3MemoryEpochKey(scope)}
+	return agentV3ForgetMemoryScript.Run(ctx, rc, keys, id).Err()
+}
+
+// AgentV3GetMemoryEpoch returns the chat memory epoch, advanced whenever memory is deleted.
+// Session nodes recorded under an older epoch may replay deleted memory and must not be continued.
+func AgentV3GetMemoryEpoch(ctx context.Context, scope AgentV3Scope) (int64, error) {
+	epoch, err := rc.Get(ctx, agentV3MemoryEpochKey(scope)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return epoch, err
+}
+
+func agentV3GetMemoryEpochFromTx(ctx context.Context, tx *redis.Tx, key string) (int64, error) {
+	epoch, err := tx.Get(ctx, key).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return epoch, err
 }
 
 // AgentV3SetMemorySnapshot stores rendered memory snapshot content.
@@ -481,13 +506,14 @@ func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl t
 
 	activeKey := agentV3MemoryActiveKey(scope)
 	currentKey := agentV3MemorySnapshotCurrentKey(scope)
+	epochKey := agentV3MemoryEpochKey(scope)
 	for range agentV3CASMaxAttempts {
 		activeIDs, err := agentV3LoadMemoryActiveIDs(ctx, rc, activeKey)
 		if err != nil {
 			return err
 		}
-		watchKeys := make([]string, 0, len(activeIDs)+2)
-		watchKeys = append(watchKeys, currentKey, activeKey)
+		watchKeys := make([]string, 0, len(activeIDs)+3)
+		watchKeys = append(watchKeys, currentKey, activeKey, epochKey)
 		for _, id := range activeIDs {
 			watchKeys = append(watchKeys, agentV3MemoryItemKey(scope, id))
 		}
@@ -510,10 +536,21 @@ func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl t
 			if err != nil {
 				return err
 			}
+			epoch, err := agentV3GetMemoryEpochFromTx(ctx, tx, epochKey)
+			if err != nil {
+				return err
+			}
 			next, err := builder(items, current)
 			if err != nil || next == nil {
 				return err
 			}
+			// A deletion since the current snapshot was built leaves a window where turns read the
+			// new epoch with the stale snapshot; advancing again invalidates those turns too.
+			bump := epoch > 0 && (current == nil || current.Epoch < epoch)
+			if bump {
+				epoch++
+			}
+			next.Epoch = epoch
 			data, err := json.Marshal(next)
 			if err != nil {
 				return err
@@ -532,6 +569,9 @@ func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl t
 				}
 				agentV3ApplyTTL(ctx, pipe, activeKey, ttl)
 				pipe.Set(ctx, currentKey, data, ttl)
+				if bump {
+					pipe.Set(ctx, epochKey, epoch, 0)
+				}
 				return nil
 			})
 			return err
@@ -739,6 +779,10 @@ func agentV3MemoryItemKey(scope AgentV3Scope, id string) string {
 
 func agentV3MemoryActiveKey(scope AgentV3Scope) string {
 	return agentV3BaseKey(scope) + ":memory:active"
+}
+
+func agentV3MemoryEpochKey(scope AgentV3Scope) string {
+	return agentV3BaseKey(scope) + ":memory:epoch"
 }
 
 func agentV3MemorySnapshotCurrentKey(scope AgentV3Scope) string {

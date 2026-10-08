@@ -11,12 +11,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
+	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"csust-got/config"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -70,7 +75,8 @@ func defaultImageTargetCheck(ip net.IP, port string) error {
 	return nil
 }
 
-// isPublicIP rejects loopback, private, link-local, multicast, unspecified, CGNAT, reserved and ULA ranges.
+// isPublicIP rejects loopback, private, link-local, multicast, unspecified, CGNAT, reserved and every
+// non-global IPv6 special-purpose range; IPv4-mapped addresses are checked as IPv4.
 func isPublicIP(ip net.IP) bool {
 	if ip == nil {
 		return false
@@ -100,19 +106,46 @@ func isPublicIP(ip net.IP) bool {
 		}
 		return true
 	}
-	if len(ip) == net.IPv6len {
-		switch {
-		case ip[0]&0xfe == 0xfc: // fc00::/7 unique local
-			return false
-		case ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8: // 2001:db8::/32 documentation
-			return false
-		case ip[0] == 0x01 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0: // 100::/64 discard
-			return false
-		case ip[0] == 0 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b: // 64:ff9b::/96 NAT64 maps IPv4 space
-			return isPublicIP(net.IPv4(ip[12], ip[13], ip[14], ip[15]))
+	if len(ip) != net.IPv6len {
+		return false
+	}
+	addr := netip.AddrFrom16([16]byte(ip))
+	for _, r := range nonGlobalIPv6Ranges {
+		if r.prefix.Contains(addr) {
+			return r.ipv4At > 0 && !slices.ContainsFunc(ip[r.zeroFrom:r.ipv4At], func(b byte) bool { return b != 0 }) &&
+				isPublicIP(net.IPv4(ip[r.ipv4At], ip[r.ipv4At+1], ip[r.ipv4At+2], ip[r.ipv4At+3]))
 		}
 	}
 	return true
+}
+
+// ipv6SpecialRange rejects its prefix unless ipv4At locates an embedded IPv4 destination, which must then be
+// public with bytes [zeroFrom, ipv4At) all zero.
+type ipv6SpecialRange struct {
+	prefix   netip.Prefix
+	ipv4At   int
+	zeroFrom int
+}
+
+// The local-use NAT64 prefix only admits the /96 layout with zero subnet bits: every other RFC 6052 decoding of
+// such an address yields a 0.0.0.0/8 destination, so the low 32 bits are the only IPv4 a translator can reach.
+var nonGlobalIPv6Ranges = []ipv6SpecialRange{
+	{prefix: netip.MustParsePrefix("::/96")}, // unspecified, loopback and deprecated IPv4-compatible
+	{prefix: netip.MustParsePrefix("64:ff9b::/96"), ipv4At: 12, zeroFrom: 12},
+	{prefix: netip.MustParsePrefix("64:ff9b:1::/48"), ipv4At: 12, zeroFrom: 6},
+	{prefix: netip.MustParsePrefix("100::/64")},
+	{prefix: netip.MustParsePrefix("2001::/32")}, // Teredo hides the real IPv4 peer
+	{prefix: netip.MustParsePrefix("2001:2::/48")},
+	{prefix: netip.MustParsePrefix("2001:10::/28")},
+	{prefix: netip.MustParsePrefix("2001:20::/28")},
+	{prefix: netip.MustParsePrefix("2001:db8::/32")},
+	{prefix: netip.MustParsePrefix("2002::/16"), ipv4At: 2, zeroFrom: 2},
+	{prefix: netip.MustParsePrefix("3fff::/20")},
+	{prefix: netip.MustParsePrefix("5f00::/16")},
+	{prefix: netip.MustParsePrefix("fc00::/7")},
+	{prefix: netip.MustParsePrefix("fe80::/10")},
+	{prefix: netip.MustParsePrefix("fec0::/10")},
+	{prefix: netip.MustParsePrefix("ff00::/8")},
 }
 
 // validatePublicImageURL enforces http(s), a standard port and a public resolved address.
@@ -448,7 +481,7 @@ func doPinnedImageRequests(ctx context.Context, client *http.Client, target *url
 			return resp, nil
 		}
 		errs = append(errs, err)
-		if connected || ctx.Err() != nil {
+		if connected || ctx.Err() != nil || errors.Is(err, errImageProxyUnusable) {
 			break
 		}
 	}
@@ -457,8 +490,15 @@ func doPinnedImageRequests(ctx context.Context, client *http.Client, target *url
 
 func doPinnedImageRequest(ctx context.Context, client *http.Client, target *url.URL, ip net.IP, budget time.Duration) (*http.Response, bool, error) {
 	attemptCtx, cancel := context.WithCancel(ctx)
-	var connected atomic.Bool
-	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
+	var connected, proxyReached atomic.Bool
+	trace := &httptrace.ClientTrace{
+		ConnectDone: func(_, _ string, err error) {
+			if err == nil {
+				proxyReached.Store(true)
+			}
+		},
+		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
+	}
 	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(attemptCtx, trace), http.MethodGet, target.String(), nil)
 	if err != nil {
 		cancel()
@@ -474,10 +514,42 @@ func doPinnedImageRequest(ctx context.Context, client *http.Client, target *url.
 	timer.Stop()
 	if err != nil {
 		cancel()
-		return nil, connected.Load(), err
+		if connected.Load() {
+			return nil, true, err
+		}
+		return nil, false, classifySocksFailure(err, proxyReached.Load())
 	}
 	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
 	return resp, true, nil
+}
+
+// socksTargetReplies are the SOCKS5 CONNECT replies, as net/http and x/net report them, that blame the
+// requested address rather than the proxy, so the next validated address may still succeed.
+var socksTargetReplies = []string{
+	"unknown error network unreachable",
+	"unknown error host unreachable",
+	"unknown error connection refused",
+	"unknown error TTL expired",
+}
+
+// classifySocksFailure marks the proxy unusable when it cannot be reached or rejects the session itself
+// (authentication, protocol, server failure, ruleset, unsupported command or address type), so the remaining
+// addresses are not retried through it. Target-side replies and attempt timeouts are returned unchanged.
+func classifySocksFailure(err error, proxyReached bool) error {
+	var op *net.OpError
+	if errors.As(err, &op) && strings.HasPrefix(op.Op, "socks ") && op.Err != nil {
+		if slices.Contains(socksTargetReplies, op.Err.Error()) || errors.Is(op.Err, context.Canceled) ||
+			errors.Is(op.Err, context.DeadlineExceeded) || errors.Is(op.Err, os.ErrDeadlineExceeded) {
+			return err
+		}
+		zap.L().Warn("agentv3: image proxy reachable but SOCKS negotiation failed", zap.Error(err))
+		return fmt.Errorf("%w: socks negotiation: %w", errImageProxyUnusable, err)
+	}
+	if !proxyReached {
+		zap.L().Warn("agentv3: image proxy unreachable", zap.Error(err))
+		return fmt.Errorf("%w: proxy unreachable: %w", errImageProxyUnusable, err)
+	}
+	return err
 }
 
 type cancelOnCloseBody struct {

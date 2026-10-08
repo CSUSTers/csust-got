@@ -188,7 +188,7 @@ func TestAgentV3SessionLoadedTurnFallsBackToRawTurnsWhenCommitFails(t *testing.T
 			agentSessionService.Store(&agentV3SessionService{service: f.service, cancel: func() {}, done: done})
 
 			cfg := &config.AgentConfig{Name: "commit-fallback", ContextMode: "chat", Session: config.AgentSessionConfig{LoadContext: true}}
-			mdl := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ROOT_FINAL", nil)}, {schema.AssistantMessage("CHILD_FINAL", nil)}}}
+			mdl := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("ROOT_FINAL", nil)}, {schema.AssistantMessage("CHILD_FINAL", nil)}, {schema.AssistantMessage("NEXT_FINAL", nil)}}}
 			f.compile(t, cfg, mdl)
 			scope := orm.AgentV3Scope{Bot: f.scope().Bot, Platform: agentV3Platform, ChatID: -100}
 			first := f.chat(t, cfg, sessionMessage(10, 7, 0, "ROOT_INPUT"), nil)
@@ -209,10 +209,23 @@ func TestAgentV3SessionLoadedTurnFallsBackToRawTurnsWhenCommitFails(t *testing.T
 				require.Equal(t, "CHILD_FINAL", turns[3].Content)
 				_, err = f.service.Load(t.Context(), session.Selection{Scope: f.scope(), Mode: session.SelectReply, ReplyMessageID: second})
 				require.ErrorIs(t, err, session.ErrMiss)
+
+				repo.fail.Store(false)
+				next := f.chat(t, cfg, sessionMessage(30, 7, 120, "NEXT_INPUT"), nil)
+				text = replySessionSchemaText(mdl.capturedInputs()[2])
+				require.Contains(t, text, "CHILD_INPUT", "the next latest selection misses and the legacy context carries the failed turn")
+				require.Contains(t, text, "CHILD_FINAL")
+				require.Nil(t, f.node(t, next).Parent)
+				loaded, err := f.service.Load(t.Context(), session.Selection{Scope: f.scope(), Mode: session.SelectReply, ReplyMessageID: first})
+				require.NoError(t, err, "replying to the dropped latest parent still loads it")
+				require.NoError(t, loaded.Parent.Close())
 			} else {
 				require.Len(t, turns, 2, "a published session hit skips the raw-turn fallback")
 				root := f.node(t, first)
 				require.Equal(t, &root.Ref, f.node(t, second).Parent)
+				next := f.chat(t, cfg, sessionMessage(30, 7, 120, "NEXT_INPUT"), nil)
+				child := f.node(t, second)
+				require.Equal(t, &child.Ref, f.node(t, next).Parent)
 			}
 		})
 	}

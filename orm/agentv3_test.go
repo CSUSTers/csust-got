@@ -555,3 +555,40 @@ func TestAgentV3AddMemoryCheckedEnforcesQuotaUnderConcurrency(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, quota+2)
 }
+
+func TestAgentV3MemoryEpochAdvancesOnlyOnDeletion(t *testing.T) {
+	setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	epoch := func() int64 {
+		t.Helper()
+		got, err := AgentV3GetMemoryEpoch(ctx, scope)
+		require.NoError(t, err)
+		return got
+	}
+	rebuild := func() {
+		t.Helper()
+		require.NoError(t, AgentV3RebuildMemorySnapshot(ctx, scope, 0, buildAgentV3MemorySnapshotForTest))
+	}
+	require.Zero(t, epoch())
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "first", Content: "first"}, 0))
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "second", Content: "second"}, 0))
+	rebuild()
+	require.Zero(t, epoch(), "adding memory never advances the epoch")
+
+	require.NoError(t, AgentV3ForgetMemory(ctx, scope, "missing"))
+	require.Zero(t, epoch(), "forgetting an unknown id deletes nothing")
+
+	require.NoError(t, AgentV3ForgetMemory(ctx, scope, "first"))
+	require.Equal(t, int64(1), epoch())
+	rebuild()
+	require.Equal(t, int64(2), epoch(), "the first rebuild after a deletion invalidates turns that read the stale snapshot")
+	snapshot, err := AgentV3GetMemorySnapshot(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), snapshot.Epoch)
+	require.Equal(t, "second", snapshot.Content)
+
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "third", Content: "third"}, 0))
+	rebuild()
+	require.Equal(t, int64(2), epoch(), "later rebuilds keep the epoch")
+}

@@ -331,18 +331,62 @@ func TestStreamFinalLongOutputIsSplitIntoOrderedMessages(t *testing.T) {
 	require.Equal(t, util.EscapeTgMDv2ReservedChars(text), strings.Join(joined, "\n"), "chunks are escaped individually and lose nothing")
 }
 
-func TestStreamFinalLongOutputStopsAtFirstFailedChunk(t *testing.T) {
-	setupDeliveryConfig(t)
-	d := newDeliveryTelegram(t)
-	d.script("", "", `{"ok":false,"error_code":500,"description":"fixture send failure"}`, `{"ok":false,"error_code":500,"description":"fixture send failure"}`)
-	sp := newDeliveryStreamProcessor(t, d, &config.AgentOutputConfig{})
-	sp.processChunk(schema.AssistantMessage(longDeliveryText(100), nil))
+const deliveryFailureBody = `{"ok":false,"error_code":500,"description":"fixture send failure"}`
 
-	_, _, _, err := sp.finalize()
+func TestFinalLongOutputPartialDelivery(t *testing.T) {
+	tests := []struct {
+		name      string
+		stream    bool
+		script    []string
+		delivered int
+	}{
+		{name: "stream third chunk fails", stream: true, script: []string{"", "", deliveryFailureBody, deliveryFailureBody}, delivered: 2},
+		{name: "non-stream third chunk fails", script: []string{"", "", deliveryFailureBody, deliveryFailureBody}, delivered: 2},
+		{name: "stream first chunk fails", stream: true, script: []string{deliveryFailureBody, deliveryFailureBody}},
+		{name: "non-stream first chunk fails", script: []string{deliveryFailureBody, deliveryFailureBody}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupDeliveryConfig(t)
+			d := newDeliveryTelegram(t)
+			d.script(tt.script...)
+			text := longDeliveryText(100)
+			var delivered []*tb.Message
+			var last, sent *tb.Message
+			var err error
+			if tt.stream {
+				sp := newDeliveryStreamProcessor(t, d, &config.AgentOutputConfig{})
+				sp.processChunk(schema.AssistantMessage(text, nil))
+				_, _, sent, err = sp.finalize()
+				delivered, last = sp.deliveredMsgs, sp.deliveredMsg
+			} else {
+				tbCtx := d.bot.NewContext(tb.Update{Message: sessionMessage(10, 7, 0, "input")})
+				placeholder := &tb.Message{ID: 42, Chat: &tb.Chat{ID: -100}}
+				var result telegramResponseResult
+				result, err = nonStreamResponseWithDelivery(t.Context(), d.bot, tbCtx, text, "", &config.AgentOutputConfig{}, placeholder, false, false)
+				delivered, last, sent = result.deliveredAll, result.delivered, result.sent
+			}
 
-	require.Error(t, err)
-	require.Nil(t, sp.deliveredMsg, "a partially delivered final is not proof of delivery")
-	require.NotNil(t, sp.placeholderMsg, "the placeholder already carries the first chunk and stays")
+			calls := d.finalCalls()
+			if tt.delivered == 0 {
+				require.Error(t, err)
+				require.Empty(t, delivered)
+				require.Nil(t, last)
+				require.Len(t, calls, 2, "no later chunk and no notice after the first chunk failed")
+				return
+			}
+			require.NoError(t, err, "visible partial content is committed, not reported as a failure")
+			require.Len(t, delivered, tt.delivered)
+			require.Equal(t, 42, delivered[0].ID)
+			require.Equal(t, delivered[1], last)
+			require.Equal(t, delivered[1].ID, sent.ID, "the last delivered chunk carries the saved response")
+			require.Len(t, calls, 5, "edit, chunk 2, chunk 3 formatted and raw, then the notice")
+			notice := calls[4]
+			require.Equal(t, "sendMessage", notice.method)
+			require.Equal(t, telegramPartialDeliveryNotice, deliveryText(notice))
+			require.Equal(t, delivered[1].ID, deliveryReplyTo(notice), "the notice replies to the last delivered chunk")
+		})
+	}
 }
 
 func TestStreamFinalRichFailureFallsBackToPlainText(t *testing.T) {

@@ -259,7 +259,7 @@ func sessionValidateNode(n session.Node, scope session.Scope, dagID string, comm
 	if n.Scope != scope || n.Ref.Validate() != nil || n.Ref.DAGID != dagID || n.Version != session.Version || n.Agent == "" || !session.ValidID(n.RunID) || n.FileName != n.Ref.NodeID+".jsonl" || n.Parent != nil && (n.Parent.Validate() != nil || n.Parent.DAGID != dagID) {
 		return session.ErrCorrupt
 	}
-	if n.RedirectedFrom != nil && (n.Parent != nil || n.RedirectedFrom.Validate() != nil) {
+	if n.MemoryEpoch < 0 || n.RedirectedFrom != nil && (n.Parent != nil || n.RedirectedFrom.Validate() != nil) {
 		return session.ErrCorrupt
 	}
 	if committed {

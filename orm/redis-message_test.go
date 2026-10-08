@@ -396,3 +396,71 @@ func TestSetMessageConcurrentSnapshotsConvergeOnNewest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "edited", got.Text)
 }
+
+func TestSameSecondEditsOrderedBySeq(t *testing.T) {
+	tests := []struct {
+		name  string
+		order []uint64
+		want  string
+	}{
+		{name: "in_order", order: []uint64{1700000000000001, 1700000000000002}, want: "seq 1700000000000002"},
+		{name: "late_old_goroutine", order: []uint64{1700000000000002, 1700000000000001}, want: "seq 1700000000000002"},
+		{name: "legacy_then_seq", order: []uint64{0, 3}, want: "seq 3"},
+		{name: "seq_then_legacy", order: []uint64{3, 0}, want: "seq 3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			for _, seq := range tt.order {
+				edit := cachedTextMessage(9, fmt.Sprintf("seq %d", seq))
+				edit.LastEdit = 1700000100
+				require.NoError(t, PushMessageToStreamWithSeq(edit, seq))
+				require.NoError(t, SetMessageWithSeq(edit, seq))
+			}
+
+			messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+			require.NoError(t, err)
+			require.Len(t, messages, 1)
+			require.Equal(t, tt.want, messages[0].Text)
+
+			best, _, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{MinID: 9})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, best[0].Text)
+
+			got, err := GetMessage(-100, 9)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Text)
+		})
+	}
+}
+
+func TestSetMessageWithSeqStillHonoursEditTime(t *testing.T) {
+	setupMessageCacheRedis(t)
+	newer := cachedTextMessage(10, "newer edit")
+	newer.LastEdit = 1700000200
+	require.NoError(t, SetMessageWithSeq(newer, 1))
+	older := cachedTextMessage(10, "older edit")
+	older.LastEdit = 1700000100
+	require.NoError(t, SetMessageWithSeq(older, 2))
+
+	got, err := GetMessage(-100, 10)
+	require.NoError(t, err)
+	require.Equal(t, "newer edit", got.Text)
+}
+
+func TestSetMessageWithoutSeqKeepsLegacyEncoding(t *testing.T) {
+	miniRedis := setupMessageCacheRedis(t)
+	message := cachedTextMessage(11, "plain")
+	require.NoError(t, SetMessage(message))
+	stored, err := miniRedis.Get(wrapKeyWithChatMsg("message_full", -100, 11))
+	require.NoError(t, err)
+	require.JSONEq(t, string(cachedMessageJSON(t, message)), stored)
+
+	require.NoError(t, SetMessageWithSeq(message, 7))
+	stored, err = miniRedis.Get(wrapKeyWithChatMsg("message_full", -100, 11))
+	require.NoError(t, err)
+	require.Contains(t, stored, `"csust_cache_seq":7`)
+	got, err := GetMessage(-100, 11)
+	require.NoError(t, err)
+	require.Equal(t, "plain", got.Text)
+}

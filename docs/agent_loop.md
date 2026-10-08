@@ -58,9 +58,12 @@ agent_v3:
 
 `fetchPublicImageURL` 只允许 http/https、80/443 端口且解析结果全部为公网地址的 URL。重定向不交给 `http.Client` 自动跟随，而是手动处理（最多 5 跳），每一跳都重新解析、校验并固定到校验过的 IP：
 
+- 公网地址判定（`isPublicIP`）：IPv4 拒绝回环、私网、链路本地、组播、0/8、100.64/10、192.0.0/24、文档段、198.18/15 与 240/4；IPv4 映射地址（`::ffff:0:0/96`）按 IPv4 规则判定。IPv6 在标准库判定之外按 `nonGlobalIPv6Ranges` 表拒绝全部非全局特殊用途前缀：`::/96`（含 `::`、`::1` 与已废弃的 IPv4 兼容地址）、`100::/64`、`2001::/32`（Teredo）、`2001:2::/48`、`2001:10::/28`、`2001:20::/28`、`2001:db8::/32`、`3fff::/20`、`5f00::/16`、`fc00::/7`、`fe80::/10`、`fec0::/10`（已废弃的站点本地）与 `ff00::/8`。内嵌 IPv4 的前缀按内嵌地址判定：`64:ff9b::/96` 与 `2002::/16`（6to4）分别取低 32 位与第 2–5 字节；本地 NAT64 `64:ff9b:1::/48` 只接受子网位（第 6–11 字节）全零的 /96 布局，此时 RFC 6052 其他前缀长度的解码都会落在 0.0.0.0/8，低 32 位是唯一可达的 IPv4。
 - 单跳期限：每一跳的期限为调用方 ctx 期限与 60s（`imageHopTimeout`）取小，整跳（所有候选尝试、响应头以及之后读取和关闭响应体）共用一个带该期限的 ctx（`context.WithDeadline`），`http.Client` 不再设置 `Timeout`，因此换 IP 重发不会重新获得 60s，读 body 也不会超出本跳期限；返回的 body 关闭时释放该 ctx。
 - 多地址回退：主机名解析出多个 A/AAAA 记录时保留全部校验过的地址，按解析顺序逐个尝试（不做 happy-eyeballs）。每次尝试的预算是本跳 ctx 的子 ctx，取本跳剩余时间除以剩余候选数，仍有剩余时间时下限 2s 但不超过剩余时间；本跳期限已过时立即停止，不再尝试后续候选；调用方取消后同样不再尝试。连接始终使用 IP 字面量，代理和拨号器都不会拿到主机名去自行解析。所有候选都失败时返回合并后的错误（`errors.Join`，每项带 `ip:port`）。
 - 直连：拨号器在连接时再次解析并校验，依次连接校验过的 IP，直到某个地址建立连接。
 - HTTP/HTTPS 代理（`proxy`）：不使用 `Transport.Proxy`，而是由拨号器向代理发起 `CONNECT <校验过的 IP>:<端口>` 隧道，Host 头和 TLS SNI 仍是原始主机名，代理不会自行解析主机名。代理必须允许对 80/443 端口的 CONNECT。某个 IP 的隧道建立失败（非 200 响应或读取失败）时换下一个 IP 重新 CONNECT；全部被拒绝时返回 `errImageURLProxyConnect`。代理本身不可用（连不上代理、与 HTTPS 代理握手失败或 407 认证失败）时不再尝试其他 IP。
-- SOCKS5 代理：请求 URL 的 host 改写为校验过的 IP，`req.Host` 与 TLS `ServerName` 保持原始主机名，SOCKS 服务端收到的是 IP 而非域名。只有在尚未建立连接时（SOCKS CONNECT 失败、TLS 握手失败或超出本次尝试的时间预算，以 `httptrace` 的 `GotConn` 判断）才用下一个 IP 重发请求；已经拿到连接后的错误和任何 HTTP 响应都原样返回，不会换 IP 重试。
+- SOCKS5 代理：请求 URL 的 host 改写为校验过的 IP，`req.Host` 与 TLS `ServerName` 保持原始主机名，SOCKS 服务端收到的是 IP 而非域名。已经拿到连接（`httptrace` 的 `GotConn`）后的错误和任何 HTTP 响应都原样返回，不会换 IP 重试。尚未拿到连接时由 `classifySocksFailure` 区分：
+  - 目标侧失败才换下一个 IP：SOCKS CONNECT 回复 network unreachable、host unreachable、connection refused、TTL expired（标准库报为 `socks connect …: unknown error <原因>`），超出本次尝试的时间预算，以及 SOCKS 成功后与目标的 TLS 握手失败。
+  - 代理不可用则标记 `errImageProxyUnusable` 并停止，不再对其他 IP 重复连接和认证：连不上代理（`httptrace` 的 `ConnectDone` 从未成功，日志 `image proxy unreachable`），或代理 TCP 可达但会话被代理本身拒绝（认证失败、无可接受的认证方式、协议版本或报文异常、general SOCKS server failure、connection not allowed by ruleset、command not supported、address type not supported 及未知回复码，日志 `image proxy reachable but SOCKS negotiation failed`）。
 - 其他代理 scheme 无法固定 IP，直接按策略错误拒绝下载。

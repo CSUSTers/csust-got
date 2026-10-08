@@ -7,9 +7,10 @@ import (
 )
 
 type inflightTurns struct {
-	mu    sync.Mutex
-	count atomic.Int64
-	idle  chan struct{}
+	mu      sync.Mutex
+	count   atomic.Int64
+	closing bool
+	idle    chan struct{}
 }
 
 var inflight = newInflightTurns()
@@ -20,12 +21,22 @@ func newInflightTurns() *inflightTurns {
 	return &inflightTurns{idle: idle}
 }
 
-func (t *inflightTurns) begin() {
+func (t *inflightTurns) begin() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.closing {
+		return false
+	}
 	if t.count.Add(1) == 1 {
 		t.idle = make(chan struct{})
 	}
+	return true
+}
+
+func (t *inflightTurns) close() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.closing = true
 }
 
 func (t *inflightTurns) end() {
@@ -51,9 +62,14 @@ func (t *inflightTurns) wait(ctx context.Context) error {
 	}
 }
 
-// BeginInflightTurn marks the start of a top-level interactive agent turn.
-func BeginInflightTurn() {
-	inflight.begin()
+// BeginInflightTurn registers a top-level interactive agent turn; it returns false once BeginShutdown has closed intake.
+func BeginInflightTurn() bool {
+	return inflight.begin()
+}
+
+// BeginShutdown closes turn intake so WaitInflight cannot miss a turn that registers after the drain starts.
+func BeginShutdown() {
+	inflight.close()
 }
 
 // EndInflightTurn marks the end of a turn started with BeginInflightTurn.

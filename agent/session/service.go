@@ -231,7 +231,7 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		return LoadResult{}, err
 	}
 	if err = context.Cause(candidateCtx); err == nil && accept != nil {
-		err = accept(candidateCtx, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
+		err = accept(candidateCtx, &LoadCandidate{Messages: messages, MemoryEpoch: pinned.Nodes[len(pinned.Nodes)-1].MemoryEpoch, ancestorReplyIDs: ancestorReplyIDs})
 	}
 	if err != nil {
 		return LoadResult{}, err
@@ -477,7 +477,7 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 {
+	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 || req.MemoryEpoch < 0 {
 		return Node{}, ErrCorrupt
 	}
 	if req.Receipt.RedirectFrom != nil && (req.Parent != nil || req.Receipt.RedirectFrom.Validate() != nil) {
@@ -515,7 +515,7 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 			node = *published
 			return nil
 		}
-		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID}
+		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID, MemoryEpoch: req.MemoryEpoch}
 		if req.Parent != nil {
 			if req.Parent.alive() {
 				err = s.repo.Renew(op, req.Scope, req.Parent.lease, s.options.LeaseDuration)
@@ -574,6 +574,27 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 		return Node{}, err
 	}
 	return node, nil
+}
+
+// DropLatest stops latest selection from returning ref or any older node of agent; reply
+// selection of those nodes is unaffected.
+func (s *Service) DropLatest(ctx context.Context, scope Scope, agent string, ref NodeRef) error {
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	scope, err = s.scope(scope)
+	if err != nil {
+		return err
+	}
+	if agent == "" || ref.Validate() != nil {
+		return ErrCorrupt
+	}
+	if err = s.repo.DropLatest(op, scope, agent, ref); err != nil {
+		return err
+	}
+	return op.Err()
 }
 
 func (s *Service) compensate(files *ScopeFiles, scope Scope, intent Intent) error {

@@ -27,26 +27,36 @@ var ErrInvalidCachedMessage = errors.New("invalid cached message")
 
 // SetMessage stores the full snapshot unless the cache already holds a newer edit of the same message.
 func SetMessage(msg *Message) error {
+	return SetMessageWithSeq(msg, 0)
+}
+
+// SetMessageWithSeq breaks same-second edit ties with seq, a process-monotonic receive order; legacy snapshots count as seq 0.
+func SetMessageWithSeq(msg *Message, seq uint64) error {
 	if msg == nil {
 		return ErrMessageIsNil
 	}
 
 	key := wrapKeyWithChatMsg("message_full", msg.Chat.ID, msg.ID)
 
-	jsonData, err := json.Marshal(msg)
+	jsonData, err := json.Marshal(cachedMessageSnapshot{Message: msg, CacheSeq: seq})
 	if err != nil {
 		log.Error("marshal message to json failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
 		return err
 	}
 
-	if err = setMessageIfNewer(context.TODO(), key, msg, jsonData); err != nil {
+	if err = setMessageIfNewer(context.TODO(), key, msg, seq, jsonData); err != nil {
 		log.Error("set message to redis failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(err))
 		return err
 	}
 	return nil
 }
 
-// setMessageScript replaces the snapshot only when the incoming edit_date/date are at least as new as the stored ones.
+type cachedMessageSnapshot struct {
+	*Message
+	CacheSeq uint64 `json:"csust_cache_seq,omitempty"`
+}
+
+// setMessageScript replaces the snapshot only when the incoming (edit_date, date, seq) is at least as new as the stored one.
 var setMessageScript = redis.NewScript(`
 local stored = redis.call('GET', KEYS[1])
 if stored then
@@ -54,9 +64,11 @@ if stored then
   if ok and type(current) == 'table' then
     local edit = tonumber(current['edit_date']) or 0
     local date = tonumber(current['date']) or 0
+    local seq = tonumber(current['csust_cache_seq']) or 0
     local newEdit = tonumber(ARGV[2])
     local newDate = tonumber(ARGV[3])
-    if newEdit < edit or (newEdit == edit and newDate < date) then
+    local newSeq = tonumber(ARGV[5])
+    if newEdit < edit or (newEdit == edit and (newDate < date or (newDate == date and newSeq < seq))) then
       return 0
     end
   end
@@ -65,17 +77,25 @@ redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4])
 return 1
 `)
 
-func setMessageIfNewer(ctx context.Context, key string, msg *Message, jsonData []byte) error {
+func setMessageIfNewer(ctx context.Context, key string, msg *Message, seq uint64, jsonData []byte) error {
 	ttl := int64((24 * time.Hour).Seconds())
-	return setMessageScript.Run(ctx, rc, []string{key}, jsonData, msg.LastEdit, msg.Unixtime, ttl).Err()
+	return setMessageScript.Run(ctx, rc, []string{key}, jsonData, msg.LastEdit, msg.Unixtime, ttl, strconv.FormatUint(seq, 10)).Err()
 }
 
-// compareMessageSnapshots orders snapshots of one message by edit time, then send time.
-func compareMessageSnapshots(a, b *Message) int {
-	if c := cmp.Compare(a.LastEdit, b.LastEdit); c != 0 {
+type messageSnapshot struct {
+	message *Message
+	seq     uint64
+}
+
+// compareMessageSnapshots orders snapshots of one message by edit time, send time, then receive sequence.
+func compareMessageSnapshots(a, b messageSnapshot) int {
+	if c := cmp.Compare(a.message.LastEdit, b.message.LastEdit); c != 0 {
 		return c
 	}
-	return cmp.Compare(a.Unixtime, b.Unixtime)
+	if c := cmp.Compare(a.message.Unixtime, b.message.Unixtime); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.seq, b.seq)
 }
 
 const (
@@ -83,6 +103,7 @@ const (
 	messageStreamFieldMessage       = "message"
 	messageStreamFieldID            = "id"
 	messageStreamFieldEdited        = "edited"
+	messageStreamFieldSeq           = "seq"
 )
 
 // MessageStreamQuery selects cached messages by Telegram message ID; zero bounds are open.
@@ -95,6 +116,11 @@ type MessageStreamQuery struct {
 
 // PushMessageToStream appends a message snapshot; entry IDs are server-generated so late or edited pushes never fail.
 func PushMessageToStream(msg *Message) error {
+	return PushMessageToStreamWithSeq(msg, 0)
+}
+
+// PushMessageToStreamWithSeq records seq so readers can order same-second edits by receive order.
+func PushMessageToStreamWithSeq(msg *Message, seq uint64) error {
 	if msg == nil {
 		return ErrMessageIsNil
 	}
@@ -110,6 +136,9 @@ func PushMessageToStream(msg *Message) error {
 	values := []any{messageStreamFieldID, strconv.Itoa(msg.ID), messageStreamFieldMessage, jsonData}
 	if msg.LastEdit != 0 {
 		values = append(values, messageStreamFieldEdited, "1")
+	}
+	if seq != 0 {
+		values = append(values, messageStreamFieldSeq, strconv.FormatUint(seq, 10))
 	}
 	resp := rc.XAdd(context.TODO(), &redis.XAddArgs{
 		Stream: key,
@@ -245,7 +274,7 @@ func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, 
 	return msg, nil
 }
 
-// GetMessagesFromStream returns distinct messages in the query range sorted by message ID, keeping the newest snapshot per ID by edit time, send time, then stream order.
+// GetMessagesFromStream returns distinct messages in the query range sorted by message ID, keeping the newest snapshot per ID by edit time, send time, receive sequence, then stream order.
 func GetMessagesFromStream(chatID int64, query MessageStreamQuery) ([]*Message, error) {
 	messages, _, err := getMessagesFromStream(chatID, query, false)
 	return messages, err
@@ -267,7 +296,7 @@ func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bo
 	}
 
 	// Snapshots are stored concurrently, so an older snapshot may be appended after a newer edit.
-	latest := make(map[int]*Message, len(records))
+	latest := make(map[int]messageSnapshot, len(records))
 	for _, record := range records {
 		seen := false
 		if id, ok := streamRecordMessageID(record); ok {
@@ -287,15 +316,16 @@ func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bo
 		if !query.contains(message.ID) {
 			continue
 		}
-		if current, ok := latest[message.ID]; ok && compareMessageSnapshots(message, current) <= 0 {
+		snapshot := messageSnapshot{message: message, seq: streamRecordSeq(record)}
+		if current, ok := latest[message.ID]; ok && compareMessageSnapshots(snapshot, current) <= 0 {
 			continue
 		}
-		latest[message.ID] = message
+		latest[message.ID] = snapshot
 	}
 
 	messages := make([]*Message, 0, len(latest))
-	for _, message := range latest {
-		messages = append(messages, message)
+	for _, snapshot := range latest {
+		messages = append(messages, snapshot.message)
 	}
 	sort.Slice(messages, func(i, j int) bool { return messages[i].ID < messages[j].ID })
 	if query.Count > 0 && int64(len(messages)) > query.Count {
@@ -331,6 +361,18 @@ func streamRecordMessageID(record redis.XMessage) (int, bool) {
 		return 0, false
 	}
 	return id, true
+}
+
+func streamRecordSeq(record redis.XMessage) uint64 {
+	raw, ok := record.Values[messageStreamFieldSeq].(string)
+	if !ok {
+		return 0
+	}
+	seq, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return seq
 }
 
 func decodeStreamRecord(chatID int64, record redis.XMessage) (*Message, error) {

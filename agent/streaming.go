@@ -615,8 +615,10 @@ func (d telegramDeliverer) sendChunk(replyTo *tb.Message, chunk telegramChunk, w
 }
 
 // deliverChunks delivers the first chunk through first and every later chunk as a reply to the previous one.
-// It returns the messages proven delivered so far together with the first error; an accepted call that
-// yields no usable message is not an error, it simply contributes no proof.
+// It stops at the first chunk that still fails after its retries. When nothing was proven delivered the error
+// is returned; otherwise the chunks the user already sees are the delivery proof and no error is returned, so
+// the turn stays continuable (deleting them would destroy content already read) and a short notice is sent.
+// An accepted call that yields no usable message is not an error, it simply contributes no proof.
 func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Message, first func(telegramChunk) (*tb.Message, error)) ([]*tb.Message, error) {
 	delivered := make([]*tb.Message, 0, len(chunks))
 	for i, chunk := range chunks {
@@ -628,7 +630,11 @@ func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Mes
 			msg, err = d.sendChunk(replyTo, chunk, true)
 		}
 		if err != nil {
-			return delivered, err
+			if len(delivered) == 0 {
+				return nil, err
+			}
+			d.notifyPartialDelivery(delivered[len(delivered)-1], i, len(chunks), err)
+			return delivered, nil
 		}
 		if msg != nil {
 			delivered = append(delivered, msg)
@@ -636,6 +642,21 @@ func (d telegramDeliverer) deliverChunks(chunks []telegramChunk, replyTo *tb.Mes
 		}
 	}
 	return delivered, nil
+}
+
+const telegramPartialDeliveryNotice = "后续内容发送失败，可回复上一条继续"
+
+// notifyPartialDelivery logs a final reply cut short at chunk failed and best-effort tells the user,
+// replying to the last delivered chunk because that message is what continues the session.
+func (d telegramDeliverer) notifyPartialDelivery(last *tb.Message, failed, total int, cause error) {
+	zap.L().Warn("agentv3: final reply only partially delivered",
+		zap.Int("failed_chunk", failed), zap.Int("chunks", total), zap.Int("last_delivered_id", last.ID), zap.Error(cause))
+	if d.chat == nil {
+		return
+	}
+	if _, err := d.sender.Send(d.chat, telegramPartialDeliveryNotice, &tb.SendOptions{ReplyTo: last, AllowWithoutReply: true}); err != nil {
+		zap.L().Debug("agentv3: failed to send partial delivery notice", zap.Error(err))
+	}
 }
 
 // NonStreamResponse sends a complete response without streaming.
