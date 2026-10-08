@@ -367,6 +367,8 @@ type fakeSocks5 struct {
 	requests []string
 	hosts    []string
 	fail     map[string]bool
+	delay    map[string]time.Duration
+	stream   func(conn net.Conn, reader *bufio.Reader)
 	origin   http.Handler
 }
 
@@ -425,13 +427,18 @@ func (s *fakeSocks5) serve(conn net.Conn) {
 	s.mu.Lock()
 	request := fmt.Sprintf("%s:%d", addr, int(port[0])<<8|int(port[1]))
 	s.requests = append(s.requests, request)
-	fail := s.fail[request]
+	fail, delay, stream := s.fail[request], s.delay[request], s.stream
 	s.mu.Unlock()
+	time.Sleep(delay)
 	if fail {
 		_, _ = conn.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
 		return
 	}
 	_, _ = conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+	if stream != nil {
+		stream(conn, reader)
+		return
+	}
 	serveTunnelledRequest(conn, reader, s.origin, func(host string) {
 		s.mu.Lock()
 		s.hosts = append(s.hosts, host)
@@ -513,7 +520,9 @@ func TestImageAttemptBudget(t *testing.T) {
 		{name: "split evenly", left: 30 * time.Second, remaining: 3, wantMin: 9 * time.Second, wantMax: 10 * time.Second},
 		{name: "last candidate gets the rest", left: 30 * time.Second, remaining: 1, wantMin: 29 * time.Second, wantMax: 30 * time.Second},
 		{name: "floor", left: 3 * time.Second, remaining: 4, wantMin: agentImageAttemptMinBudget, wantMax: agentImageAttemptMinBudget},
-		{name: "expired", left: -time.Second, remaining: 2, wantMin: agentImageAttemptMinBudget, wantMax: agentImageAttemptMinBudget},
+		{name: "floor capped by time left", left: time.Second, remaining: 3, wantMin: 900 * time.Millisecond, wantMax: time.Second},
+		{name: "expired stops", left: -time.Second, remaining: 2},
+		{name: "expired last candidate stops", left: -time.Millisecond, remaining: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -525,6 +534,51 @@ func TestImageAttemptBudget(t *testing.T) {
 }
 
 var errTestDialRefused = errors.New("refused")
+
+func TestDialImageCandidatesStopsAfterHopDeadline(t *testing.T) {
+	var dials int
+	_, err := dialImageCandidates(t.Context(), time.Now().Add(-time.Millisecond), []string{"a:80", "b:80"},
+		func(context.Context, string) (net.Conn, error) {
+			dials++
+			return nil, errTestDialRefused
+		})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Zero(t, dials, "no candidate is granted the floor once the hop deadline has passed")
+}
+
+func shortenImageHopTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := imageHopTimeout
+	imageHopTimeout = d
+	t.Cleanup(func() { imageHopTimeout = old })
+}
+
+// streamSlowImage answers the tunnelled request with headers at once and then one body byte every 100ms.
+func streamSlowImage(conn net.Conn, reader *bufio.Reader) {
+	if _, err := http.ReadRequest(reader); err != nil {
+		return
+	}
+	if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 100\r\n\r\n")); err != nil {
+		return
+	}
+	for range 100 {
+		time.Sleep(100 * time.Millisecond)
+		if _, err := conn.Write([]byte{'x'}); err != nil {
+			return
+		}
+	}
+}
+
+func readImageWithin(t *testing.T, rawURL string) (time.Duration, error) {
+	t.Helper()
+	start := time.Now()
+	resp, err := fetchPublicImageURL(t.Context(), rawURL)
+	if err == nil {
+		_, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+	}
+	return time.Since(start), err
+}
 
 func TestDialImageCandidates(t *testing.T) {
 	refused := errTestDialRefused
@@ -688,4 +742,65 @@ func TestFetchPublicImageURLThroughSocksAllAddressesFail(t *testing.T) {
 	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests)
 	require.Empty(t, hosts)
 	requireOnlyIPTargets(t, requests)
+}
+
+func TestFetchPublicImageURLThroughSocksSharesHopDeadline(t *testing.T) {
+	const hop = 1500 * time.Millisecond
+	shortenImageHopTimeout(t, hop)
+	stubPublicImageResolver(t, map[string][]string{"multi.test": {"93.184.216.34", "2606:4700::1111", "8.8.8.8"}})
+	socks := startFakeSocks5(t, imageOriginHandler())
+	socks.mu.Lock()
+	socks.fail = map[string]bool{"93.184.216.34:80": true}
+	socks.delay = map[string]time.Duration{"93.184.216.34:80": 300 * time.Millisecond}
+	socks.stream = streamSlowImage
+	socks.mu.Unlock()
+
+	elapsed, err := readImageWithin(t, "http://multi.test/image.png")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Greater(t, elapsed, hop-200*time.Millisecond)
+	require.Less(t, elapsed, hop+500*time.Millisecond, "the slow body is cut off at the hop deadline")
+	requests, _ := socks.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests, "no third attempt after a connection")
+}
+
+func TestFetchPublicImageURLHopDeadlineBoundsBody(t *testing.T) {
+	const hop = time.Second
+	shortenImageHopTimeout(t, hop)
+	t.Run("direct", func(t *testing.T) {
+		allowLoopbackOnly(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+			for range 100 {
+				w.(http.Flusher).Flush()
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
+				_, _ = w.Write([]byte{'x'})
+			}
+		}))
+		t.Cleanup(server.Close)
+		elapsed, err := readImageWithin(t, server.URL+"/image.png")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Less(t, elapsed, hop+500*time.Millisecond)
+	})
+	t.Run("http proxy", func(t *testing.T) {
+		stubMultiAddressImageHost(t)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			conn, buf, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			_, _ = conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+			streamSlowImage(conn, buf.Reader)
+		}))
+		t.Cleanup(server.Close)
+		withImageProxy(t, server.URL)
+		elapsed, err := readImageWithin(t, "http://multi.test/image.png")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Less(t, elapsed, hop+500*time.Millisecond)
+	})
 }

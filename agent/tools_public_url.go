@@ -35,10 +35,12 @@ const (
 	agentImageURLMaxRedirects    = 5
 	agentImageURLResolveWindow   = 5 * time.Second
 	agentImageProxyConnectWindow = 15 * time.Second
-	agentImageClientTimeout      = 60 * time.Second
 	agentImageDialTimeout        = 15 * time.Second
 	agentImageAttemptMinBudget   = 2 * time.Second
 )
+
+// imageHopTimeout caps one redirect hop end to end, including reading the body; tests shorten it.
+var imageHopTimeout = 60 * time.Second
 
 // lookupPublicImageHost resolves hosts for public-address checks; tests override it.
 var lookupPublicImageHost = func(ctx context.Context, host string) ([]net.IP, error) {
@@ -200,9 +202,9 @@ func pinnedDialTargets(ctx context.Context, addr string) ([]string, error) {
 	return targets, nil
 }
 
-// imageHopDeadline is the time budget of one hop: the caller deadline capped by the client timeout.
+// imageHopDeadline is the time budget of one hop: the caller deadline capped by imageHopTimeout.
 func imageHopDeadline(ctx context.Context) time.Time {
-	deadline := time.Now().Add(agentImageClientTimeout)
+	deadline := time.Now().Add(imageHopTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		return d
 	}
@@ -210,12 +212,17 @@ func imageHopDeadline(ctx context.Context) time.Time {
 }
 
 // imageAttemptBudget splits the remaining hop budget evenly over the remaining candidates, like net.Dialer.
+// The floor only applies while time remains and never exceeds it; zero means the hop deadline has passed.
 func imageAttemptBudget(deadline time.Time, remaining int) time.Duration {
-	budget := time.Until(deadline)
+	left := time.Until(deadline)
+	if left <= 0 {
+		return 0
+	}
+	budget := left
 	if remaining > 1 {
 		budget /= time.Duration(remaining)
 	}
-	return max(budget, agentImageAttemptMinBudget)
+	return min(max(budget, agentImageAttemptMinBudget), left)
 }
 
 // dialImageCandidates tries the validated targets in order and stops early on caller cancellation or proxy failure.
@@ -223,7 +230,12 @@ func dialImageCandidates(ctx context.Context, deadline time.Time, targets []stri
 	dial func(context.Context, string) (net.Conn, error)) (net.Conn, error) {
 	errs := make([]error, 0, len(targets))
 	for i, target := range targets {
-		attemptCtx, cancel := context.WithTimeout(ctx, imageAttemptBudget(deadline, len(targets)-i))
+		budget := imageAttemptBudget(deadline, len(targets)-i)
+		if budget <= 0 {
+			errs = append(errs, fmt.Errorf("%s: %w", target, context.DeadlineExceeded))
+			break
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, budget)
 		conn, err := dial(attemptCtx, target)
 		cancel()
 		if err == nil {
@@ -238,6 +250,7 @@ func dialImageCandidates(ctx context.Context, deadline time.Time, targets []stri
 }
 
 // newPublicImageHTTPClient builds a single-hop client that never follows redirects itself.
+// It has no Client.Timeout: the caller's hop context bounds every attempt, the response and the body.
 // Direct and HTTP-proxy hops pin the connection to validated addresses in the dialer (HTTP proxies via CONNECT,
 // so Host and SNI stay the original hostname) and fall back through them in order within deadline.
 // SOCKS hops are pinned through the request URL, and serverName restores certificate verification for https.
@@ -275,7 +288,6 @@ func newPublicImageHTTPClient(proxyURL *url.URL, serverName string, deadline tim
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   agentImageClientTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -389,27 +401,30 @@ func fetchPublicImageHop(ctx context.Context, proxyURL *url.URL, rawURL string) 
 		return nil, "", err
 	}
 	deadline := imageHopDeadline(ctx)
+	hopCtx, cancel := context.WithDeadline(ctx, deadline)
 	client := newPublicImageHTTPClient(proxyURL, target.Hostname(), deadline)
 	defer client.CloseIdleConnections()
 	var resp *http.Response
 	if proxyURL != nil && !isHTTPProxy(proxyURL) {
-		resp, err = doPinnedImageRequests(ctx, client, target, ips, deadline)
+		resp, err = doPinnedImageRequests(hopCtx, client, target, ips, deadline)
 	} else {
 		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
-		if err != nil {
-			return nil, "", err
+		req, err = http.NewRequestWithContext(hopCtx, http.MethodGet, target.String(), nil)
+		if err == nil {
+			resp, err = client.Do(req)
 		}
-		resp, err = client.Do(req)
 	}
 	if err != nil {
+		cancel()
 		return nil, "", err
 	}
 	location := resp.Header.Get("Location")
 	if !isImageRedirectStatus(resp.StatusCode) || location == "" {
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
 		return resp, "", nil
 	}
 	_ = resp.Body.Close()
+	cancel()
 	next, err := target.Parse(location)
 	if err != nil {
 		return nil, "", err
@@ -418,11 +433,17 @@ func fetchPublicImageHop(ctx context.Context, proxyURL *url.URL, rawURL string) 
 }
 
 // doPinnedImageRequests sends the request pinned to each validated IP in order, moving on only while no
-// connection could be established; HTTP responses and post-connect failures are returned as-is.
+// connection could be established and the hop deadline has not passed; HTTP responses and post-connect
+// failures are returned as-is. ctx must carry the hop deadline so it also bounds the response body.
 func doPinnedImageRequests(ctx context.Context, client *http.Client, target *url.URL, ips []net.IP, deadline time.Time) (*http.Response, error) {
 	errs := make([]error, 0, len(ips))
 	for i, ip := range ips {
-		resp, connected, err := doPinnedImageRequest(ctx, client, target, ip, imageAttemptBudget(deadline, len(ips)-i))
+		budget := imageAttemptBudget(deadline, len(ips)-i)
+		if budget <= 0 {
+			errs = append(errs, fmt.Errorf("%s: %w", ip, context.DeadlineExceeded))
+			break
+		}
+		resp, connected, err := doPinnedImageRequest(ctx, client, target, ip, budget)
 		if err == nil {
 			return resp, nil
 		}
