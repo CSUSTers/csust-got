@@ -122,6 +122,11 @@ func startAgentV3SessionMaintenance(ctx context.Context, service *session.Servic
 		if s.catchUpDue(ctx, time.Now(), location) {
 			zap.L().Info("agentv3: running catch-up session collection after missed daily schedule")
 			s.collect(ctx, location)
+			nextCollection, err = session.NextCollection(time.Now(), location)
+			if err != nil {
+				zap.L().Warn("agentv3: session maintenance schedule failed", zap.Error(err))
+				return
+			}
 		}
 		for ctx.Err() == nil {
 			next := time.Now().Add(time.Minute)

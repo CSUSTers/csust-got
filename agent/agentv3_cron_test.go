@@ -549,6 +549,9 @@ func claimCronTask(t *testing.T, f *cronFixture, task cronjob.Task) cronjob.Leas
 }
 
 func TestCronPersistsModelOutcomeBeforeBoundedTraceFinalization(t *testing.T) {
+	previous := cronTraceFinishTimeout
+	cronTraceFinishTimeout = 80 * time.Millisecond
+	t.Cleanup(func() { cronTraceFinishTimeout = previous })
 	f := newCronFixture(t)
 	store := &cronFinishSignalStore{Store: f.s.store, finished: make(chan cronjob.ExecutionResult, 2)}
 	f.s.store = store
@@ -593,6 +596,20 @@ func TestCronPersistsModelOutcomeBeforeBoundedTraceFinalization(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cronjob.OutcomeSucceeded, persisted.LatestResult.Outcome)
 	require.Equal(t, cronjob.RetryUnavailable, persisted.LatestResult.RetryStatus)
+}
+
+func TestCronTraceFinalizationSurvivesCancelledParent(t *testing.T) {
+	s := &agentCronService{}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var finishErr error
+	var hasDeadline bool
+	s.finishCronTrace(ctx, agentCronRunResult{Finalize: func(finishCtx context.Context) {
+		finishErr = finishCtx.Err()
+		_, hasDeadline = finishCtx.Deadline()
+	}})
+	require.NoError(t, finishErr)
+	require.True(t, hasDeadline)
 }
 
 func TestCronExecutionCompletingAfterDeadlineFails(t *testing.T) {

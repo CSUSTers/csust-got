@@ -46,12 +46,17 @@ type agentSessionCatchUpRepository struct {
 	session.Repository
 	scope       session.Scope
 	collections atomic.Int32
+	scopeCalls  atomic.Int32
+	firstDelay  time.Duration
 	mu          sync.Mutex
 	last        string
 	marks       []string
 }
 
 func (r *agentSessionCatchUpRepository) Scopes(context.Context) ([]session.Scope, error) {
+	if r.scopeCalls.Add(1) == 1 && r.firstDelay > 0 {
+		time.Sleep(r.firstDelay)
+	}
 	return []session.Scope{r.scope}, nil
 }
 
@@ -130,9 +135,46 @@ func TestAgentV3SessionStartupCatchUpCollection(t *testing.T) {
 				time.Sleep(time.Minute)
 				synctest.Wait()
 				require.Equal(t, tt.wantCollections, base.collections.Load(), "the minute recovery loop never collects")
+				next, err := session.NextCollection(time.Now(), location)
+				require.NoError(t, err)
+				time.Sleep(time.Until(next) - time.Second)
+				synctest.Wait()
+				require.Equal(t, tt.wantCollections, base.collections.Load(), "no second collection before the next 02:00")
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				require.Equal(t, tt.wantCollections+1, base.collections.Load(), "the next collection runs at the following 02:00")
 			})
 		})
 	}
+}
+
+func TestAgentV3SessionStartupCatchUpAfterSlowRecoveryCollectsOnce(t *testing.T) {
+	f := newAgentSessionFixture(t)
+	files, err := session.NewFileStore(t.TempDir())
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		location := time.FixedZone("slow-recovery", 2*3600-2*60)
+		base := &agentSessionCatchUpRepository{Repository: f.repo, scope: f.scope(), firstDelay: 7 * time.Minute}
+		service, err := session.NewService(agentSessionCatchUpMarkerRepository{base}, files, session.Options{})
+		require.NoError(t, err)
+		require.Equal(t, "01:58", time.Now().In(location).Format("15:04"))
+		s := startAgentV3SessionMaintenance(t.Context(), service, location)
+		defer s.close()
+		time.Sleep(7*time.Minute + time.Second)
+		synctest.Wait()
+		require.Equal(t, int32(1), base.collections.Load(), "slow recovery crossing 02:00 triggers exactly one catch-up collection")
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		require.Equal(t, int32(1), base.collections.Load(), "no second collection right after the catch-up")
+		next, err := session.NextCollection(time.Now(), location)
+		require.NoError(t, err)
+		time.Sleep(time.Until(next) - time.Second)
+		synctest.Wait()
+		require.Equal(t, int32(1), base.collections.Load())
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		require.Equal(t, int32(2), base.collections.Load(), "the next collection runs at tomorrow's 02:00")
+	})
 }
 
 func TestAgentV3SessionStartupCatchUpCollectsExpiredDAG(t *testing.T) {
