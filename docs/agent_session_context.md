@@ -152,7 +152,7 @@ Load 的存储阶段使用有界短 timeout；准备回调遵循 caller / Servic
 
 `agent_v3.session.ttl` 是**整 DAG 的闲置 TTL**，不是逐节点或逐文件年龄，也不是 Redis `EXPIRE`。被接受的成功完整加载和成功提交都更新整 DAG 的最后活跃时间；仅请求开始、失败加载、超限/估算失败拒绝或租约续期不算用户活跃。load=true/save=false 的被接受成功读取也会刷新活跃时间。
 
-每天在进程本地时区的 **02:00** 检查过期的 active DAG，并回收整个 DAG，连同文件、节点、消息映射、最近节点记录及生命周期记录。它不使用 `agent_v3.cron.timezone`，也不依赖 cron runner 是否启用；部署者应设置进程/容器的本地 TZ。每日重新计算当地 02:00，不以固定 24h ticker 替代；DST 重复日期至多运行一次，02:00 不存在时使用当天跳时后的首个有效时刻。成功完成的回收把当地日期写入 Redis 全局区的 last-collection 标记；进程若在当天 02:00 之后启动且标记不是今天（或从未记录），会在启动恢复之后**补跑一次** Collect，避免长期错过每日回收。每分钟的恢复循环仍只处理 pending/deleting，不回收普通 active DAG。
+每天在进程本地时区的 **02:00** 检查过期的 active DAG，并回收整个 DAG，连同文件、节点、消息映射、最近节点记录及生命周期记录。它不使用 `agent_v3.cron.timezone`，也不依赖 cron runner 是否启用；部署者应设置进程/容器的本地 TZ。每日重新计算当地 02:00，不以固定 24h ticker 替代；DST 重复日期至多运行一次，02:00 不存在时使用当天跳时后的首个有效时刻。成功完成的回收把当地日期写入 Redis 全局区的 last-collection 标记；进程若在当天 02:00 之后启动且标记不是今天（或从未记录），会在启动恢复之后**补跑一次** Collect，避免长期错过每日回收。每分钟的恢复循环仍只处理 pending/deleting，不回收普通 active DAG。Collect 失败时不写标记，并在 1 小时后（不晚于下一个当地 02:00）重试，成功后恢复每日 02:00 节奏。
 
 每个 scope 的回收不再整段持有文件锁：intent 恢复、claim/读取 deleting 清单、以及**每个 DAG 的文件删除**各自独立加锁，期间的 Load / Commit 可以穿插进行。Collect 对每个 scope 使用独立的 `CollectTimeout`（默认 2 分钟），与 10 秒的普通操作超时分开；Recover 仍沿用 10 秒预算。
 

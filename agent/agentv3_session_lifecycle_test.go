@@ -211,13 +211,12 @@ func TestAgentV3SessionMaintenanceRecoversBetweenCalendarCollections(t *testing.
 		synctest.Wait()
 		require.EqualValues(t, 1, repo.collections.Load(), "collection failure must not cause an off-schedule active DAG sweep")
 		require.Greater(t, repo.recoveries.Load(), previousRecoveries)
-		next, err = session.NextCollection(time.Now(), location)
-		require.NoError(t, err)
-		time.Sleep(time.Until(next))
+		retry := next.Add(time.Hour)
+		time.Sleep(time.Until(retry))
 		synctest.Wait()
-		require.EqualValues(t, 2, repo.collections.Load())
-		require.Equal(t, next, (<-repo.collectedAt).In(location))
-		require.Equal(t, []string{agentV3SessionCollectionDay(next, location)}, repo.markedDays(), "only the successful collection marks its day")
+		require.EqualValues(t, 2, repo.collections.Load(), "a failed collection is retried an hour later")
+		require.Equal(t, retry, (<-repo.collectedAt).In(location))
+		require.Equal(t, []string{agentV3SessionCollectionDay(retry, location)}, repo.markedDays(), "only the successful collection marks its day")
 	})
 }
 

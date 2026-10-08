@@ -121,8 +121,7 @@ func startAgentV3SessionMaintenance(ctx context.Context, service *session.Servic
 		s.recover(ctx)
 		if s.catchUpDue(ctx, time.Now(), location) {
 			zap.L().Info("agentv3: running catch-up session collection after missed daily schedule")
-			s.collect(ctx, location)
-			nextCollection, err = session.NextCollection(time.Now(), location)
+			nextCollection, err = s.collectAndSchedule(ctx, location)
 			if err != nil {
 				zap.L().Warn("agentv3: session maintenance schedule failed", zap.Error(err))
 				return
@@ -141,8 +140,7 @@ func startAgentV3SessionMaintenance(ctx context.Context, service *session.Servic
 				return
 			case <-timer.C:
 				if collect {
-					s.collect(ctx, location)
-					nextCollection, err = session.NextCollection(time.Now(), location)
+					nextCollection, err = s.collectAndSchedule(ctx, location)
 					if err != nil {
 						zap.L().Warn("agentv3: session maintenance schedule failed", zap.Error(err))
 						return
@@ -163,17 +161,30 @@ func (s *agentV3SessionService) recover(ctx context.Context) {
 	}
 }
 
-func (s *agentV3SessionService) collect(ctx context.Context, location *time.Location) {
+func (s *agentV3SessionService) collectAndSchedule(ctx context.Context, location *time.Location) (time.Time, error) {
+	ok := s.collect(ctx, location)
+	now := time.Now()
+	next, err := session.NextCollection(now, location)
+	if err == nil && !ok {
+		if retry := now.Add(time.Hour); retry.Before(next) {
+			next = retry
+		}
+	}
+	return next, err
+}
+
+func (s *agentV3SessionService) collect(ctx context.Context, location *time.Location) bool {
 	if err := s.service.Collect(ctx); err != nil {
 		if ctx.Err() == nil {
-			zap.L().Warn("agentv3: session collection failed; pending/deleting recovery will retry", zap.Error(err))
+			zap.L().Warn("agentv3: session collection failed; retrying within the hour", zap.Error(err))
 		}
-		return
+		return false
 	}
 	err := s.service.MarkCollection(ctx, agentV3SessionCollectionDay(time.Now(), location))
 	if err != nil && !errors.Is(err, errors.ErrUnsupported) && ctx.Err() == nil {
 		zap.L().Warn("agentv3: session collection marker was not saved", zap.Error(err))
 	}
+	return true
 }
 
 func (s *agentV3SessionService) catchUpDue(ctx context.Context, now time.Time, location *time.Location) bool {

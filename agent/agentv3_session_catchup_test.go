@@ -2,6 +2,7 @@ package agentv3
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,12 +43,15 @@ func TestAgentV3SessionCatchUpDecision(t *testing.T) {
 	require.NotEmpty(t, agentV3SessionCollectionDay(time.Now(), nil))
 }
 
+var errAgentSessionClaimFailed = errors.New("claim failed")
+
 type agentSessionCatchUpRepository struct {
 	session.Repository
 	scope       session.Scope
 	collections atomic.Int32
 	scopeCalls  atomic.Int32
 	firstDelay  time.Duration
+	claimFails  atomic.Int32
 	mu          sync.Mutex
 	last        string
 	marks       []string
@@ -70,6 +74,9 @@ func (r *agentSessionCatchUpRepository) Deleting(context.Context, session.Scope)
 
 func (r *agentSessionCatchUpRepository) ClaimDeleting(context.Context, session.Scope, time.Duration) ([]session.Deletion, error) {
 	r.collections.Add(1)
+	if r.claimFails.Add(-1) >= 0 {
+		return nil, errAgentSessionClaimFailed
+	}
 	return nil, nil
 }
 
@@ -200,4 +207,59 @@ func TestAgentV3SessionStartupCatchUpCollectsExpiredDAG(t *testing.T) {
 		last, err := f.service.LastCollection(t.Context())
 		return err == nil && last == agentV3SessionCollectionDay(time.Now(), afternoon)
 	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestAgentV3SessionCollectionRetriesAfterFailure(t *testing.T) {
+	f := newAgentSessionFixture(t)
+	tests := []struct {
+		name   string
+		offset time.Duration
+	}{
+		{"catch-up failure retries in an hour", 3 * time.Hour},
+		{"scheduled failure retries at 03:00", 90 * time.Minute},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files, err := session.NewFileStore(t.TempDir())
+			require.NoError(t, err)
+			synctest.Test(t, func(t *testing.T) {
+				location := time.FixedZone("retry", int(tt.offset/time.Second))
+				base := &agentSessionCatchUpRepository{Repository: f.repo, scope: f.scope()}
+				base.claimFails.Store(1)
+				service, err := session.NewService(agentSessionCatchUpMarkerRepository{base}, files, session.Options{})
+				require.NoError(t, err)
+				s := startAgentV3SessionMaintenance(t.Context(), service, location)
+				defer s.close()
+				synctest.Wait()
+				if tt.offset > 2*time.Hour {
+					require.Equal(t, int32(1), base.collections.Load(), "the catch-up attempt failed")
+				} else {
+					require.Zero(t, base.collections.Load())
+					time.Sleep(30 * time.Minute)
+					synctest.Wait()
+					require.Equal(t, int32(1), base.collections.Load(), "the 02:00 attempt failed")
+				}
+				base.mu.Lock()
+				require.Empty(t, base.marks, "a failed collection does not mark the day")
+				base.mu.Unlock()
+				time.Sleep(time.Hour - time.Second)
+				synctest.Wait()
+				require.Equal(t, int32(1), base.collections.Load(), "no retry before the hour is up")
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				require.Equal(t, int32(2), base.collections.Load(), "retry runs an hour after the failure")
+				base.mu.Lock()
+				require.Equal(t, []string{agentV3SessionCollectionDay(time.Now(), location)}, base.marks)
+				base.mu.Unlock()
+				next, err := session.NextCollection(time.Now(), location)
+				require.NoError(t, err)
+				time.Sleep(time.Until(next) - time.Second)
+				synctest.Wait()
+				require.Equal(t, int32(2), base.collections.Load(), "success resumes the 02:00 schedule")
+				time.Sleep(2 * time.Second)
+				synctest.Wait()
+				require.Equal(t, int32(3), base.collections.Load())
+			})
+		})
+	}
 }
