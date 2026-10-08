@@ -30,7 +30,8 @@ import (
 func main() {
 	config.InitConfig("config.yaml", "BOT")
 	log.InitLogger()
-	defer log.Sync()
+	defer log.Close()
+	config.LogDiagnostics()
 	orm.InitRedis()
 
 	if err := agentv3.Init(context.Background()); err != nil {

@@ -375,7 +375,7 @@ func checkConfig() {
 			}
 		}
 	}
-	warnConfigHygiene()
+	diagnostics = collectDiagnostics()
 
 	BotConfig.DebugOptConfig.checkConfig()
 }

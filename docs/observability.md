@@ -4,7 +4,7 @@ Bot 进程的文件日志、Agent v3 trace JSONL 的落盘方式，以及收到�
 
 ## 文件日志轮转
 
-`log_file_dir` 非空时，日志同时写到 stderr 与 `<log_file_dir>/got.log`（zap 内部错误写 `got_err.log`）。两个文件都由 lumberjack 按大小与天数轮转，旧文件命名为 `got-<时间戳>.log`，默认 gzip 压缩。stderr 输出保持不变；对 stderr 调用 `Sync` 时返回的 `EINVAL` / `ENOTTY` / `EBADF` 会被忽略，不再在退出时打印 `Logger Sync failed`。
+`log_file_dir` 非空时，日志同时写到 stderr 与 `<log_file_dir>/got.log`（zap 内部错误写 `got_err.log`）。两个文件都由 lumberjack 按大小与天数轮转，旧文件命名为 `got-<时间戳>.log`，默认 gzip 压缩。stderr 输出保持不变；对 stderr 调用 `Sync` 时返回的 `EINVAL` / `ENOTTY` / `EBADF` 会被忽略，不再在退出时打印 `Logger Sync failed`。进程退出时 `log.Close()` 会关闭这两个文件句柄（Windows 上未关闭的句柄会阻止删除或移动日志目录）。
 
 ## Trace JSONL 异步写入
 
@@ -19,7 +19,7 @@ Bot 进程的文件日志、Agent v3 trace JSONL 的落盘方式，以及收到�
 1. `bot.Stop()` 停止拉取更新；已经在处理的消息 handler 继续运行。
 2. 主进程等待所有进行中的交互式 agent 轮次结束，最长 `agent_v3.shutdown_grace`；超时则记录 warning 并继续。
 3. `agentv3.Close()`：刷 trace 队列 → 关闭 session 服务 → 停止 cron → 关闭 MCP 连接。
-4. `log.Sync()`。
+4. `log.Close()`：`Sync` 后关闭 `got.log` / `got_err.log` 的文件句柄。
 
 容器编排的 `stop_grace_period`（Compose）或 `terminationGracePeriodSeconds`（k8s）应大于 `shutdown_grace` 加几秒，否则进程会在 drain 完成前被 `SIGKILL`。
 

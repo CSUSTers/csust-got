@@ -3,11 +3,15 @@ package log
 import (
 	"csust-got/config"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -18,16 +22,20 @@ const (
 	errLogFileName = "got_err.log"
 )
 
-var logger *zap.Logger
+var (
+	logger      *zap.Logger
+	closeLogger = func() error { return nil }
+)
 
 // InitLogger init logger.
 func InitLogger() {
-	logger = NewLogger()
+	_ = closeLogger()
+	logger, closeLogger = NewLogger()
 	zap.ReplaceGlobals(logger)
 }
 
-// NewLogger new logger.
-func NewLogger() *zap.Logger {
+// NewLogger builds a logger and a function that closes its rotating log files.
+func NewLogger() (*zap.Logger, func() error) {
 	// create log dir if not exists
 	if config.BotConfig.LogFileDir != "" {
 		if err := os.MkdirAll(config.BotConfig.LogFileDir, 0755); err != nil {
@@ -40,14 +48,16 @@ func NewLogger() *zap.Logger {
 	return buildLogger(prodConfig())
 }
 
-func buildLogger(cfg zap.Config) *zap.Logger {
+func buildLogger(cfg zap.Config) (*zap.Logger, func() error) {
+	output, outFile := outputSyncer(logFileName)
+	errOutput, errFile := outputSyncer(errLogFileName)
 	encoder := zapcore.NewJSONEncoder(cfg.EncoderConfig)
-	core := zapcore.NewCore(encoder, outputSyncer(logFileName), cfg.Level)
+	core := zapcore.NewCore(encoder, output, cfg.Level)
 	if cfg.Sampling != nil {
 		core = zapcore.NewSamplerWithOptions(core, time.Second, cfg.Sampling.Initial, cfg.Sampling.Thereafter)
 	}
 	opts := []zap.Option{
-		zap.ErrorOutput(outputSyncer(errLogFileName)),
+		zap.ErrorOutput(errOutput),
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
 	}
@@ -56,15 +66,27 @@ func buildLogger(cfg zap.Config) *zap.Logger {
 	} else {
 		opts = append(opts, zap.AddStacktrace(zapcore.ErrorLevel))
 	}
-	return zap.New(core, opts...)
+	return zap.New(core, opts...), closeFiles(lo.Compact([]io.Closer{outFile, errFile}))
 }
 
-func outputSyncer(fileName string) zapcore.WriteSyncer {
-	syncers := []zapcore.WriteSyncer{stderrSyncer{}}
-	if dir := config.BotConfig.LogFileDir; dir != "" {
-		syncers = append(syncers, zapcore.AddSync(rotatingFile(filepath.Join(dir, fileName), config.BotConfig.LogConfig)))
+func closeFiles(files []io.Closer) func() error {
+	var once sync.Once
+	var err error
+	return func() error {
+		once.Do(func() {
+			err = errors.Join(lo.Map(files, func(f io.Closer, _ int) error { return f.Close() })...)
+		})
+		return err
 	}
-	return zapcore.NewMultiWriteSyncer(syncers...)
+}
+
+func outputSyncer(fileName string) (zapcore.WriteSyncer, io.Closer) {
+	dir := config.BotConfig.LogFileDir
+	if dir == "" {
+		return stderrSyncer{}, nil
+	}
+	file := rotatingFile(filepath.Join(dir, fileName), config.BotConfig.LogConfig)
+	return zapcore.NewMultiWriteSyncer(stderrSyncer{}, zapcore.AddSync(file)), file
 }
 
 func rotatingFile(path string, cfg *config.LogConfig) *lumberjack.Logger {
@@ -176,5 +198,13 @@ func Panic(msg string, fields ...zap.Field) {
 func Sync() {
 	if err := ignoreUnsyncable(logger.Sync()); err != nil {
 		logger.Error("Logger Sync failed", zap.Error(err))
+	}
+}
+
+// Close syncs the logger and closes its rotating log files.
+func Close() {
+	Sync()
+	if err := closeLogger(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "Logger Close failed:", err)
 	}
 }

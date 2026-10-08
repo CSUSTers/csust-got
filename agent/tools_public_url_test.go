@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"csust-got/config"
 
@@ -137,7 +139,7 @@ func TestDownloadImageRejectsLocalServer(t *testing.T) {
 
 func TestPublicImageHTTPClientBlocksLoopbackDial(t *testing.T) {
 	stubPublicImageResolver(t, map[string][]string{"rebind.test": {"127.0.0.1"}})
-	client := newPublicImageHTTPClient(nil, "")
+	client := newPublicImageHTTPClient(nil, "", time.Now().Add(time.Minute))
 	transport := client.Transport.(*http.Transport)
 	for _, addr := range []string{"127.0.0.1:80", "[::1]:443", "rebind.test:80"} {
 		conn, dialErr := transport.DialContext(t.Context(), "tcp", addr)
@@ -205,6 +207,7 @@ type recordingProxy struct {
 	hosts       []string
 	connects    int32
 	denyConnect bool
+	deny        map[string]bool
 	origin      http.Handler
 }
 
@@ -217,7 +220,7 @@ func (p *recordingProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "absolute-form requests leak the hostname", http.StatusBadRequest)
 		return
 	}
-	if p.denyConnect {
+	if p.denyConnect || p.deny[r.Host] {
 		http.Error(w, "CONNECT denied", http.StatusForbidden)
 		return
 	}
@@ -363,6 +366,7 @@ type fakeSocks5 struct {
 	mu       sync.Mutex
 	requests []string
 	hosts    []string
+	fail     map[string]bool
 	origin   http.Handler
 }
 
@@ -419,8 +423,14 @@ func (s *fakeSocks5) serve(conn net.Conn) {
 	port := make([]byte, 2)
 	_, _ = io.ReadFull(reader, port)
 	s.mu.Lock()
-	s.requests = append(s.requests, fmt.Sprintf("%s:%d", addr, int(port[0])<<8|int(port[1])))
+	request := fmt.Sprintf("%s:%d", addr, int(port[0])<<8|int(port[1]))
+	s.requests = append(s.requests, request)
+	fail := s.fail[request]
 	s.mu.Unlock()
+	if fail {
+		_, _ = conn.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
+		return
+	}
 	_, _ = conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
 	serveTunnelledRequest(conn, reader, s.origin, func(host string) {
 		s.mu.Lock()
@@ -490,4 +500,192 @@ func TestPinImageRequest(t *testing.T) {
 			require.Equal(t, tt.wantHost, req.Host)
 		})
 	}
+}
+
+func TestImageAttemptBudget(t *testing.T) {
+	tests := []struct {
+		name      string
+		left      time.Duration
+		remaining int
+		wantMin   time.Duration
+		wantMax   time.Duration
+	}{
+		{name: "split evenly", left: 30 * time.Second, remaining: 3, wantMin: 9 * time.Second, wantMax: 10 * time.Second},
+		{name: "last candidate gets the rest", left: 30 * time.Second, remaining: 1, wantMin: 29 * time.Second, wantMax: 30 * time.Second},
+		{name: "floor", left: 3 * time.Second, remaining: 4, wantMin: agentImageAttemptMinBudget, wantMax: agentImageAttemptMinBudget},
+		{name: "expired", left: -time.Second, remaining: 2, wantMin: agentImageAttemptMinBudget, wantMax: agentImageAttemptMinBudget},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := imageAttemptBudget(time.Now().Add(tt.left), tt.remaining)
+			require.GreaterOrEqual(t, got, tt.wantMin)
+			require.LessOrEqual(t, got, tt.wantMax)
+		})
+	}
+}
+
+var errTestDialRefused = errors.New("refused")
+
+func TestDialImageCandidates(t *testing.T) {
+	refused := errTestDialRefused
+	tests := []struct {
+		name      string
+		failures  map[string]error
+		wantDials []string
+		wantErr   error
+	}{
+		{name: "first succeeds", wantDials: []string{"a:80"}},
+		{name: "falls back in order", failures: map[string]error{"a:80": refused, "b:80": refused}, wantDials: []string{"a:80", "b:80", "c:80"}},
+		{name: "all fail", failures: map[string]error{"a:80": refused, "b:80": refused, "c:80": refused}, wantDials: []string{"a:80", "b:80", "c:80"}, wantErr: refused},
+		{name: "unusable proxy stops", failures: map[string]error{"a:80": fmt.Errorf("%w: down", errImageProxyUnusable)}, wantDials: []string{"a:80"}, wantErr: errImageProxyUnusable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var dials []string
+			conn, err := dialImageCandidates(t.Context(), time.Now().Add(time.Minute), []string{"a:80", "b:80", "c:80"},
+				func(ctx context.Context, target string) (net.Conn, error) {
+					_, ok := ctx.Deadline()
+					require.True(t, ok, "every attempt has its own deadline")
+					dials = append(dials, target)
+					if err := tt.failures[target]; err != nil {
+						return nil, err
+					}
+					client, server := net.Pipe()
+					_ = server.Close()
+					return client, nil
+				})
+			require.Equal(t, tt.wantDials, dials)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				require.Nil(t, conn)
+				return
+			}
+			require.NoError(t, err)
+			_ = conn.Close()
+		})
+	}
+}
+
+func TestFetchPublicImageURLDirectFallsBackToNextAddress(t *testing.T) {
+	allowLoopbackOnly(t)
+	var served []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		served = append(served, r.Context().Value(http.LocalAddrContextKey).(net.Addr).String())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("png"))
+	}))
+	t.Cleanup(server.Close)
+	_, port, err := net.SplitHostPort(server.Listener.Addr().String())
+	require.NoError(t, err)
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, closedPort, err := net.SplitHostPort(closed.Addr().String())
+	require.NoError(t, err)
+	require.NoError(t, closed.Close())
+	stubPublicImageResolver(t, map[string][]string{"multi.test": {"::1", "127.0.0.1"}})
+
+	resp, err := fetchPublicImageURL(t.Context(), "http://multi.test:"+port+"/image.png")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Equal(t, []string{"127.0.0.1:" + port}, served, "the second validated address served the image")
+
+	_, err = fetchPublicImageURL(t.Context(), "http://multi.test:"+closedPort+"/image.png")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "[::1]:"+closedPort)
+	require.Contains(t, err.Error(), "127.0.0.1:"+closedPort)
+}
+
+func stubMultiAddressImageHost(t *testing.T) {
+	t.Helper()
+	stubPublicImageResolver(t, map[string][]string{"multi.test": {"93.184.216.34", "2606:4700::1111"}})
+}
+
+func requireOnlyIPTargets(t *testing.T, targets []string) {
+	t.Helper()
+	for _, target := range targets {
+		require.NotContains(t, target, "multi.test", "the hostname is never sent to the proxy")
+		host, _, err := net.SplitHostPort(strings.TrimPrefix(target, "domain:"))
+		require.NoError(t, err)
+		require.NotNil(t, net.ParseIP(host), target)
+	}
+}
+
+func TestFetchPublicImageURLThroughHTTPProxyFallsBackToNextAddress(t *testing.T) {
+	stubMultiAddressImageHost(t)
+	proxy := &recordingProxy{origin: imageOriginHandler(), deny: map[string]bool{"93.184.216.34:80": true}}
+	server := httptest.NewServer(proxy)
+	t.Cleanup(server.Close)
+	withImageProxy(t, server.URL)
+
+	resp, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	targets, hosts := proxy.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, targets)
+	require.Equal(t, []string{"multi.test"}, hosts)
+}
+
+func TestFetchPublicImageURLThroughHTTPProxyAllAddressesDenied(t *testing.T) {
+	stubMultiAddressImageHost(t)
+	proxy := &recordingProxy{origin: imageOriginHandler(), denyConnect: true}
+	server := httptest.NewServer(proxy)
+	t.Cleanup(server.Close)
+	withImageProxy(t, server.URL)
+
+	_, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+	require.ErrorIs(t, err, errImageURLProxyConnect)
+	targets, hosts := proxy.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, targets)
+	require.Empty(t, hosts)
+	requireOnlyIPTargets(t, targets)
+}
+
+func TestFetchPublicImageURLThroughSocksFallsBackToNextAddress(t *testing.T) {
+	stubMultiAddressImageHost(t)
+	origin := imageOriginHandler().(*http.ServeMux)
+	origin.HandleFunc("/broken.png", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	socks := startFakeSocks5(t, origin)
+	socks.mu.Lock()
+	socks.fail = map[string]bool{"93.184.216.34:80": true}
+	socks.mu.Unlock()
+
+	resp, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	requests, hosts := socks.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests)
+	require.Equal(t, []string{"multi.test"}, hosts)
+
+	socks.mu.Lock()
+	socks.fail, socks.requests, socks.hosts = nil, nil, nil
+	socks.mu.Unlock()
+	resp, err = fetchPublicImageURL(t.Context(), "http://multi.test/broken.png")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	requests, _ = socks.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80"}, requests, "HTTP responses are never retried on another address")
+}
+
+func TestFetchPublicImageURLThroughSocksAllAddressesFail(t *testing.T) {
+	stubMultiAddressImageHost(t)
+	socks := startFakeSocks5(t, imageOriginHandler())
+	socks.mu.Lock()
+	socks.fail = map[string]bool{"93.184.216.34:80": true, "[2606:4700::1111]:80": true}
+	socks.mu.Unlock()
+
+	_, err := fetchPublicImageURL(t.Context(), "http://multi.test/image.png")
+	require.Error(t, err)
+	requests, hosts := socks.snapshot()
+	require.Equal(t, []string{"93.184.216.34:80", "[2606:4700::1111]:80"}, requests)
+	require.Empty(t, hosts)
+	requireOnlyIPTargets(t, requests)
 }

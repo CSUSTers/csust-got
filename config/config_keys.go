@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/samber/lo"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -121,12 +122,48 @@ func unimplementedModelKeys(model *Model, prefix string) []string {
 	return keys
 }
 
-func warnConfigHygiene() {
-	for _, key := range UnknownConfigKeys() {
-		zap.L().Warn("unknown config key", zap.String("path", key))
-	}
-	for _, key := range UnimplementedConfigKeys(BotConfig.Agents, BotConfig.AgentV3) {
-		zap.L().Warn("config key is read but not implemented", zap.String("path", key))
+// DiagnosticKind classifies a config hygiene finding.
+type DiagnosticKind string
+
+const (
+	// DiagnosticUnknownKey marks a loaded key that no config field or reader accepts.
+	DiagnosticUnknownKey DiagnosticKind = "unknown"
+	// DiagnosticUnimplementedKey marks a decoded key that is not applied anywhere.
+	DiagnosticUnimplementedKey DiagnosticKind = "unimplemented"
+)
+
+// Diagnostic is a config hygiene finding collected during InitConfig.
+type Diagnostic struct {
+	Path string
+	Kind DiagnosticKind
+}
+
+var diagnostics []Diagnostic
+
+func collectDiagnostics() []Diagnostic {
+	unknown := lo.Map(UnknownConfigKeys(), func(key string, _ int) Diagnostic {
+		return Diagnostic{Path: key, Kind: DiagnosticUnknownKey}
+	})
+	unimplemented := lo.Map(UnimplementedConfigKeys(BotConfig.Agents, BotConfig.AgentV3), func(key string, _ int) Diagnostic {
+		return Diagnostic{Path: key, Kind: DiagnosticUnimplementedKey}
+	})
+	return append(unknown, unimplemented...)
+}
+
+// Diagnostics returns the config hygiene findings collected by the last InitConfig.
+func Diagnostics() []Diagnostic {
+	return slices.Clone(diagnostics)
+}
+
+// LogDiagnostics emits the collected config hygiene findings through the global logger.
+func LogDiagnostics() {
+	for _, d := range diagnostics {
+		switch d.Kind {
+		case DiagnosticUnknownKey:
+			zap.L().Warn("unknown config key", zap.String("path", d.Path))
+		case DiagnosticUnimplementedKey:
+			zap.L().Warn("config key is read but not implemented", zap.String("path", d.Path))
+		}
 	}
 }
 

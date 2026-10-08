@@ -29,9 +29,16 @@ func withTestConfig(t *testing.T, mutate func(*config.Config)) {
 	t.Cleanup(func() { config.BotConfig = old })
 }
 
+func newTestLogger(t *testing.T) *zap.Logger {
+	t.Helper()
+	l, closeFiles := NewLogger()
+	t.Cleanup(func() { require.NoError(t, closeFiles()) })
+	return l
+}
+
 func TestNewLoggerWritesRotatingFiles(t *testing.T) {
 	withTestConfig(t, func(cfg *config.Config) { cfg.DebugMode = true })
-	l := NewLogger()
+	l := newTestLogger(t)
 	l.Info("hello rotation", zap.String("k", "v"))
 	require.NoError(t, l.Sync())
 
@@ -43,9 +50,46 @@ func TestNewLoggerWritesRotatingFiles(t *testing.T) {
 
 func TestNewLoggerProdSyncIgnoresStderr(t *testing.T) {
 	withTestConfig(t, nil)
-	l := NewLogger()
+	l := newTestLogger(t)
 	l.Info("prod")
 	require.NoError(t, l.Sync())
+}
+
+func TestNewLoggerCloseReleasesFiles(t *testing.T) {
+	withTestConfig(t, nil)
+	l, closeFiles := NewLogger()
+	l.Info("before close")
+	l.Error("before close err")
+	require.NoError(t, closeFiles())
+	require.NoError(t, closeFiles())
+	require.NoError(t, os.RemoveAll(config.BotConfig.LogFileDir))
+}
+
+func TestNewLoggerWithoutLogDirHasNoFiles(t *testing.T) {
+	withTestConfig(t, func(cfg *config.Config) { cfg.LogFileDir = "" })
+	l, closeFiles := NewLogger()
+	l.Info("stderr only")
+	require.NoError(t, closeFiles())
+}
+
+func TestCloseClosesInitLoggerFiles(t *testing.T) {
+	withTestConfig(t, nil)
+	oldLogger, oldClose, oldGlobal := logger, closeLogger, zap.L()
+	t.Cleanup(func() {
+		logger, closeLogger = oldLogger, oldClose
+		zap.ReplaceGlobals(oldGlobal)
+	})
+	InitLogger()
+	Info("init logger")
+	closed := false
+	inner := closeLogger
+	closeLogger = func() error {
+		closed = true
+		return inner()
+	}
+	Close()
+	require.True(t, closed)
+	require.NoError(t, os.RemoveAll(config.BotConfig.LogFileDir))
 }
 
 func TestRotatingFileUsesConfig(t *testing.T) {

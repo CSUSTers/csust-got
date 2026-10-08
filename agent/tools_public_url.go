@@ -7,10 +7,13 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"csust-got/config"
@@ -25,12 +28,16 @@ var (
 	errImageURLRedirects    = errors.New("image url has too many redirects")
 	errImageURLDialTarget   = errors.New("image download dial target is not a public address")
 	errImageURLProxyConnect = errors.New("image download proxy refused the tunnel")
+	errImageProxyUnusable   = errors.New("image download proxy is unusable")
 )
 
 const (
 	agentImageURLMaxRedirects    = 5
 	agentImageURLResolveWindow   = 5 * time.Second
 	agentImageProxyConnectWindow = 15 * time.Second
+	agentImageClientTimeout      = 60 * time.Second
+	agentImageDialTimeout        = 15 * time.Second
+	agentImageAttemptMinBudget   = 2 * time.Second
 )
 
 // lookupPublicImageHost resolves hosts for public-address checks; tests override it.
@@ -170,33 +177,72 @@ func isHTTPProxy(proxyURL *url.URL) bool {
 	return proxyURL != nil && isHTTPScheme(proxyURL.Scheme)
 }
 
-// pinnedDialTarget re-resolves and validates a dial address and returns the validated ip:port to connect to.
-func pinnedDialTarget(ctx context.Context, addr string) (string, error) {
+// pinnedDialTargets re-resolves and validates a dial address and returns every validated ip:port in resolver order.
+func pinnedDialTargets(ctx context.Context, addr string) ([]string, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	ips, err := lookupPublicImageHost(ctx, host)
 	if ip := net.ParseIP(host); ip != nil {
 		ips, err = []net.IP{ip}, nil
 	}
 	if err != nil || len(ips) == 0 {
-		return "", fmt.Errorf("%w: %s", errImageURLResolve, host)
+		return nil, fmt.Errorf("%w: %s", errImageURLResolve, host)
 	}
+	targets := make([]string, 0, len(ips))
 	for _, ip := range ips {
 		if err := checkImageTarget(ip, ""); err != nil {
-			return "", fmt.Errorf("%w: %w", errImageURLDialTarget, err)
+			return nil, fmt.Errorf("%w: %w", errImageURLDialTarget, err)
+		}
+		targets = append(targets, net.JoinHostPort(ip.String(), port))
+	}
+	return targets, nil
+}
+
+// imageHopDeadline is the time budget of one hop: the caller deadline capped by the client timeout.
+func imageHopDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(agentImageClientTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		return d
+	}
+	return deadline
+}
+
+// imageAttemptBudget splits the remaining hop budget evenly over the remaining candidates, like net.Dialer.
+func imageAttemptBudget(deadline time.Time, remaining int) time.Duration {
+	budget := time.Until(deadline)
+	if remaining > 1 {
+		budget /= time.Duration(remaining)
+	}
+	return max(budget, agentImageAttemptMinBudget)
+}
+
+// dialImageCandidates tries the validated targets in order and stops early on caller cancellation or proxy failure.
+func dialImageCandidates(ctx context.Context, deadline time.Time, targets []string,
+	dial func(context.Context, string) (net.Conn, error)) (net.Conn, error) {
+	errs := make([]error, 0, len(targets))
+	for i, target := range targets {
+		attemptCtx, cancel := context.WithTimeout(ctx, imageAttemptBudget(deadline, len(targets)-i))
+		conn, err := dial(attemptCtx, target)
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", target, err))
+		if ctx.Err() != nil || errors.Is(err, errImageProxyUnusable) {
+			break
 		}
 	}
-	return net.JoinHostPort(ips[0].String(), port), nil
+	return nil, errors.Join(errs...)
 }
 
 // newPublicImageHTTPClient builds a single-hop client that never follows redirects itself.
-// Direct and HTTP-proxy hops pin the connection to a validated address in the dialer (HTTP proxies via CONNECT,
-// so Host and SNI stay the original hostname). SOCKS hops are pinned through the request URL, and serverName
-// restores certificate verification for https.
-func newPublicImageHTTPClient(proxyURL *url.URL, serverName string) *http.Client {
-	dialer := &net.Dialer{Timeout: 15 * time.Second}
+// Direct and HTTP-proxy hops pin the connection to validated addresses in the dialer (HTTP proxies via CONNECT,
+// so Host and SNI stay the original hostname) and fall back through them in order within deadline.
+// SOCKS hops are pinned through the request URL, and serverName restores certificate verification for https.
+func newPublicImageHTTPClient(proxyURL *url.URL, serverName string, deadline time.Time) *http.Client {
+	dialer := &net.Dialer{Timeout: agentImageDialTimeout}
 	transport := &http.Transport{
 		TLSHandshakeTimeout:   15 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
@@ -204,19 +250,23 @@ func newPublicImageHTTPClient(proxyURL *url.URL, serverName string) *http.Client
 	switch {
 	case proxyURL == nil:
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			target, err := pinnedDialTarget(ctx, addr)
+			targets, err := pinnedDialTargets(ctx, addr)
 			if err != nil {
 				return nil, err
 			}
-			return dialer.DialContext(ctx, network, target)
+			return dialImageCandidates(ctx, deadline, targets, func(ctx context.Context, target string) (net.Conn, error) {
+				return dialer.DialContext(ctx, network, target)
+			})
 		}
 	case isHTTPProxy(proxyURL):
 		transport.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
-			target, err := pinnedDialTarget(ctx, addr)
+			targets, err := pinnedDialTargets(ctx, addr)
 			if err != nil {
 				return nil, err
 			}
-			return dialThroughHTTPProxy(ctx, dialer, proxyURL, target)
+			return dialImageCandidates(ctx, deadline, targets, func(ctx context.Context, target string) (net.Conn, error) {
+				return dialThroughHTTPProxy(ctx, dialer, proxyURL, target)
+			})
 		}
 	default:
 		transport.Proxy = http.ProxyURL(proxyURL)
@@ -225,7 +275,7 @@ func newPublicImageHTTPClient(proxyURL *url.URL, serverName string) *http.Client
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   60 * time.Second,
+		Timeout:   agentImageClientTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -233,6 +283,7 @@ func newPublicImageHTTPClient(proxyURL *url.URL, serverName string) *http.Client
 }
 
 // dialThroughHTTPProxy opens a CONNECT tunnel to an already validated ip:port.
+// Failures to reach or authenticate with the proxy wrap errImageProxyUnusable so other targets are not tried.
 func dialThroughHTTPProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url.URL, target string) (net.Conn, error) {
 	proxyAddr := proxyURL.Host
 	if proxyURL.Port() == "" {
@@ -244,38 +295,57 @@ func dialThroughHTTPProxy(ctx context.Context, dialer *net.Dialer, proxyURL *url
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errImageProxyUnusable, err)
 	}
 	if strings.EqualFold(proxyURL.Scheme, "https") {
 		tlsConn := tls.Client(conn, &tls.Config{ServerName: proxyURL.Hostname(), MinVersion: tls.VersionTLS12})
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			_ = conn.Close()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errImageProxyUnusable, err)
 		}
 		conn = tlsConn
 	}
+	deadline := time.Now().Add(agentImageProxyConnectWindow)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
+	if err := writeImageProxyConnect(conn, proxyURL, target); err != nil {
+		stop()
+		_ = conn.Close()
+		return nil, err
+	}
+	if !stop() {
+		_ = conn.Close()
+		return nil, ctx.Err()
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
+}
+
+func writeImageProxyConnect(conn net.Conn, proxyURL *url.URL, target string) error {
 	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: target}, Host: target, Header: http.Header{}}
 	if proxyURL.User != nil {
 		password, _ := proxyURL.User.Password()
 		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(proxyURL.User.Username()+":"+password)))
 	}
-	_ = conn.SetDeadline(time.Now().Add(agentImageProxyConnectWindow))
 	if err := req.Write(conn); err != nil {
-		_ = conn.Close()
-		return nil, err
+		return err
 	}
 	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
 	if err != nil {
-		_ = conn.Close()
-		return nil, err
+		return err
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_ = conn.Close()
-		return nil, fmt.Errorf("%w: %s", errImageURLProxyConnect, resp.Status)
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusProxyAuthRequired:
+		return fmt.Errorf("%w: %w: %s", errImageProxyUnusable, errImageURLProxyConnect, resp.Status)
+	default:
+		return fmt.Errorf("%w: %s", errImageURLProxyConnect, resp.Status)
 	}
-	_ = conn.SetDeadline(time.Time{})
-	return conn, nil
 }
 
 // pinImageRequest rewrites the request target to the validated address while keeping the original Host.
@@ -318,16 +388,20 @@ func fetchPublicImageHop(ctx context.Context, proxyURL *url.URL, rawURL string) 
 	if err != nil {
 		return nil, "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
-	if err != nil {
-		return nil, "", err
-	}
-	if proxyURL != nil && !isHTTPProxy(proxyURL) {
-		pinImageRequest(req, target, ips[0])
-	}
-	client := newPublicImageHTTPClient(proxyURL, target.Hostname())
+	deadline := imageHopDeadline(ctx)
+	client := newPublicImageHTTPClient(proxyURL, target.Hostname(), deadline)
 	defer client.CloseIdleConnections()
-	resp, err := client.Do(req)
+	var resp *http.Response
+	if proxyURL != nil && !isHTTPProxy(proxyURL) {
+		resp, err = doPinnedImageRequests(ctx, client, target, ips, deadline)
+	} else {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+		if err != nil {
+			return nil, "", err
+		}
+		resp, err = client.Do(req)
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -341,6 +415,59 @@ func fetchPublicImageHop(ctx context.Context, proxyURL *url.URL, rawURL string) 
 		return nil, "", err
 	}
 	return nil, next.String(), nil
+}
+
+// doPinnedImageRequests sends the request pinned to each validated IP in order, moving on only while no
+// connection could be established; HTTP responses and post-connect failures are returned as-is.
+func doPinnedImageRequests(ctx context.Context, client *http.Client, target *url.URL, ips []net.IP, deadline time.Time) (*http.Response, error) {
+	errs := make([]error, 0, len(ips))
+	for i, ip := range ips {
+		resp, connected, err := doPinnedImageRequest(ctx, client, target, ip, imageAttemptBudget(deadline, len(ips)-i))
+		if err == nil {
+			return resp, nil
+		}
+		errs = append(errs, err)
+		if connected || ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, errors.Join(errs...)
+}
+
+func doPinnedImageRequest(ctx context.Context, client *http.Client, target *url.URL, ip net.IP, budget time.Duration) (*http.Response, bool, error) {
+	attemptCtx, cancel := context.WithCancel(ctx)
+	var connected atomic.Bool
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }}
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(attemptCtx, trace), http.MethodGet, target.String(), nil)
+	if err != nil {
+		cancel()
+		return nil, true, err
+	}
+	pinImageRequest(req, target, ip)
+	timer := time.AfterFunc(budget, func() {
+		if !connected.Load() {
+			cancel()
+		}
+	})
+	resp, err := client.Do(req)
+	timer.Stop()
+	if err != nil {
+		cancel()
+		return nil, connected.Load(), err
+	}
+	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	return resp, true, nil
+}
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.cancel()
+	return err
 }
 
 func isImageRedirectStatus(status int) bool {
