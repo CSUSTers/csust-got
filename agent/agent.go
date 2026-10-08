@@ -138,7 +138,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 		zap.Int("max_steps", maxSteps),
 	)
 
-	return agentTool, nil
+	return &sessionCaptureSubAgentTool{InvokableTool: agentTool.(tool.InvokableTool)}, nil
 }
 
 // buildMainAgent creates the main react.Agent from an AgentConfig with agent options.

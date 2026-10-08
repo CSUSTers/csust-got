@@ -22,12 +22,14 @@ import (
 // it streams every turn (not only the final), refuses tool calls on the final
 // step, detects duplicate tool calls and sanitises history before each model call.
 type CustomAgent struct {
-	name         string
-	boundModel   model.ToolCallingChatModel
-	invokables   map[string]tool.InvokableTool
-	toolNames    []string
-	maxSteps     int
-	dupThreshold int
+	name                   string
+	boundModel             model.ToolCallingChatModel
+	invokables             map[string]tool.InvokableTool
+	toolNames              []string
+	maxSteps               int
+	dupThreshold           int
+	sessionToolEstimate    sessionContextEstimate
+	sessionToolEstimateErr error
 }
 
 // CustomAgentConfig configures a CustomAgent.
@@ -90,21 +92,46 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 		}
 	}
 
+	toolEstimate, toolEstimateErr := estimateSessionTools(ctx, infos)
 	return &CustomAgent{
-		name:         cfg.Name,
-		boundModel:   bound,
-		invokables:   invokables,
-		toolNames:    names,
-		maxSteps:     cfg.MaxSteps,
-		dupThreshold: 3,
+		name:                   cfg.Name,
+		boundModel:             bound,
+		invokables:             invokables,
+		toolNames:              names,
+		maxSteps:               cfg.MaxSteps,
+		dupThreshold:           3,
+		sessionToolEstimate:    toolEstimate,
+		sessionToolEstimateErr: toolEstimateErr,
 	}, nil
 }
 
 // Stream runs the agent loop, forwarding chunks from every turn to the reader.
 func (a *CustomAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	sr, sw := schema.Pipe[*schema.Message](32)
-	go a.runLoop(ctx, input, sw)
-	return sr, nil
+	capture := sessionCaptureFromContext(ctx)
+	if capture == nil {
+		sr, sw := schema.Pipe[*schema.Message](32)
+		go a.runLoop(ctx, input, sw, nil, nil)
+		return sr, nil
+	}
+	input, started := capture.begin(input)
+	if !started {
+		return a.Stream(WithSessionCapture(ctx, nil), input)
+	}
+	// An unbuffered, filtered end marker acknowledges downstream consumption
+	// before Complete becomes visible and the writer closes.
+	sr, sw := schema.Pipe[*schema.Message](0)
+	end := &schema.Message{}
+	go func() {
+		defer sw.Close()
+		defer close(capture.done)
+		a.runLoop(ctx, input, sw, capture, end)
+	}()
+	return schema.StreamReaderWithConvert(sr, func(message *schema.Message) (*schema.Message, error) {
+		if message == end {
+			return nil, schema.ErrNoValue
+		}
+		return message, nil
+	}), nil
 }
 
 // Generate runs the loop and returns the concatenated assistant message.
@@ -139,14 +166,14 @@ func (a *CustomAgent) Generate(ctx context.Context, input []*schema.Message) (*s
 	return schema.ConcatMessages(chunks)
 }
 
-func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message]) {
-	defer sw.Close()
-
-	history := append([]*schema.Message{}, input...)
-	history = sanitizeHistory(history)
-	if len(a.invokables) > 0 {
-		history = injectLoopDirectives(ctx, history)
+func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message], capture *SessionCapture, end *schema.Message) {
+	if capture == nil {
+		defer sw.Close()
 	}
+
+	history := a.sessionModelBaseline(ctx, input)
+	capture.recordModelInput(history)
+	var toolRounds []*schema.Message
 
 	dupCounts := map[string]int{}
 	dupWarnInjected := false
@@ -158,8 +185,11 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		isFinal := round == a.maxSteps-1
-		guidanceText := a.computeGuidanceText(history, isFinal, dupWarnInjected)
-		history = appendLoopGuidance(history, guidanceText)
+		beforeGuidance := len(history)
+		history = a.appendSessionLoopGuidance(history, toolRounds, isFinal, dupWarnInjected)
+		if len(history) > beforeGuidance {
+			capture.record(history[len(history)-1], true)
+		}
 
 		assistantMsg, reasoningChunks, sendErr := a.streamOneTurn(ctx, a.boundModel, history, sw)
 		if sendErr != nil {
@@ -171,11 +201,17 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 				zap.String("agent", a.name), zap.Int("round", round))
 			return
 		}
+		capture.record(assistantMsg, false)
 
 		if len(assistantMsg.ToolCalls) == 0 {
 			for _, rc := range reasoningChunks {
 				if closed := sw.Send(rc, nil); closed {
 					return
+				}
+			}
+			if capture != nil && completeSessionAssistant(assistantMsg) && ctx.Err() == nil {
+				if closed := sw.Send(end, nil); !closed {
+					capture.complete(ctx)
 				}
 			}
 			return
@@ -198,6 +234,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		history = append(history, assistantMsg)
+		toolRounds = append(toolRounds, assistantMsg)
 		sawNewDup := false
 		for _, tc := range assistantMsg.ToolCalls {
 			key := dupKey(tc.Function.Name, tc.Function.Arguments)
@@ -211,8 +248,18 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		for _, tc := range assistantMsg.ToolCalls {
 			toolMsg := a.executeToolCall(ctx, tc)
 			history = append(history, toolMsg)
+			capture.record(toolMsg, false)
 		}
 	}
+}
+
+func completeSessionAssistant(message *schema.Message) bool {
+	if message.ResponseMeta != nil && (message.ResponseMeta.FinishReason == "length" || message.ResponseMeta.FinishReason == "content_filter") {
+		return false
+	}
+	return message.Role == schema.Assistant && len(message.ToolCalls) == 0 &&
+		(strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.ReasoningContent) != "" ||
+			len(message.MultiContent) > 0 || len(message.AssistantGenMultiContent) > 0)
 }
 
 func (a *CustomAgent) streamOneTurn(
@@ -483,7 +530,7 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 		)
 	}
 
-	result, err := t.InvokableRun(ctx, args)
+	result, err := t.InvokableRun(WithSessionCapture(ctx, nil), args)
 	if err != nil {
 		toolErr := err
 		errText := err.Error()
@@ -550,6 +597,22 @@ func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, du
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+func (a *CustomAgent) sessionModelBaseline(ctx context.Context, input []*schema.Message) []*schema.Message {
+	history := sanitizeHistory(input)
+	if len(a.invokables) > 0 {
+		history = injectLoopDirectives(ctx, history)
+	}
+	return history
+}
+
+func (a *CustomAgent) previewSessionModelInput(ctx context.Context, input []*schema.Message) []*schema.Message {
+	return a.appendSessionLoopGuidance(a.sessionModelBaseline(ctx, input), nil, a.maxSteps == 1, false)
+}
+
+func (a *CustomAgent) appendSessionLoopGuidance(history, toolRounds []*schema.Message, final, duplicate bool) []*schema.Message {
+	return appendLoopGuidance(history, a.computeGuidanceText(toolRounds, final, duplicate))
 }
 
 func appendLoopGuidance(history []*schema.Message, guidance string) []*schema.Message {

@@ -28,6 +28,25 @@ func StreamToTelegram(
 	existingMsg *tb.Message,
 	richEnabled bool,
 ) (response string, reasoning string, sentMsg *tb.Message, err error) {
+	result, err := streamToTelegramWithDelivery(ctx, tbCtx, reader, format, existingMsg, richEnabled)
+	return result.response, result.reasoning, result.sent, err
+}
+
+type telegramResponseResult struct {
+	response  string
+	reasoning string
+	sent      *tb.Message
+	delivered *tb.Message
+}
+
+func streamToTelegramWithDelivery(
+	ctx context.Context,
+	tbCtx tb.Context,
+	reader *schema.StreamReader[*schema.Message],
+	format *config.AgentOutputConfig,
+	existingMsg *tb.Message,
+	richEnabled bool,
+) (telegramResponseResult, error) {
 	tc := GetTurnContext(ctx) // may be nil outside agent handling
 	sp := &streamProcessor{
 		ctx:            ctx,
@@ -42,7 +61,8 @@ func StreamToTelegram(
 		tc:             tc,
 	}
 
-	return sp.process(existingMsg)
+	response, reasoning, sent, err := sp.process(existingMsg)
+	return telegramResponseResult{response: response, reasoning: reasoning, sent: sent, delivered: sp.deliveredMsg}, err
 }
 
 // streamProcessor manages the streaming output lifecycle.
@@ -61,6 +81,7 @@ type streamProcessor struct {
 	fullResponse     strings.Builder
 	reasoningContent strings.Builder
 	placeholderMsg   *tb.Message
+	deliveredMsg     *tb.Message
 	tc               *TurnContext // For editMu locking and lifecycle flags
 	deleteOnError    bool
 
@@ -254,6 +275,7 @@ func (sp *streamProcessor) updateMessage() {
 
 // finalize sends the final complete message and sets the finalized lifecycle flag.
 func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
+	sp.deliveredMsg = nil
 	text := sp.getResponse()
 	reason := sp.getReasoning()
 	if text == "" && reason == "" {
@@ -270,6 +292,7 @@ func (sp *streamProcessor) finalize() (string, string, *tb.Message, error) {
 		}
 		sent, err := sendTelegramRichMessage(sp.telegramRaw(), sp.targetChatID(), replyToID, delivery.RichMessage)
 		if err == nil {
+			sp.deliveredMsg, _ = telegramDeliveryProof(sent, nil, err)
 			if sp.tc != nil {
 				sp.tc.finalized.Store(true)
 			}
@@ -354,19 +377,24 @@ func (sp *streamProcessor) editPlaceholder(formatted string, force bool) error {
 		}
 	}
 	parseMode := GetParseMode(sp.format)
-	_, err := util.EditMessageWithError(
+	edited, err := util.EditMessageWithError(
 		sp.placeholderMsg,
 		util.RawTgText(formatted),
 		&tb.SendOptions{ParseMode: parseMode},
 	)
+	proof, err := telegramDeliveryProof(edited, sp.placeholderMsg, err)
 	if err != nil {
-		_, err = sp.tbCtx.Bot().Edit(sp.placeholderMsg, formatted)
+		edited, err = sp.tbCtx.Bot().Edit(sp.placeholderMsg, formatted)
+		proof, err = telegramDeliveryProof(edited, sp.placeholderMsg, err)
 		if err != nil {
 			zap.L().Debug("agentv3: failed to edit streaming message",
 				zap.Error(err),
 			)
 			return err
 		}
+	}
+	if force {
+		sp.deliveredMsg = proof
 	}
 	sp.mu.Lock()
 	sp.deleteOnError = false
@@ -416,6 +444,21 @@ func nonStreamResponseWithCaller(
 	richEnabled bool,
 	richAuthorized bool,
 ) (*tb.Message, string, error) {
+	result, err := nonStreamResponseWithDelivery(raw, tbCtx, text, reasoning, format, existingMsg, richEnabled, richAuthorized)
+	return result.sent, result.response, err
+}
+
+func nonStreamResponseWithDelivery(
+	raw telegramRawCaller,
+	tbCtx tb.Context,
+	text string,
+	reasoning string,
+	format *config.AgentOutputConfig,
+	existingMsg *tb.Message,
+	richEnabled bool,
+	richAuthorized bool,
+) (telegramResponseResult, error) {
+	result := telegramResponseResult{sent: existingMsg, response: text}
 	delivery := resolveTelegramRichDelivery(text, reasoning, format, richEnabled, richAuthorized)
 	if delivery.ShouldSendRich {
 		replyToID := 0
@@ -429,35 +472,44 @@ func nonStreamResponseWithCaller(
 			chatID = chat.ID
 		}
 		msg, err := sendTelegramRichMessage(raw, chatID, replyToID, delivery.RichMessage)
+		result.response = delivery.VisibleText
 		if err == nil {
 			deleteExistingPlaceholderAfterRichSend(tbCtx, existingMsg, msg)
-			return msg, delivery.VisibleText, nil
+			result.sent = msg
+			result.delivered, _ = telegramDeliveryProof(msg, nil, err)
+			return result, nil
 		}
 		zap.L().Debug("agentv3: failed to send rich non-stream message", zap.Error(err))
-		return existingMsg, delivery.VisibleText, err
+		return result, err
 	}
 	if delivery.VisibleText != "" && delivery.VisibleText != text {
 		text = delivery.VisibleText
 		reasoning = ""
 	}
+	result.response = text
 	formatted := FormatOutputWithReason(text, reasoning, format)
+	if formatted == "" {
+		return result, nil
+	}
 	parseMode := GetParseMode(format)
 	if existingMsg != nil {
 		// Edit existing progress placeholder
-		_, err := util.EditMessageWithError(
+		edited, err := util.EditMessageWithError(
 			existingMsg,
 			util.RawTgText(formatted),
 			&tb.SendOptions{ParseMode: parseMode},
 		)
+		result.delivered, err = telegramDeliveryProof(edited, existingMsg, err)
 		if err != nil {
 			// Fallback: edit without formatting
-			_, err = tbCtx.Bot().Edit(existingMsg, text)
+			edited, err = tbCtx.Bot().Edit(existingMsg, text)
+			result.delivered, err = telegramDeliveryProof(edited, existingMsg, err)
 			if err != nil {
 				zap.L().Debug("agentv3: failed to edit non-stream message", zap.Error(err))
-				return existingMsg, text, err
+				return result, err
 			}
 		}
-		return existingMsg, text, nil
+		return result, nil
 	}
 
 	// Send new message (original behavior)
@@ -475,7 +527,20 @@ func nonStreamResponseWithCaller(
 			ReplyTo: tbCtx.Message(),
 		})
 	}
-	return sent, text, err
+	result.sent = sent
+	result.delivered, err = telegramDeliveryProof(sent, nil, err)
+	return result, err
+}
+
+func telegramDeliveryProof(sent, editTarget *tb.Message, err error) (*tb.Message, error) {
+	if editTarget != nil && (errors.Is(err, tb.ErrMessageNotModified) || errors.Is(err, tb.ErrSameMessageContent)) {
+		// Telegram confirms the requested final content is already on this message.
+		sent, err = editTarget, nil
+	}
+	if err != nil || sent == nil || sent.ID <= 0 {
+		return nil, err
+	}
+	return sent, nil
 }
 
 func deleteExistingPlaceholderAfterRichSend(tbCtx tb.Context, existingMsg, sent *tb.Message) {

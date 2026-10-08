@@ -1,6 +1,8 @@
 # Reply-chain Agent Sessions
 
-By default, an agent uses `context_mode: chat` (or omits `context_mode`) and keeps the existing chat-history behaviour. Set `context_mode: reply_chain` on one agent to build its model context only from the triggering Telegram reply chain.
+By default, an agent uses `context_mode: chat` (or omits `context_mode`) and keeps the existing chat-history behaviour. Set `context_mode: reply_chain` on one agent to build its fallback model context only from the triggering Telegram reply chain.
+
+This page describes the Telegram reply-chain context source used when a complete-model session isn't loaded, isn't accepted, or is disabled. An accepted complete session includes tool calls and results, not just visible Telegram messages, and replaces this fallback history. See [Agent session context](agent_session_context.md) for configuration, input estimates, idle TTL, sensitive-data and shared-volume requirements.
 
 ```yaml
 agents:
@@ -20,11 +22,67 @@ In `reply_chain` mode, `system_prompt` (when it is effective) and `prompt_templa
 
 ## Session boundaries and limits
 
+The limits in this section apply to the Telegram reply-chain fallback, not to a successfully restored complete-model session.
+
 The session follows reply ancestors stored during the normal 24-hour Telegram-message TTL. Consecutive messages from the same non-bot author join one user block only when IDs are adjacent and the gap is under 60 seconds. Missing parents, expired records, and conservative block breaks are marked as incomplete; unrelated replies and future/album sibling messages are not imported.
 
 `message_context` remains a soft message-count limit for selected reply blocks. The rendered session text also has a hard UTF-8 byte budget of `agent_v3.context_cache.max_raw_tokens * 4` (24,000 bytes when defaults have not been initialized). Older complete blocks are removed first; the current trigger remains, with an omission marker if it must be shortened. File IDs, document/sticker hints, entity links, and retained image references stay in their own selected block. Images are encoded only after this text budget is decided and only when both existing image feature gates are enabled.
 
-Reply-chain turns still save raw turns and summaries for normal chat compatibility, but they do not read those sources as reply-session history. The model receives the selected user blocks and bot blocks in reply order; the current trigger is the final user block. Group memory remains an independently loaded shared background context; it is neither reply history nor a permission source.
+Reply-chain turns still use the independent `SaveResponse`, raw-turn and summary mechanisms, but don't read those sources as reply-session history. The model receives the selected user blocks and bot blocks in reply order; the current trigger is the final user block. Group memory remains an independently loaded shared background context; it is neither reply history nor a permission source.
+
+## Continuing a complete-model session
+
+Global `agent_v3.session.enable` defaults to true. Explicit false disables complete-session loading, saving, overflow checks and the reply save/load override, without deleting archives or disabling existing Telegram-message storage, raw turns, summaries, memory or traces. With no enabled v3 agent, Agent v3 globally off, or session disabled, no session store or maintenance is created. Valid configuration with a session-storage initialization failure logs Warn and locally falls back; invalid configuration still fails validation.
+
+`enable` accepts YAML booleans. Environment and YAML strings follow `strconv.ParseBool`: `true` / `false`, `TRUE` / `FALSE`, `True` / `False`, `1` / `0`, `t` / `f`, and `T` / `F` are valid, not arbitrary mixed case. YAML numbers (such as unquoted `1`), other wrong types and explicit `null` are rejected even when sessions are disabled.
+
+When global sessions are enabled and available, per-agent `session.save_context` defaults to true and `session.load_context` to false. Only an invocation selected by the actual reply branch forces both to true, even when these per-agent switches are explicitly false. A command or regex match that also replies to a message is still non-reply, including when one trigger entry configures several trigger types.
+
+Reply selection looks up the exact replied bot message within the same Redis prefix/bot/platform/chat scope. It allows different members and different agents in that chat, subject to the current filters and whitelist. Replying to an older answer forks from that answer, without importing sibling branches. Cross-agent replies reuse conversation history with the **current agent's** newly built system/stable prefix, memory and tool permissions; old system frames are archived but aren't replayed. A missing reply node never falls back to the latest node. Non-reply `load_context: true` selects the same agent's latest successfully committed node by commit order; `load_context: false` uses the existing context source and starts a **new DAG** if saving is enabled.
+
+An accepted complete session replaces the old Telegram reply-chain/raw-turn/summary history rather than appending it twice. Current system, memory and template additions are built for this invocation; old frames aren't replayed. Only this accepted-session path supplements external direct references: a direct reply already in the selected ancestor chain is deduplicated; other direct references retain their text, entities and supported media without importing an entire sibling history. Fallback and no-session paths still respect the original template author's choice of whether to insert reply content.
+
+Reply-chain template/datetime additions are Frame data and aren't replayed into later turns.
+
+Missing, damaged, unreadable or unsupported archives, broken ancestor chains and Redis failures fall back to the entire existing `context_mode` path, never a partially restored history. Only a successfully and completely accepted parent may be linked; failed loads start a new root when saving, using the actual fallback baseline. Existing fallback errors remain errors, and a Redis outage can also prevent saving the new root.
+
+Global `agent_v3.session.context_overflow` defaults to `strategy: rebuild` and `max_tokens: 200000`, and follows the global session enable switch. The global default stays unchanged. Optional `agents[].session.context_overflow.max_tokens` overrides the limit for that agent; omission inherits the global value. Only `rebuild` is currently supported; explicit limits must be positive integers, not zero, negatives, fractions, booleans, containers, null or overflowing values. Environment overrides must be positive integer strings. Invalid explicit settings fail validation even when sessions are disabled. Before accepting a candidate and refreshing its activity, the first complete model input is estimated, including current system/memory/templates/input, loaded history, loop guidance and actually bound tool definitions. Only an estimate **strictly greater than** the limit rejects it; equality is allowed. The approximate method is `text-runs-media-budget-v1`, not a provider tokenizer or a byte limit; see the [counting rules and limitations](agent_session_context.md#估算方法与局限).
+
+For example, an agent can set the following override. Choose a limit for your own model with room for output and later tool-result growth. The bot doesn't detect the model window automatically, and an output-token limit isn't a context-token limit.
+
+```yaml
+session:
+  context_overflow:
+    max_tokens: 32768 # Optional per-agent example; omission inherits the global limit.
+```
+
+Overflow rejects the entire candidate and rebuilds via the original `context_mode`, preserving the triggering message and its original reply relation. If saving is allowed and final delivery succeeds, the actual fallback baseline becomes a **new root in a new DAG**, never relinked to the old parent. Rebuild doesn't override `save=false` (apart from the existing actual-reply save rule), rewrite or delete old archives, or refresh the rejected DAG's activity; old data remains subject to idle-TTL GC. An accepted load still refreshes activity even with `save=false`.
+
+Fallback itself may exceed the limit: it runs the existing mode once, without recursive rebuild or new truncation, retaining its existing budgets, summaries, retries, tool loop and error behaviour. The checkpoint doesn't count future model output or recheck tool-generated growth, so it cannot guarantee the provider context window. Unknown inputs that cannot be safely estimated log Warn and fall back, not count as zero. **This change implements only rebuild, not new compression, summarization or automatic pruning; further context compression is deferred.**
+
+After an accepted load, a specifically recognized structured SDK provider context-length error persists a rejection marker for **selectedNode + the current agent/model identity**. On the next invocation under the same marker key, that candidate is no longer selected or confirmed. This doesn't automatically rerun this invocation's model or tools, or roll back the first accepted load's LastActive refresh. Unknown provider errors aren't inferred from generic error text, and recognition isn't guaranteed for every vendor. Markers don't rewrite old JSONL or immutable history, don't block other agents/models, and are removed with whole-DAG GC.
+
+Only a complete top-level model turn whose final answer was actually delivered to Telegram successfully is saved. The archive preserves tool calls, matching results, reasoning and multimodal history in one incremental JSONL file per turn. A placeholder or partial stream isn't enough; cancelled turns, unfinished tool chains and failed final sends don't become reply targets. Archival failure doesn't rerun the model, resend the answer or disable the independent `SaveResponse`, raw-turn and summary mechanisms. Redis partitioning doesn't change the archive's single read/write path or make official SDK types and fields such as `schema.ParamsOneOf`, `schema.ToolInfo` and `schema.Message.MultiContent` obsolete.
+
+Delegate/subagent calls **don't join interactive sessions**. Any tool-invoked nested agent is isolated from the top-level recorder, regardless of tool name. Its internal execution doesn't load or save DAGs or establish session leases. Top-level tool requests and returned results are still saved as ordinary top-level tool messages, without expanding the child's internal history. Background cron runs don't join interactive sessions either.
+
+The Load storage phase has a bounded short timeout. Preparation callbacks follow the caller / Service lifetime deadline, not a shared 10-second budget already consumed by storage. A pin protects the entire prepare phase, followed by a fresh confirmation; `save=false` retains the pin and accepted-load activity refresh. A full replay baseline for saving a new root after lease loss is generated only when saving needs it and outside the lock. Public load messages remain isolated from the private save baseline.
+
+Each album poll reads IDs with a batch `MGET` and reuses cancellable read resources within the operation, rather than creating a client per ID. Photo requests reuse the bot/proxy transport with the request context, without a new fixed 10-second deadline per photo or mutations to the shared bot/client or supplied context. Logs don't print media URLs or tokens. These requirements aren't a measured peak-resource count.
+
+Global `agent_v3.session.directory` defaults to `data/agent-sessions`, and `ttl` defaults to `24h`. Nonempty TTL values must be positive Go duration strings such as `"24h"` or `"1h30m"`, not `"1d"`; malformed, zero, negative and overflowing values fail configuration checks. TTL applies to the **whole idle DAG**, not each node or Redis `EXPIRE`. Accepted successful complete loads and successful commits refresh its activity; failed or rejected loads and lease renewals don't. Expired active DAGs are collected only daily at **02:00 in the process's local timezone**, independently of the cron runner/timezone. Startup and short recovery timers only resume registered intent/deleting work. TTL is an eligibility threshold, not an exact deletion deadline.
+
+The bot image defaults to `TZ=Asia/Shanghai`; Compose lets `BOT_TZ` override it. Its dedicated `./agent-sessions` mount must be pre-created with restricted permissions and maps to `/app/data/agent-sessions`, separate from Redis's data mount and Runtime. Existing data must be backed up and migrated before a new mount hides it. A Dockerfile anonymous volume alone doesn't guarantee reuse on redeploy or multi-instance sharing; use an explicitly reused host mount or named volume. See [container deployment](agent_session_context.md#容器目录与时区) for custom paths and rollout precautions.
+
+Sessions aren't isolated by member: group members can continue shared history that contains sensitive tool results or media. Restrict archive and backup access, use `0600` files or equivalent Windows ACLs, and mount the same sharedVolume with working cross-process locks on all instances sharing a Redis scope. Keep Redis metadata backed up too. There's no guarantee of automatic disk reconstruction after Redis loss, no general orphan scan, and unfamiliar files are retained. See the [deployment requirements](agent_session_context.md#数据敏感性与部署约束) before enabling this in a group.
+
+## Redis storage and cost boundaries
+
+Redis stores a small meta JSON per DAG and separate nodes, leases and intents hashes, with scope-level run/message/sequence/latest/DAG indexes and a scope catalog. Updates use `WATCH` / `MULTI`, not a whole-scope history JSON rewrite. Renew reads the target meta and one lease field and updates that lease's deadline without reading history nodes or refreshing LastActive. A matching existing known-catalog field isn't written again with `HSET`; `WATCH` still protects scope ownership and the last-DAG / new-root guard. `WATCH` operates at key level: same-DAG lease updates and scope-index writes can contend, and initial scope registration/final cleanup can still contend across scopes. Filesystem scope-lock critical sections remain serialized, and partitioning adds small Redis RPCs; it doesn't make the entire service O(1).
+
+Load fetches the target DAG's nodes in one `HGETALL`, builds the ancestor chain in memory and replays ancestor JSONL. Node bytes and memory grow linearly with the target DAG, while replay grows with ancestor history; Redis RPCs aren't issued one per ancestor. Minute recovery uses scope-level pending/deleting DAG SET indexes to scan registered work, not every ordinary active DAG. Index lifecycle updates share transactions with Reserve / Finish / claim; daily GC still scans all DAGs for idle TTL. Nonempty work/index payloads and cleanup remain linear, and contention and retries can add work. Recovery doesn't make the entire service O(1), and there is no new measured production speedup; see [storage details](agent_session_context.md#存储范围与备份).
+
+The Redis reader only recognizes the partitioned layout, not the old whole-scope JSON. There is no migration, dual-write or old feature reader, and no automatic deletion of actual old keys/files or disk scan to reconstruct indexes. Missing new metadata doesn't authorize deleting old or unfamiliar files.
 
 ## Stable prefix and loop guidance
 
@@ -33,11 +91,10 @@ runtime and skill rules, loop rules, and the available-skill catalog. It is
 unchanged by reply-session history, memory, summaries, tool results, and loop
 guidance. Per-round execution-limit guidance is appended only to the local model
 input as a user-role `<agent_runtime_guidance>` message after prior tool results;
-it is not persisted as a chat turn or a new permission source.
+it is not persisted as a chat turn or a new permission source. The complete-model archive may retain it as an audit frame, but must not replay old execution guidance into a later invocation.
 
 With `agent_v3.context_cache.enable: true`, local `cache_hit` means the stored
 stable-prefix record reused the same hash and version. It does not prove a
 provider key-value cache hit. `prompt_cache_key` is a provider hint derived from
-that stable version, so tests verify its stable construction and Redis record,
-not a live provider-cache hit. This design adds no observation state and does
-not reorder registered tools.
+that stable version. Don't interpret the local record as evidence of a live
+provider-cache hit.

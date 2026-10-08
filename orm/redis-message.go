@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 	"time"
 
 	"csust-got/log"
@@ -75,9 +76,107 @@ func PushMessageToStream(msg *Message) error {
 
 // GetMessage 从 Redis 获取完整的消息结构体
 func GetMessage(chatID int64, messageID int) (*Message, error) {
+	return getMessageContext(context.Background(), rc, chatID, messageID)
+}
+
+// GetMessageContext isolates the connection so cancellation can interrupt socket reads.
+func GetMessageContext(ctx context.Context, chatID int64, messageID int) (*Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if ctx.Done() == nil {
+		return getMessageContext(ctx, rc, chatID, messageID)
+	}
+	reader := NewMessageReader(ctx)
+	defer reader.Close()
+	return getMessageContext(ctx, reader.client, chatID, messageID)
+}
+
+// MessageReader is an operation-scoped, cancellable batch reader.
+type MessageReader struct {
+	ctx       context.Context
+	client    *redis.Client
+	stop      func() bool
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+// NewMessageReader owns one cancellable client for an entire message query operation.
+func NewMessageReader(ctx context.Context) *MessageReader {
+	options := *rc.Options()
+	options.ContextTimeoutEnabled = true
+	options.PushNotificationProcessor = nil
+	options.PoolSize = 1
+	options.MinIdleConns = 0
+	reader := &MessageReader{ctx: ctx, client: redis.NewClient(&options), closed: make(chan struct{})}
+	reader.stop = context.AfterFunc(ctx, func() {
+		_ = reader.client.Close()
+		close(reader.closed)
+	})
+	return reader
+}
+
+// Close releases the private client and joins any in-flight cancellation cleanup.
+func (r *MessageReader) Close() {
+	r.closeOnce.Do(func() {
+		if !r.stop() {
+			<-r.closed
+		} else {
+			_ = r.client.Close()
+			close(r.closed)
+		}
+	})
+}
+
+// GetMessages skips missing or malformed records; Redis failures remain operation errors.
+func (r *MessageReader) GetMessages(chatID int64, messageIDs []int) (map[int]*Message, error) {
+	if err := r.ctx.Err(); err != nil {
+		return nil, err
+	}
+	messages := make(map[int]*Message, len(messageIDs))
+	if len(messageIDs) == 0 {
+		return messages, nil
+	}
+	keys := make([]string, len(messageIDs))
+	for i, id := range messageIDs {
+		keys[i] = wrapKeyWithChatMsg("message_full", chatID, id)
+	}
+	values, err := r.client.MGet(r.ctx, keys...).Result()
+	if r.ctx.Err() != nil {
+		return nil, r.ctx.Err()
+	}
+	if err != nil {
+		log.Error("get messages from redis failed", zap.Int64("chat", chatID), zap.Error(err))
+		return nil, err
+	}
+	for i, value := range values {
+		if err := r.ctx.Err(); err != nil {
+			return nil, err
+		}
+		if value == nil {
+			continue
+		}
+		data, ok := value.(string)
+		if !ok {
+			continue
+		}
+		message, err := decodeCachedMessage([]byte(data))
+		if err != nil {
+			log.Error("decode cached message failed", zap.Int64("chat", chatID), zap.Int("message", messageIDs[i]), zap.Error(err))
+			continue
+		}
+		messages[messageIDs[i]] = message
+	}
+	return messages, nil
+}
+
+func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, messageID int) (*Message, error) {
 	key := wrapKeyWithChatMsg("message_full", chatID, messageID)
 
-	jsonData, err := rc.Get(context.TODO(), key).Bytes()
+	jsonData, err := client.Get(ctx, key).Bytes()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			log.Error("get message from redis failed", zap.Int64("chat", chatID), zap.Int("message", messageID), zap.Error(err))

@@ -1,6 +1,7 @@
 package agentv3
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -134,12 +135,12 @@ func TestBuildUserMessageFallsBackWhenMultimodalDisabled(t *testing.T) {
 }
 
 func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
-	oldLoader := loadStoredTelegramMessage
+	oldReader := newAlbumMessageReader
 	oldWait := currentAlbumCompletionWait
 	oldPoll := currentAlbumCompletionPollInterval
 	oldWindow := currentAlbumSiblingWindow
 	defer func() {
-		loadStoredTelegramMessage = oldLoader
+		newAlbumMessageReader = oldReader
 		currentAlbumCompletionWait = oldWait
 		currentAlbumCompletionPollInterval = oldPoll
 		currentAlbumSiblingWindow = oldWindow
@@ -148,25 +149,16 @@ func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
 	currentAlbumCompletionWait = 0
 	currentAlbumCompletionPollInterval = 0
 	currentAlbumSiblingWindow = 2
-	loadStoredTelegramMessage = func(chatID int64, messageID int) (*tb.Message, error) {
-		switch messageID {
-		case 99, 101:
-			return &tb.Message{
-				ID:      messageID,
-				Chat:    &tb.Chat{ID: chatID},
-				AlbumID: "album-1",
-				Photo:   &tb.Photo{File: tb.File{FileID: "photo"}},
-			}, nil
-		case 102:
-			return &tb.Message{
-				ID:      messageID,
-				Chat:    &tb.Chat{ID: chatID},
-				AlbumID: "album-2",
-				Photo:   &tb.Photo{File: tb.File{FileID: "other"}},
-			}, nil
-		default:
-			return nil, errTestImageContextMissing
-		}
+	reader := &testAlbumMessageReader{load: func(chatID int64, ids []int) (map[int]*tb.Message, error) {
+		require.Equal(t, []int{98, 99, 101, 102}, ids)
+		return map[int]*tb.Message{
+			99:  {ID: 99, Chat: &tb.Chat{ID: chatID}, AlbumID: "album-1", Photo: &tb.Photo{File: tb.File{FileID: "photo"}}},
+			101: {ID: 101, Chat: &tb.Chat{ID: chatID}, AlbumID: "album-1", Photo: &tb.Photo{File: tb.File{FileID: "photo"}}},
+			102: {ID: 102, Chat: &tb.Chat{ID: chatID}, AlbumID: "album-2", Photo: &tb.Photo{File: tb.File{FileID: "other"}}},
+		}, nil
+	}}
+	newAlbumMessageReader = func(context.Context) albumMessageReader {
+		return reader
 	}
 
 	result := loadCurrentAlbumMessages(&tb.Message{
@@ -180,7 +172,19 @@ func TestLoadCurrentAlbumMessagesCollectsSiblingMessages(t *testing.T) {
 	assert.Equal(t, 99, result[0].ID)
 	assert.Equal(t, 100, result[1].ID)
 	assert.Equal(t, 101, result[2].ID)
+	require.True(t, reader.closed)
 }
+
+type testAlbumMessageReader struct {
+	load   func(int64, []int) (map[int]*tb.Message, error)
+	closed bool
+}
+
+func (r *testAlbumMessageReader) GetMessages(chatID int64, ids []int) (map[int]*tb.Message, error) {
+	return r.load(chatID, ids)
+}
+
+func (r *testAlbumMessageReader) Close() { r.closed = true }
 
 func TestLoadFullContextMessagesUsesReplyChainAndStoredMessages(t *testing.T) {
 	oldLoader := loadStoredTelegramMessage

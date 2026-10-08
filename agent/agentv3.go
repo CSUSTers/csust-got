@@ -16,16 +16,35 @@ import (
 )
 
 var errNoCompiledConfig = errors.New("no compiled config found")
+var streamAgentV3 = (*CustomAgent).Stream
 
 // compiledAgents stores pre-compiled agent configurations, keyed by agent name.
 var (
-	compiledAgents sync.Map // map[string]*CompiledAgent
-	mcpManager     *McpManager
+	compiledAgents   sync.Map // map[string]*CompiledAgent
+	mcpManager       *McpManager
+	agentResourcesMu sync.Mutex
 )
 
 // Init compiles all enabled agent configurations at startup.
 // Must be called after config is loaded and before bot starts.
 func Init(ctx context.Context) error {
+	agentResourcesMu.Lock()
+	defer agentResourcesMu.Unlock()
+	closeAgentV3SessionService()
+	if config.BotConfig != nil && config.BotConfig.Agents != nil {
+		for _, cfg := range *config.BotConfig.Agents {
+			if cfg != nil {
+				if err := cfg.Session.Validate(); err != nil {
+					return fmt.Errorf("agentv3: agent session configuration: %w", err)
+				}
+			}
+		}
+	}
+	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		if err := config.BotConfig.AgentV3.Session.Validate(); err != nil {
+			return fmt.Errorf("agentv3: session configuration: %w", err)
+		}
+	}
 	if err := validateCronStartup(); err != nil {
 		return err
 	}
@@ -44,7 +63,7 @@ func Init(ctx context.Context) error {
 	mcpManager = NewMcpManager()
 
 	if config.BotConfig == nil || config.BotConfig.Agents == nil || len(*config.BotConfig.Agents) == 0 {
-		return nil
+		return initAgentV3SessionService(ctx)
 	}
 
 	for _, agentConfig := range *config.BotConfig.Agents {
@@ -64,7 +83,7 @@ func Init(ctx context.Context) error {
 	}
 
 	initCronService()
-	return nil
+	return initAgentV3SessionService(ctx)
 }
 
 func validateAgentV3StartupConfig() error {
@@ -113,12 +132,16 @@ func HasCompiledAgent(name string) bool {
 
 // Close shuts down all agent resources.
 func Close() {
+	agentResourcesMu.Lock()
+	defer agentResourcesMu.Unlock()
+	closeAgentV3SessionService()
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
 	}
 	if mcpManager != nil {
 		mcpManager.Close()
 	}
+	closeTelegramPhotoDownloaders()
 }
 
 // Chat is the main handler function for agent v3.
@@ -159,14 +182,13 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		BotUser: tbCtx.Bot().Me,
 	}
 	ctx = WithTurnContext(ctx, tc)
-
-	history, err := loadAgentHistory(tc)
-	if err != nil {
-		zap.L().Warn("agentv3: failed to load history", zap.Error(err))
-		history = &RichHistory{}
+	setupAgentV3SessionTurn(tc)
+	defer closeAgentV3SessionTurn(tc)
+	if tc.Session != nil && tc.Session.capture != nil {
+		ctx = WithSessionCapture(ctx, tc.Session.capture)
 	}
 
-	messages, err := prepareAgentV3Turn(ctx, compiled, tc, history)
+	messages, err := prepareAgentV3Turn(ctx, compiled, tc, nil)
 	if err != nil {
 		if tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
@@ -232,18 +254,31 @@ func handleStreaming(
 	chatCfg *config.AgentConfig,
 ) error {
 	tc := GetTurnContext(ctx)
-	reader, err := compiled.Agent.Stream(ctx, messages)
+	reader, err := streamAgentV3(compiled.Agent, ctx, messages)
 	if err != nil {
+		if rejectAgentV3SessionContext(tc, err) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
 		}
 		zap.L().Error("agentv3: agent stream failed", zap.Error(err))
 		return sendAgentErrorMessage(tbCtx, chatCfg, err)
 	}
+	defer reader.Close()
 
 	tc.streamingStarted.Store(true)
-	response, _, sentMsg, streamErr := StreamToTelegram(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
+	delivery, streamErr := streamToTelegramWithDelivery(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
+	response, sentMsg := delivery.response, delivery.sent
 	if streamErr != nil {
+		if rejectAgentV3SessionContext(tc, streamErr) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			if response == "" {
+				return sendAgentErrorMessage(tbCtx, chatCfg, streamErr)
+			}
+			return agentV3ContextLimitError{cause: streamErr}
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(streamErr)
 		}
@@ -253,6 +288,7 @@ func handleStreaming(
 		}
 		return streamErr
 	}
+	commitAgentV3Session(tc, delivery.delivered)
 	// Save response to Redis for future context
 	if response != "" && sentMsg != nil {
 		sentMsg.Text = response
@@ -279,6 +315,10 @@ func handleNonStreaming(
 	tc := GetTurnContext(ctx)
 	result, err := compiled.Agent.Generate(ctx, messages)
 	if err != nil {
+		if rejectAgentV3SessionContext(tc, err) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
 		}
@@ -290,7 +330,8 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	sent, visibleResponse, sendErr := NonStreamResponse(tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	delivery, sendErr := nonStreamResponseWithDelivery(tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	sent, visibleResponse := delivery.sent, delivery.response
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(sendErr)
@@ -299,6 +340,7 @@ func handleNonStreaming(
 		return sendErr
 	}
 
+	commitAgentV3Session(tc, delivery.delivered)
 	if sent != nil {
 		sent.Text = visibleResponse
 		SaveResponse(sent, tbCtx.Message())

@@ -19,7 +19,7 @@ type replySessionTemplateData struct {
 }
 
 func replySessionMetadata(tc *TurnContext) replySessionTemplateData {
-	now := beijingNow()
+	now := agentV3FrameTime(tc)
 	data := replySessionTemplateData{
 		DateTime:      now.Format("2006-01-02 15:04:05"),
 		CurrentDateCN: now.Format("2006年01月02日"),

@@ -250,7 +250,7 @@ func customHandler(ctx Context) error {
 		if reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, agentConfig := range *config.BotConfig.Agents {
 				if trigger, ok := agentConfig.TriggerOnReply(); ok {
-					return handleAgentConfig(ctx, agentConfig, trigger)
+					return handleAgentConfig(ctx, agentConfig, agentInvocationTrigger(trigger, agentTriggerReply))
 				}
 			}
 		}
@@ -294,9 +294,9 @@ func registerAgentConfigHandler(bot *Bot) {
 			if trigger.Command != "" {
 				// 创建局部副本以避免闭包捕获循环变量
 				agentConfigCopy := agentConfig
-				triggerCopy := trigger
+				triggerCopy := *trigger
 				bot.Handle("/"+triggerCopy.Command, func(ctx Context) error {
-					return handleAgentConfig(ctx, agentConfigCopy, triggerCopy)
+					return handleAgentConfig(ctx, agentConfigCopy, agentInvocationTrigger(&triggerCopy, agentTriggerCommand))
 				})
 			}
 		}
@@ -308,17 +308,38 @@ var regexHandlers []struct {
 	Func  func(Context) error
 }
 
+type agentTriggerKind uint8
+
+const (
+	agentTriggerCommand agentTriggerKind = iota
+	agentTriggerRegex
+	agentTriggerReply
+)
+
+func agentInvocationTrigger(trigger *config.AgentTrigger, kind agentTriggerKind) *config.AgentTrigger {
+	switch kind {
+	case agentTriggerCommand:
+		return &config.AgentTrigger{Command: trigger.Command}
+	case agentTriggerRegex:
+		return &config.AgentTrigger{Regex: trigger.Regex}
+	case agentTriggerReply:
+		return &config.AgentTrigger{Reply: true}
+	default:
+		return &config.AgentTrigger{}
+	}
+}
+
 func initAgentRegexHandlers(agents config.AgentV3Configs) {
 	for _, agentConfig := range agents {
 		for _, trigger := range agentConfig.Trigger {
 			if trigger.Regex != "" {
 				agentConfigCopy := agentConfig
-				triggerCopy := trigger
+				triggerCopy := *trigger
 				regexHandlers = append(regexHandlers, struct {
 					Regex *regexp.Regexp
 					Func  func(Context) error
 				}{Regex: regexp.MustCompile(triggerCopy.Regex), Func: func(ctx Context) error {
-					return handleAgentConfig(ctx, agentConfigCopy, triggerCopy)
+					return handleAgentConfig(ctx, agentConfigCopy, agentInvocationTrigger(&triggerCopy, agentTriggerRegex))
 				}})
 			}
 		}

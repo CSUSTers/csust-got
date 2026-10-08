@@ -161,10 +161,13 @@ func FormatSingleTbMessage(msg *tb.Message, tag string) string {
 	}
 
 	buf := strings.Builder{}
-
+	username, showname := "", ""
+	if msg.Sender != nil {
+		username = msg.Sender.Username
+		showname = (&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName()
+	}
 	fmt.Fprintf(&buf, `<%s id="%d" username="%s" showname="%s">\n`, tag, msg.ID,
-		html.EscapeString(msg.Sender.Username),
-		html.EscapeString((&userNames{First: msg.Sender.FirstName, Last: msg.Sender.LastName}).ShowName()))
+		html.EscapeString(username), html.EscapeString(showname))
 
 	text := getMessageTextWithEntities(msg, true) // Use HTML format since this function generates XML/HTML
 	if text == "" {
