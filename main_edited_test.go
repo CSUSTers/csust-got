@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -89,6 +90,16 @@ func setupMainTestRedis(t *testing.T) {
 	})
 }
 
+func trackMessageStore(t *testing.T) {
+	t.Helper()
+	pending := &sync.WaitGroup{}
+	messageStoreAsync = pending
+	t.Cleanup(func() {
+		pending.Wait()
+		messageStoreAsync = nil
+	})
+}
+
 func TestShutdownMiddlewarePassesEditsInShutdownChat(t *testing.T) {
 	setupMainTestRedis(t)
 	chat := &Chat{ID: -100, Type: ChatSuperGroup, Title: "group"}
@@ -118,6 +129,7 @@ func TestShutdownMiddlewarePassesEditsInShutdownChat(t *testing.T) {
 
 func TestMessageStoreMiddlewareOrdersSameSecondEditsByUpdateID(t *testing.T) {
 	setupMainTestRedis(t)
+	trackMessageStore(t)
 	chat := &Chat{ID: -100, Type: ChatSuperGroup, Title: "group"}
 	handler := messageStoreMiddleware(func(Context) error { return nil })
 	before := messageStoreSeq.Load()
@@ -142,6 +154,7 @@ func TestMessageStoreMiddlewareOrdersSameSecondEditsByUpdateID(t *testing.T) {
 
 func TestMessageStoreMiddlewareFallsBackToCounterWithoutUpdateID(t *testing.T) {
 	setupMainTestRedis(t)
+	trackMessageStore(t)
 	chat := &Chat{ID: -101, Type: ChatSuperGroup, Title: "group"}
 	handler := messageStoreMiddleware(func(Context) error { return nil })
 	before := messageStoreSeq.Load()

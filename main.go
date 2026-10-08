@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -591,6 +592,8 @@ func newMessageStoreSeq() *atomic.Uint64 {
 	return seq
 }
 
+var messageStoreAsync *sync.WaitGroup
+
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
@@ -599,8 +602,15 @@ func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 			if seq == 0 {
 				seq = messageStoreSeq.Add(1)
 			}
+			pending := messageStoreAsync
+			if pending != nil {
+				pending.Add(1)
+			}
 			// 异步存储完整消息结构体到Redis
 			go func() {
+				if pending != nil {
+					defer pending.Done()
+				}
 				// Store to stream
 				if err := orm.PushMessageToStreamWithSeq(m, seq); err != nil {
 					log.Error("Store message to Redis stream failed", zap.Error(err))
