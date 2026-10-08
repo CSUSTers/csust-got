@@ -15,6 +15,7 @@ type sessionPendingRead struct {
 	dag                   sessionDAGKeys
 	metaType, intentsType *redis.StatusCmd
 	member                *redis.BoolCmd
+	indexed               *redis.BoolCmd
 	meta                  *redis.StringCmd
 	intents               *redis.MapStringStringCmd
 	corrupt               bool
@@ -26,7 +27,7 @@ func (r *AgentV3SessionRepository) pendingBatch(ctx context.Context, s sessionSc
 	err := r.atomic(ctx, func(t *sessionTxn) error {
 		out = nil
 		failures = nil
-		if err := t.check(map[string]string{s.dags: sessionRedisSet}); err != nil {
+		if err := t.check(map[string]string{s.dags: sessionRedisSet, s.pending: sessionRedisSet}); err != nil {
 			return err
 		}
 		reads := make([]sessionPendingRead, len(ids))
@@ -66,6 +67,7 @@ func (r *AgentV3SessionRepository) pendingBatch(ctx context.Context, s sessionSc
 				}
 				entry := &reads[i]
 				entry.member = p.SIsMember(ctx, s.dags, entry.dag.id)
+				entry.indexed = p.SIsMember(ctx, s.pending, entry.dag.id)
 				if !entry.corrupt {
 					entry.meta = p.Get(ctx, entry.dag.meta)
 					entry.intents = p.HGetAll(ctx, entry.dag.intents)
@@ -81,11 +83,19 @@ func (r *AgentV3SessionRepository) pendingBatch(ctx context.Context, s sessionSc
 				return err
 			}
 			entry := &reads[i]
+			indexed, err := entry.indexed.Result()
+			if err != nil {
+				return err
+			}
+			if !indexed {
+				continue
+			}
 			member, err := entry.member.Result()
 			if err != nil {
 				return err
 			}
 			if !member {
+				failures = append(failures, sessionDAGError(scope, entry.dag.id, session.ErrCorrupt))
 				continue
 			}
 			current, err := sessionPendingEntry(ctx, scope, entry)
@@ -142,6 +152,9 @@ func sessionPendingEntry(ctx context.Context, scope session.Scope, entry *sessio
 	}
 	if meta.State != sessionDAGActive {
 		return nil, nil
+	}
+	if len(raw) == 0 {
+		return nil, session.ErrCorrupt
 	}
 	return sessionDecodeIntents(ctx, raw, meta)
 }

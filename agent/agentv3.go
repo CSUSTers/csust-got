@@ -31,6 +31,15 @@ func Init(ctx context.Context) error {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
 	closeAgentV3SessionService()
+	if config.BotConfig != nil && config.BotConfig.Agents != nil {
+		for _, cfg := range *config.BotConfig.Agents {
+			if cfg != nil {
+				if err := cfg.Session.Validate(); err != nil {
+					return fmt.Errorf("agentv3: agent session configuration: %w", err)
+				}
+			}
+		}
+	}
 	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
 		if err := config.BotConfig.AgentV3.Session.Validate(); err != nil {
 			return fmt.Errorf("agentv3: session configuration: %w", err)
@@ -132,6 +141,7 @@ func Close() {
 	if mcpManager != nil {
 		mcpManager.Close()
 	}
+	closeTelegramPhotoDownloaders()
 }
 
 // Chat is the main handler function for agent v3.
@@ -246,6 +256,10 @@ func handleStreaming(
 	tc := GetTurnContext(ctx)
 	reader, err := streamAgentV3(compiled.Agent, ctx, messages)
 	if err != nil {
+		if rejectAgentV3SessionContext(tc, err) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
 		}
@@ -258,6 +272,13 @@ func handleStreaming(
 	delivery, streamErr := streamToTelegramWithDelivery(ctx, tbCtx, reader, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled())
 	response, sentMsg := delivery.response, delivery.sent
 	if streamErr != nil {
+		if rejectAgentV3SessionContext(tc, streamErr) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			if response == "" {
+				return sendAgentErrorMessage(tbCtx, chatCfg, streamErr)
+			}
+			return agentV3ContextLimitError{cause: streamErr}
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(streamErr)
 		}
@@ -294,6 +315,10 @@ func handleNonStreaming(
 	tc := GetTurnContext(ctx)
 	result, err := compiled.Agent.Generate(ctx, messages)
 	if err != nil {
+		if rejectAgentV3SessionContext(tc, err) {
+			zap.L().Warn("agentv3: provider context limit exceeded")
+			return sendAgentErrorMessage(tbCtx, chatCfg, err)
+		}
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
 			tc.V3.Trace.SetError(err)
 		}

@@ -36,15 +36,16 @@ func (t *sessionTxn) reserveParent(d sessionDAGKeys, req session.Reservation) (*
 }
 
 func (r *AgentV3SessionRepository) reserveRoot(t *sessionTxn, s sessionScopeKeys, d sessionDAGKeys, req session.Reservation, ids []string, duration time.Duration) (*sessionMeta, session.Lease, error) {
-	if err := t.check(map[string]string{d.meta: "string", d.nodes: sessionRedisHash, d.leases: sessionRedisHash, d.intents: sessionRedisHash, s.dags: sessionRedisSet, s.sequence: "string", r.base + "scopes": sessionRedisHash}); err != nil {
+	if err := t.check(map[string]string{d.meta: "string", d.nodes: sessionRedisHash, d.leases: sessionRedisHash, d.intents: sessionRedisHash, d.rejectedContexts: sessionRedisHash, s.dags: sessionRedisSet, s.sequence: "string", s.pending: sessionRedisSet, s.deleting: sessionRedisSet, r.base + "scopes": sessionRedisHash}); err != nil {
 		return nil, session.Lease{}, err
 	}
-	for _, key := range []string{d.meta, d.nodes, d.leases, d.intents} {
+	for _, key := range []string{d.meta, d.nodes, d.leases, d.intents, d.rejectedContexts} {
 		if t.types[key] != sessionRedisNone {
 			return nil, session.Lease{}, session.ErrCorrupt
 		}
 	}
-	if err := t.catalog(r.base+"scopes", req.Scope); err != nil {
+	registered, err := t.catalog(r.base+"scopes", req.Scope)
+	if err != nil {
 		return nil, session.Lease{}, err
 	}
 	count, err := t.tx.SCard(t.ctx, s.dags).Result()
@@ -55,7 +56,7 @@ func (r *AgentV3SessionRepository) reserveRoot(t *sessionTxn, s sessionScopeKeys
 		if err := t.check(map[string]string{s.messages: sessionRedisHash}); err != nil {
 			return nil, session.Lease{}, err
 		}
-		if t.types[s.sequence] != sessionRedisNone || t.types[s.runs] != sessionRedisNone || t.types[s.messages] != sessionRedisNone {
+		if t.types[s.sequence] != sessionRedisNone || t.types[s.runs] != sessionRedisNone || t.types[s.messages] != sessionRedisNone || t.types[s.pending] != sessionRedisNone || t.types[s.deleting] != sessionRedisNone {
 			return nil, session.Lease{}, fmt.Errorf("%w: orphan scope indexes", session.ErrCorrupt)
 		}
 		t.write(sessionRedisSet, s.sequence, "0")
@@ -71,6 +72,8 @@ func (r *AgentV3SessionRepository) reserveRoot(t *sessionTxn, s sessionScopeKeys
 	t.write(sessionRedisSet, d.meta, sessionEncode(meta))
 	t.write("hset", d.leases, lease.Token, sessionEncode(lease))
 	t.write("sadd", s.dags, meta.ID)
-	t.write("hset", r.base+"scopes", req.Scope.Key(), sessionEncode(req.Scope))
+	if !registered {
+		t.write("hset", r.base+"scopes", req.Scope.Key(), sessionEncode(req.Scope))
+	}
 	return meta, lease, nil
 }

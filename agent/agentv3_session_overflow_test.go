@@ -312,7 +312,7 @@ func TestAgentV3SessionDisabledOverridesActualReply(t *testing.T) {
 
 func TestAgentV3SessionBlockedPhotoCallbackCancellation(t *testing.T) {
 	for _, stage := range []string{"lookup", "download headers", "download body"} {
-		for _, action := range []string{"cancel", "close", "operation timeout"} {
+		for _, action := range []string{"cancel", "close", "caller deadline beyond operation budget"} {
 			t.Run(stage+"/"+action, func(t *testing.T) {
 				f := newAgentSessionFixture(t)
 				cfg := &config.AgentConfig{Name: "blocked", ContextMode: "reply_chain", Session: config.AgentSessionConfig{LoadContext: true}, Features: config.FeatureSetting{Image: true}}
@@ -321,8 +321,8 @@ func TestAgentV3SessionBlockedPhotoCallbackCancellation(t *testing.T) {
 				cfg.Model.Features.Image = true
 				root := seedAgentSession(t, f, cfg, 50, []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
 				options := session.Options{}
-				if action == "operation timeout" {
-					options.OperationTimeout = 100 * time.Millisecond
+				if action == "caller deadline beyond operation budget" {
+					options.OperationTimeout = 50 * time.Millisecond
 				}
 				repo := installAgentSessionGate(t, f, options)
 				started := make(chan struct{}, 1)
@@ -359,6 +359,10 @@ func TestAgentV3SessionBlockedPhotoCallbackCancellation(t *testing.T) {
 				current.Photo = &tb.Photo{File: tb.File{FileID: "photo"}}
 				tc := &TurnContext{Bot: mediaBot, BotUser: mediaBot.Me, Message: current, ChatID: -100, Config: cfg}
 				ctx, cancel := context.WithCancel(WithTurnContext(t.Context(), tc))
+				if action == "caller deadline beyond operation budget" {
+					cancel()
+					ctx, cancel = context.WithTimeout(WithTurnContext(t.Context(), tc), 300*time.Millisecond)
+				}
 				defer cancel()
 				setupAgentV3SessionTurn(tc)
 				returned := make(chan error, 1)
@@ -382,17 +386,25 @@ func TestAgentV3SessionBlockedPhotoCallbackCancellation(t *testing.T) {
 						t.Fatal("Close waited for blocked HTTP instead of cancelling callback")
 					}
 					cancel()
-				case "operation timeout":
+				case "caller deadline beyond operation budget":
+					select {
+					case <-repo.released:
+						t.Fatal("short operation budget must not truncate photo rendering")
+					case <-time.After(100 * time.Millisecond):
+					}
 					select {
 					case <-repo.released:
 					case <-time.After(time.Second):
-						t.Fatal("operation timeout did not release its pin")
+						t.Fatal("caller deadline did not release its pin")
 					}
-					cancel()
 				}
 				select {
 				case err := <-returned:
-					require.ErrorIs(t, err, context.Canceled)
+					if action == "caller deadline beyond operation budget" {
+						require.ErrorIs(t, err, context.DeadlineExceeded)
+					} else {
+						require.ErrorIs(t, err, context.Canceled)
+					}
 					require.NotContains(t, err.Error(), token)
 				case <-time.After(time.Second):
 					t.Fatal("prepare did not terminate after cancellation")

@@ -29,6 +29,8 @@ var (
 	ErrConflict = errors.New("session transaction conflict")
 	// ErrUnknown requires retaining files until publication can be confirmed.
 	ErrUnknown = errors.New("session publication outcome unknown; retained for recovery")
+	// ErrContextRejected reports a candidate rejected for the selected agent/model context.
+	ErrContextRejected = errors.New("session context rejected")
 )
 
 // Scope isolates storage by deployment, bot, platform, and chat.
@@ -76,6 +78,8 @@ type Selection struct {
 	Agent          string
 	Mode           SelectionMode
 	ReplyMessageID int
+	ContextKey     string
+	LoadOnly       bool
 }
 
 // NodeRef identifies one immutable node within its DAG.
@@ -208,6 +212,7 @@ type Deletion struct {
 type Repository interface {
 	Namespace() string
 	ResolveAndPin(context.Context, Selection, string, time.Duration) (Pinned, error)
+	RejectContext(context.Context, Scope, NodeRef, string) error
 	ConfirmLoaded(context.Context, Scope, Lease, time.Duration) error
 	Renew(context.Context, Scope, Lease, time.Duration) error
 	Release(context.Context, Scope, Lease) error

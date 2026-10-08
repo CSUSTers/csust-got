@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -144,6 +145,7 @@ var (
 	errInvalidAgentV3SessionEnable   = errors.New("invalid agent_v3.session.enable: must be a boolean")
 	errInvalidAgentV3SessionType     = errors.New("invalid agent_v3.session: must be an object with a string directory")
 	errInvalidAgentV3SessionOverflow = errors.New("invalid agent_v3.session.context_overflow: strategy must be rebuild and max_tokens must be a positive int64")
+	errInvalidAgentSessionOverflow   = errors.New("invalid agents[].session.context_overflow: max_tokens must be a positive int64")
 )
 
 var agentV3EnvironmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -278,8 +280,43 @@ type AgentConfig struct {
 
 // AgentSessionConfig controls per-agent DAG context saving and loading.
 type AgentSessionConfig struct {
-	SaveContext *bool `mapstructure:"save_context"`
-	LoadContext bool  `mapstructure:"load_context"`
+	SaveContext     *bool                             `mapstructure:"save_context"`
+	LoadContext     bool                              `mapstructure:"load_context"`
+	ContextOverflow AgentSessionContextOverflowConfig `mapstructure:"context_overflow"`
+	decodeErr       error
+}
+
+// AgentSessionContextOverflowConfig optionally overrides the global session input limit.
+type AgentSessionContextOverflowConfig struct {
+	MaxTokens *int64 `mapstructure:"max_tokens"`
+}
+
+// From decodes per-agent session settings without weakening the token limit schema.
+func (c AgentSessionConfig) From(src reflect.Value) (any, error) {
+	if src.Type() == reflect.TypeFor[AgentSessionConfig]() {
+		return src.Interface(), nil
+	}
+	var out AgentSessionConfig
+	if err := decodeAgentSessionConfig(src.Interface(), &out); err != nil {
+		out.decodeErr = errInvalidAgentSessionOverflow
+	}
+	return out, nil
+}
+
+// Validate rejects explicit invalid limits even when saving and loading are disabled.
+func (c AgentSessionConfig) Validate() error {
+	if c.decodeErr != nil || (c.ContextOverflow.MaxTokens != nil && *c.ContextOverflow.MaxTokens <= 0) {
+		return errInvalidAgentSessionOverflow
+	}
+	return nil
+}
+
+// EffectiveSessionTokenLimit inherits the global input limit unless the agent overrides it.
+func (ccs *AgentConfig) EffectiveSessionTokenLimit(global AgentV3SessionConfig) int64 {
+	if ccs != nil && ccs.Session.ContextOverflow.MaxTokens != nil {
+		return *ccs.Session.ContextOverflow.MaxTokens
+	}
+	return global.ContextOverflow.TokenLimit()
 }
 
 // SaveEnabled reports whether context saving is enabled, defaulting to true.
@@ -375,20 +412,14 @@ type AgentV3SessionConfig struct {
 	TTL             string                              `mapstructure:"ttl"`
 	ContextOverflow AgentV3SessionContextOverflowConfig `mapstructure:"context_overflow"`
 
-	invalidTTLType bool
-	invalidEnable  bool
-	invalidType    bool
+	decodeErr   error
+	invalidType bool
 }
 
 // AgentV3SessionContextOverflowConfig controls acceptance of restored model input.
 type AgentV3SessionContextOverflowConfig struct {
-	Strategy         string `mapstructure:"strategy"`
-	MaxTokens        int64  `mapstructure:"max_tokens"`
-	strategySet      bool
-	maxTokensSet     bool
-	explicitInvalid  bool
-	invalidStrategy  bool
-	invalidMaxTokens bool
+	Strategy  string `mapstructure:"strategy"`
+	MaxTokens int64  `mapstructure:"max_tokens"`
 }
 
 // Enabled defaults to true and overrides per-agent reply settings when false.
@@ -396,7 +427,7 @@ func (c AgentV3SessionConfig) Enabled() bool { return c.Enable == nil || *c.Enab
 
 // StrategyName returns the configured acceptance strategy, defaulting to rebuild.
 func (c AgentV3SessionContextOverflowConfig) StrategyName() string {
-	if !c.strategySet && c.Strategy == "" {
+	if c.Strategy == "" {
 		return agentV3DefaultSessionOverflowStrategy
 	}
 	return c.Strategy
@@ -404,7 +435,7 @@ func (c AgentV3SessionContextOverflowConfig) StrategyName() string {
 
 // TokenLimit defaults to 200000 only when the field was omitted.
 func (c AgentV3SessionContextOverflowConfig) TokenLimit() int64 {
-	if !c.maxTokensSet && c.MaxTokens == 0 {
+	if c.MaxTokens == 0 {
 		return 200000
 	}
 	return c.MaxTokens
@@ -415,21 +446,87 @@ func (c AgentV3SessionConfig) From(src reflect.Value) (any, error) {
 	if src.Type() == reflect.TypeFor[AgentV3SessionConfig]() {
 		return src.Interface(), nil
 	}
-	var out AgentV3SessionConfig
-	fields, ok := agentV3SessionConfigMap(src.Interface())
-	if !ok {
-		out.invalidType = true
-		return out, nil
+	out := AgentV3SessionConfig{ContextOverflow: AgentV3SessionContextOverflowConfig{Strategy: agentV3DefaultSessionOverflowStrategy, MaxTokens: 200000}}
+	err := decodeAgentSessionConfig(src.Interface(), &out)
+	if err != nil {
+		out.decodeErr = errInvalidAgentV3SessionType
+		var fieldErr *mapstructure.DecodeError
+		if errors.As(err, &fieldErr) {
+			switch {
+			case fieldErr.Name() == "ttl":
+				out.decodeErr = errInvalidAgentV3SessionTTL
+			case fieldErr.Name() == "enable":
+				out.decodeErr = errInvalidAgentV3SessionEnable
+			case strings.HasPrefix(fieldErr.Name(), "context_overflow"):
+				out.decodeErr = errInvalidAgentV3SessionOverflow
+			}
+		}
 	}
-	for key, value := range fields {
-		readAgentV3SessionField(&out, key, value)
+	if out.ContextOverflow.Strategy == "" {
+		out.decodeErr = errInvalidAgentV3SessionOverflow
 	}
 	return out, nil
 }
 
+func decodeAgentSessionConfig(raw, out any) error {
+	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
+		Result: out, DecodeNil: true,
+		DecodeHook: mapstructure.DecodeHookFuncValue(strictAgentSessionValue),
+	})
+	if err != nil {
+		return err
+	}
+	return decoder.Decode(raw)
+}
+
+func strictAgentSessionValue(from, to reflect.Value) (any, error) {
+	if !from.IsValid() || (from.Kind() == reflect.Pointer && from.IsNil()) {
+		return nil, ErrUnsupportedType
+	}
+	target := to.Type()
+	if target.Kind() == reflect.Pointer {
+		target = target.Elem()
+	}
+	switch target.Kind() {
+	case reflect.Struct:
+		fields, ok := agentV3SessionConfigMap(from.Interface())
+		if !ok {
+			return nil, ErrUnsupportedType
+		}
+		return fields, nil
+	case reflect.String:
+		if from.Kind() != reflect.String {
+			return nil, ErrUnsupportedType
+		}
+	case reflect.Bool:
+		if from.Kind() == reflect.String {
+			return strconv.ParseBool(from.String())
+		}
+		if from.Kind() != reflect.Bool {
+			return nil, ErrUnsupportedType
+		}
+	case reflect.Int64:
+		switch {
+		case from.Kind() == reflect.String:
+			value, err := strconv.ParseInt(from.String(), 10, 64)
+			if err == nil && value > 0 {
+				return value, nil
+			}
+		case from.CanInt() && from.Int() > 0:
+			return from.Int(), nil
+		case from.CanUint() && from.Uint() > 0 && from.Uint() <= math.MaxInt64:
+			return int64(from.Uint()), nil
+		}
+		return nil, ErrUnsupportedType
+	default:
+		return nil, ErrUnsupportedType
+	}
+	return from.Interface(), nil
+}
+
 func agentV3SessionConfigMap(raw any) (map[string]any, bool) {
 	v := reflect.ValueOf(raw)
-	if !v.IsValid() || v.Kind() != reflect.Map {
+	if !v.IsValid() || v.Kind() != reflect.Map || v.IsNil() {
 		return nil, false
 	}
 	fields := make(map[string]any, v.Len())
@@ -438,71 +535,13 @@ func agentV3SessionConfigMap(raw any) (map[string]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		fields[strings.ToLower(name)] = v.MapIndex(key).Interface()
+		value := v.MapIndex(key).Interface()
+		if value == nil {
+			value = struct{}{}
+		}
+		fields[strings.ToLower(name)] = value
 	}
 	return fields, true
-}
-
-func readAgentV3SessionField(c *AgentV3SessionConfig, key string, raw any) {
-	switch key {
-	case "directory":
-		var ok bool
-		c.Directory, ok = raw.(string)
-		c.invalidType = !ok
-	case "ttl":
-		var ok bool
-		c.TTL, ok = raw.(string)
-		c.invalidTTLType = !ok
-	case "enable":
-		value, ok := raw.(bool)
-		if text, isString := raw.(string); isString {
-			ok = text == "true" || text == "false"
-			value = text == "true"
-		}
-		c.invalidEnable = !ok
-		c.Enable = &value
-	case "context_overflow":
-		fields, ok := agentV3SessionConfigMap(raw)
-		if !ok {
-			c.ContextOverflow.explicitInvalid = true
-			return
-		}
-		for name, value := range fields {
-			readAgentV3SessionOverflowField(&c.ContextOverflow, name, value)
-		}
-	}
-}
-
-func readAgentV3SessionOverflowField(c *AgentV3SessionContextOverflowConfig, key string, raw any) {
-	switch key {
-	case "strategy":
-		c.strategySet = true
-		value, ok := raw.(string)
-		c.Strategy = value
-		c.invalidStrategy = !ok || value != agentV3DefaultSessionOverflowStrategy
-	case "max_tokens":
-		c.maxTokensSet = true
-		v := reflect.ValueOf(raw)
-		valid := v.IsValid()
-		if valid {
-			switch v.Kind() {
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				c.MaxTokens = v.Int()
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-				valid = v.Uint() <= math.MaxInt64
-				if valid {
-					c.MaxTokens = int64(v.Uint())
-				}
-			case reflect.String:
-				var err error
-				c.MaxTokens, err = strconv.ParseInt(v.String(), 10, 64)
-				valid = err == nil
-			default:
-				valid = false
-			}
-		}
-		c.invalidMaxTokens = !valid || c.MaxTokens <= 0
-	}
 }
 
 // DirectoryPath returns the archive directory, defaulting to data/agent-sessions.
@@ -527,14 +566,11 @@ func (c AgentV3SessionConfig) Validate() error {
 	if c.invalidType {
 		return errInvalidAgentV3SessionType
 	}
-	if c.ContextOverflow.explicitInvalid || c.ContextOverflow.invalidStrategy || c.ContextOverflow.invalidMaxTokens || c.ContextOverflow.StrategyName() != agentV3DefaultSessionOverflowStrategy || c.ContextOverflow.TokenLimit() <= 0 {
+	if c.decodeErr != nil {
+		return c.decodeErr
+	}
+	if c.ContextOverflow.StrategyName() != agentV3DefaultSessionOverflowStrategy || c.ContextOverflow.TokenLimit() <= 0 {
 		return errInvalidAgentV3SessionOverflow
-	}
-	if c.invalidEnable {
-		return errInvalidAgentV3SessionEnable
-	}
-	if c.invalidTTLType {
-		return errInvalidAgentV3SessionTTL
 	}
 	if c.TTL == "" {
 		return nil
@@ -808,27 +844,51 @@ func (c *AgentV3Config) readConfig() {
 	}
 	invalidShape := invalidAgentV3SessionShape()
 	err := viper.UnmarshalKey("agent_v3", c, viper.DecodeHook(DispatchFor()))
-	c.Session.invalidType = c.Session.invalidType || invalidShape
 	if err != nil {
 		zap.L().Warn("cannot parse agent_v3 config")
 	}
-	// AutomaticEnv does not enumerate keys missing from YAML for Unmarshal.
-	for _, key := range []string{"enable", "ttl"} {
-		path := "agent_v3.session." + key
-		if viper.IsSet(path) || viper.InConfig(path) {
-			readAgentV3SessionField(&c.Session, key, viper.Get(path))
-		}
-	}
-	for _, key := range []string{"strategy", "max_tokens"} {
-		path := "agent_v3.session.context_overflow." + key
-		if viper.IsSet(path) || viper.InConfig(path) {
-			readAgentV3SessionOverflowField(&c.Session.ContextOverflow, key, viper.Get(path))
-		}
-	}
+	raw := agentSessionEnvironment(viper.Get("agent_v3.session"), reflect.TypeFor[AgentV3SessionConfig](), "agent_v3.session")
+	decoded, _ := c.Session.From(reflect.ValueOf(raw))
+	c.Session = decoded.(AgentV3SessionConfig)
+	c.Session.invalidType = invalidShape
 	c.Runtime.Env = make(map[string]string, len(runtimeEnvConfig))
 	for name, value := range runtimeEnvConfig {
 		c.Runtime.Env[name] = value
 	}
+}
+
+// AutomaticEnv does not enumerate absent YAML keys; derive them from the same typed schema.
+func agentSessionEnvironment(raw any, schema reflect.Type, path string) any {
+	fields, ok := agentV3SessionConfigMap(raw)
+	if !ok {
+		if raw != nil {
+			return raw
+		}
+		fields = make(map[string]any)
+	}
+	for i := range schema.NumField() {
+		field := schema.Field(i)
+		name := field.Tag.Get("mapstructure")
+		if name == "" {
+			continue
+		}
+		key := path + "." + name
+		if field.Type.Kind() == reflect.Struct {
+			value, exists := fields[name]
+			if exists {
+				if _, object := agentV3SessionConfigMap(value); !object {
+					continue
+				}
+			}
+			child := agentSessionEnvironment(value, field.Type, key).(map[string]any)
+			if exists || len(child) > 0 {
+				fields[name] = child
+			}
+		} else if viper.IsSet(key) {
+			fields[name] = viper.Get(key)
+		}
+	}
+	return fields
 }
 
 func invalidAgentV3SessionShape() bool {
@@ -1308,6 +1368,13 @@ func (ccs *AgentConfig) GetErrorMessage() string {
 func (c *AgentV3Configs) readConfig() {
 	v := viper.GetViper()
 	err := v.UnmarshalKey("agents", c, viper.DecodeHook(DispatchFor()))
+	for _, cfg := range *c {
+		if cfg != nil {
+			if sessionErr := cfg.Session.Validate(); sessionErr != nil {
+				zap.L().Panic("invalid agent session config", zap.Error(sessionErr))
+			}
+		}
+	}
 	if err != nil {
 		zap.L().Warn("cannot parse agents config", zap.Error(err))
 		return

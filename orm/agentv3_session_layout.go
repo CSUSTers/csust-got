@@ -36,8 +36,8 @@ type sessionRunIndex struct {
 	Ref    session.NodeRef `json:"ref"`
 	Status string          `json:"status"`
 }
-type sessionScopeKeys struct{ prefix, dags, sequence, runs, messages string }
-type sessionDAGKeys struct{ id, meta, nodes, leases, intents string }
+type sessionScopeKeys struct{ prefix, dags, sequence, runs, messages, pending, deleting string }
+type sessionDAGKeys struct{ id, meta, nodes, leases, intents, rejectedContexts string }
 
 func (r *AgentV3SessionRepository) scopeKeys(scope session.Scope) (sessionScopeKeys, error) {
 	if err := scope.Validate(); err != nil {
@@ -47,11 +47,11 @@ func (r *AgentV3SessionRepository) scopeKeys(scope session.Scope) (sessionScopeK
 		return sessionScopeKeys{}, session.ErrCorrupt
 	}
 	p := r.base + "scope:" + scope.Key() + ":"
-	return sessionScopeKeys{prefix: p, dags: p + "dags", sequence: p + "sequence", runs: p + "runs", messages: p + "messages"}, nil
+	return sessionScopeKeys{prefix: p, dags: p + "dags", sequence: p + "sequence", runs: p + "runs", messages: p + "messages", pending: p + "pending_dags", deleting: p + "deleting_dags"}, nil
 }
 func (s sessionScopeKeys) dag(id string) sessionDAGKeys {
 	p := s.prefix + "dag:" + id + ":"
-	return sessionDAGKeys{id: id, meta: p + "meta", nodes: p + "nodes", leases: p + "leases", intents: p + "intents"}
+	return sessionDAGKeys{id: id, meta: p + "meta", nodes: p + "nodes", leases: p + "leases", intents: p + "intents", rejectedContexts: p + "rejected_contexts"}
 }
 func (s sessionScopeKeys) latest(agent string) string {
 	return s.prefix + "latest:" + hex.EncodeToString([]byte(agent))
@@ -220,16 +220,16 @@ func (t *sessionTxn) run(s sessionScopeKeys, id string) (*sessionRunIndex, error
 	}
 	return &run, nil
 }
-func (t *sessionTxn) catalog(key string, scope session.Scope) error {
+func (t *sessionTxn) catalog(key string, scope session.Scope) (bool, error) {
 	var stored session.Scope
 	found, err := sessionReadJSON(t.ctx, t.tx.HGet(t.ctx, key, scope.Key()), &stored)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if found && (stored.Validate() != nil || stored != scope || stored.Key() != scope.Key()) {
-		return session.ErrCorrupt
+		return false, session.ErrCorrupt
 	}
-	return nil
+	return found, nil
 }
 func (t *sessionTxn) sequence(s sessionScopeKeys) (int64, error) {
 	value, err := t.tx.Get(t.ctx, s.sequence).Result()

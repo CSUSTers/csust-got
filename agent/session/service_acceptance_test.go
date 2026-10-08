@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -230,6 +231,11 @@ func TestServiceAcceptanceCancellationAndDeadline(t *testing.T) {
 			root := f.commit(t, f.scope, nil, 101, "root")
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
+			if cause == "deadline" {
+				var deadlineCancel context.CancelFunc
+				ctx, deadlineCancel = context.WithTimeout(ctx, time.Second)
+				defer deadlineCancel()
+			}
 			if cause == "confirm-race" {
 				f.repo.confirm = func(ctx context.Context, scope session.Scope, lease session.Lease, duration time.Duration) error {
 					err := f.repo.Repository.ConfirmLoaded(ctx, scope, lease, duration)
@@ -424,4 +430,113 @@ func TestServiceAcceptanceProofOnlyCoversSelectedAncestors(t *testing.T) {
 		Receipt: session.DeliveryReceipt{MessageIDs: []int{105}},
 	})
 	require.ErrorIs(t, err, session.ErrCorrupt)
+}
+
+func TestServiceFencedParentNewRootsKeepPrivateHistoryDuringPublicMutationAndConcurrentCapture(t *testing.T) {
+	f := newAcceptanceFixture(t)
+	var input schema.Message
+	require.NoError(t, json.Unmarshal([]byte(`{"role":"user","content":"root","user_input_multi_content":[{"type":"image_url","image":{"base64data":"original media","mime_type":"image/png"}}],"extra":{"nested":{"list":["original"],"integer":9007199254740993}}}`), &input))
+	input.Extra["nested"].(map[string]any)["integer"] = json.Number("9007199254740993")
+	root, err := f.service.Commit(t.Context(), session.CommitRequest{
+		Scope: f.scope, Agent: "agent", RunID: acceptanceID(t),
+		Capture: session.TurnCapture{
+			Bootstrap: session.History(schema.UserMessage("bootstrap"), schema.AssistantMessage("bootstrap answer", nil)),
+			Delta:     session.History(&input, schema.AssistantMessage("root answer", nil)), Complete: true,
+		},
+		Receipt: session.DeliveryReceipt{MessageIDs: []int{101}},
+	})
+	require.NoError(t, err)
+	rootLoad, err := f.service.Load(t.Context(), f.selection(101))
+	require.NoError(t, err)
+	child := f.commit(t, f.scope, rootLoad.Parent, 102, "child")
+	require.NoError(t, rootLoad.Parent.Close())
+	var original []byte
+	loaded, err := f.service.LoadWithAcceptance(t.Context(), f.selection(102), func(_ context.Context, candidate *session.LoadCandidate) error {
+		original, err = json.Marshal(candidate.Messages)
+		require.NoError(t, err)
+		candidate.Messages[0].Content = "callback mutation"
+		*candidate.Messages[2].UserInputMultiContent[0].Image.Base64Data = "callback media mutation"
+		candidate.Messages[2].Extra["nested"].(map[string]any)["list"].([]any)[0] = "callback nested mutation"
+		return nil
+	})
+	require.NoError(t, err)
+	defer loaded.Parent.Close()
+	require.Equal(t, child.Ref, loaded.Parent.Ref())
+	for _, lease := range f.dag(t, root.Ref.DAGID).Leases {
+		require.NoError(t, f.repo.Repository.Release(t.Context(), f.scope, lease))
+	}
+	started, stop, mutationDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(mutationDone)
+		close(started)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				loaded.Messages[0].Content = "caller mutation"
+				*loaded.Messages[2].UserInputMultiContent[0].Image.Base64Data = "caller media mutation"
+				loaded.Messages[2].Extra["nested"].(map[string]any)["list"].([]any)[0] = "caller nested mutation"
+			}
+		}
+	}()
+	<-started
+	var workers sync.WaitGroup
+	var nodes [2]session.Node
+	var failures [2]error
+	for i := range nodes {
+		id := acceptanceID(t)
+		workers.Go(func() {
+			nodes[i], failures[i] = f.service.Commit(t.Context(), session.CommitRequest{
+				Scope: f.scope, Agent: "agent", RunID: id, Parent: loaded.Parent,
+				Capture: session.TurnCapture{Delta: session.History(schema.UserMessage("new turn"), schema.AssistantMessage("new answer", nil)), Complete: true},
+				Receipt: session.DeliveryReceipt{MessageIDs: []int{103 + i}},
+			})
+		})
+	}
+	workers.Wait()
+	close(stop)
+	<-mutationDone
+	for i, node := range nodes {
+		require.NoError(t, failures[i])
+		require.Nil(t, node.Parent)
+		require.NotEqual(t, root.Ref.DAGID, node.Ref.DAGID)
+		fresh, err := f.service.Load(t.Context(), f.selection(103+i))
+		require.NoError(t, err)
+		require.Len(t, fresh.Messages, 8, "new roots need bootstrap + all ancestors + their complete new turn")
+		got, err := json.Marshal(fresh.Messages[:6])
+		require.NoError(t, err)
+		require.Equal(t, original, got, "private full-history fallback must survive callback and caller mutations")
+		require.NoError(t, fresh.Parent.Close())
+	}
+}
+
+func TestServiceRejectedContextUsesRepositorySelectionGate(t *testing.T) {
+	f := newAcceptanceFixture(t)
+	root := f.commit(t, f.scope, nil, 101, "root")
+	before := f.dag(t, root.Ref.DAGID).LastActive
+	f.redis.SetTime(f.now.Add(time.Minute))
+	require.NoError(t, f.service.RejectContext(t.Context(), f.scope, root.Ref, "agent:model-small"))
+	require.Equal(t, before, f.dag(t, root.Ref.DAGID).LastActive)
+	require.Empty(t, f.dag(t, root.Ref.DAGID).Leases)
+	selection := f.selection(101)
+	selection.ContextKey = "agent:model-small"
+	loaded, err := f.service.LoadWithAcceptance(t.Context(), selection, func(context.Context, *session.LoadCandidate) error {
+		t.Error("a repository-rejected context must not reach acceptance")
+		return nil
+	})
+	require.ErrorIs(t, err, session.ErrContextRejected)
+	require.Nil(t, loaded.Parent)
+	require.Nil(t, loaded.Messages)
+	require.Zero(t, f.repo.confirmed.Load())
+	require.Zero(t, f.repo.released.Load())
+	require.Equal(t, before, f.dag(t, root.Ref.DAGID).LastActive)
+	selection.ContextKey = "agent:model-large"
+	selection.LoadOnly = true
+	loaded, err = f.service.Load(t.Context(), selection)
+	require.NoError(t, err)
+	require.Equal(t, root.Ref, loaded.Parent.Ref())
+	require.Equal(t, f.now.Add(time.Minute).UnixMilli(), f.dag(t, root.Ref.DAGID).LastActive)
+	require.NoError(t, loaded.Parent.Close())
+	require.Empty(t, f.dag(t, root.Ref.DAGID).Leases)
 }

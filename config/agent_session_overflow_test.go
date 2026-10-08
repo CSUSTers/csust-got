@@ -30,7 +30,7 @@ func TestAgentV3SessionOverflowConfig(t *testing.T) {
 		})
 	}
 	for _, field := range []string{
-		"enable: ''", "enable: 0", "enable: []", "enable: {}", "enable: null",
+		"enable: ''", "enable: 0", "enable: 1", "enable: 0.0", "enable: 1.0", "enable: []", "enable: {}", "enable: null",
 		"context_overflow: []", "context_overflow: false", "context_overflow: ''",
 		"context_overflow: {strategy: ''}", "context_overflow: {strategy: trim}", "context_overflow: {strategy: false}",
 		"context_overflow: {max_tokens: 0}", "context_overflow: {max_tokens: -1}",
@@ -84,13 +84,27 @@ func TestAgentV3SessionNewEnvironmentKeys(t *testing.T) {
 			}
 		})
 	}
-	for _, enable := range []string{"", "invalid", "1"} {
+	for _, enable := range []string{"", "invalid"} {
 		viper.Reset()
 		t.Setenv("SESSION_TEST_AGENT_V3_SESSION_ENABLE", enable)
 		InitViper("", "SESSION_TEST")
 		var cfg AgentV3Config
 		cfg.readConfig()
 		require.Error(t, cfg.Session.Validate())
+	}
+}
+
+func TestAgentV3SessionEnableParseBoolStrings(t *testing.T) {
+	for _, text := range []string{"true", "TRUE", "True", "1", "t", "T", "false", "FALSE", "False", "0", "f", "F"} {
+		t.Run(text, func(t *testing.T) {
+			v := viper.New()
+			v.SetConfigType("yaml")
+			require.NoError(t, v.ReadConfig(strings.NewReader("agent_v3: {session: {enable: '"+text+"'}}")))
+			var cfg AgentV3Config
+			require.NoError(t, v.UnmarshalKey("agent_v3", &cfg, viper.DecodeHook(DispatchFor())))
+			require.NoError(t, cfg.Session.Validate())
+			require.Equal(t, text == "true" || text == "TRUE" || text == "True" || text == "1" || text == "t" || text == "T", cfg.Session.Enabled())
+		})
 	}
 }
 

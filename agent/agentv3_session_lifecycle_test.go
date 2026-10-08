@@ -70,6 +70,12 @@ func (r *agentSessionCollectionRepository) Scopes(ctx context.Context) ([]sessio
 
 func TestAgentV3SessionCloseCancelsMaintenanceAndConcurrentCloseWaits(t *testing.T) {
 	f := newAgentSessionFixture(t)
+	isolateAgentV3ClosePhotoResources(t)
+	entry, err := telegramPhotoDownloaders.acquire(f.bot)
+	require.NoError(t, err)
+	telegramPhotoDownloaders.release(entry)
+	cached, _, _ := photoDownloaderLifecycleCounts()
+	require.Equal(t, 1, cached)
 	started, canceled := make(chan struct{}), make(chan struct{})
 	repo := &agentSessionCollectionRepository{Repository: f.repo, scopes: func(ctx context.Context) ([]session.Scope, error) {
 		close(started)
@@ -83,10 +89,7 @@ func TestAgentV3SessionCloseCancelsMaintenanceAndConcurrentCloseWaits(t *testing
 	require.NoError(t, err)
 	s := startAgentV3SessionMaintenance(t.Context(), service, time.Local)
 	agentSessionService.Store(s)
-	oldManager, oldCron := mcpManager, cronService.Load()
-	mcpManager = nil
-	cronService.Store(nil)
-	t.Cleanup(func() { s.close(); mcpManager = oldManager; cronService.Store(oldCron) })
+	t.Cleanup(s.close)
 	select {
 	case <-started:
 	case <-time.After(3 * time.Second):
@@ -118,6 +121,10 @@ func TestAgentV3SessionCloseCancelsMaintenanceAndConcurrentCloseWaits(t *testing
 	workers.Wait()
 	require.Nil(t, agentSessionService.Load())
 	require.ErrorIs(t, service.Collect(t.Context()), session.ErrClosed)
+	cached, retired, references := photoDownloaderLifecycleCounts()
+	require.Zero(t, cached, "Close must retire photo transports after session termination")
+	require.Zero(t, retired)
+	require.Zero(t, references)
 }
 
 type agentSessionRecoveryRepository struct {

@@ -20,10 +20,14 @@ agents:
     session:
       save_context: true
       load_context: false
+      context_overflow:
+        max_tokens: 32768 # 可选覆盖；省略继承全局值，按自己的模型预留输出与工具增长余量。
     # 保留现有 model、agent、trigger、filters、format 等配置。
 ```
 
 全局 `agent_v3.session.enable` 缺省为 **true**。显式 false 关闭完整会话的加载、保存、阈值检查及实际 reply 的 save/load 强制覆盖，沿用原 `context_mode`；不会删除已有归档，也不关闭 raw turns、summary、memory 等独立存储。
+
+`enable` 接受 YAML 布尔值；环境变量和 YAML 字符串按 `strconv.ParseBool` 解析，支持 `true` / `false`、`TRUE` / `FALSE`、`True` / `False`、`1` / `0`、`t` / `f`、`T` / `F`，不接受任意大小写混写。YAML 数字（例如未加引号的 `1`）、其他错误类型和显式 `null` 均拒绝；关闭 session 也不会跳过显式配置的合法性校验。
 
 全局 session 启用且可用时，每个 agent 的 `session.save_context` 缺省为 **true**，显式 false 可关闭非 reply 调用的新会话归档；`session.load_context` 缺省为 **false**，独立控制是否加载已保存的完整会话。只有**实际 reply 分支触发**的本次调用强制 save/load 为 **true/true**，即使两项都显式 false，也不会修改共享 agent 配置。
 
@@ -51,13 +55,15 @@ reply 查不到目标节点时**不改查最近节点**。无节点、祖先链�
 
 通过接受检查并成功恢复时只回放完整对话历史，再追加一次本轮输入，不重复叠加旧 raw turns、summary、无关群历史或 Telegram 回复链。即便同 agent，也重新构建**当前 agent** 的 system / stable prefix、当前 memory、模板附加指令及工具权限；跨 agent 回复同样如此。旧 system、memory、模板附加指令等 frame 可归档供审计，但不作为下一轮提示 replay。历史工具调用只是数据，不重执行，不恢复旧技能、Runtime 环境或权限，也不消耗本轮工具预算。
 
-当前消息的直接引用如果已在所选祖先链中，省略重复引用；不在该链中的引用仍保留正文、链接实体及现有图片能力支持的媒体，不导入它的整条旁支历史。
+仅在完整会话被接受的路径中补充当前消息的外部直接引用：如果已在所选祖先链中，省略重复引用；不在该链中的引用仍保留正文、链接实体及现有图片能力支持的媒体，不导入它的整条旁支历史。回退或未使用完整会话时，仍尊重原模板作者是否插入 reply 的选择，不强制补引用。
 
 `reply_chain` 的模板/时间 addition 按 Frame 处理，不在后续轮次 replay。
 
 ## 完整输入阈值与一次重建
 
-`agent_v3.session.context_overflow` 是全局配置，没有 per-agent 覆盖或独立启用开关，随 session 启用。省略该对象或其中字段时，`strategy` 默认 `rebuild`，`max_tokens` 默认 **200000**。当前唯一支持的策略是 `rebuild`，其他策略及显式空策略非法；显式阈值必须是正整数，零、负数、小数、布尔、容器类型、空值及整数溢出都拒绝，环境变量覆盖也必须为正整数字符串。即使 session 被禁用，显式非法配置仍不被忽略。
+`agent_v3.session.context_overflow` 随 session 启用。省略该对象或其中字段时，`strategy` 默认 `rebuild`，全局 `max_tokens` 默认 **200000**，此默认值不变。每个 agent 可用 `agents[].session.context_overflow.max_tokens` 覆盖阈值；省略时继承全局值，不提供 per-agent 策略或独立启用开关。当前唯一支持的策略是 `rebuild`，其他策略及显式空策略非法；显式阈值必须是正整数，零、负数、小数、布尔、容器类型、空值及整数溢出都拒绝，环境变量覆盖也必须为正整数字符串。即使 session 被禁用，显式非法配置仍不被忽略。
+
+上例的 **32768** 只是配置示例，不是自动识别的模型窗口。应按自己模型的实际容量设置阈值，并为输出和后续工具结果增长留出余量；模型的输出上限不是上下文上限，不能用 output max 代替 context max。
 
 判断对象是本轮**首次实际模型请求的完整候选输入**，不只已加载的历史：包括当前 system / stable prefix、memory、模板、本轮输入及引用、已加载历史（含推理、工具调用参数及结果）、首轮 loop 指令和 guidance，以及实际绑定的 tool definitions / schema。在确认加载并刷新旧 DAG 活跃时间**之前**估算；只有估算值**严格大于**阈值才因超限拒绝，恰好 200000 不因阈值拒绝。
 
@@ -74,7 +80,9 @@ reply 查不到目标节点时**不改查最近节点**。无节点、祖先链�
 - 仅对已识别的**结构化媒体 part**使用固定预算：image **4096**、audio **8192**、video **16384**、file **8192**，每个 part 计一次。它们的 URL、data URI、raw base64 或 file ID 不另按传输字符数计；等价传输表示预算相同。独立 caption、转写和描述仍按文本计，不为估算下载、解码媒体或查询 metadata。
 - 正文、reasoning、tool arguments / results、可见 JSON 和 schema 中的真实文本正常计数，JSON/schema 的键、标量和结构也按其文本表示计；即使文本包含 URL、base64、`data:image/...` 或 `image_url` 字段，也不从字符串形状猜成结构化媒体。未知或不支持的输入不能安全估算时整体回退；如计数提前封顶，诊断中的数值只是已超过阈值的下界，不是精确总数。
 
-这些规则可能高估或低估 provider 的实际 tokens；固定媒体预算尤其不是任意长度音视频或文档的上界。检查只在本轮首次模型请求前决定一次，不计未来模型输出，也不保证模型/工具生成的新内容不会继续超过 provider 窗口。已经调用模型或工具后不因本阈值回滚重跑，避免重复外部副作用；provider 后续超限仍沿用原错误行为。**本次仅实现 rebuild，不新增上下文压缩、摘要或自动裁剪；进一步压缩功能后续实现。**
+这些规则可能高估或低估 provider 的实际 tokens；固定媒体预算尤其不是任意长度音视频或文档的上界。检查只在本轮首次模型请求前决定一次，不计未来模型输出，也不保证模型/工具生成的新内容不会继续超过 provider 窗口。已经调用模型或工具后不因本阈值回滚重跑，避免重复外部副作用。
+
+已接受加载后，若发生明确识别的 SDK 结构化 provider context-length 错误，会持久记录针对 **selectedNode + 当前 agent/model identity** 的拒绝标记。下一次在同一标记 key 下，该候选不再被选中或 Confirm；本次不自动重跑模型或工具，首次已接受加载刷新的 LastActive 也不回滚。未知 provider 错误不靠泛化的错误文本猜测，不保证所有 vendor 均被识别。标记不改写旧 JSONL 或不可变历史，不屏蔽其他 agent/model，并随整 DAG 回收一并清除。**当前只提供 rebuild，不新增上下文压缩、摘要或自动裁剪；进一步压缩仍属于未来功能。**
 
 ## 保存内容与调用边界
 
@@ -84,6 +92,10 @@ reply 查不到目标节点时**不改查最近节点**。无节点、祖先链�
 
 delegate/subagent **不接入交互 session**。任何工具启动的嵌套 agent 调用都不继承顶层捕获器，不以工具名称判断；子调用内部不加载或保存 DAG、不建立 session 租约，其私有内层 history 不进入顶层归档。顶层模型发出的工具请求及其返回结果，仍作为**普通顶层工具消息**随完整成功的顶层轮次保存，不展开子调用内部 history。后台 cron 同样不加载或保存交互 session。
 
+Load 的存储阶段使用有界短 timeout；准备回调遵循 caller / Service lifetime 的 deadline，不共用存储阶段已消耗的 10 秒预算。整个 prepare 期间持有 pin 保护，完成后重新 fresh confirm；`save=false` 也保留 pin 和成功加载续活。用于租约丢失时保存新 root 的完整 replay baseline 只在需要保存时生成，并在锁外生成；公开的 load messages 与私有 baseline 保持隔离，不让调用方修改公开消息污染保存基线。
+
+媒体读取同样受调用取消控制：相册每个 poll 批量 `MGET`，读取资源在 operation 内复用，不为每个 ID 新建 client。photo 请求复用 bot/proxy transport 并携带请求 context，不为每张 photo 新增固定 10 秒 deadline，也不修改共享 bot/client 或传入 context；日志不打印媒体 URL 或 token。这些约束不代表已测得固定峰值资源数量。
+
 ## 闲置 TTL 与每日回收
 
 `agent_v3.session.ttl` 是**整 DAG 的闲置 TTL**，不是逐节点或逐文件年龄，也不是 Redis `EXPIRE`。被接受的成功完整加载和成功提交都更新整 DAG 的最后活跃时间；仅请求开始、失败加载、超限/估算失败拒绝或租约续期不算用户活跃。load=true/save=false 的被接受成功读取也会刷新活跃时间。
@@ -92,7 +104,7 @@ delegate/subagent **不接入交互 session**。任何工具启动的嵌套 agen
 
 TTL 表示回收资格，不保证到第 24h 秒立即物理删除。每日检查可能额外保留不足一天，故障或活动调用可能继续延后。已到期但尚未进入 deleting 的 DAG 可以由成功加载重新激活；有效租约保护慢模型正在使用的父链。已进入 deleting 的 DAG 不再复活，读取回退。DAG 元数据和清理清单不能靠 Redis 自然 TTL 消失；崩溃或部分失败会留下可重试的 intent / deleting 状态。
 
-启动及短周期恢复仅继续 Redis 已登记的 intent / deleting 未完成工作，不提前扫描过期 active DAG。没有通用孤儿文件扫描，陌生文件不会因为年龄或缺少 Redis 索引而自动删除。
+启动及每分钟恢复通过 scope 的 pending/deleting DAG SET 索引，仅扫描 Redis 已登记的未完成工作，不每分钟查询所有普通 active DAG，也不提前回收它们。索引生命周期与 Reserve / Finish / claim 在同一事务中维护；每日回收仍全扫描 DAG 检查闲置 TTL。没有通用孤儿文件扫描，陌生文件不会因为年龄或缺少 Redis 索引而自动删除。
 
 ## 存储范围与备份
 
@@ -100,9 +112,9 @@ TTL 表示回收资格，不保证到第 24h 秒立即物理删除。每日检�
 
 Redis 按 DAG 分区保存状态：每个 DAG 使用小型 meta JSON，以及独立的 nodes、leases、intents hashes。scope 维护 run/message 索引、提交 sequence、每个 agent 的 latest 有序索引和 DAG 成员集合，全局 catalog 登记 scope。`WATCH` / `MULTI` 协调节点、租约、发布与索引更新，不再把整 scope 的历史集合放进一个 JSON 重写。具体 key 拼写属于存储实现，不是固定的外部契约；不要直接编辑这些 key 来迁移或删除会话。
 
-续租读取目标 DAG 的 meta 与指定 lease 字段，只更新该租约的 deadline，不读取或重写历史节点，载荷不随历史节点数增长，也不刷新 LastActive。但 `WATCH` 的竞争单位是 **key** 而非 hash field：同 DAG 的 leases hash 仍可能竞争；并发提交写 scope 的 run/message/sequence 等索引 key 也仍可能冲突，root 创建及最后清理涉及共享 catalog。服务层文件系统 scope 锁的临界区仍串行执行，多 key 分区还带来额外的小 Redis RPC，不能据此宣称整个服务是 O(1) 或没有争用。
+续租读取目标 DAG 的 meta 与指定 lease 字段，只更新该租约的 deadline，不读取或重写历史节点，载荷不随历史节点数增长，也不刷新 LastActive。known catalog 中已有匹配 field 时不重复 `HSET`，仍通过 `WATCH` 保护 scope 归属及 last-DAG / new-root guard。但 `WATCH` 的竞争单位是 **key** 而非 hash field：同 DAG 的 leases hash 仍可能竞争；并发提交写 scope 的 run/message/sequence 等索引 key 也仍可能冲突，首次 scope 注册及最后清理仍可跨 scope 竞争。服务层文件系统 scope 锁的临界区仍串行执行，多 key 分区还带来额外的小 Redis RPC，不能据此宣称整个服务是 O(1) 或没有争用。
 
-完整 Load 一次 `HGETALL` 读取**目标 DAG** 的 nodes，在内存按父边构建选中祖先链，再回放祖先 JSONL；Redis 节点读取和内存占用随目标 DAG 节点数线性增长，文件回放随祖先历史量增长，不是每个祖先单独一次 Redis RPC。GC/恢复仍线性遍历维护集合，工作量随 DAG、租约、intent 及待清理节点/文件数量增长，竞争和重试还会增加成本。JSONL 的媒体载荷不等同于 Redis 元数据大小；这些成本边界不是吞吐或固定加速倍数的保证。
+完整 Load 一次 `HGETALL` 读取**目标 DAG** 的 nodes，在内存按父边构建选中祖先链，再回放祖先 JSONL；Redis 节点读取和内存占用随目标 DAG 节点数线性增长，文件回放随祖先历史量增长，不是每个祖先单独一次 Redis RPC。恢复索引避免每分钟扫描普通 active DAG，但非空工作/index 载荷、租约、intent 及待清理节点/文件的处理仍是线性成本；每日 GC 仍扫描 DAG 集合，竞争和重试还会增加成本。JSONL 的媒体载荷不等同于 Redis 元数据大小；恢复不是整个服务 O(1)，当前没有新的生产加速倍数证明。
 
 当前 Redis reader 只识别新分区布局，**不读取旧 whole-scope JSON**；没有迁移器、dual-write 或旧 feature reader。布局替换不会自动迁移、清空或删除实际旧 Redis keys/JSONL，也不通过扫盘重建索引；缺少新布局元数据不构成删除旧文件或未知数据的授权。
 

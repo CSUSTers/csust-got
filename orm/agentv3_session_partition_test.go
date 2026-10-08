@@ -320,6 +320,7 @@ func TestAgentV3SessionPartialCorruptDAGsRetainFilesAndAllowHealthyGC(t *testing
 	badIntent.Node.Ref = badNodes[3].Ref
 	badIntent.Lease.DAGID = badNodes[3].Ref.DAGID
 	require.NoError(t, f.repo.client.HSet(t.Context(), s.dag(badNodes[3].Ref.DAGID).intents, badIntent.Node.RunID, sessionEncode(badIntent)).Err())
+	require.NoError(t, f.repo.client.SAdd(t.Context(), s.pending, badNodes[0].Ref.DAGID, badNodes[3].Ref.DAGID).Err())
 	intents, err := f.repo.Pending(t.Context(), f.scope)
 	require.ErrorIs(t, err, session.ErrCorrupt)
 	require.Contains(t, intents, pending)

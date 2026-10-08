@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (r *AgentV3SessionRepository) sessionDAGs(ctx context.Context, s sessionScopeKeys, scope session.Scope, sampleTime bool) ([]string, map[string]*sessionMeta, map[string]error, int64, error) {
+func (r *AgentV3SessionRepository) sessionDAGs(ctx context.Context, s sessionScopeKeys, scope session.Scope) ([]string, map[string]*sessionMeta, map[string]error, int64, error) {
 	var ids []string
 	err := r.atomic(ctx, func(t *sessionTxn) error {
 		ids = nil
@@ -30,9 +30,7 @@ func (r *AgentV3SessionRepository) sessionDAGs(ctx context.Context, s sessionSco
 	commands := map[string]*redis.StringCmd{}
 	var clock *redis.TimeCmd
 	_, pipeErr := r.client.Pipelined(ctx, func(p redis.Pipeliner) error {
-		if sampleTime {
-			clock = p.Time(ctx)
-		}
+		clock = p.Time(ctx)
 		for _, id := range ids {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -111,9 +109,11 @@ func sessionDecodeIntents(ctx context.Context, raw map[string]string, meta *sess
 func (t *sessionTxn) manifest(d sessionDAGKeys, meta *sessionMeta) (session.Deletion, error) {
 	var nodesCmd *redis.MapStringStringCmd
 	var leasesCmd *redis.MapStringStringCmd
+	var rejectedCmd *redis.MapStringStringCmd
 	_, err := t.tx.Pipelined(t.ctx, func(p redis.Pipeliner) error {
 		nodesCmd = p.HGetAll(t.ctx, d.nodes)
 		leasesCmd = p.HGetAll(t.ctx, d.leases)
+		rejectedCmd = p.HGetAll(t.ctx, d.rejectedContexts)
 		return nil
 	})
 	if err != nil {
@@ -121,6 +121,9 @@ func (t *sessionTxn) manifest(d sessionDAGKeys, meta *sessionMeta) (session.Dele
 	}
 	nodes, err := sessionDecodeNodes(t.ctx, nodesCmd.Val(), meta.Scope, d.id)
 	if err != nil {
+		return session.Deletion{}, err
+	}
+	if err := sessionValidateRejectedContexts(t.ctx, rejectedCmd.Val(), nodes); err != nil {
 		return session.Deletion{}, err
 	}
 	for token, value := range leasesCmd.Val() {
@@ -175,7 +178,7 @@ func (r *AgentV3SessionRepository) Pending(ctx context.Context, scope session.Sc
 	if err != nil {
 		return nil, err
 	}
-	ids, metas, bad, _, err := r.sessionDAGs(ctx, s, scope, false)
+	ids, err := r.maintenanceIDs(ctx, s.pending)
 	if err != nil {
 		return nil, sessionMaintenanceFailure(err)
 	}
@@ -186,11 +189,8 @@ func (r *AgentV3SessionRepository) Pending(ctx context.Context, scope session.Sc
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if bad[id] != nil {
-			failures = append(failures, sessionDAGError(scope, id, bad[id]))
-			continue
-		}
-		if metas[id].State != sessionDAGActive {
+		if !session.ValidID(id) {
+			failures = append(failures, sessionDAGError(scope, id, session.ErrCorrupt))
 			continue
 		}
 		candidates = append(candidates, id)
@@ -214,7 +214,7 @@ func (r *AgentV3SessionRepository) Pending(ctx context.Context, scope session.Sc
 
 // Deleting reads frozen tombstones without claiming idle active DAGs.
 func (r *AgentV3SessionRepository) Deleting(ctx context.Context, scope session.Scope) ([]session.Deletion, error) {
-	return r.deletions(ctx, scope, 0, false)
+	return r.indexedDeletions(ctx, scope)
 }
 
 // ClaimDeleting freezes eligible DAGs while preserving pinned and corrupt DAGs.
@@ -222,14 +222,14 @@ func (r *AgentV3SessionRepository) ClaimDeleting(ctx context.Context, scope sess
 	if ttl <= 0 {
 		return nil, session.ErrCorrupt
 	}
-	return r.deletions(ctx, scope, ttl, true)
+	return r.deletions(ctx, scope, ttl)
 }
-func (r *AgentV3SessionRepository) deletions(ctx context.Context, scope session.Scope, ttl time.Duration, claim bool) ([]session.Deletion, error) {
+func (r *AgentV3SessionRepository) deletions(ctx context.Context, scope session.Scope, ttl time.Duration) ([]session.Deletion, error) {
 	s, err := r.scopeKeys(scope)
 	if err != nil {
 		return nil, err
 	}
-	ids, metas, bad, now, err := r.sessionDAGs(ctx, s, scope, claim)
+	ids, metas, bad, now, err := r.sessionDAGs(ctx, s, scope)
 	if err != nil {
 		return nil, sessionMaintenanceFailure(err)
 	}
@@ -243,19 +243,16 @@ func (r *AgentV3SessionRepository) deletions(ctx context.Context, scope session.
 			failures = append(failures, sessionDAGError(scope, id, bad[id]))
 			continue
 		}
-		if !claim && metas[id].State != sessionDAGDeleting {
-			continue
-		}
 		// Detached discovery can only defer non-candidates. Actual claims still
 		// reread metadata, leases and server TIME under the original WATCH guards.
-		if claim && metas[id].State == sessionDAGActive && metas[id].LastActive > now-ttl.Milliseconds() {
+		if metas[id].State == sessionDAGActive && metas[id].LastActive > now-ttl.Milliseconds() {
 			continue
 		}
 		d := s.dag(id)
 		var current *session.Deletion
 		err = r.atomic(ctx, func(t *sessionTxn) error {
 			current = nil
-			if err := t.check(map[string]string{s.dags: sessionRedisSet, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash}); err != nil {
+			if err := t.check(map[string]string{s.dags: sessionRedisSet, s.pending: sessionRedisSet, s.deleting: sessionRedisSet, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash, d.rejectedContexts: sessionRedisHash}); err != nil {
 				return err
 			}
 			member, err := t.member(s, d)
@@ -270,9 +267,6 @@ func (r *AgentV3SessionRepository) deletions(ctx context.Context, scope session.
 				return session.ErrCorrupt
 			}
 			if meta.State == sessionDAGActive {
-				if !claim {
-					return nil
-				}
 				now, err := t.tx.Time(ctx).Result()
 				if err != nil {
 					return err
@@ -347,7 +341,7 @@ func (r *AgentV3SessionRepository) deletions(ctx context.Context, scope session.
 				}
 			}
 			current = &manifest
-			return nil
+			return t.handoffDeleting(s, d)
 		})
 		if err != nil {
 			if !sessionPureCorruption(err) {
@@ -377,7 +371,7 @@ func (r *AgentV3SessionRepository) FinishDelete(ctx context.Context, scope sessi
 	}
 	d := s.dag(deletion.DAGID)
 	return r.atomic(ctx, func(t *sessionTxn) error {
-		if err := t.check(map[string]string{s.dags: sessionRedisSet, s.runs: sessionRedisHash, s.messages: sessionRedisHash, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash}); err != nil {
+		if err := t.check(map[string]string{s.dags: sessionRedisSet, s.pending: sessionRedisSet, s.deleting: sessionRedisSet, s.runs: sessionRedisHash, s.messages: sessionRedisHash, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash, d.rejectedContexts: sessionRedisHash}); err != nil {
 			return err
 		}
 		meta, err := t.meta(d, scope)
@@ -483,10 +477,12 @@ func (r *AgentV3SessionRepository) FinishDelete(ctx context.Context, scope sessi
 		for _, n := range manifest.Nodes {
 			t.write("zrem", s.latest(n.Agent), sessionLatestMember(n))
 		}
-		t.write("del", d.meta, d.nodes, d.intents, d.leases)
+		t.write("del", d.meta, d.nodes, d.intents, d.leases, d.rejectedContexts)
 		t.write("srem", s.dags, d.id)
+		t.write("srem", s.pending, d.id)
+		t.write("srem", s.deleting, d.id)
 		if count == 1 {
-			t.write("del", s.runs, s.messages, s.sequence)
+			t.write("del", s.runs, s.messages, s.sequence, s.pending, s.deleting)
 			t.write("hdel", r.base+"scopes", scope.Key())
 		}
 		return nil
@@ -517,7 +513,10 @@ func (t *sessionTxn) finalScopeIndexes(s sessionScopeKeys, scope session.Scope, 
 	if err := t.check(map[string]string{catalog: sessionRedisHash, s.sequence: "string"}); err != nil {
 		return nil, nil, err
 	}
-	if err := t.catalog(catalog, scope); err != nil {
+	if _, err := t.catalog(catalog, scope); err != nil {
+		return nil, nil, err
+	}
+	if err := t.finalMaintenanceIndexes(s, manifest.DAGID); err != nil {
 		return nil, nil, err
 	}
 	if _, err := t.sequence(s); err != nil {

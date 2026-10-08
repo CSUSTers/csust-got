@@ -13,6 +13,7 @@ import (
 var (
 	errSessionStorageRequired = errors.New("session repository and files are required")
 	errSessionDurations       = errors.New("invalid session durations")
+	errSessionLoadOnlyParent  = errors.New("load-only session parent cannot be committed")
 )
 
 // Options controls idle qualification, lease renewal, and operation deadlines.
@@ -103,11 +104,11 @@ func (s *Service) Load(ctx context.Context, selection Selection) (LoadResult, er
 }
 
 // LoadWithAcceptance validates a pinned candidate before accepting it as user activity.
-// accept borrows read-only messages and ancestry only for the callback's duration;
-// it must use the supplied context, not retain the candidate or reenter this Service.
-// The callback runs without the scope file lock, within the tracked Load deadline.
+// accept may mutate messages, but must not retain the candidate or reenter this Service.
+// It runs synchronously outside the scope lock, with caller and Service cancellation;
+// only storage phases have the default operation deadline. Close waits for accept to return.
 func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, accept func(context.Context, *LoadCandidate) error) (result LoadResult, loadErr error) {
-	op, done, err := s.begin(ctx)
+	op, done, err := s.track(ctx)
 	if err != nil {
 		return LoadResult{}, err
 	}
@@ -130,11 +131,12 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		}
 	}()
 	var messages []*schema.Message
-	var baseline TurnCapture
 	ancestorReplyIDs := map[int]struct{}{}
-	err = s.files.WithScopeLock(op, selection.Scope, func(files *ScopeFiles) error {
+	readCtx, cancelRead := context.WithTimeout(op, s.options.OperationTimeout)
+	defer cancelRead()
+	err = s.files.WithScopeLock(readCtx, selection.Scope, func(files *ScopeFiles) error {
 		var err error
-		pinned, err = s.repo.ResolveAndPin(op, selection, token, s.options.LeaseDuration)
+		pinned, err = s.repo.ResolveAndPin(readCtx, selection, token, s.options.LeaseDuration)
 		if err != nil {
 			return err
 		}
@@ -144,7 +146,7 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		seen := map[NodeRef]bool{}
 		var archiveSize int64
 		for i, n := range pinned.Nodes {
-			if err := op.Err(); err != nil {
+			if err := readCtx.Err(); err != nil {
 				return err
 			}
 			if n.Scope != selection.Scope || n.Ref.DAGID != pinned.Lease.DAGID || seen[n.Ref] {
@@ -181,24 +183,53 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 				ancestorReplyIDs[id] = struct{}{}
 			}
 		}
-		if err = ValidateHistory(messages); err != nil {
-			return err
+		return ValidateHistory(messages)
+	})
+	if err == nil {
+		err = readCtx.Err()
+	}
+	cancelRead()
+	if err != nil {
+		return LoadResult{}, err
+	}
+	candidateCtx, cancelCandidate := context.WithCancelCause(op)
+	defer cancelCandidate(nil)
+	renewCtx, cancelRenew := context.WithCancel(candidateCtx)
+	renewDone := make(chan error, 1)
+	go func() {
+		err := s.renewLease(renewCtx, selection.Scope, pinned.Lease)
+		if err != nil {
+			cancelCandidate(err)
 		}
-		baseline, err = Snapshot(TurnCapture{Bootstrap: History(messages...)})
-		return err
+		renewDone <- err
+	}()
+	stopRenew := sync.OnceValue(func() error {
+		cancelRenew()
+		return <-renewDone
 	})
+	defer func() { loadErr = errors.Join(loadErr, stopRenew()) }()
+	baseline, err := loadBaseline(messages, selection.LoadOnly)
 	if err != nil {
 		return LoadResult{}, err
 	}
-	if err = op.Err(); err == nil && accept != nil {
-		err = accept(op, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
+	if err = context.Cause(candidateCtx); err == nil && accept != nil {
+		err = accept(candidateCtx, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
 	}
 	if err != nil {
 		return LoadResult{}, err
 	}
-	err = s.files.WithScopeLock(op, selection.Scope, func(*ScopeFiles) error {
-		return s.repo.ConfirmLoaded(op, selection.Scope, pinned.Lease, s.options.LeaseDuration)
+	if err = errors.Join(stopRenew(), context.Cause(candidateCtx)); err != nil {
+		return LoadResult{}, err
+	}
+	confirmCtx, cancelConfirm := context.WithTimeout(op, s.options.OperationTimeout)
+	defer cancelConfirm()
+	err = s.files.WithScopeLock(confirmCtx, selection.Scope, func(*ScopeFiles) error {
+		return s.repo.ConfirmLoaded(confirmCtx, selection.Scope, pinned.Lease, s.options.LeaseDuration)
 	})
+	if err == nil {
+		err = confirmCtx.Err()
+	}
+	cancelConfirm()
 	if err != nil {
 		return LoadResult{}, err
 	}
@@ -212,11 +243,36 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		return LoadResult{}, err
 	}
 	parentCtx, cancel := context.WithCancel(s.ctx)
-	parent := &LoadedParent{service: s, scope: selection.Scope, ref: pinned.Nodes[len(pinned.Nodes)-1].Ref, lease: pinned.Lease, baseline: baseline.Bootstrap, ancestorReplyIDs: ancestorReplyIDs, valid: true, ctx: parentCtx, cancel: cancel, done: make(chan struct{})}
+	parent := &LoadedParent{service: s, scope: selection.Scope, ref: pinned.Nodes[len(pinned.Nodes)-1].Ref, lease: pinned.Lease, baseline: baseline, loadOnly: selection.LoadOnly, ancestorReplyIDs: ancestorReplyIDs, valid: true, ctx: parentCtx, cancel: cancel, done: make(chan struct{})}
 	s.parents[parent] = struct{}{}
 	s.mu.Unlock()
 	go parent.heartbeat()
 	return LoadResult{Messages: messages, Parent: parent}, nil
+}
+
+func loadBaseline(messages []*schema.Message, loadOnly bool) ([]Record, error) {
+	if loadOnly {
+		return nil, nil
+	}
+	baseline, err := Snapshot(TurnCapture{Bootstrap: History(messages...)})
+	return baseline.Bootstrap, err
+}
+
+// RejectContext records an unusable node for the supplied context without accepting it as activity.
+func (s *Service) RejectContext(ctx context.Context, scope Scope, ref NodeRef, contextKey string) error {
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	scope, err = s.scope(scope)
+	if err != nil {
+		return err
+	}
+	if err = s.repo.RejectContext(op, scope, ref, contextKey); err != nil {
+		return err
+	}
+	return op.Err()
 }
 
 // LoadedParent can only be constructed by a complete successful Load. Close it after
@@ -227,6 +283,7 @@ type LoadedParent struct {
 	ref              NodeRef
 	lease            Lease
 	baseline         []Record
+	loadOnly         bool
 	ancestorReplyIDs map[int]struct{}
 	mu               sync.Mutex
 	valid            bool
@@ -272,20 +329,30 @@ func (p *LoadedParent) heartbeat() {
 		delete(p.service.parents, p)
 		p.service.mu.Unlock()
 	}()
-	ticker := time.NewTicker(p.service.options.RenewInterval)
+	_ = p.service.renewLease(p.ctx, p.scope, p.lease)
+}
+
+func (s *Service) renewLease(ctx context.Context, scope Scope, lease Lease) error {
+	ticker := time.NewTicker(s.options.RenewInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-p.ctx.Done():
-			return
+		case <-ctx.Done():
+			return nil
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(p.ctx, p.service.options.OperationTimeout)
-			err := p.service.files.WithScopeLock(ctx, p.scope, func(*ScopeFiles) error {
-				return p.service.repo.Renew(ctx, p.scope, p.lease, p.service.options.LeaseDuration)
+			op, cancel := context.WithTimeout(ctx, s.options.OperationTimeout)
+			err := s.files.WithScopeLock(op, scope, func(*ScopeFiles) error {
+				return s.repo.Renew(op, scope, lease, s.options.LeaseDuration)
 			})
+			if err == nil {
+				err = op.Err()
+			}
 			cancel()
+			if ctx.Err() != nil {
+				return nil
+			}
 			if err != nil {
-				return
+				return err
 			}
 		}
 	}
@@ -319,6 +386,9 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	req.Receipt.MessageIDs = append([]int(nil), req.Receipt.MessageIDs...)
 	if req.Parent != nil && (req.Parent.service != s || req.Parent.scope != req.Scope) {
 		return Node{}, ErrCorrupt
+	}
+	if req.Parent != nil && req.Parent.loadOnly {
+		return Node{}, errSessionLoadOnlyParent
 	}
 	capture, err := Snapshot(req.Capture)
 	if err != nil {

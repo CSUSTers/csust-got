@@ -152,7 +152,7 @@ func TestAgentV3SessionPendingBatchRetryResetsResultsAndErrors(t *testing.T) {
 		once.Do(func() {
 			err = other.client.HSet(ctx, s.dag(a.ID).intents, repaired.Node.RunID, sessionEncode(repaired)).Err()
 			if err == nil {
-				err = other.client.HDel(ctx, s.dag(b.ID).intents, removed.Node.RunID).Err()
+				err = other.FinishIntent(ctx, f.scope, removed)
 			}
 		})
 		return err

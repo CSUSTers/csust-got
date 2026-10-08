@@ -232,7 +232,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			if err := op.Err(); err != nil {
 				return err
 			}
-			limit := cfg.Session.ContextOverflow.TokenLimit()
+			limit := tc.Config.EffectiveSessionTokenLimit(cfg.Session)
 			estimate, err := cc.Agent.estimateSessionContext(op, prepared.messages, limit)
 			if err != nil {
 				return fmt.Errorf("session context estimate unknown: %w", err)
@@ -377,7 +377,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		return nil, err
 	}
 	if rebuilt && !sessionLoaded {
-		limit := cfg.Session.ContextOverflow.TokenLimit()
+		limit := tc.Config.EffectiveSessionTokenLimit(cfg.Session)
 		estimate, estimateErr := cc.Agent.estimateSessionContext(ctx, messages, limit)
 		if estimateErr != nil {
 			zap.L().Warn("agentv3: fallback context estimate unknown; executing existing context mode once", zap.Error(estimateErr))
@@ -451,10 +451,6 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	if userText == "" {
 		userText = pd.Input
 	}
-	if pd.ReplyToXml != "" && !strings.Contains(userText, pd.ReplyToXml) {
-		userText = joinUserMessageSections(userText, pd.ReplyToXml)
-	}
-
 	dynamic := strings.Builder{}
 	dynamic.WriteString("<dynamic_suffix>\n")
 	dynamic.WriteString("<datetime>")

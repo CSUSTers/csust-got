@@ -141,6 +141,11 @@ func (r *AgentV3SessionRepository) ResolveAndPin(ctx context.Context, sel sessio
 		if sequence != 0 && (selected.Agent != sel.Agent || selected.CommitSequence != sequence) {
 			return session.ErrCorrupt
 		}
+		if sel.ContextKey != "" {
+			if err := t.contextAccepted(d, selected.Ref, sel.ContextKey); err != nil {
+				return err
+			}
+		}
 		seen := map[string]bool{}
 		for {
 			if err := ctx.Err(); err != nil {
@@ -294,7 +299,7 @@ func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Rese
 	var out session.Intent
 	err = r.atomic(ctx, func(t *sessionTxn) error {
 		out = session.Intent{}
-		if err := t.check(map[string]string{s.runs: sessionRedisHash}); err != nil {
+		if err := t.check(map[string]string{s.runs: sessionRedisHash, s.pending: sessionRedisSet}); err != nil {
 			return err
 		}
 		run, err := t.run(s, req.RunID)
@@ -334,7 +339,7 @@ func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Rese
 				return session.ErrFence
 			}
 			out = previous
-			return nil
+			return t.ensurePending(s, d)
 		}
 		var meta *sessionMeta
 		var lease session.Lease
@@ -353,7 +358,7 @@ func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Rese
 		out = session.Intent{Node: session.Node{Scope: req.Scope, Ref: session.NodeRef{DAGID: meta.ID, NodeID: ids[0]}, Parent: req.Parent, Agent: req.Agent, RunID: req.RunID, FileName: ids[0] + ".jsonl", Version: session.Version}, Lease: lease, Status: sessionIntentPending}
 		t.write("hset", d.intents, req.RunID, sessionEncode(out))
 		t.write("hset", s.runs, req.RunID, sessionEncode(sessionRunIndex{Ref: out.Node.Ref, Status: out.Status}))
-		return nil
+		return t.ensurePending(s, d)
 	})
 	if err != nil {
 		return session.Intent{}, err
@@ -386,7 +391,7 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 	var out session.Node
 	err = r.atomic(ctx, func(t *sessionTxn) error {
 		out = session.Node{}
-		if err := t.check(map[string]string{s.runs: sessionRedisHash, d.meta: "string", d.nodes: sessionRedisHash, d.leases: sessionRedisHash, d.intents: sessionRedisHash, s.sequence: "string", s.messages: sessionRedisHash, s.latest(intent.Node.Agent): sessionRedisZSet}); err != nil {
+		if err := t.check(map[string]string{s.runs: sessionRedisHash, s.pending: sessionRedisSet, d.meta: "string", d.nodes: sessionRedisHash, d.leases: sessionRedisHash, d.intents: sessionRedisHash, s.sequence: "string", s.messages: sessionRedisHash, s.latest(intent.Node.Agent): sessionRedisZSet}); err != nil {
 			return err
 		}
 		run, err := t.run(s, intent.Node.RunID)
@@ -472,7 +477,7 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 		for _, id := range receipt.MessageIDs {
 			t.write("hset", s.messages, strconv.Itoa(id), sessionEncode(out.Ref))
 		}
-		return nil
+		return t.ensurePending(s, d)
 	})
 	if err != nil {
 		return session.Node{}, err
@@ -555,7 +560,7 @@ func (r *AgentV3SessionRepository) AbortIntent(ctx context.Context, scope sessio
 	var aborted bool
 	err = r.atomic(ctx, func(t *sessionTxn) error {
 		aborted = false
-		if err := t.check(map[string]string{s.runs: sessionRedisHash, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash}); err != nil {
+		if err := t.check(map[string]string{s.runs: sessionRedisHash, s.pending: sessionRedisSet, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash}); err != nil {
 			return err
 		}
 		run, err := t.run(s, intent.Node.RunID)
@@ -608,7 +613,7 @@ func (r *AgentV3SessionRepository) AbortIntent(ctx context.Context, scope sessio
 			t.write("hset", d.intents, stored.Node.RunID, sessionEncode(stored))
 			t.write("hset", s.runs, stored.Node.RunID, sessionEncode(sessionRunIndex{Ref: stored.Node.Ref, Status: stored.Status}))
 		}
-		return nil
+		return t.ensurePending(s, d)
 	})
 	if err != nil {
 		return false, err
@@ -627,7 +632,7 @@ func (r *AgentV3SessionRepository) FinishIntent(ctx context.Context, scope sessi
 	}
 	d := s.dag(intent.Node.Ref.DAGID)
 	return r.atomic(ctx, func(t *sessionTxn) error {
-		if err := t.check(map[string]string{s.runs: sessionRedisHash, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash}); err != nil {
+		if err := t.check(map[string]string{s.runs: sessionRedisHash, s.pending: sessionRedisSet, d.meta: "string", d.nodes: sessionRedisHash, d.intents: sessionRedisHash, d.leases: sessionRedisHash}); err != nil {
 			return err
 		}
 		meta, err := t.meta(d, scope)
@@ -674,6 +679,15 @@ func (r *AgentV3SessionRepository) FinishIntent(ctx context.Context, scope sessi
 			return session.ErrCorrupt
 		}
 		t.write("hdel", d.intents, stored.Node.RunID)
+		count, err := t.tx.HLen(ctx, d.intents).Result()
+		if err != nil {
+			return err
+		}
+		if count == 1 {
+			t.write("srem", s.pending, d.id)
+		} else if err := t.ensurePending(s, d); err != nil {
+			return err
+		}
 		if stored.Status == sessionIntentAborted {
 			t.write("hdel", s.runs, stored.Node.RunID)
 		}

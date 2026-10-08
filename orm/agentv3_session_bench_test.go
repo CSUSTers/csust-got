@@ -99,7 +99,7 @@ func (c *sessionCommandCounter) record(cmd redis.Cmder) {
 	case strings.Contains(key, ":latest:"):
 		family = "latest"
 	default:
-		for _, suffix := range []string{"meta", "nodes", "leases", "intents", "runs", "messages", "sequence", "dags"} {
+		for _, suffix := range []string{"meta", "nodes", "leases", "intents", "runs", "messages", "sequence", "dags", "pending_dags", "deleting_dags", "rejected_contexts"} {
 			if strings.HasSuffix(key, ":"+suffix) {
 				family = suffix
 				break

@@ -119,8 +119,8 @@ func TestServiceBadDagAlongsideHealthy(t *testing.T) {
 
 func TestServicePartialPendingCancellationDoesNotStartRemainingIntents(t *testing.T) {
 	f := newAcceptanceFixture(t)
-	bad := f.commit(t, f.scope, nil, 101, "corrupt meta")
-	require.NoError(t, f.client.Set(t.Context(), f.dagKey(bad.Ref.DAGID, "meta"), "malformed meta", 0).Err())
+	bad := pendingPartitionArchive(t, f)
+	require.NoError(t, f.client.Set(t.Context(), f.dagKey(bad.Node.Ref.DAGID, "meta"), "malformed meta", 0).Err())
 	for range 3 {
 		pendingPartitionArchive(t, f)
 	}

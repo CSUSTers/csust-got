@@ -1,10 +1,12 @@
 package agentv3
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -184,7 +186,7 @@ func setupAgentV3SessionTurn(tc *TurnContext) {
 	if !load {
 		return
 	}
-	selection := session.Selection{Scope: state.scope, Agent: tc.Config.Name, Mode: session.SelectLatest}
+	selection := session.Selection{Scope: state.scope, Agent: tc.Config.Name, Mode: session.SelectLatest, ContextKey: agentV3SessionContextKey(tc.Config), LoadOnly: !save}
 	if tc.Trigger != nil && tc.Trigger.Reply {
 		selection.Mode = session.SelectReply
 		if target, valid := replySessionEmbeddedParent(tc.Message.ReplyTo, tc.Message.Chat); valid && target.Chat.ID == tc.ChatID {
@@ -226,9 +228,24 @@ func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3S
 	}
 	currentTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
 	if !tc.Config.UsesReplyChain() {
-		message, err := buildAgentV3UserMessage(cc, currentTC, &RichHistory{}, nil)
+		history := &RichHistory{}
+		if current.ReplyTo != nil {
+			quote := contextMessageFromTelegram(current.ReplyTo)
+			if quote == nil {
+				quote = &ContextMessage{ID: current.ReplyTo.ID}
+			}
+			history.ContextMessages = []*ContextMessage{quote}
+		}
+		quoted, err := agentV3SessionTemplateQuotesReply(cc, currentTC, history)
 		if err != nil {
 			return nil, nil, err
+		}
+		message, err := buildAgentV3UserMessage(cc, currentTC, history, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		if current.ReplyTo != nil && !quoted {
+			return []*schema.Message{schema.UserMessage(FormatSingleTbMessage(current.ReplyTo, "reply_to_message")), message}, nil, nil
 		}
 		return []*schema.Message{message}, nil, nil
 	}
@@ -250,6 +267,61 @@ func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3S
 		tc.V3.ImageRefs = normalizeAgentV3ImageRefs(append(tc.V3.ImageRefs, replySessionMessageImageRefs(current.ReplyTo)...))
 	}
 	return append(messages, currentMessages...), []int{0}, nil
+}
+
+func agentV3SessionTemplateQuotesReply(cc *CompiledAgent, tc *TurnContext, history *RichHistory) (bool, error) {
+	if cc.PromptTemplate == nil || tc.Message.ReplyTo == nil {
+		return false, nil
+	}
+	// Probe template data, not user-authored XML: only an emitted reply field can suppress the extra reference.
+	marker := newAgentV3RunID()
+	quoted := *history.ContextMessages[0]
+	quoted.Text += marker
+	pd := buildPromptData(tc, []*ContextMessage{&quoted})
+	pd.ReplyToXml = strings.TrimSuffix(pd.ReplyToXml, "</reply_to_message>") + marker + "</reply_to_message>"
+	var rendered bytes.Buffer
+	if err := cc.PromptTemplate.Execute(&rendered, pd); err != nil {
+		return false, fmt.Errorf("failed to render session reply template: %w", err)
+	}
+	return strings.Contains(rendered.String(), marker), nil
+}
+
+func agentV3SessionContextKey(cfg *config.AgentConfig) string {
+	var model *config.Model
+	if cfg != nil {
+		model = cfg.Model
+	}
+	if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
+		model = config.BotConfig.AgentV3.EffectiveModel(model)
+	}
+	identity := []string{"session-context-v1"}
+	if cfg != nil {
+		identity = append(identity, cfg.Name)
+	}
+	if model != nil {
+		identity = append(identity, model.Name, model.Model, model.BaseUrl)
+	}
+	return hashString(strings.Join(identity, "\x00"))
+}
+
+func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
+	if !isAgentV3ProviderContextLimit(err) {
+		return false
+	}
+	if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		setAgentV3ContextLimitTraceError(tc.V3.Trace)
+	}
+	if tc != nil && tc.Session != nil && tc.Session.parent != nil {
+		state := tc.Session
+		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
+		defer cancel()
+		if markErr := state.service.RejectContext(ctx, state.scope, state.parent.Ref(), state.selection.ContextKey); markErr != nil {
+			zap.L().Warn("agentv3: provider context rejection could not be saved")
+		} else {
+			zap.L().Debug("agentv3: provider rejected session context; next invocation uses fallback")
+		}
+	}
+	return true
 }
 
 func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory string, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {

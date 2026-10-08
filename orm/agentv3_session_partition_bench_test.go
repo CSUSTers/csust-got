@@ -27,6 +27,11 @@ func sessionStoreFixture(t testing.TB, f *sessionFixture, state sessionState) {
 		for id, view := range state.DAGs {
 			d := s.dag(id)
 			p.SAdd(t.Context(), s.dags, id)
+			if view.State == sessionDAGDeleting {
+				p.SAdd(t.Context(), s.deleting, id)
+			} else if len(view.Intents) > 0 {
+				p.SAdd(t.Context(), s.pending, id)
+			}
 			p.Set(t.Context(), d.meta, sessionEncode(sessionMeta{Layout: sessionRedisLayout, Scope: f.scope, ID: view.ID, Generation: view.Generation, State: view.State, LastActive: view.LastActive}), 0)
 			for field, n := range view.Nodes {
 				p.HSet(t.Context(), d.nodes, field, sessionEncode(n))
