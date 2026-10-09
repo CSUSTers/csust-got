@@ -128,12 +128,17 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		"enabled": cfg.Memory.Enable,
 	})
 	if cfg.Memory.Enable {
-		snapshot, err := orm.AgentV3GetMemorySnapshot(ctx, scope)
+		snapshot, epoch, err := orm.AgentV3GetCurrentMemorySnapshot(ctx, scope, func(ctx context.Context) error {
+			return rebuildAgentV3MemorySnapshot(ctx, scope, agentV3MemoryTTL())
+		})
 		if err != nil {
 			err = fmt.Errorf("agent v3 memory snapshot: %w", err)
 			finishMemorySpan(err, nil)
 			finishContextSpan(err, nil)
 			return nil, err
+		}
+		if state := tc.Session; !tc.Background && state != nil && state.service != nil {
+			state.memoryEpoch = epoch
 		}
 		if snapshot != nil {
 			memoryText = snapshot.Content

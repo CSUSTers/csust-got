@@ -427,6 +427,50 @@ func TestIdleWatchdogLateCallbackAfterTouchDoesNotCancel(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
+func TestIdleWatchdogTouchAfterDecisionDoesNotRearm(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	attempt := &streamAttempt{cancel: cancel}
+	attempt.armWatchdog(time.Hour)
+	defer attempt.close()
+
+	attempt.mu.Lock()
+	expired := time.Now().Add(-time.Millisecond)
+	attempt.deadline = expired
+	attempt.mu.Unlock()
+	attempt.onIdleTimer()
+	require.True(t, attempt.idle.Load())
+
+	attempt.touch()
+	attempt.mu.Lock()
+	require.Equal(t, expired, attempt.deadline, "touch after the idle decision must not move the deadline")
+	attempt.mu.Unlock()
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestIdleWatchdogDecisionIsAtomicWithTouch(t *testing.T) {
+	for range 200 {
+		ctx, cancel := context.WithCancel(t.Context())
+		attempt := &streamAttempt{cancel: cancel}
+		attempt.armWatchdog(time.Hour)
+		attempt.mu.Lock()
+		attempt.deadline = time.Now().Add(-time.Millisecond)
+		attempt.mu.Unlock()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); attempt.onIdleTimer() }()
+		go func() { defer wg.Done(); attempt.touch() }()
+		wg.Wait()
+
+		if attempt.idle.Load() {
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+		} else {
+			require.NoError(t, ctx.Err(), "a touch that decided first keeps the stream alive")
+		}
+		attempt.close()
+	}
+}
+
 func TestIdleWatchdogErrorIsRetryable(t *testing.T) {
 	assert.True(t, isRetryableModelError(errModelStreamIdle))
 	assert.True(t, isRetryableModelError(fmt.Errorf("wrapped: %w", errModelStreamIdle)))

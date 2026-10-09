@@ -128,7 +128,7 @@ Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leas
 
 每日 GC 新增 Redis key `<prefix>:agentv3:session:{<namespace>}:last_collection`（session 布局的全局区，无 TTL），保存最近一次成功每日回收的当地日期。升级后该 key 不存在，所以升级后**第一次在当地 02:00 之后启动**时会补跑一次完整 session GC：扫描所有 scope 的全部 DAG，每个 scope 受 `CollectTimeout`（默认 2m）限制；失败不写标记，每小时重试一次。此后恢复每日 02:00 节奏。回滚：旧版本忽略该 key，删除它也无副作用（下次新版本启动只会再补跑一次回收）。会话节点 JSON 的 `memory_epoch` 字段与群内 `…:memory:epoch` key 见 `docs/agent_memory.md`，不是本节新增。
 
-时区：不依赖 `TZ`；旧 DAG 的回收仍由每日 02:00 的 session GC 处理。
+时区：每日 GC 依赖进程/容器时区（`startAgentV3SessionMaintenance` 使用 `time.Local` 判定 02:00、补跑的当地日期以及写入 `last_collection` 的日期）。Dockerfile 默认 `TZ=Asia/Shanghai`，可用 `BOT_TZ` 覆盖；未设置 `TZ` 时按 UTC 计算。`agent_v3.cron.timezone` 不作用于此处。迁移影响：修改 `TZ` 会让 GC 时刻随之平移，并可能因当地日期与 `last_collection` 不一致而触发一次补跑。旧 DAG 的回收仍由每日 02:00 的 session GC 处理。
 
 ### 对已有部署的迁移步骤
 

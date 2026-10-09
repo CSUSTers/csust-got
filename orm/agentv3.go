@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"csust-got/log"
+
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 const (
@@ -599,6 +602,35 @@ func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3
 	}
 	agentV3PersistLegacyMemoryTTL(ctx, scope)
 	return &snapshot, nil
+}
+
+// AgentV3GetCurrentMemorySnapshot reads the epoch and then the snapshot for one turn. A snapshot whose
+// epoch differs from the memory epoch predates a deletion and may contain deleted text, so it is rebuilt
+// first; if that fails no snapshot is returned. The returned epoch is the one the snapshot belongs to.
+func AgentV3GetCurrentMemorySnapshot(ctx context.Context, scope AgentV3Scope, rebuild func(context.Context) error) (*AgentV3MemorySnapshot, int64, error) {
+	for attempt := 0; ; attempt++ {
+		epoch, err := AgentV3GetMemoryEpoch(ctx, scope)
+		if err != nil {
+			return nil, 0, err
+		}
+		snapshot, err := AgentV3GetMemorySnapshot(ctx, scope)
+		if err != nil {
+			return nil, 0, err
+		}
+		if snapshot == nil || snapshot.Epoch == epoch {
+			return snapshot, epoch, nil
+		}
+		if attempt > 0 || rebuild == nil {
+			log.Warn("agent v3 memory snapshot is older than the memory epoch, ignoring it",
+				zap.Int64("chat", scope.ChatID), zap.Int64("snapshot_epoch", snapshot.Epoch), zap.Int64("epoch", epoch))
+			return nil, epoch, nil
+		}
+		if err := rebuild(ctx); err != nil {
+			log.Warn("agent v3 memory snapshot rebuild after deletion failed, ignoring the stale snapshot",
+				zap.Int64("chat", scope.ChatID), zap.Error(err))
+			return nil, epoch, nil
+		}
+	}
 }
 
 var agentV3MemoryPersisted sync.Map

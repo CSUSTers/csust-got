@@ -1,6 +1,7 @@
 package orm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"csust-got/config"
+	"csust-got/log"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -34,7 +36,47 @@ func setupAgentV3Redis(t *testing.T) *miniredis.Miniredis {
 	return mr
 }
 
+func TestAgentV3GetCurrentMemorySnapshotNeverReturnsDeletedMemory(t *testing.T) {
+	setupAgentV3Redis(t)
+	log.InitLogger()
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100}
+	rebuild := func(ctx context.Context) error {
+		return AgentV3RebuildMemorySnapshot(ctx, scope, 0, buildAgentV3MemorySnapshotForTest)
+	}
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "first", Content: "secret"}, 0))
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "second", Content: "kept"}, 0))
+	require.NoError(t, rebuild(ctx))
+
+	snapshot, epoch, err := AgentV3GetCurrentMemorySnapshot(ctx, scope, rebuild)
+	require.NoError(t, err)
+	require.Zero(t, epoch)
+	require.Equal(t, "kept,secret", snapshot.Content)
+
+	require.NoError(t, AgentV3ForgetMemory(ctx, scope, "first"))
+	snapshot, epoch, err = AgentV3GetCurrentMemorySnapshot(ctx, scope, rebuild)
+	require.NoError(t, err)
+	require.Equal(t, "kept", snapshot.Content, "a stale snapshot is rebuilt before it is returned")
+	require.Equal(t, snapshot.Epoch, epoch)
+	stored, err := AgentV3GetMemoryEpoch(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, stored, epoch, "the returned epoch is the one after the rebuild")
+
+	require.NoError(t, AgentV3ForgetMemory(ctx, scope, "second"))
+	failing := func(context.Context) error { return errAgentV3RebuildFailedUnderTest }
+	snapshot, epoch, err = AgentV3GetCurrentMemorySnapshot(ctx, scope, failing)
+	require.NoError(t, err)
+	require.Nil(t, snapshot, "a failed rebuild must not fall back to the stale snapshot")
+	require.Equal(t, stored+1, epoch)
+
+	snapshot, _, err = AgentV3GetCurrentMemorySnapshot(ctx, scope, nil)
+	require.NoError(t, err)
+	require.Nil(t, snapshot)
+}
+
 var agentV3UpdateSummaryUnderTest = AgentV3UpdateSummary
+
+var errAgentV3RebuildFailedUnderTest = errors.New("redis blip")
 
 var errAgentV3StateConflictUnderTest = ErrAgentV3StateConflict
 
@@ -486,6 +528,7 @@ func TestAgentV3GetMemorySnapshotPersistsLegacyTTL(t *testing.T) {
 	mr := setupAgentV3Redis(t)
 	ctx := t.Context()
 	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100777}
+	agentV3MemoryPersisted.Delete(agentV3BaseKey(scope))
 	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "a", Content: "a", CreatedBy: 1}, time.Hour))
 	require.NoError(t, agentV3RebuildMemorySnapshotUnderTest(ctx, scope, time.Hour, buildAgentV3MemorySnapshotForTest))
 	keys := []string{

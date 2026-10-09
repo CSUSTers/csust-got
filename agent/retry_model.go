@@ -80,9 +80,10 @@ func (a *streamAttempt) onIdleTimer() {
 		a.mu.Unlock()
 		return
 	}
-	a.mu.Unlock()
 	a.idle.Store(true)
-	a.cancel()
+	cancel := a.cancel
+	a.mu.Unlock()
+	cancel()
 }
 
 func (a *streamAttempt) touch() {
@@ -91,7 +92,7 @@ func (a *streamAttempt) touch() {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.timer != nil {
+	if a.timer != nil && !a.idle.Load() {
 		a.deadline = time.Now().Add(a.timeout)
 	}
 }

@@ -88,6 +88,9 @@ Redis key：无新增。时区：不依赖 `TZ`。
 1. 升级前：检查 `config.yaml` / `custom.yaml` 中是否已写有 `agents[].temperature` 或 `agents[].reasoning_effort`。此前这两个键会被解码但不生效；升级后开始真正作用于模型请求，采样、推理行为和成本都会变化。请先确认取值是否符合预期，不想生效的直接删除。
 2. 升级后：对照模型供应商的账单与回复质量，确认调优值符合预期。
 
+`model.request_timeout`、`model.stream_idle_timeout`、`agents[].agent.final_reserve` 与 `agent_v3.concurrency.*` 在重启后的第一次请求起生效；不配置时使用安全默认值（分别为 `0` / `60s` / `90s` / 不限并发），滚动升级无需数据迁移。
+
 ### 回滚方式
 
 - 删除 `agents[].temperature` / `agents[].reasoning_effort` 即恢复供应商默认；回滚到旧版本后这两个键重新被忽略。无数据需要清理。
+- 回滚到旧版本后，`model.request_timeout`、`model.stream_idle_timeout`、`agents[].agent.final_reserve` 与 `agent_v3.concurrency.*` 会被忽略（至多记一条未知配置键 warning），无需清理。
