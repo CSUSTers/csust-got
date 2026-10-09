@@ -12,7 +12,7 @@ require (
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/mark3labs/mcp-go v0.58.0
-	github.com/meguminnnnnnnnn/go-openai v0.1.2
+	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/samber/lo v1.53.0
