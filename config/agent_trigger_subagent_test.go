@@ -64,6 +64,10 @@ func TestSubAgentConfigValidateSkills(t *testing.T) {
 	require.NoError(t, (&SubAgentConfig{Name: "r", Skills: []string{"searxng", "Web_Search", " rich-message "}}).ValidateSkills())
 	err := (&SubAgentConfig{Name: "r", Skills: []string{"../disk"}}).ValidateSkills()
 	require.ErrorIs(t, err, errInvalidSubAgentSkillName)
+	require.NoError(t, (&SubAgentConfig{Name: "r", Skills: []string{"exa-search"}}).ValidateSkills())
+	for _, bad := range []string{"Bad Name", "../disk", "", "-lead", strings.Repeat("a", 65)} {
+		require.ErrorIs(t, (&SubAgentConfig{Name: "r", Skills: []string{bad}}).ValidateSkills(), errInvalidSubAgentSkillName, bad)
+	}
 	agent := &AgentConfig{Name: "assistant", Agent: &AgentOptions{SubAgents: []*SubAgentConfig{{Name: "r", Skills: []string{"bad name"}}}}}
 	require.ErrorIs(t, agent.ValidateSubAgents(), errInvalidSubAgentSkillName)
 	require.NoError(t, (&AgentConfig{Name: "plain"}).ValidateSubAgents())

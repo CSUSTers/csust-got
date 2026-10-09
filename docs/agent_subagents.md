@@ -44,7 +44,7 @@ agents:
 | `agents[].agent.subagents[].max_result_chars` | 配置项 | `4000` | 返回文本超过 4000 字符时截断为首尾各约 2000 字符 | 无 |
 | `agents[].agent.subagents[].max_steps` | 配置项 | `runtime: true` 时 `8`，否则 `5` | 使用默认值；有工具时最低 4 | 无 |
 
-- 校验：`skills` 中的名称必须是规范技能名（`^[a-z0-9][a-z0-9-]{0,63}$`，下划线会被归一为 `-`），否则启动时 panic。
+- 校验：`skills` 中的名称必须是规范技能名（`^[a-z0-9][a-z0-9-]{0,63}$`，下划线会被归一为 `-`），否则 `checkConfig` 在启动时 panic（子 agent 不会被静默跳过）。
 - 校验：`subagents` 中不能有 `null` 条目（例如 YAML 里只写了 `-`），否则启动时报 `agents[].agent.subagents[<j>] is null` 配置错误并 panic。
 - Redis key：无新增。Runtime 工作空间仍按 `bot:tg:<chatID>` 命名空间共享。
 - 时区：不依赖 `TZ`。

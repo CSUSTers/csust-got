@@ -27,12 +27,22 @@ func TestCapSubAgentResult(t *testing.T) {
 		{name: "unlimited", in: strings.Repeat("x", 50), limit: 0, want: strings.Repeat("x", 50)},
 		{name: "fits", in: "short", limit: 10, want: "short"},
 		{name: "head and tail kept", in: "0123456789abcdef", limit: 8, want: "0123\n[subagent result truncated: 8 chars omitted]\ncdef"},
-		{name: "utf8 boundary", in: strings.Repeat("好", 10), limit: 7, want: "好\n[subagent result truncated: 24 chars omitted]\n好"},
+		{name: "utf8 boundary", in: strings.Repeat("好", 10), limit: 7, want: strings.Repeat("好", 3) + "\n[subagent result truncated: 3 chars omitted]\n" + strings.Repeat("好", 4)},
+		{name: "multibyte within limit", in: strings.Repeat("好", 10), limit: 10, want: strings.Repeat("好", 10)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.want, capSubAgentResult(tt.in, tt.limit))
 		})
+	}
+}
+
+func TestSubAgentSkillNameValidationAgreesWithRuntime(t *testing.T) {
+	names := []string{"exa-search", "Web_Search", " rich-message ", "searxng", "../disk", "Bad Name", "", "-lead", "a/b", "好", strings.Repeat("a", 64), strings.Repeat("a", 65)}
+	for _, name := range names {
+		_, runtimeErr := parseAgentV3CanonicalSkillName(name)
+		cfgErr := (&config.SubAgentConfig{Name: "r", Skills: []string{name}}).ValidateSkills()
+		require.Equal(t, runtimeErr == nil, cfgErr == nil, name)
 	}
 }
 

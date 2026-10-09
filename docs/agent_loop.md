@@ -67,3 +67,27 @@ agent_v3:
   - 目标侧失败才换下一个 IP：SOCKS CONNECT 回复 network unreachable、host unreachable、connection refused、TTL expired（标准库报为 `socks connect …: unknown error <原因>`），超出本次尝试的时间预算，以及 SOCKS 成功后与目标的 TLS 握手失败。
   - 代理不可用则标记 `errImageProxyUnusable` 并停止，不再对其他 IP 重复连接和认证：连不上代理（`httptrace` 的 `ConnectDone` 从未成功，日志 `image proxy unreachable`），或代理 TCP 可达但会话被代理本身拒绝（认证失败、无可接受的认证方式、协议版本或报文异常、general SOCKS server failure、connection not allowed by ruleset、command not supported、address type not supported 及未知回复码，日志 `image proxy reachable but SOCKS negotiation failed`）。
 - 其他代理 scheme 无法固定 IP，直接按策略错误拒绝下载。
+
+## 部署与配置
+
+| 键名 / 路径 | 类型 | 默认值 | 不配置时的行为 | 需要挂载 / 环境变量 / TZ |
+| --- | --- | --- | --- | --- |
+| `agents[].temperature` | 配置项 | 未设置 | 使用供应商默认采样温度 | 无 |
+| `agents[].reasoning_effort` | 配置项 | 未设置 | 使用供应商默认推理强度；可填 `low` / `medium` / `high` | 无 |
+| `model.request_timeout` | 配置项 | `0` | 不限制整请求时长（仅靠 `stream_idle_timeout` 与调用 ctx 期限） | 无 |
+| `model.stream_idle_timeout` | 配置项 | `60s` | 连续 60s 无 chunk 即取消该次尝试并重试；`"0s"` 关闭 | 无 |
+| `agents[].agent.final_reserve` | 配置项 | `90s` | 为收尾预留 90s（压到 `min(final_reserve, 剩余总时长/3)`）；`"0s"` 关闭 | 无 |
+| `agent_v3.concurrency.max_runs` | 配置项 | `0` | 不限制同时运行的 agent 轮次 | 无 |
+| `agent_v3.concurrency.max_model_calls` | 配置项 | `0` | 不限制同时进行的模型请求 | 无 |
+| `agent_v3.concurrency.busy_message` | 配置项 | `当前任务太多，稍后再试。` | 超出 `max_runs` 时回复该文本 | 无 |
+
+Redis key：无新增。时区：不依赖 `TZ`。
+
+### 对已有部署的迁移步骤
+
+1. 升级前：检查 `config.yaml` / `custom.yaml` 中是否已写有 `agents[].temperature` 或 `agents[].reasoning_effort`。此前这两个键会被解码但不生效；升级后开始真正作用于模型请求，采样、推理行为和成本都会变化。请先确认取值是否符合预期，不想生效的直接删除。
+2. 升级后：对照模型供应商的账单与回复质量，确认调优值符合预期。
+
+### 回滚方式
+
+- 删除 `agents[].temperature` / `agents[].reasoning_effort` 即恢复供应商默认；回滚到旧版本后这两个键重新被忽略。无数据需要清理。

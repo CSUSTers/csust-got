@@ -235,23 +235,13 @@ func (t *subAgentResultTool) InvokableRun(ctx context.Context, args string, opts
 
 // capSubAgentResult keeps the head and tail of an oversized subagent reply around an omission marker.
 func capSubAgentResult(s string, limit int) string {
-	if limit <= 0 || len(s) <= limit {
+	if limit <= 0 || len(s) <= limit || utf8.RuneCountInString(s) <= limit {
 		return s
 	}
+	runes := []rune(s)
 	head := limit / 2
-	tail := limit - head
-	for head > 0 && !utf8.RuneStart(s[head]) {
-		head--
-	}
-	tailStart := len(s) - tail
-	for tailStart < len(s) && !utf8.RuneStart(s[tailStart]) {
-		tailStart++
-	}
-	if tailStart < head {
-		tailStart = head
-	}
-	omitted := tailStart - head
-	return fmt.Sprintf("%s\n[subagent result truncated: %d chars omitted]\n%s", s[:head], omitted, s[tailStart:])
+	tailStart := len(runes) - (limit - head)
+	return fmt.Sprintf("%s\n[subagent result truncated: %d chars omitted]\n%s", string(runes[:head]), tailStart-head, string(runes[tailStart:]))
 }
 
 // buildMainAgent creates the main react.Agent from an AgentConfig with agent options.
