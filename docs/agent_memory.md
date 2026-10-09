@@ -16,7 +16,7 @@
   检查通过后 MULTI 写入，冲突时最多重试 5 次）。并发写入不会突破 `max_entries_per_user` 或容量；重试耗尽返回
   `ErrAgentV3StateConflict`，用户看到「写入 memory 失败，请稍后重试」。
 - snapshot 超出预算时（例如升级前已经写满）**丢弃最旧条目**、保留最新条目，并在开头标注 `[earlier memory omitted: N entries]`；预算同样按字符计，单条最新条目超长时按字符截断。
-- memory 项与 snapshot **不再设置 TTL**：升级后首次写入 / 删除会把现有 memory key 转为持久 key。
+- memory 项与 snapshot **不再设置 TTL**：升级后首次写入 / 删除会把现有 memory key 转为持久 key。旧版本给 `memory:item:*`、`memory:active`、`memory:snapshot:current` 设置了 `context_cache.redis_ttl`；升级后第一次读取该群记忆时自动 PERSIST 这些旧 key（每进程每群一次），无需手工操作；但在升级前已过期的 key 不可恢复。
 
 ## 会话中的 memory snapshot 只追加、不改写
 
@@ -73,8 +73,9 @@ Redis key：`<prefix>:agentv3:<bot>:tg:<chatID>:memory:*`，**无 TTL**。当前
 
 1. 升级前：无需操作。若希望普通成员也能写记忆，在 `config.yaml` 设置 `write_policy: explicit_quota`。
 2. 升级后：以前任何人发「记住：…」都会写入记忆，现在默认只有管理员可写，非管理员会收到一条拒绝回复；请告知群成员。
-3. 已经超过容量的群，下次写入 / 删除触发重建时 snapshot 会改为保留最新条目。
-4. 升级前提交的会话节点没有 `memory_epoch`，按 0 处理；群里从未删除过记忆时照常续聊，第一次删除后这些节点同样失效重建。
+3. 升级后每个仍有记忆的群，首次读取记忆时旧 TTL 自动清除（见上）；升级前已按旧 TTL 过期的记忆不可恢复。
+4. 已经超过容量的群，下次写入 / 删除触发重建时 snapshot 会改为保留最新条目。
+5. 升级前提交的会话节点没有 `memory_epoch`，按 0 处理；群里从未删除过记忆时照常续聊，第一次删除后这些节点同样失效重建。
 
 ### 回滚方式
 

@@ -122,8 +122,11 @@ context-length 错误的识别规则：OpenAI 风格 API 错误（eino-ext 或 g
 | `agent_v3.session.compact.keep_recent_turns` | 配置项 | `2` | 最近 2 个节点原样保留；显式值必须为正整数 | 无 |
 | `agent_v3.session.compact.summary_max_chars` | 配置项 | `6000` | 摘要按 6000 个 rune 截断；显式值必须为正整数 | 无 |
 | `agent_v3.session.compact.model` | 配置项（`Model` 对象） | 无 | 回退该 agent 的 `format.progress_summary.model`；都没有则跳过压缩 | 无；模型 API key 与现有 model 配置相同方式提供 |
+| `agent_v3.session.context_overflow.patterns` | 配置项（正则列表） | 内置列表（覆盖 vLLM `maximum context length`、DeepSeek、Qwen 等） | 使用内置列表；空列表同样沿用内置值，非法正则启动时拒绝 | 无；迁移无需操作，回滚删除该键即可 |
 
-Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leases，scope 的 `messages`/`latest`/`runs`/`sequence`），节点 JSON 新增可选字段 `redirected_from`，压缩 root 的 `memory_epoch` 继承被压缩节点；没有新增 key 前缀或 TTL。文件：新 root 的 JSONL 写入同一 `session.directory`，受同样的锁与原子发布要求。
+Redis key：复用 session 的分区布局（新 DAG 的 meta/nodes/intents/leases，scope 的 `messages`/`latest`/`runs`/`sequence`），节点 JSON 新增可选字段 `redirected_from`，压缩 root 的 `memory_epoch` 继承被压缩节点；`compact` 本身没有新增 key 前缀或 TTL。文件：新 root 的 JSONL 写入同一 `session.directory`，受同样的锁与原子发布要求。
+
+每日 GC 新增 Redis key `<prefix>:agentv3:session:{<namespace>}:last_collection`（session 布局的全局区，无 TTL），保存最近一次成功每日回收的当地日期。升级后该 key 不存在，所以升级后**第一次在当地 02:00 之后启动**时会补跑一次完整 session GC：扫描所有 scope 的全部 DAG，每个 scope 受 `CollectTimeout`（默认 2m）限制；失败不写标记，每小时重试一次。此后恢复每日 02:00 节奏。回滚：旧版本忽略该 key，删除它也无副作用（下次新版本启动只会再补跑一次回收）。会话节点 JSON 的 `memory_epoch` 字段与群内 `…:memory:epoch` key 见 `docs/agent_memory.md`，不是本节新增。
 
 时区：不依赖 `TZ`；旧 DAG 的回收仍由每日 02:00 的 session GC 处理。
 

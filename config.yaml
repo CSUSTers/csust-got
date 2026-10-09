@@ -71,6 +71,7 @@ agent_v3:
     context_overflow:
       strategy: rebuild # 当前唯一支持的策略；省略默认 rebuild，不是压缩/摘要。
       max_tokens: 200000 # 省略默认 200000，显式值必须为正整数；完整首轮候选输入估算严格 > 此值才回退。
+      # patterns: ["maximum context length", "context window"] # 可选；正则列表，替换默认的 provider 上下文超限识别（内置列表覆盖 vLLM "maximum context length"、DeepSeek、Qwen）；省略或空列表沿用内置值。
     # agents[].session.context_overflow.max_tokens 可选覆盖；省略继承此值，disabled 也校验非法阈值。
     # 估算方法 text-runs-media-budget-v1 为近似值，非 provider tokenizer/窗口保证，详见文档。
     # 超限整体回退原 context_mode，允许保存时建立新 DAG 根，不复连或删除旧祖先。

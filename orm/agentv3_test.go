@@ -482,6 +482,34 @@ func TestAgentV3MemoryZeroTTLPersistsKeys(t *testing.T) {
 	assert.Equal(t, 0, count)
 }
 
+func TestAgentV3GetMemorySnapshotPersistsLegacyTTL(t *testing.T) {
+	mr := setupAgentV3Redis(t)
+	ctx := t.Context()
+	scope := AgentV3Scope{Bot: "bot", Platform: "tg", ChatID: -100777}
+	require.NoError(t, AgentV3AddMemory(ctx, scope, AgentV3MemoryItem{ID: "a", Content: "a", CreatedBy: 1}, time.Hour))
+	require.NoError(t, agentV3RebuildMemorySnapshotUnderTest(ctx, scope, time.Hour, buildAgentV3MemorySnapshotForTest))
+	keys := []string{
+		agentV3MemoryItemKey(scope, "a"),
+		agentV3MemoryActiveKey(scope),
+		agentV3MemorySnapshotCurrentKey(scope),
+	}
+	for _, key := range keys {
+		require.Positive(t, mr.TTL(key), key)
+	}
+
+	snapshot, err := AgentV3GetMemorySnapshot(ctx, scope)
+	require.NoError(t, err)
+	require.NotNil(t, snapshot)
+	for _, key := range keys {
+		require.Equal(t, time.Duration(0), mr.TTL(key), key)
+	}
+
+	mr.SetTTL(keys[0], time.Hour)
+	_, err = AgentV3GetMemorySnapshot(ctx, scope)
+	require.NoError(t, err)
+	require.Positive(t, mr.TTL(keys[0]), "persist runs once per process and scope")
+}
+
 func TestAgentV3SetPrefixWritesOnlyCurrentRecord(t *testing.T) {
 	mr := setupAgentV3Redis(t)
 	ctx := t.Context()

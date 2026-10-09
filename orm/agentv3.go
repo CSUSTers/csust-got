@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -596,7 +597,32 @@ func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3
 	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
 		return nil, err
 	}
+	agentV3PersistLegacyMemoryTTL(ctx, scope)
 	return &snapshot, nil
+}
+
+var agentV3MemoryPersisted sync.Map
+
+func agentV3PersistLegacyMemoryTTL(ctx context.Context, scope AgentV3Scope) {
+	base := agentV3BaseKey(scope)
+	if _, done := agentV3MemoryPersisted.Load(base); done {
+		return
+	}
+	activeKey := agentV3MemoryActiveKey(scope)
+	ids, err := rc.SMembers(ctx, activeKey).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return
+	}
+	pipe := rc.Pipeline()
+	pipe.Persist(ctx, agentV3MemorySnapshotCurrentKey(scope))
+	pipe.Persist(ctx, activeKey)
+	for _, id := range ids {
+		pipe.Persist(ctx, agentV3MemoryItemKey(scope, id))
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		return
+	}
+	agentV3MemoryPersisted.Store(base, struct{}{})
 }
 
 // AgentV3SaveTraceSummary stores the latest trace summary.
