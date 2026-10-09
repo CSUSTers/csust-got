@@ -258,7 +258,6 @@ func TestAgentV3SessionMaintenanceBudgetAndCloseStopNewBatches(t *testing.T) {
 	for _, stop := range []string{"budget", "close"} {
 		t.Run(stop, func(t *testing.T) {
 			f, _ := sessionPendingFixture(t, sessionPendingBatchSize+1)
-			svc := fixtureService(t, f.repo, f.dir, session.Options{OperationTimeout: 50 * time.Millisecond})
 			entered := make(chan struct{})
 			var once sync.Once
 			reads := 0
@@ -271,13 +270,47 @@ func TestAgentV3SessionMaintenanceBudgetAndCloseStopNewBatches(t *testing.T) {
 				<-ctx.Done()
 				return ctx.Err()
 			}})
+			timeout := time.Minute
+			if stop == "budget" {
+				timeout = 50 * time.Millisecond
+			}
+			var svc *session.Service
+			var err error
+			returned := false
 			done := make(chan error, 1)
-			go func() { done <- svc.Recover(t.Context()) }()
-			<-entered
+			for {
+				svc = fixtureService(t, f.repo, f.dir, session.Options{OperationTimeout: timeout})
+				go func() { done <- svc.Recover(t.Context()) }()
+				select {
+				case <-entered:
+				case err = <-done:
+					returned = true
+				case <-time.After(time.Minute):
+					require.FailNow(t, "recovery did not read intents")
+				}
+				select {
+				case <-entered:
+				default:
+					// A slow runner can spend the whole budget before the first batch read.
+					require.Equal(t, "budget", stop, "recovery returned before reading intents: %v", err)
+					require.ErrorIs(t, err, context.DeadlineExceeded)
+					require.Zero(t, reads)
+					require.NoError(t, svc.Close())
+					timeout, returned = 2*timeout, false
+					continue
+				}
+				break
+			}
 			if stop == "close" {
 				require.NoError(t, svc.Close())
 			}
-			err := <-done
+			if !returned {
+				select {
+				case err = <-done:
+				case <-time.After(time.Minute):
+					require.FailNow(t, "recovery did not stop")
+				}
+			}
 			if stop == "budget" {
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			} else {

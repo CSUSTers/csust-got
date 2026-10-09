@@ -38,6 +38,7 @@ type agentSessionGateRepository struct {
 	confirmError error
 	releaseError error
 	onConfirm    func()
+	onRelease    func()
 	released     chan struct{}
 }
 
@@ -63,6 +64,9 @@ func (r *agentSessionGateRepository) ConfirmLoaded(ctx context.Context, scope se
 func (r *agentSessionGateRepository) Release(ctx context.Context, scope session.Scope, lease session.Lease) error {
 	r.releases.Add(1)
 	err := errors.Join(r.Repository.Release(ctx, scope, lease), r.releaseError)
+	if r.onRelease != nil {
+		r.onRelease()
+	}
 	select {
 	case r.released <- struct{}{}:
 	default:
