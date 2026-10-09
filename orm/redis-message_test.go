@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"csust-got/log"
@@ -97,7 +98,7 @@ func TestMessageStreamStrictAndBestEffortDecoding(t *testing.T) {
 		setupMessageCacheRedis(t)
 		require.NoError(t, PushMessageToStream(cachedPollMessage(1, PollQuiz)))
 
-		messages, err := GetMessagesFromStream(-100, "-", "+", 10, false)
+		messages, err := GetMessagesFromStream(-100, MessageStreamQuery{Count: 10})
 		require.NoError(t, err)
 		require.Len(t, messages, 1)
 		require.Equal(t, PollQuiz, messages[0].Poll.Type)
@@ -109,7 +110,7 @@ func TestMessageStreamStrictAndBestEffortDecoding(t *testing.T) {
 
 		var err error
 		require.NotPanics(t, func() {
-			_, err = GetMessagesFromStream(-100, "-", "+", 10, false)
+			_, err = GetMessagesFromStream(-100, MessageStreamQuery{Count: 10})
 		})
 		require.ErrorIs(t, err, ErrInvalidCachedMessage)
 	})
@@ -119,19 +120,113 @@ func TestMessageStreamStrictAndBestEffortDecoding(t *testing.T) {
 		addRawMessageStreamRecord(t, -100, "1-0", map[string]any{"message": `{"message_id":1`})
 		require.NoError(t, PushMessageToStream(cachedPollMessage(2, PollRegular)))
 
-		messages, scanned, err := GetMessagesFromStreamBestEffort(-100, "-", "+", 10, false)
+		messages, scanned, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{Count: 10})
 		require.NoError(t, err)
 		require.Equal(t, 2, scanned)
 		require.Len(t, messages, 1)
 		require.Equal(t, 2, messages[0].ID)
 	})
+
+	t.Run("strict_ignores_bad_records_outside_range", func(t *testing.T) {
+		setupMessageCacheRedis(t)
+		addRawMessageStreamRecord(t, -100, "1-0", map[string]any{"message": `{"message_id":1`})
+		require.NoError(t, PushMessageToStream(cachedTextMessage(2, "two")))
+
+		messages, err := GetMessagesFromStream(-100, MessageStreamQuery{MinID: 2})
+		require.NoError(t, err)
+		require.Equal(t, []int{2}, cachedMessageIDs(messages))
+	})
+}
+
+func TestPushMessageToStreamAcceptsOutOfOrderIDs(t *testing.T) {
+	setupMessageCacheRedis(t)
+	for _, id := range []int{5, 7, 6, 3, 7} {
+		require.NoError(t, PushMessageToStream(cachedTextMessage(id, fmt.Sprintf("m%d", id))))
+	}
+
+	messages, scanned, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, 5, scanned)
+	require.Equal(t, []int{3, 5, 6, 7}, cachedMessageIDs(messages))
+}
+
+func TestMessageStreamReaderKeepsLatestEditAndMarksEditedEntries(t *testing.T) {
+	miniRedis := setupMessageCacheRedis(t)
+	require.NoError(t, PushMessageToStream(cachedTextMessage(1, "first")))
+	original := cachedTextMessage(2, "original")
+	require.NoError(t, PushMessageToStream(original))
+	require.NoError(t, PushMessageToStream(cachedTextMessage(3, "third")))
+	edited := cachedTextMessage(2, "edited")
+	edited.LastEdit = 1700000100
+	require.NoError(t, PushMessageToStream(edited))
+
+	messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, []int{1, 2, 3}, cachedMessageIDs(messages))
+	require.Equal(t, "edited", messages[1].Text)
+	require.Equal(t, int64(1700000100), messages[1].LastEdit)
+
+	entries, err := miniRedis.Stream(wrapKeyWithChat("message_stream", -100))
+	require.NoError(t, err)
+	require.Len(t, entries, 4)
+	require.NotContains(t, entries[1].Values, "edited")
+	require.Contains(t, entries[3].Values, "edited")
+	require.Contains(t, entries[3].Values, "1")
+	require.Contains(t, entries[3].Values, "id")
+	require.Contains(t, entries[3].Values, "2")
+}
+
+func TestMessageStreamReaderAcceptsLegacyEntries(t *testing.T) {
+	setupMessageCacheRedis(t)
+	addRawMessageStreamRecord(t, -100, "4-0", map[string]any{"message": cachedMessageJSON(t, cachedTextMessage(4, "legacy four"))})
+	addRawMessageStreamRecord(t, -100, "6-0", map[string]any{"message": cachedMessageJSON(t, cachedTextMessage(6, "legacy six"))})
+	require.NoError(t, PushMessageToStream(cachedTextMessage(5, "new five")))
+	require.NoError(t, PushMessageToStream(cachedTextMessage(6, "new six")))
+
+	messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, []int{4, 5, 6}, cachedMessageIDs(messages))
+	require.Equal(t, "legacy four", messages[0].Text)
+	require.Equal(t, "new six", messages[2].Text)
+
+	inRange, err := GetMessagesFromStream(-100, MessageStreamQuery{MinID: 5, MaxID: 5})
+	require.NoError(t, err)
+	require.Equal(t, []int{5}, cachedMessageIDs(inRange))
+}
+
+func TestMessageStreamQueryRangeCountAndOrder(t *testing.T) {
+	setupMessageCacheRedis(t)
+	for _, id := range []int{10, 12, 11, 15, 14, 13} {
+		require.NoError(t, PushMessageToStream(cachedTextMessage(id, fmt.Sprintf("m%d", id))))
+	}
+
+	tests := []struct {
+		name  string
+		query MessageStreamQuery
+		want  []int
+	}{
+		{name: "all_ascending", query: MessageStreamQuery{}, want: []int{10, 11, 12, 13, 14, 15}},
+		{name: "all_descending", query: MessageStreamQuery{Reverse: true}, want: []int{15, 14, 13, 12, 11, 10}},
+		{name: "bounded_inclusive", query: MessageStreamQuery{MinID: 11, MaxID: 13}, want: []int{11, 12, 13}},
+		{name: "oldest_count", query: MessageStreamQuery{Count: 2}, want: []int{10, 11}},
+		{name: "newest_count_descending", query: MessageStreamQuery{MaxID: 14, Count: 2, Reverse: true}, want: []int{14, 13}},
+		{name: "open_lower_bound", query: MessageStreamQuery{MinID: -5, MaxID: 10}, want: []int{10}},
+		{name: "empty_range", query: MessageStreamQuery{MinID: 16}, want: []int{}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			messages, err := GetMessagesFromStream(-100, test.query)
+			require.NoError(t, err)
+			require.Equal(t, test.want, cachedMessageIDs(messages))
+		})
+	}
 }
 
 func TestMessageStreamRedisErrorsRemainDistinct(t *testing.T) {
 	miniRedis := setupMessageCacheRedis(t)
 	miniRedis.Close()
 
-	_, _, err := GetMessagesFromStreamBestEffort(-100, "-", "+", 10, false)
+	_, _, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{Count: 10})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, ErrInvalidCachedMessage))
 }
@@ -143,6 +238,24 @@ func cachedPollMessage(id int, pollType PollType) *Message {
 		Sender: &User{ID: 9007199254740993},
 		Poll:   &Poll{ID: "poll", Type: pollType, Question: "question"},
 	}
+}
+
+func cachedTextMessage(id int, text string) *Message {
+	return &Message{
+		ID:       id,
+		Chat:     &Chat{ID: -100},
+		Sender:   &User{ID: 42},
+		Unixtime: 1700000000 + int64(id),
+		Text:     text,
+	}
+}
+
+func cachedMessageIDs(messages []*Message) []int {
+	ids := make([]int, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	return ids
 }
 
 func setupMessageCacheRedis(t *testing.T) *miniredis.Miniredis {
@@ -167,4 +280,187 @@ func addRawMessageStreamRecord(t *testing.T, chatID int64, id string, values map
 		Values: values,
 	}).Err()
 	require.NoError(t, err)
+}
+
+func TestMessageStreamReaderPrefersNewestSnapshotOverInsertionOrder(t *testing.T) {
+	tests := []struct {
+		name  string
+		first func(*Message)
+		last  func(*Message)
+		want  string
+	}{
+		{name: "edit_then_late_original", first: func(m *Message) { m.LastEdit = 1700000100 }, last: func(*Message) {}, want: "first"},
+		{name: "later_edit_wins", first: func(m *Message) { m.LastEdit = 1700000100 }, last: func(m *Message) { m.LastEdit = 1700000200 }, want: "last"},
+		{name: "same_edit_newer_date_wins", first: func(m *Message) { m.LastEdit = 1700000100; m.Unixtime = 1700000050 }, last: func(m *Message) { m.LastEdit = 1700000100; m.Unixtime = 1700000040 }, want: "first"},
+		{name: "identical_times_keep_last_insert", first: func(*Message) {}, last: func(*Message) {}, want: "last"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			first := cachedTextMessage(2, "first")
+			tt.first(first)
+			last := cachedTextMessage(2, "last")
+			tt.last(last)
+			require.NoError(t, PushMessageToStream(cachedTextMessage(1, "one")))
+			require.NoError(t, PushMessageToStream(first))
+			require.NoError(t, PushMessageToStream(last))
+
+			messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+			require.NoError(t, err)
+			require.Equal(t, []int{1, 2}, cachedMessageIDs(messages))
+			require.Equal(t, tt.want, messages[1].Text)
+
+			best, _, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{MinID: 2})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, best[0].Text)
+		})
+	}
+}
+
+func TestMessageStreamStrictSkipsCorruptDuplicateOfSeenMessage(t *testing.T) {
+	setupMessageCacheRedis(t)
+	addRawMessageStreamRecord(t, -100, "1-0", map[string]any{"id": "2", "message": `{"message_id":2`})
+	require.NoError(t, PushMessageToStream(cachedTextMessage(2, "valid")))
+
+	messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, []int{2}, cachedMessageIDs(messages))
+	require.Equal(t, "valid", messages[0].Text)
+}
+
+func TestSetMessageKeepsNewerSnapshot(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored func(*Message)
+		next   func(*Message)
+		want   string
+	}{
+		{name: "older_original_does_not_overwrite_edit", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(*Message) {}, want: "stored"},
+		{name: "newer_edit_overwrites", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(m *Message) { m.LastEdit = 1700000200 }, want: "next"},
+		{name: "equal_times_overwrite", stored: func(m *Message) { m.LastEdit = 1700000100 }, next: func(m *Message) { m.LastEdit = 1700000100 }, want: "next"},
+		{name: "same_edit_older_date_does_not_overwrite", stored: func(m *Message) { m.Unixtime = 1700000050 }, next: func(m *Message) { m.Unixtime = 1700000040 }, want: "stored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			stored := cachedTextMessage(3, "stored")
+			tt.stored(stored)
+			next := cachedTextMessage(3, "next")
+			tt.next(next)
+			require.NoError(t, SetMessage(stored))
+			require.NoError(t, SetMessage(next))
+
+			got, err := GetMessage(-100, 3)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Text)
+		})
+	}
+}
+
+func TestSetMessageReplacesCorruptSnapshot(t *testing.T) {
+	miniRedis := setupMessageCacheRedis(t)
+	key := wrapKeyWithChatMsg("message_full", -100, 4)
+	miniRedis.Set(key, `{"message_id":4`)
+
+	require.NoError(t, SetMessage(cachedTextMessage(4, "fresh")))
+	got, err := GetMessage(-100, 4)
+	require.NoError(t, err)
+	require.Equal(t, "fresh", got.Text)
+	require.Greater(t, miniRedis.TTL(key).Seconds(), float64(0))
+}
+
+func TestSetMessageConcurrentSnapshotsConvergeOnNewest(t *testing.T) {
+	setupMessageCacheRedis(t)
+	edited := cachedTextMessage(5, "edited")
+	edited.LastEdit = 1700000100
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				errs <- SetMessage(edited)
+			} else {
+				errs <- SetMessage(cachedTextMessage(5, "original"))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	got, err := GetMessage(-100, 5)
+	require.NoError(t, err)
+	require.Equal(t, "edited", got.Text)
+}
+
+func TestSameSecondEditsOrderedBySeq(t *testing.T) {
+	tests := []struct {
+		name  string
+		order []uint64
+		want  string
+	}{
+		{name: "in_order", order: []uint64{1700000000000001, 1700000000000002}, want: "seq 1700000000000002"},
+		{name: "late_old_goroutine", order: []uint64{1700000000000002, 1700000000000001}, want: "seq 1700000000000002"},
+		{name: "legacy_then_seq", order: []uint64{0, 3}, want: "seq 3"},
+		{name: "seq_then_legacy", order: []uint64{3, 0}, want: "seq 3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMessageCacheRedis(t)
+			for _, seq := range tt.order {
+				edit := cachedTextMessage(9, fmt.Sprintf("seq %d", seq))
+				edit.LastEdit = 1700000100
+				require.NoError(t, PushMessageToStreamWithSeq(edit, seq))
+				require.NoError(t, SetMessageWithSeq(edit, seq))
+			}
+
+			messages, err := GetMessagesFromStream(-100, MessageStreamQuery{})
+			require.NoError(t, err)
+			require.Len(t, messages, 1)
+			require.Equal(t, tt.want, messages[0].Text)
+
+			best, _, err := GetMessagesFromStreamBestEffort(-100, MessageStreamQuery{MinID: 9})
+			require.NoError(t, err)
+			require.Equal(t, tt.want, best[0].Text)
+
+			got, err := GetMessage(-100, 9)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got.Text)
+		})
+	}
+}
+
+func TestSetMessageWithSeqStillHonoursEditTime(t *testing.T) {
+	setupMessageCacheRedis(t)
+	newer := cachedTextMessage(10, "newer edit")
+	newer.LastEdit = 1700000200
+	require.NoError(t, SetMessageWithSeq(newer, 1))
+	older := cachedTextMessage(10, "older edit")
+	older.LastEdit = 1700000100
+	require.NoError(t, SetMessageWithSeq(older, 2))
+
+	got, err := GetMessage(-100, 10)
+	require.NoError(t, err)
+	require.Equal(t, "newer edit", got.Text)
+}
+
+func TestSetMessageWithoutSeqKeepsLegacyEncoding(t *testing.T) {
+	miniRedis := setupMessageCacheRedis(t)
+	message := cachedTextMessage(11, "plain")
+	require.NoError(t, SetMessage(message))
+	stored, err := miniRedis.Get(wrapKeyWithChatMsg("message_full", -100, 11))
+	require.NoError(t, err)
+	require.JSONEq(t, string(cachedMessageJSON(t, message)), stored)
+
+	require.NoError(t, SetMessageWithSeq(message, 7))
+	stored, err = miniRedis.Get(wrapKeyWithChatMsg("message_full", -100, 11))
+	require.NoError(t, err)
+	require.Contains(t, stored, `"csust_cache_seq":7`)
+	got, err := GetMessage(-100, 11)
+	require.NoError(t, err)
+	require.Equal(t, "plain", got.Text)
 }

@@ -32,7 +32,8 @@ type SessionCapture struct {
 
 // SessionCaptureResult holds invocation snapshots and newly generated messages.
 // Input is the invocation snapshot; ModelInput is the sanitized/directive baseline.
-// Messages contains only new model/tool messages, with framework guidance separate.
+// Messages contains new model, tool, and framework guidance messages in model order;
+// Guidance marks which Messages entries are guidance.
 type SessionCaptureResult struct {
 	Input      []*schema.Message
 	ModelInput []*schema.Message
@@ -42,11 +43,10 @@ type SessionCaptureResult struct {
 	Err        error
 }
 
-// SessionCaptureGuidance records framework guidance at an offset in Messages.
-// BeforeMessage is an offset in Messages, not in the caller's input history.
+// SessionCaptureGuidance identifies a framework guidance entry by its index in Messages.
 type SessionCaptureGuidance struct {
-	BeforeMessage int
-	Message       *schema.Message
+	Index   int
+	Message *schema.Message
 }
 
 // NewSessionCapture creates a recorder for one invocation.
@@ -131,13 +131,31 @@ func (c *SessionCapture) record(message *schema.Message, guidance bool) {
 		c.result.Err = err
 		return
 	}
+	c.result.Messages = append(c.result.Messages, messages[0])
 	if guidance {
-		c.result.Guidance = append(c.result.Guidance, SessionCaptureGuidance{
-			BeforeMessage: len(c.result.Messages), Message: messages[0],
-		})
-	} else {
-		c.result.Messages = append(c.result.Messages, messages[0])
+		c.result.Guidance = append(c.result.Guidance, SessionCaptureGuidance{Index: len(c.result.Messages) - 1, Message: messages[0]})
 	}
+}
+
+// AppendNote records a framework note after the invocation's final message, as guidance.
+func (c *SessionCapture) AppendNote(message *schema.Message) {
+	c.record(message, true)
+}
+
+// ModelResponses counts model calls that completed within this invocation.
+func (c *SessionCapture) ModelResponses() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	count := 0
+	for _, message := range c.result.Messages {
+		if message != nil && message.Role == schema.Assistant {
+			count++
+		}
+	}
+	return count
 }
 
 func (c *SessionCapture) complete(ctx context.Context) {

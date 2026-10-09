@@ -3,9 +3,7 @@ package agentv3
 import (
 	"csust-got/log"
 	"csust-got/orm"
-	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -177,9 +175,16 @@ func getReplyChain(bot *tb.Bot, msg *tb.Message, maxContext int) ([]*ContextMess
 // getPreviousMessages 通过消息ID获取之前的消息
 func getPreviousMessages(chatID int64, messageID int, count int) ([]*ContextMessage, error) {
 	var messages []*ContextMessage
+	if messageID <= 1 {
+		return messages, nil
+	}
 
-	msgs, err := orm.GetMessagesFromStream(chatID, fmt.Sprintf("(%d", messageID), strconv.Itoa(messageID-50), int64(count), true)
-
+	msgs, err := orm.GetMessagesFromStream(chatID, orm.MessageStreamQuery{
+		MinID:   messageID - 50,
+		MaxID:   messageID - 1,
+		Count:   int64(count),
+		Reverse: true,
+	})
 	if err != nil {
 		return messages, err
 	}

@@ -168,6 +168,9 @@ func buildReplySessionPromptAddition(cc *CompiledAgent, tc *TurnContext) (*schem
 	if prompt != "" {
 		content += "\n" + prompt
 	}
+	if hint := appendAgentV3TriggerHint("", tc.Trigger); hint != "" {
+		content += "\n" + hint
+	}
 	content += "\n</reply_session_metadata>"
 	return schema.UserMessage(content), nil
 }

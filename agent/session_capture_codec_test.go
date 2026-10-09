@@ -31,7 +31,7 @@ func TestSessionCaptureToolSearchSchemasArchiveCommitAndLoad(t *testing.T) {
 					Type: schema.ChatMessagePartTypeReasoning, Reasoning: &schema.MessageOutputReasoning{Text: "thinking", Signature: "signed-token"},
 				}}, ResponseMeta: &schema.ResponseMeta{FinishReason: "stop", Usage: &schema.TokenUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16}}}
 				mdl := &scriptedToolModel{turns: [][]*schema.Message{{first}, {final}}}
-				agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{echoLookupTool{}}, 4)
+				agent := newSessionCaptureAgent(t, mdl, []tool.BaseTool{echoLookupTool{}}, 3)
 				capture := NewSessionCapture()
 				ctx := WithSessionCapture(t.Context(), capture)
 				if streaming {
@@ -64,13 +64,13 @@ func TestSessionCaptureToolSearchSchemasArchiveCommitAndLoad(t *testing.T) {
 				baselineTool := snapshot.ModelInput[1].UserInputMultiContent[4].ToolSearchResult.Tools[0]
 				requireSessionCaptureParamsRepresentation(t, baselineTool.ParamsOneOf, representation)
 				requireSessionCaptureParamsDetached(t, capturedTool.ParamsOneOf, baselineTool.ParamsOneOf)
-				require.Len(t, snapshot.Messages, 3)
+				require.Len(t, snapshot.Messages, 4)
 				require.Equal(t, first, snapshot.Messages[0])
-				require.Equal(t, final, snapshot.Messages[2])
+				require.Equal(t, final, snapshot.Messages[3])
 				state := &agentV3SessionTurn{input: input, kinds: []agentV3SessionInputKind{agentV3SessionFrame, agentV3SessionCurrent}}
 				archive, err := agentV3SessionArchive(state, snapshot)
 				require.NoError(t, err)
-				require.Len(t, archive.Delta, 4)
+				require.Len(t, archive.Delta, 5)
 				if representation == "params" {
 					normalized := capture.Snapshot()
 					normalizedTool := normalized.Input[1].UserInputMultiContent[4].ToolSearchResult.Tools[0]
@@ -110,8 +110,9 @@ func TestSessionCaptureToolSearchSchemasArchiveCommitAndLoad(t *testing.T) {
 				require.NoError(t, err)
 				require.JSONEq(t, sessionCaptureJSON(t, originalDefinition), sessionCaptureJSON(t, definition))
 				require.Equal(t, "call", loaded.Messages[2].ToolCallID)
-				require.Equal(t, "signed-token", loaded.Messages[3].AssistantGenMultiContent[0].Reasoning.Signature)
-				require.Equal(t, 16, loaded.Messages[3].ResponseMeta.Usage.TotalTokens)
+				require.Contains(t, loaded.Messages[3].Content, "<agent_runtime_guidance>", "guidance replays inline before the final assistant")
+				require.Equal(t, "signed-token", loaded.Messages[4].AssistantGenMultiContent[0].Reasoning.Signature)
+				require.Equal(t, 16, loaded.Messages[4].ResponseMeta.Usage.TotalTokens)
 			})
 		}
 	}

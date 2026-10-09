@@ -3,6 +3,7 @@ package agentv3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 var errRetryStubUpstream500 = errors.New("upstream returned 500")
@@ -286,4 +290,210 @@ func (m *retryStubModel) Stream(context.Context, []*schema.Message, ...model.Opt
 
 func (m *retryStubModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	return m, nil
+}
+
+// stallingStreamModel stalls a configured number of attempts (at open or mid-stream) until the attempt context is cancelled.
+type stallingStreamModel struct {
+	mu          sync.Mutex
+	stallOpens  int
+	stallChunks int
+	calls       int
+	final       string
+}
+
+func (m *stallingStreamModel) Generate(context.Context, []*schema.Message, ...model.Option) (*schema.Message, error) {
+	return schema.AssistantMessage(m.final, nil), nil
+}
+
+func (m *stallingStreamModel) Stream(ctx context.Context, _ []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	m.mu.Lock()
+	m.calls++
+	call := m.calls
+	m.mu.Unlock()
+	if call <= m.stallOpens {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if call <= m.stallOpens+m.stallChunks {
+		sr, sw := schema.Pipe[*schema.Message](2)
+		go func() {
+			defer sw.Close()
+			sw.Send(schema.AssistantMessage("partial ", nil), nil)
+			<-ctx.Done()
+			sw.Send(nil, ctx.Err())
+		}()
+		return sr, nil
+	}
+	return schema.StreamReaderFromArray([]*schema.Message{schema.AssistantMessage(m.final, nil)}), nil
+}
+
+func (m *stallingStreamModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+
+func (m *stallingStreamModel) streamCalls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+func TestRetryingChatModelIdleWatchdogRetriesStalledStream(t *testing.T) {
+	tests := []struct {
+		name        string
+		stallOpens  int
+		stallChunks int
+		wantCalls   int
+		wantClear   bool
+	}{
+		{"stalled mid stream", 0, 1, 2, true},
+		{"stalled before first chunk", 1, 0, 2, false},
+		{"stalled twice within budget", 1, 1, 3, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stallingStreamModel{stallOpens: tt.stallOpens, stallChunks: tt.stallChunks, final: "recovered"}
+			wrapped := &retryingChatModel{
+				inner:        stub,
+				retries:      3,
+				initialDelay: time.Millisecond,
+				idleTimeout:  40 * time.Millisecond,
+				sleep:        func(context.Context, time.Duration) error { return nil },
+			}
+			retried := zapRetryErrors(t, func() {
+				stream, err := wrapped.Stream(t.Context(), []*schema.Message{schema.UserMessage("hello")})
+				require.NoError(t, err)
+				defer stream.Close()
+				var visible string
+				sawClear := false
+				for {
+					chunk, recvErr := stream.Recv()
+					if errors.Is(recvErr, io.EOF) {
+						break
+					}
+					require.NoError(t, recvErr)
+					if isClearStreamOutputMessage(chunk) {
+						sawClear = true
+						visible = ""
+						continue
+					}
+					visible += chunk.Content
+				}
+				assert.Equal(t, "recovered", visible)
+				assert.Equal(t, tt.wantClear, sawClear)
+			})
+			assert.Equal(t, tt.wantCalls, stub.streamCalls())
+			require.NotEmpty(t, retried)
+			for _, err := range retried {
+				assert.ErrorIs(t, err, errModelStreamIdle)
+			}
+		})
+	}
+}
+
+func TestRetryingChatModelIdleWatchdogIsDisabledByZero(t *testing.T) {
+	stub := &stallingStreamModel{stallChunks: 1, final: "never"}
+	wrapped := &retryingChatModel{inner: stub, retries: 3, initialDelay: time.Millisecond, sleep: func(context.Context, time.Duration) error { return nil }}
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Millisecond)
+	defer cancel()
+	stream, err := wrapped.Stream(ctx, nil)
+	require.NoError(t, err)
+	defer stream.Close()
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	assert.Equal(t, "partial ", first.Content)
+	for err == nil {
+		_, err = stream.Recv()
+	}
+	require.ErrorIs(t, err, context.DeadlineExceeded, "without a watchdog only the caller deadline ends the stall")
+	assert.Equal(t, 1, stub.streamCalls())
+}
+
+func TestIdleWatchdogLateCallbackAfterTouchDoesNotCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	attempt := &streamAttempt{cancel: cancel}
+	attempt.armWatchdog(time.Hour)
+	defer attempt.close()
+
+	attempt.touch()
+	attempt.onIdleTimer()
+	require.False(t, attempt.idle.Load())
+	require.NoError(t, ctx.Err())
+
+	attempt.mu.Lock()
+	attempt.deadline = time.Now().Add(-time.Millisecond)
+	attempt.mu.Unlock()
+	attempt.onIdleTimer()
+	require.True(t, attempt.idle.Load())
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestIdleWatchdogTouchAfterDecisionDoesNotRearm(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	attempt := &streamAttempt{cancel: cancel}
+	attempt.armWatchdog(time.Hour)
+	defer attempt.close()
+
+	attempt.mu.Lock()
+	expired := time.Now().Add(-time.Millisecond)
+	attempt.deadline = expired
+	attempt.mu.Unlock()
+	attempt.onIdleTimer()
+	require.True(t, attempt.idle.Load())
+
+	attempt.touch()
+	attempt.mu.Lock()
+	require.Equal(t, expired, attempt.deadline, "touch after the idle decision must not move the deadline")
+	attempt.mu.Unlock()
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestIdleWatchdogDecisionIsAtomicWithTouch(t *testing.T) {
+	for range 200 {
+		ctx, cancel := context.WithCancel(t.Context())
+		attempt := &streamAttempt{cancel: cancel}
+		attempt.armWatchdog(time.Hour)
+		attempt.mu.Lock()
+		attempt.deadline = time.Now().Add(-time.Millisecond)
+		attempt.mu.Unlock()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); attempt.onIdleTimer() }()
+		go func() { defer wg.Done(); attempt.touch() }()
+		wg.Wait()
+
+		if attempt.idle.Load() {
+			require.ErrorIs(t, ctx.Err(), context.Canceled)
+		} else {
+			require.NoError(t, ctx.Err(), "a touch that decided first keeps the stream alive")
+		}
+		attempt.close()
+	}
+}
+
+func TestIdleWatchdogErrorIsRetryable(t *testing.T) {
+	assert.True(t, isRetryableModelError(errModelStreamIdle))
+	assert.True(t, isRetryableModelError(fmt.Errorf("wrapped: %w", errModelStreamIdle)))
+	assert.False(t, isRetryableModelError(context.Canceled))
+}
+
+// zapRetryErrors runs fn and returns the errors attached to retry warnings logged meanwhile.
+func zapRetryErrors(t *testing.T, fn func()) []error {
+	t.Helper()
+	core, logs := observer.New(zapcore.WarnLevel)
+	restore := zap.ReplaceGlobals(zap.New(core))
+	defer restore()
+	fn()
+	var errs []error
+	for _, entry := range logs.All() {
+		if entry.Message != "agentv3/model: retrying transient model error" {
+			continue
+		}
+		for _, field := range entry.Context {
+			if err, ok := field.Interface.(error); ok {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errs
 }

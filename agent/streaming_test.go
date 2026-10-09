@@ -350,7 +350,7 @@ func TestFinalizePlainMarkdownDoesNotUseRichAPI(t *testing.T) {
 	assert.True(t, tc.finalized.Load())
 }
 
-func TestFinalizeRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
+func TestFinalizeRichSendFailureReportsFailedPlainFallback(t *testing.T) {
 	const rawMarkdown = "# Title\n\n**Body**"
 	const wantFallback = "Title\n\nBody"
 
@@ -373,7 +373,7 @@ func TestFinalizeRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
 
 	response, reasoning, sentMsg, err := sp.finalize()
 
-	require.ErrorIs(t, err, errTelegramRichRawTestFailure)
+	require.ErrorIs(t, err, errTelegramRichRawTestFailure, "the rich failure stays visible when the plain fallback also fails")
 	assert.Equal(t, wantFallback, response)
 	assert.Empty(t, reasoning)
 	assert.Equal(t, placeholder, sentMsg)
@@ -382,8 +382,9 @@ func TestFinalizeRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
 	payload := raw.payload.(telegramSendRichMessagePayload)
 	assert.Equal(t, rawMarkdown, payload.RichMessage.Markdown)
 	assert.NotContains(t, payload.RichMessage.Markdown, "```")
-	assert.Equal(t, int64(0), tc.lastEditAt.Load(), "must not edit the placeholder after rich send failure")
+	assert.NotZero(t, tc.lastEditAt.Load(), "the plain fallback edit was attempted")
 	assert.False(t, tc.finalized.Load())
+	assert.Nil(t, sp.deliveredMsg)
 }
 
 func TestFinalizeReturnsErrorWhenFinalEditFails(t *testing.T) {
@@ -478,7 +479,7 @@ func TestNonStreamResponsePlainMarkdownDoesNotUseRichAPI(t *testing.T) {
 	assert.Equal(t, rawMarkdown, visibleText)
 }
 
-func TestNonStreamResponseRichSendFailureDoesNotEditPlaceholderFallback(t *testing.T) {
+func TestNonStreamResponseRichSendFailureReportsFailedPlainFallback(t *testing.T) {
 	const rawMarkdown = "# Title\n\n**Body**"
 	const wantFallback = "Title\n\nBody"
 

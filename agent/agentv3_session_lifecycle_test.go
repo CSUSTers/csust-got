@@ -40,6 +40,7 @@ func TestAgentV3SessionInitRecoversWithoutCollectingExpiredActiveDAG(t *testing.
 	require.NoError(t, err)
 	require.Len(t, deletions, 1)
 	f.mini.SetTime(now.Add(2 * time.Hour))
+	require.NoError(t, f.repo.MarkCollection(t.Context(), agentV3SessionCollectionDay(time.Now(), time.Local)), "today's collection already ran; startup must not catch up")
 	config.BotConfig.AgentV3.Session.TTL = "1h"
 	config.BotConfig.Agents = &config.AgentV3Configs{cfg}
 	oldManager, oldCron := mcpManager, cronService.Load()
@@ -133,6 +134,29 @@ type agentSessionRecoveryRepository struct {
 	recoveries  atomic.Int32
 	collections atomic.Int32
 	collectedAt chan time.Time
+	mu          sync.Mutex
+	last        string
+	marks       []string
+}
+
+func (r *agentSessionRecoveryRepository) LastCollection(context.Context) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.last, nil
+}
+
+func (r *agentSessionRecoveryRepository) MarkCollection(_ context.Context, day string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.last = day
+	r.marks = append(r.marks, day)
+	return nil
+}
+
+func (r *agentSessionRecoveryRepository) markedDays() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.marks...)
 }
 
 func (r *agentSessionRecoveryRepository) Scopes(context.Context) ([]session.Scope, error) {
@@ -164,7 +188,7 @@ func TestAgentV3SessionMaintenanceRecoversBetweenCalendarCollections(t *testing.
 	require.NoError(t, err)
 	synctest.Test(t, func(t *testing.T) {
 		location := time.FixedZone("session-local", -3600)
-		repo := &agentSessionRecoveryRepository{Repository: f.repo, scope: f.scope(), collectedAt: make(chan time.Time, 2)}
+		repo := &agentSessionRecoveryRepository{Repository: f.repo, scope: f.scope(), collectedAt: make(chan time.Time, 2), last: agentV3SessionCollectionDay(time.Now(), location)}
 		service, err := session.NewService(repo, files, session.Options{})
 		require.NoError(t, err)
 		s := startAgentV3SessionMaintenance(t.Context(), service, location)
@@ -187,12 +211,12 @@ func TestAgentV3SessionMaintenanceRecoversBetweenCalendarCollections(t *testing.
 		synctest.Wait()
 		require.EqualValues(t, 1, repo.collections.Load(), "collection failure must not cause an off-schedule active DAG sweep")
 		require.Greater(t, repo.recoveries.Load(), previousRecoveries)
-		next, err = session.NextCollection(time.Now(), location)
-		require.NoError(t, err)
-		time.Sleep(time.Until(next))
+		retry := next.Add(time.Hour)
+		time.Sleep(time.Until(retry))
 		synctest.Wait()
-		require.EqualValues(t, 2, repo.collections.Load())
-		require.Equal(t, next, (<-repo.collectedAt).In(location))
+		require.EqualValues(t, 2, repo.collections.Load(), "a failed collection is retried an hour later")
+		require.Equal(t, retry, (<-repo.collectedAt).In(location))
+		require.Equal(t, []string{agentV3SessionCollectionDay(retry, location)}, repo.markedDays(), "only the successful collection marks its day")
 	})
 }
 
@@ -209,7 +233,7 @@ func TestAgentV3SessionBackgroundDoesNotLoadCaptureOrCommit(t *testing.T) {
 	require.NoError(t, err)
 	_, err = compiled.Agent.Generate(ctx, messages)
 	require.NoError(t, err)
-	commitAgentV3Session(tc, &tb.Message{ID: 42})
+	commitAgentV3Session(tc, []*tb.Message{{ID: 42}})
 	scopes, err := f.repo.Scopes(t.Context())
 	require.NoError(t, err)
 	require.Empty(t, scopes)

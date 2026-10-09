@@ -51,8 +51,8 @@ func TestAgentV3SessionProviderContextRejectsParentOnNextInvocation(t *testing.T
 				f.chat(t, cfg, sessionMessage(1100, 7, 0, "first input"), nil)
 				traceJSON, err := json.Marshal(failedTrace)
 				require.NoError(t, err)
-				require.NotContains(t, string(traceJSON), "PRIVATE_PROVIDER_TOKEN")
-				require.NotContains(t, string(traceJSON), "private error")
+				require.Contains(t, string(traceJSON), errAgentV3ProviderContextLimit.Error())
+				require.Contains(t, string(traceJSON), "private error", "the trace keeps the truncated provider body for diagnosis")
 				require.EqualValues(t, 1, attempts.Load(), "context rejection does not retry this invocation")
 				require.EqualValues(t, 1, repo.confirms.Load())
 				f.chat(t, cfg, sessionMessage(1200, 7, 60, "second input"), nil)
@@ -141,7 +141,7 @@ func TestAgentV3SessionActualSDKReaderFailureKeepsSafeErrorIdentity(t *testing.T
 	require.NotContains(t, err.Error(), "<html>")
 	traceJSON, err := json.Marshal(turn.V3.Trace)
 	require.NoError(t, err)
-	require.NotContains(t, string(traceJSON), "PRIVATE_SDK_TOKEN")
+	require.Contains(t, string(traceJSON), errAgentV3ProviderContextLimit.Error())
 	require.EqualValues(t, 1, requests.Load(), "partial reader failure does not replay the operation")
 	f.chat(t, cfg, sessionMessage(1200, 7, 60, "next"), nil)
 	require.EqualValues(t, 2, requests.Load())
@@ -155,7 +155,8 @@ func TestAgentV3SessionUnknownProviderErrorDoesNotRejectParent(t *testing.T) {
 	for _, fault := range []error{
 		errAgentV3ContextToolText,
 		&openai.APIError{HTTPStatusCode: 429, Code: "rate_limit_exceeded", Message: "context_length_exceeded"},
-		&openai.RequestError{HTTPStatusCode: 400, Body: []byte("<html>context_length_exceeded</html>"), Err: errAgentV3UnknownProvider},
+		&openai.RequestError{HTTPStatusCode: 400, Body: []byte("<html>bad request</html>"), Err: errAgentV3UnknownProvider},
+		&openai.RequestError{HTTPStatusCode: 502, Body: []byte("This model's maximum context length is 262144 tokens"), Err: errAgentV3UnknownProvider},
 	} {
 		t.Run(fmt.Sprintf("%T", fault), func(t *testing.T) {
 			f := newAgentSessionFixture(t)
@@ -179,7 +180,9 @@ func TestAgentV3SessionUnknownProviderErrorDoesNotRejectParent(t *testing.T) {
 	}
 }
 
-func TestAgentV3SessionProviderContextFailureDoesNotReplayToolSideEffects(t *testing.T) {
+// A context-limit failure after a tool round stems from this turn's own growth, so the
+// loaded parent stays usable; the failed turn itself is never committed or replayed.
+func TestAgentV3SessionProviderContextFailureAfterToolRoundKeepsParent(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "tool-once", ContextMode: "reply_chain", Session: config.AgentSessionConfig{LoadContext: true}}
 	var attempts atomic.Int32
@@ -200,8 +203,12 @@ func TestAgentV3SessionProviderContextFailureDoesNotReplayToolSideEffects(t *tes
 	tool.mu.Unlock()
 	f.chat(t, cfg, sessionMessage(1200, 7, 60, "second"), nil)
 	require.EqualValues(t, 3, attempts.Load())
-	require.EqualValues(t, 1, repo.confirms.Load())
-	require.NotContains(t, replySessionSchemaText(mdl.capturedInputs()[1]), "side-effect")
+	require.EqualValues(t, 2, repo.confirms.Load(), "a failure after the first model call does not reject the parent")
+	tool.mu.Lock()
+	require.Equal(t, 1, tool.calls, "the failed turn's tool side effects are not replayed")
+	tool.mu.Unlock()
+	require.Len(t, mdl.capturedInputs(), 2, "the failing attempt never reaches the scripted model")
+	require.NotContains(t, replySessionSchemaText(mdl.capturedInputs()[1]), "side-effect", "the uncommitted failed turn is not part of the replayed history")
 }
 
 func TestAgentV3SessionContextRejectionDoesNotPoisonOtherAgentOrModel(t *testing.T) {

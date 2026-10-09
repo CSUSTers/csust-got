@@ -31,6 +31,7 @@ func Init(ctx context.Context) error {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
 	closeAgentV3SessionService()
+	initAgentV3TraceWriter()
 	if config.BotConfig != nil && config.BotConfig.Agents != nil {
 		for _, cfg := range *config.BotConfig.Agents {
 			if cfg != nil {
@@ -134,10 +135,11 @@ func HasCompiledAgent(name string) bool {
 func Close() {
 	agentResourcesMu.Lock()
 	defer agentResourcesMu.Unlock()
-	closeAgentV3SessionService()
 	if s := cronService.Swap(nil); s != nil {
 		s.stop()
 	}
+	closeAgentV3TraceWriter(context.Background())
+	closeAgentV3SessionService()
 	if mcpManager != nil {
 		mcpManager.Close()
 	}
@@ -152,6 +154,11 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return fmt.Errorf("agentv3: %w for %q", errNoCompiledConfig, agentConfig.Name)
 	}
 	compiled := val.(*CompiledAgent)
+	if !BeginInflightTurn() {
+		zap.L().Debug("agentv3: shutting down, dropping turn", zap.String("agent", agentConfig.Name))
+		return nil
+	}
+	defer EndInflightTurn()
 
 	msg := tbCtx.Message()
 	if msg == nil {
@@ -168,6 +175,17 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 	if input == "" {
 		return nil
 	}
+
+	runLimiter := limiters.run()
+	if !runLimiter.tryAcquire() {
+		zap.L().Warn("agentv3: run limit reached, rejecting turn",
+			zap.String("agent", agentConfig.Name),
+			zap.Int64("chat_id", msg.Chat.ID),
+			zap.Int64("runs_in_flight", runLimiter.current()),
+		)
+		return tbCtx.Reply(configuredConcurrency().GetBusyMessage())
+	}
+	defer runLimiter.release()
 
 	// Create turn context
 	ctx, cancel := context.WithTimeout(context.Background(), agentConfig.GetTimeout())
@@ -288,17 +306,9 @@ func handleStreaming(
 		}
 		return streamErr
 	}
-	commitAgentV3Session(tc, delivery.delivered)
-	// Save response to Redis for future context
+	visible := commitAgentV3Delivery(tc, delivery, response)
 	if response != "" && sentMsg != nil {
-		sentMsg.Text = response
-		SaveResponse(sentMsg, tbCtx.Message())
-		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sentMsg.ID); err != nil {
-			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
-				tc.V3.Trace.SetError(err)
-			}
-			zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
-		}
+		saveAgentV3Delivery(ctx, tbCtx, tc, delivery.deliveredAll, sentMsg, visible)
 	}
 
 	return streamErr
@@ -330,7 +340,7 @@ func handleNonStreaming(
 
 	tc.streamingStarted.Store(true)
 
-	delivery, sendErr := nonStreamResponseWithDelivery(tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
+	delivery, sendErr := nonStreamResponseWithDelivery(ctx, tbCtx.Bot(), tbCtx, response, reasoning, &chatCfg.Format, tc.GetProgressMsg(), chatCfg.IsAgentV3RichEnabled(), tc.richMessageSkillLoadedForFinal())
 	sent, visibleResponse := delivery.sent, delivery.response
 	if sendErr != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
@@ -340,19 +350,52 @@ func handleNonStreaming(
 		return sendErr
 	}
 
-	commitAgentV3Session(tc, delivery.delivered)
+	visibleResponse = commitAgentV3Delivery(tc, delivery, visibleResponse)
 	if sent != nil {
-		sent.Text = visibleResponse
-		SaveResponse(sent, tbCtx.Message())
-		if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), visibleResponse, sent.ID); err != nil {
-			if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
-				tc.V3.Trace.SetError(err)
-			}
-			zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
-		}
+		saveAgentV3Delivery(ctx, tbCtx, tc, delivery.deliveredAll, sent, visibleResponse)
 	}
 
 	return nil
+}
+
+// commitAgentV3Delivery publishes the session turn and returns the text the user actually saw.
+// A partially delivered reply keeps its archive append-only: a note after the final answer
+// tells later turns which chunks were visible.
+func commitAgentV3Delivery(tc *TurnContext, delivery telegramResponseResult, response string) string {
+	if partial := delivery.partial; partial != nil {
+		response = partial.visible
+		if tc != nil && tc.Session != nil {
+			tc.Session.capture.AppendNote(schema.AssistantMessage(agentV3PartialDeliveryNote(partial), nil))
+		}
+	}
+	commitAgentV3Session(tc, agentV3DeliveredMessages(delivery.deliveredAll, delivery.delivered))
+	return response
+}
+
+func agentV3PartialDeliveryNote(partial *telegramPartialDelivery) string {
+	return fmt.Sprintf("<delivery_note>回答共 %d 段，仅前 %d 段成功发送；用户只看到了前 %d 段。</delivery_note>", partial.total, partial.sent, partial.sent)
+}
+
+// saveAgentV3Delivery stores the delivered reply after Telegram accepted it. The turn context
+// may already be expired by then, so persistence runs on its own deadline. Multi-chunk replies
+// cache every chunk with the text Telegram returned for it.
+func saveAgentV3Delivery(ctx context.Context, tbCtx tb.Context, tc *TurnContext, delivered []*tb.Message, sent *tb.Message, response string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentV3SessionCommitTimeout)
+	defer cancel()
+	if len(delivered) > 1 {
+		for _, msg := range delivered {
+			SaveResponse(msg, tbCtx.Message())
+		}
+	} else {
+		sent.Text = response
+		SaveResponse(sent, tbCtx.Message())
+	}
+	if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sent.ID); err != nil {
+		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+			tc.V3.Trace.SetError(err)
+		}
+		zap.L().Warn("agentv3: failed to save agent v3 turn", zap.Error(err))
+	}
 }
 
 // sendErrorMessage sends the configured error message to the user.

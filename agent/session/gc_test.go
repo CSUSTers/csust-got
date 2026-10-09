@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -137,24 +138,31 @@ func TestServiceMaintenancePartialScopesContinue(t *testing.T) {
 }
 
 func TestServiceMaintenanceFreshScopeBudget(t *testing.T) {
-	repo := &maintenanceRepo{}
-	repo.scopes = maintenanceScopes(repo)
-	var visited []Scope
-	repo.pending = func(ctx context.Context, scope Scope) ([]Intent, error) {
-		visited = append(visited, scope)
-		if scope == repo.scopes[0] {
-			<-ctx.Done()
-			return nil, ctx.Err()
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 200 * time.Millisecond
+		repo := &maintenanceRepo{}
+		repo.scopes = maintenanceScopes(repo)
+		var visited []Scope
+		var starts []time.Time
+		repo.pending = func(ctx context.Context, scope Scope) ([]Intent, error) {
+			visited = append(visited, scope)
+			starts = append(starts, time.Now())
+			if scope == repo.scopes[0] {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			require.NoError(t, ctx.Err(), "slow first scope must not consume next scope's budget")
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			require.Equal(t, timeout, time.Until(deadline))
+			return nil, nil
 		}
-		require.NoError(t, ctx.Err(), "slow first scope must not consume next scope's budget")
-		deadline, ok := ctx.Deadline()
-		require.True(t, ok)
-		require.Greater(t, time.Until(deadline), 50*time.Millisecond)
-		return nil, nil
-	}
-	svc := maintenanceService(t, repo, 200*time.Millisecond)
-	require.ErrorIs(t, svc.Recover(t.Context()), context.DeadlineExceeded)
-	require.Equal(t, repo.scopes, visited)
+		svc := maintenanceService(t, repo, timeout)
+		require.ErrorIs(t, svc.Recover(t.Context()), context.DeadlineExceeded)
+		require.Equal(t, repo.scopes, visited)
+		require.Len(t, starts, 2)
+		require.Equal(t, timeout, starts[1].Sub(starts[0]))
+	})
 }
 
 func TestServiceMaintenanceCancellationStopsPending(t *testing.T) {

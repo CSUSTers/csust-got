@@ -37,7 +37,7 @@ func TestSessionCaptureDelegateInnerHistoryIsIsolated(t *testing.T) {
 				{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: "delegate-call", Function: schema.FunctionCall{Name: agentV3ToolDelegate, Arguments: `{"request":"private inner request"}`}}}}},
 				{schema.AssistantMessage("parent answer", nil)},
 			}}
-			parent := newSessionCaptureAgent(t, parentModel, []tool.BaseTool{delegate}, 4)
+			parent := newSessionCaptureAgent(t, parentModel, []tool.BaseTool{delegate}, 3)
 			capture := NewSessionCapture()
 			ctx := WithSessionCapture(WithTurnContext(t.Context(), turn), capture)
 			input := []*schema.Message{schema.UserMessage("parent request")}
@@ -60,7 +60,7 @@ func TestSessionCaptureDelegateInnerHistoryIsIsolated(t *testing.T) {
 			require.NoError(t, result.Err)
 			require.True(t, result.Complete)
 			assert.Equal(t, input, result.Input)
-			require.Len(t, result.Messages, 3)
+			require.Len(t, result.Messages, 4)
 			require.Len(t, result.Messages[0].ToolCalls, 1)
 			assert.Equal(t, "delegate-call", result.Messages[0].ToolCalls[0].ID)
 			assert.Equal(t, agentV3ToolDelegate, result.Messages[0].ToolCalls[0].Function.Name)
@@ -68,7 +68,7 @@ func TestSessionCaptureDelegateInnerHistoryIsIsolated(t *testing.T) {
 			assert.Equal(t, "delegate-call", result.Messages[1].ToolCallID)
 			assert.Equal(t, agentV3ToolDelegate, result.Messages[1].ToolName)
 			assert.Equal(t, "delegate result", result.Messages[1].Content)
-			assert.Equal(t, "parent answer", result.Messages[2].Content)
+			assert.Equal(t, "parent answer", result.Messages[3].Content)
 			for _, message := range result.Messages {
 				assert.NotContains(t, message.ReasoningContent, "private inner reasoning")
 				assert.NotEqual(t, "private-inner-call", message.ToolCallID)
@@ -88,7 +88,7 @@ func TestSessionCaptureBuiltinDelegateInvocationIsIsolated(t *testing.T) {
 		{schema.AssistantMessage("task scheduled", nil)},
 	}}
 	tools := buildAgentV3Tools(f.tc.Config, config.BotConfig.AgentV3, agentV3SkillCatalog{}, nil)
-	agent := newSessionCaptureAgent(t, mdl, tools, 4)
+	agent := newSessionCaptureAgent(t, mdl, tools, 3)
 	capture := NewSessionCapture()
 	answer, err := agent.Generate(WithSessionCapture(WithTurnContext(t.Context(), f.tc), capture), []*schema.Message{schema.UserMessage("schedule this task")})
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestSessionCaptureBuiltinDelegateInvocationIsIsolated(t *testing.T) {
 	result := capture.Snapshot()
 	require.NoError(t, result.Err)
 	require.True(t, result.Complete)
-	require.Len(t, result.Messages, 3)
+	require.Len(t, result.Messages, 4)
 	assert.Equal(t, string(args), result.Messages[0].ToolCalls[0].Function.Arguments)
 	assert.Equal(t, "scheduled-delegate", result.Messages[1].ToolCallID)
 	assert.Equal(t, agentV3ToolDelegate, result.Messages[1].ToolName)
@@ -113,7 +113,7 @@ func TestSessionCaptureBuiltinDelegateInvocationIsIsolated(t *testing.T) {
 	assert.Equal(t, testCronPrompt, task.Prompt)
 	assert.Equal(t, f.tc.Config.Name, task.SourceAgent)
 	assert.Nil(t, task.ActiveRun, "delegate creation must not immediately run the scheduled task")
-	assert.Equal(t, "task scheduled", result.Messages[2].Content)
+	assert.Equal(t, "task scheduled", result.Messages[3].Content)
 }
 
 type sessionCaptureDelegateTool struct {

@@ -31,6 +31,8 @@ var (
 	ErrUnknown = errors.New("session publication outcome unknown; retained for recovery")
 	// ErrContextRejected reports a candidate rejected for the selected agent/model context.
 	ErrContextRejected = errors.New("session context rejected")
+	// ErrStale reports that no delivered message still maps to the redirect source node.
+	ErrStale = errors.New("session redirect source is no longer mapped")
 )
 
 // Scope isolates storage by deployment, bot, platform, and chat.
@@ -151,8 +153,11 @@ type TurnCapture struct {
 }
 
 // DeliveryReceipt lists the final bot messages successfully delivered for this turn.
+// RedirectFrom publishes a compacted root: only MessageIDs still mapped to that node are
+// moved to the new node, and the publish fails with ErrStale when none remain.
 type DeliveryReceipt struct {
-	MessageIDs []int `json:"message_ids"`
+	MessageIDs   []int    `json:"message_ids"`
+	RedirectFrom *NodeRef `json:"redirect_from,omitempty"`
 }
 
 // Node is immutable committed metadata for one archive and its optional parent.
@@ -168,6 +173,17 @@ type Node struct {
 	Size            int64    `json:"size"`
 	Version         int      `json:"version"`
 	CommitSequence  int64    `json:"commit_sequence"`
+	// RedirectedFrom records the compacted node whose message mappings this root took over.
+	RedirectedFrom *NodeRef `json:"redirected_from,omitempty"`
+	// MemoryEpoch is the chat memory-deletion epoch read before this turn built its memory snapshot.
+	MemoryEpoch int64 `json:"memory_epoch,omitempty"`
+}
+
+// ReplayTurn is one archived node with its replayable history; Bootstrap is set on the root only.
+type ReplayTurn struct {
+	Node      Node
+	Bootstrap []*schema.Message
+	Delta     []*schema.Message
 }
 
 // Lease pins a DAG with a generation-fenced token and Redis millisecond deadline.
@@ -187,11 +203,12 @@ type Intent struct {
 
 // Reservation requests a new root or a child under a pinned loaded parent.
 type Reservation struct {
-	Scope  Scope
-	Agent  string
-	RunID  string
-	Parent *NodeRef
-	Lease  *Lease
+	Scope       Scope
+	Agent       string
+	RunID       string
+	Parent      *NodeRef
+	Lease       *Lease
+	MemoryEpoch int64
 }
 
 // Pinned contains root-to-selected ancestor metadata protected by a lease.
@@ -212,6 +229,8 @@ type Deletion struct {
 type Repository interface {
 	Namespace() string
 	ResolveAndPin(context.Context, Selection, string, time.Duration) (Pinned, error)
+	// Chain returns root-to-node metadata of an active DAG without pinning or refreshing activity.
+	Chain(context.Context, Scope, NodeRef) ([]Node, error)
 	RejectContext(context.Context, Scope, NodeRef, string) error
 	ConfirmLoaded(context.Context, Scope, Lease, time.Duration) error
 	Renew(context.Context, Scope, Lease, time.Duration) error
@@ -232,22 +251,29 @@ type Repository interface {
 	Deleting(context.Context, Scope) ([]Deletion, error)
 	ClaimDeleting(context.Context, Scope, time.Duration) ([]Deletion, error)
 	FinishDelete(context.Context, Scope, Deletion) error
+	// DropLatest removes ref, every older entry, and any compacted root redirected from ref
+	// from the agent's latest index, leaving message mappings intact, so latest selection
+	// misses until the agent's next commit.
+	DropLatest(context.Context, Scope, string, NodeRef) error
 }
 
 // CommitRequest combines a complete capture, delivery proof, and optional loaded parent.
 type CommitRequest struct {
-	Scope   Scope
-	Agent   string
-	RunID   string
-	Parent  *LoadedParent
-	Capture TurnCapture
-	Receipt DeliveryReceipt
+	Scope       Scope
+	Agent       string
+	RunID       string
+	Parent      *LoadedParent
+	Capture     TurnCapture
+	Receipt     DeliveryReceipt
+	MemoryEpoch int64
 }
 
 // LoadCandidate borrows complete validated replay, but provides no Commit parent proof.
 // Messages are read-only and must not be retained after the acceptance callback.
 type LoadCandidate struct {
-	Messages         []*schema.Message
+	Messages []*schema.Message
+	// MemoryEpoch is the selected node's recorded memory-deletion epoch.
+	MemoryEpoch      int64
 	ancestorReplyIDs map[int]struct{}
 }
 

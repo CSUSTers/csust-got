@@ -44,7 +44,7 @@ func TestSaveResponsePreservesKnownReplyWithoutMutation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, stored.ReplyTo)
 	require.Equal(t, 10, stored.ReplyTo.ID)
-	stream, err := orm.GetMessagesFromStream(-100, "11", "11", 1, false)
+	stream, err := orm.GetMessagesFromStream(-100, orm.MessageStreamQuery{MinID: 11, MaxID: 11})
 	require.NoError(t, err)
 	require.Len(t, stream, 1)
 	require.NotNil(t, stream[0].ReplyTo)
@@ -77,6 +77,68 @@ func TestSaveResponseKeepsExistingParentAndRejectsCrossChat(t *testing.T) {
 		require.Nil(t, stored.ReplyTo)
 		require.Nil(t, bot.ReplyTo)
 	})
+}
+
+func TestSaveResponseSucceedsAfterLaterMessagesWereStored(t *testing.T) {
+	setupReplySessionRedis(t)
+	user := sessionMessage(10, 7, 0, "request")
+	require.NoError(t, orm.SetMessage(user))
+	require.NoError(t, orm.PushMessageToStream(user))
+	for _, id := range []int{12, 13} {
+		later := sessionMessage(id, 8, int64(id), "later chatter")
+		require.NoError(t, orm.SetMessage(later))
+		require.NoError(t, orm.PushMessageToStream(later))
+	}
+	bot := sessionMessage(11, 99, 1, "answer")
+	bot.Sender.IsBot = true
+
+	SaveResponse(bot, user)
+
+	stored, err := orm.GetMessage(-100, 11)
+	require.NoError(t, err)
+	require.Equal(t, "answer", stored.Text)
+	require.Equal(t, 10, stored.ReplyTo.ID)
+	stream, err := orm.GetMessagesFromStream(-100, orm.MessageStreamQuery{})
+	require.NoError(t, err)
+	require.Equal(t, []int{10, 11, 12, 13}, streamMessageIDs(stream))
+
+	current := sessionMessage(14, 7, 14, "followup")
+	current.ReplyTo = &tb.Message{ID: 11}
+	loaded, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{10}, {11}, {14}}, sessionBlockIDs(loaded))
+	require.False(t, loaded.Incomplete)
+}
+
+func TestReplySessionNearbyScanToleratesOutOfOrderAndEditedEntries(t *testing.T) {
+	setupReplySessionRedis(t)
+	first := sessionMessage(20, 7, 0, "first part")
+	second := sessionMessage(21, 7, 10, "second part")
+	bot := sessionMessage(22, 99, 20, "answer")
+	bot.Sender.IsBot = true
+	bot.ReplyTo = &tb.Message{ID: 21, Chat: bot.Chat}
+	for _, message := range []*tb.Message{second, bot, first} {
+		require.NoError(t, orm.PushMessageToStream(message))
+	}
+	edited := sessionMessage(21, 7, 10, "second part (edited)")
+	edited.LastEdit = 1700000030
+	require.NoError(t, orm.PushMessageToStream(edited))
+	current := sessionMessage(23, 7, 40, "followup")
+	current.ReplyTo = &tb.Message{ID: 22}
+
+	loaded, err := loadReplySession(t.Context(), current, 10)
+	require.NoError(t, err)
+	require.Equal(t, [][]int{{20, 21}, {22}, {23}}, sessionBlockIDs(loaded))
+	require.Equal(t, "second part (edited)", loaded.Blocks[0].Messages[1].Text)
+	require.True(t, loaded.Incomplete)
+}
+
+func streamMessageIDs(messages []*tb.Message) []int {
+	ids := make([]int, 0, len(messages))
+	for _, message := range messages {
+		ids = append(ids, message.ID)
+	}
+	return ids
 }
 
 func TestReplySessionLoadRecoversStoredParentAndExpiry(t *testing.T) {

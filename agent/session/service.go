@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"go.uber.org/zap"
 )
 
 var (
@@ -23,7 +25,20 @@ type Options struct {
 	LeaseDuration    time.Duration
 	RenewInterval    time.Duration
 	OperationTimeout time.Duration
+	// CollectTimeout bounds one scope's expiry collection; zero uses 2m.
+	CollectTimeout time.Duration
 }
+
+// CollectionMarker optionally persists the local calendar day of the last completed collection.
+type CollectionMarker interface {
+	LastCollection(context.Context) (string, error)
+	MarkCollection(context.Context, string) error
+}
+
+var forkedRootCommits atomic.Int64
+
+// ForkedRootCommits counts commits that lost their loaded parent lease and published a new root.
+func ForkedRootCommits() int64 { return forkedRootCommits.Load() }
 
 // Service coordinates fenced Redis metadata and confined archive operations.
 type Service struct {
@@ -59,7 +74,10 @@ func NewService(repo Repository, files *FileStore, options Options) (*Service, e
 	if options.OperationTimeout == 0 {
 		options.OperationTimeout = 10 * time.Second
 	}
-	if options.TTL <= 0 || options.LeaseDuration < time.Millisecond || options.RenewInterval <= 0 || options.RenewInterval >= options.LeaseDuration || options.OperationTimeout <= 0 {
+	if options.CollectTimeout == 0 {
+		options.CollectTimeout = 2 * time.Minute
+	}
+	if options.TTL <= 0 || options.LeaseDuration < time.Millisecond || options.RenewInterval <= 0 || options.RenewInterval >= options.LeaseDuration || options.OperationTimeout <= 0 || options.CollectTimeout <= 0 {
 		return nil, errSessionDurations
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -213,7 +231,7 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		return LoadResult{}, err
 	}
 	if err = context.Cause(candidateCtx); err == nil && accept != nil {
-		err = accept(candidateCtx, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
+		err = accept(candidateCtx, &LoadCandidate{Messages: messages, MemoryEpoch: pinned.Nodes[len(pinned.Nodes)-1].MemoryEpoch, ancestorReplyIDs: ancestorReplyIDs})
 	}
 	if err != nil {
 		return LoadResult{}, err
@@ -332,9 +350,12 @@ func (p *LoadedParent) heartbeat() {
 	_ = p.service.renewLease(p.ctx, p.scope, p.lease)
 }
 
+// renewLease retries transient renewal failures until the lease itself would lapse;
+// only fencing, corruption, or closure end renewal early.
 func (s *Service) renewLease(ctx context.Context, scope Scope, lease Lease) error {
 	ticker := time.NewTicker(s.options.RenewInterval)
 	defer ticker.Stop()
+	lastSuccess := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -351,11 +372,92 @@ func (s *Service) renewLease(ctx context.Context, scope Scope, lease Lease) erro
 			if ctx.Err() != nil {
 				return nil
 			}
-			if err != nil {
+			if err == nil {
+				lastSuccess = time.Now()
+				continue
+			}
+			if errors.Is(err, ErrFence) || errors.Is(err, ErrCorrupt) || errors.Is(err, ErrClosed) {
 				return err
 			}
+			if time.Since(lastSuccess) >= s.options.LeaseDuration-s.options.RenewInterval/2 {
+				return err
+			}
+			zap.L().Debug("session: lease renewal failed; retrying before lease expiry", zap.String("dag_id", lease.DAGID), zap.Error(err))
 		}
 	}
+}
+
+// Replay reads one node's complete ancestor history per turn without pinning the DAG or
+// refreshing its activity. It is a read-only view for background compaction.
+func (s *Service) Replay(ctx context.Context, scope Scope, ref NodeRef) ([]ReplayTurn, error) {
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	scope, err = s.scope(scope)
+	if err != nil {
+		return nil, err
+	}
+	if err = ref.Validate(); err != nil {
+		return nil, err
+	}
+	var turns []ReplayTurn
+	err = s.files.WithScopeLock(op, scope, func(files *ScopeFiles) error {
+		nodes, err := s.repo.Chain(op, scope, ref)
+		if err != nil {
+			return err
+		}
+		if len(nodes) == 0 || nodes[len(nodes)-1].Ref != ref {
+			return ErrCorrupt
+		}
+		var messages []*schema.Message
+		var archiveSize int64
+		seen := map[NodeRef]bool{}
+		for i, n := range nodes {
+			if err := op.Err(); err != nil {
+				return err
+			}
+			if n.Scope != scope || n.Ref.DAGID != ref.DAGID || seen[n.Ref] {
+				return ErrCorrupt
+			}
+			seen[n.Ref] = true
+			if n.Size <= 0 || n.Size > maxArchiveBytes-archiveSize {
+				return fmt.Errorf("%w: session chain too large", ErrCorrupt)
+			}
+			archiveSize += n.Size
+			if i == 0 && n.Parent != nil || i > 0 && (n.Parent == nil || *n.Parent != nodes[i-1].Ref) {
+				return ErrCorrupt
+			}
+			c, err := files.Read(n)
+			if err != nil {
+				return fmt.Errorf("%w: %w", ErrCorrupt, err)
+			}
+			turn := ReplayTurn{Node: n}
+			if i == 0 {
+				if turn.Bootstrap, err = replayRecords(c.Bootstrap); err != nil {
+					return err
+				}
+				messages = append(messages, turn.Bootstrap...)
+			}
+			if turn.Delta, err = replayRecords(c.Delta); err != nil {
+				return err
+			}
+			messages = append(messages, turn.Delta...)
+			if len(messages) > maxArchiveRecords {
+				return fmt.Errorf("%w: too many history messages", ErrCorrupt)
+			}
+			turns = append(turns, turn)
+		}
+		return ValidateHistory(messages)
+	})
+	if err == nil {
+		err = op.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	return turns, nil
 }
 
 func (s *Service) release(scope Scope, lease Lease) error {
@@ -375,7 +477,10 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 {
+	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 || req.MemoryEpoch < 0 {
+		return Node{}, ErrCorrupt
+	}
+	if req.Receipt.RedirectFrom != nil && (req.Parent != nil || req.Receipt.RedirectFrom.Validate() != nil) {
 		return Node{}, ErrCorrupt
 	}
 	for _, id := range req.Receipt.MessageIDs {
@@ -410,7 +515,7 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 			node = *published
 			return nil
 		}
-		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID}
+		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID, MemoryEpoch: req.MemoryEpoch}
 		if req.Parent != nil {
 			if req.Parent.alive() {
 				err = s.repo.Renew(op, req.Scope, req.Parent.lease, s.options.LeaseDuration)
@@ -422,6 +527,10 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 				ref, lease := req.Parent.ref, req.Parent.lease
 				reservation.Parent, reservation.Lease = &ref, &lease
 			case errors.Is(err, ErrFence):
+				forkedRootCommits.Add(1)
+				zap.L().Warn("session: loaded parent lease lost; committing turn as a new root",
+					zap.String("scope", req.Scope.Key()), zap.Int64("chat_id", req.Scope.ChatID), zap.String("agent", req.Agent),
+					zap.String("parent_dag_id", req.Parent.ref.DAGID), zap.String("parent_node_id", req.Parent.ref.NodeID), zap.Error(err))
 				capture.Bootstrap = req.Parent.baseline
 				if err = ValidateCapture(capture, true); err != nil {
 					return err
@@ -467,6 +576,27 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	return node, nil
 }
 
+// DropLatest stops latest selection from returning ref, any older node of agent, or a
+// compacted root redirected from ref; reply selection of those nodes is unaffected.
+func (s *Service) DropLatest(ctx context.Context, scope Scope, agent string, ref NodeRef) error {
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	scope, err = s.scope(scope)
+	if err != nil {
+		return err
+	}
+	if agent == "" || ref.Validate() != nil {
+		return ErrCorrupt
+	}
+	if err = s.repo.DropLatest(op, scope, agent, ref); err != nil {
+		return err
+	}
+	return op.Err()
+}
+
 func (s *Service) compensate(files *ScopeFiles, scope Scope, intent Intent) error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.options.OperationTimeout)
 	defer cancel()
@@ -491,6 +621,34 @@ func (s *Service) abortIntent(ctx context.Context, files *ScopeFiles, scope Scop
 		return s.repo.FinishIntent(cleanup, scope, intent)
 	}
 	return s.repo.FinishIntent(ctx, scope, intent)
+}
+
+// LastCollection reads the persisted local day of the last completed collection, if the repository supports it.
+func (s *Service) LastCollection(ctx context.Context) (string, error) {
+	marker, ok := s.repo.(CollectionMarker)
+	if !ok {
+		return "", errors.ErrUnsupported
+	}
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	return marker.LastCollection(op)
+}
+
+// MarkCollection persists the local day of a completed collection, if the repository supports it.
+func (s *Service) MarkCollection(ctx context.Context, day string) error {
+	marker, ok := s.repo.(CollectionMarker)
+	if !ok {
+		return errors.ErrUnsupported
+	}
+	op, done, err := s.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	return marker.MarkCollection(op, day)
 }
 
 // Close cancels operations and renewal, waits for pins, and closes files without closing Redis.

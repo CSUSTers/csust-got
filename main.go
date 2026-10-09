@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,7 +32,8 @@ import (
 func main() {
 	config.InitConfig("config.yaml", "BOT")
 	log.InitLogger()
-	defer log.Sync()
+	defer log.Close()
+	config.LogDiagnostics()
 	orm.InitRedis()
 
 	if err := agentv3.Init(context.Background()); err != nil {
@@ -77,9 +80,25 @@ func main() {
 	}
 	go func() {
 		<-ctx.Done()
+		agentv3.BeginShutdown()
 		bot.Stop()
 	}()
 	bot.Start()
+	drainInflightTurns()
+}
+
+func drainInflightTurns() {
+	agentv3.BeginShutdown()
+	grace := config.BotConfig.AgentV3.ShutdownGraceDuration()
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), grace)
+	defer cancelDrain()
+	if pending := agentv3.InflightTurns(); pending > 0 {
+		log.Info("shutdown: waiting for in-flight agent turns", zap.Int64("inflight", pending), zap.Duration("grace", grace))
+	}
+	if err := agentv3.WaitInflight(drainCtx); err != nil {
+		log.Warn("shutdown: in-flight agent turns did not finish within grace",
+			zap.Int64("inflight", agentv3.InflightTurns()), zap.Duration("grace", grace), zap.Error(err))
+	}
 }
 
 func initBot() (*Bot, error) {
@@ -192,6 +211,10 @@ func registerBaseHandler(bot *Bot) {
 
 	// custom regexp handler
 	bot.Handle(OnText, customHandler)
+
+	// edited messages and channel posts only refresh the message cache through the middleware chain
+	bot.Handle(OnEdited, base.DoNothing)
+	bot.Handle(OnEditedChannelPost, base.DoNothing)
 
 	// download sticker in private chat
 	bot.Handle(OnSticker, stickerDlHandler)
@@ -319,11 +342,11 @@ const (
 func agentInvocationTrigger(trigger *config.AgentTrigger, kind agentTriggerKind) *config.AgentTrigger {
 	switch kind {
 	case agentTriggerCommand:
-		return &config.AgentTrigger{Command: trigger.Command}
+		return &config.AgentTrigger{Command: trigger.Command, Hint: trigger.Hint}
 	case agentTriggerRegex:
-		return &config.AgentTrigger{Regex: trigger.Regex}
+		return &config.AgentTrigger{Regex: trigger.Regex, Hint: trigger.Hint}
 	case agentTriggerReply:
-		return &config.AgentTrigger{Reply: true}
+		return &config.AgentTrigger{Reply: true, Hint: trigger.Hint}
 	default:
 		return &config.AgentTrigger{}
 	}
@@ -364,7 +387,7 @@ func skipMiddleware(next HandlerFunc) HandlerFunc {
 		}
 
 		if m != nil {
-			d := time.Since(m.Time())
+			d := time.Since(updateTime(ctx, m))
 			if skipSec > 0 && int64(d.Seconds()) > skipSec {
 				log.Debug("bot skip expired update", zap.Int("update_id", ctx.Update().ID))
 				return nil
@@ -391,7 +414,7 @@ func blockMiddleware(next HandlerFunc) HandlerFunc {
 
 func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -413,7 +436,7 @@ func fakeBanMiddleware(next HandlerFunc) HandlerFunc {
 
 func rateMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate {
+		if !isChatMessageHasSender(ctx) || ctx.Chat().Type == ChatPrivate || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -434,7 +457,7 @@ func rateMiddleware(next HandlerFunc) HandlerFunc {
 func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
-		if !isChatMessageHasSender(ctx) || m.Sticker == nil {
+		if !isChatMessageHasSender(ctx) || m.Sticker == nil || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -450,7 +473,7 @@ func noStickerMiddleware(next HandlerFunc) HandlerFunc {
 
 func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 		if isAllowedMessageCommand(ctx.Message(), "boot", "info") {
@@ -468,7 +491,7 @@ func shutdownMiddleware(next HandlerFunc) HandlerFunc {
 // byeWorldMiddleware auto delete message.
 func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
-		if !isChatMessageHasSender(ctx) {
+		if !isChatMessageHasSender(ctx) || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 
@@ -561,18 +584,40 @@ func isAllowedCommandName(commandName string, allowed ...string) bool {
 	return false
 }
 
+var messageStoreSeq = newMessageStoreSeq()
+
+// newMessageStoreSeq starts at the wall clock in microseconds so receive order also survives restarts and stays exact in Lua numbers.
+func newMessageStoreSeq() *atomic.Uint64 {
+	seq := &atomic.Uint64{}
+	seq.Store(uint64(time.Now().UnixMicro()))
+	return seq
+}
+
+var messageStoreAsync *sync.WaitGroup
+
 func messageStoreMiddleware(next HandlerFunc) HandlerFunc {
 	return func(ctx Context) error {
 		m := ctx.Message()
 		if shouldStoreMessage(m) {
+			seq := uint64(max(ctx.Update().ID, 0))
+			if seq == 0 {
+				seq = messageStoreSeq.Add(1)
+			}
+			pending := messageStoreAsync
+			if pending != nil {
+				pending.Add(1)
+			}
 			// 异步存储完整消息结构体到Redis
 			go func() {
+				if pending != nil {
+					defer pending.Done()
+				}
 				// Store to stream
-				if err := orm.PushMessageToStream(m); err != nil {
+				if err := orm.PushMessageToStreamWithSeq(m, seq); err != nil {
 					log.Error("Store message to Redis stream failed", zap.Error(err))
 				}
 				// Also store as a retrievable message
-				if err := orm.SetMessage(m); err != nil {
+				if err := orm.SetMessageWithSeq(m, seq); err != nil {
 					log.Error("Store message to Redis failed", zap.Error(err))
 				}
 			}()
@@ -587,4 +632,18 @@ func shouldStoreMessage(m *Message) bool {
 
 func isChatMessageHasSender(ctx Context) bool {
 	return ctx.Chat() != nil && ctx.Message() != nil && ctx.Sender() != nil
+}
+
+// isEditedUpdate reports an edited message or channel post; edits only refresh the message cache.
+func isEditedUpdate(ctx Context) bool {
+	update := ctx.Update()
+	return update.EditedMessage != nil || update.EditedChannelPost != nil
+}
+
+// updateTime is the edit time for edited updates so late edits of old messages still refresh the cache.
+func updateTime(ctx Context, m *Message) time.Time {
+	if m.LastEdit != 0 && isEditedUpdate(ctx) {
+		return time.Unix(m.LastEdit, 0)
+	}
+	return m.Time()
 }

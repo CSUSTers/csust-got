@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	"csust-got/agent/session"
 
 	"github.com/redis/go-redis/v9"
-	"time"
 )
 
 func (r *AgentV3SessionRepository) sessionDAGs(ctx context.Context, s sessionScopeKeys, scope session.Scope) ([]string, map[string]*sessionMeta, map[string]error, int64, error) {
@@ -74,6 +75,33 @@ func (r *AgentV3SessionRepository) sessionDAGs(ctx context.Context, s sessionSco
 	}
 	return ids, metas, failures, now, nil
 }
+
+const sessionLastCollectionKey = "last_collection"
+
+// LastCollection returns the stored local day of the last completed collection, or "" when none.
+func (r *AgentV3SessionRepository) LastCollection(ctx context.Context) (string, error) {
+	value, err := r.client.Get(ctx, r.base+sessionLastCollectionKey).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", sessionRedisError(err)
+	}
+	return value, nil
+}
+
+// MarkCollection stores the local day of a completed collection in the layout's global area.
+func (r *AgentV3SessionRepository) MarkCollection(ctx context.Context, day string) error {
+	if strings.TrimSpace(day) == "" {
+		return session.ErrCorrupt
+	}
+	if err := r.client.Set(ctx, r.base+sessionLastCollectionKey, day, 0).Err(); err != nil {
+		return sessionRedisError(err)
+	}
+	return nil
+}
+
+var _ session.CollectionMarker = (*AgentV3SessionRepository)(nil)
 
 func sessionDAGError(scope session.Scope, id string, err error) error {
 	return fmt.Errorf("%w: scope %q DAG %q", err, scope.Key(), id)

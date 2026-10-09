@@ -27,6 +27,7 @@ agents:
       - command: chat
         regex: ^hello$
         reply: true
+        hint: search first
 `)))
 	var agents config.AgentV3Configs
 	require.NoError(t, v.UnmarshalKey("agents", &agents, viper.DecodeHook(config.DispatchFor())))
@@ -40,9 +41,9 @@ agents:
 		kind agentTriggerKind
 		want config.AgentTrigger
 	}{
-		{name: "command", kind: agentTriggerCommand, want: config.AgentTrigger{Command: "chat"}},
-		{name: "regex", kind: agentTriggerRegex, want: config.AgentTrigger{Regex: "^hello$"}},
-		{name: "reply", kind: agentTriggerReply, want: config.AgentTrigger{Reply: true}},
+		{name: "command", kind: agentTriggerCommand, want: config.AgentTrigger{Command: "chat", Hint: "search first"}},
+		{name: "regex", kind: agentTriggerRegex, want: config.AgentTrigger{Regex: "^hello$", Hint: "search first"}},
+		{name: "reply", kind: agentTriggerReply, want: config.AgentTrigger{Reply: true, Hint: "search first"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

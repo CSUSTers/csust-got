@@ -16,7 +16,7 @@ if err := svc.Recover(ctx); err != nil { /* 告警，保留失败清单供重试
 next, err := session.NextCollection(time.Now(), nil) // nil = time.Local，02:00
 ```
 
-启动和周期补偿调用 `Recover`，仅重试已登记的 intents 和已经标记 deleting 的 DAG；不会因普通 active DAG 已过期而标记/清理它，也不会更新其 lastActive。失败 root intent 补偿后的空 active DAG 也留到日程回收。调度等待 `next` 后才调用 `Collect` 来扫描新的过期 active DAG，再按当前本地日期重算；不能用固定 24h ticker，也不能在启动或分钟重试中调用 `Collect`。服务不自建调度 goroutine，不依赖 cron 开关。`Close` 取消进行中的操作和 heartbeat、等待退出并关闭 FileStore，不关闭 orm 借出的 Redis client，不清空归档。单次操作默认上界 10s，租约默认 90s、每 30s 续租；磁盘系统调用不能强制取消，严重挂盘可能延迟关闭/回收。
+启动和周期补偿调用 `Recover`，仅重试已登记的 intents 和已经标记 deleting 的 DAG；不会因普通 active DAG 已过期而标记/清理它，也不会更新其 lastActive。失败 root intent 补偿后的空 active DAG 也留到日程回收。调度等待 `next` 后才调用 `Collect` 来扫描新的过期 active DAG，再按当前本地日期重算；不能用固定 24h ticker，每分钟补偿也不得调用 `Collect`。唯一例外是启动补跑：若进程在当地 02:00 之后启动，且 `Service.LastCollection` 返回的日期不是今天（或 Repository 不实现 `CollectionMarker`），调用方在启动 `Recover` 之后调用一次 `Collect`，成功后用 `Service.MarkCollection(day)` 记录当地日期。Repository 可选实现 `CollectionMarker`（`LastCollection` / `MarkCollection`）；orm 把它存在 layout 的全局区，不实现时 Service 返回 `errors.ErrUnsupported`。服务不自建调度 goroutine，不依赖 cron 开关。`Close` 取消进行中的操作和 heartbeat、等待退出并关闭 FileStore，不关闭 orm 借出的 Redis client，不清空归档。单次操作默认上界 10s（`Options.OperationTimeout`），`Collect` 每个 scope 另有 `Options.CollectTimeout`（默认 2m）；租约默认 90s、每 30s 续租，瞬时续租失败在距上次成功不足 `LeaseDuration - RenewInterval/2` 时于下一 tick 重试，只有 fence / corrupt / closed 立即终止；磁盘系统调用不能强制取消，严重挂盘可能延迟关闭/回收。
 
 TTL 与配置契约一致：任何正 duration 均可初始化。Redis 的 lastActive/到期比较为毫秒精度，TTL 向下取整；`0 < TTL < 1ms` 等价于立即具备到期资格，但仅在调用 `Collect` 的日程扫描时处理，且有效 lease 仍阻止回收。`Recover` 不因此开启到期扫描。`Options.TTL == 0` 表示 API 默认 24h；配置中显式零/负 TTL 仍由 Validate 拒绝。lease duration 必须至少 1ms，以免 deadline 向下取整后等于创建时刻、立即失效。
 
@@ -62,18 +62,20 @@ node, err := svc.Commit(commitCtx, session.CommitRequest{
 - reply 精确选择被回复消息，跨 agent、同 chat，不增设 user 范围、不做 latest 回退。
 - 普通 `load_context=true` 用 `SelectLatest`，只选本 agent，按 Redis 提交 sequence；不加载可直接不调用 Load，或使用 `SelectNone`。实际 reply 的 true/true 强制由调用层处理。
 - Scope.Namespace 可留空，由 Service 根据 Redis prefix 的 SHA-256 自动补齐；显式 namespace 不匹配会拒绝。bot/platform 使用结构化哈希、chat 使用十进制；agent 名和模型参数不成为路径。
-- 只有完整 Load 返回的 opaque LoadedParent 能续接。调用者改动 `loaded.Messages` 不会改动失租 fallback 的私有快照。提交前失租使用完整 replay 建新根；写中失租返回 fence 错误并补偿，绝不连接旧父，也不重跑模型。
-- Frame/Guidance 显式分类；`Bootstrap` 和 `Delta` 中也可放带 SourceFrame/SourceGuidance 的 Record，归档保留但 replay 不注入。用户文本中的框架标记没有分类作用。system 必须分类为 frame。
+- 只有完整 Load 返回的 opaque LoadedParent 能续接。调用者改动 `loaded.Messages` 不会改动失租 fallback 的私有快照。提交前失租使用完整 replay 建新根，记录 Warn 并累加 `session.ForkedRootCommits()`；写中失租返回 fence 错误并补偿，绝不连接旧父，也不重跑模型。
+- Frame/Guidance 显式分类；`Bootstrap` 和 `Delta` 中也可放带 SourceFrame/SourceGuidance 的 Record，归档保留但 replay 不注入。用户文本中的框架标记没有分类作用。system 必须分类为 frame。agent owner 目前只把 system 归为 Frame：runtime guidance、memory snapshot、模板附加指令都按 `SourceHistory` 内联归档，原顺序 replay，以保证模型输入前缀与上一轮逐字节一致。
+- `DeliveryReceipt.MessageIDs` 可包含同一轮次拆分发送的全部 Telegram 消息 ID；Publish 为每个 ID 建立 message 索引，回复任意分片都能解析到该节点，首个 ID 为主消息。
 - 根保存 bootstrap + delta；子节点禁止带 bootstrap，只保存新轮次。完整工具链和非空最终 assistant、Complete、正数成功交付消息 ID 都是发布门槛。进度消息、用户消息 ID 和发送失败不能成为 receipt。
 - `Commit` 自动 JSON 深快照。消息保存完整 schema.Message，包括多模态、工具参数/响应、推理签名、ToolSearchResult、Extra/ResponseMeta；JSON 数字使用 `json.Number` 保精度，不保证 Extra 中任意自定义 Go 类型身份。
 - RunID 是 `NewID` 返回的 32 位小写十六进制 ID；同 scope 不得用于不同轮次。提交成功后的相同 RunID 返回原节点。`ErrUnknown` 表示结果尚不可确认：保留原 RunID，不重发、不换 ID 盲目重复发布，稍后查询/Recover 恢复。
 - 文件、加载整链各最多 256MiB，消息/record 最多 100000；超限明确失败，绝不截断/摘要。调用层按正常 fallback 或告警跳过保存处理。
+- 后台压缩用 `Service.Replay(ctx, scope, ref)` 只读取整条祖先链（`Repository.Chain`，不 pin、不刷新活跃），再以 `Parent=nil` 提交新 root，并在 `DeliveryReceipt.RedirectFrom` 填源节点：Publish 在同一事务里只把仍指向源节点的 `MessageIDs` 改指新节点，源节点为该 agent latest 时才同步 latest；无可重定向 ID 返回 `ErrStale` 并按正常补偿处理。新节点带 `Node.RedirectedFrom`。摘要内容、阈值与模型选择由 agent owner 决定，本包不解释消息内容。
 
 ## 安全协议与边界
 
 每 scope 的不可见 intents、DAG 节点、单父边、message/run 索引、sequence、leases 和 deleting 状态合并在一个 Redis JSON 状态记录中，用 WATCH/MULTI 同时更新 namespace 的 scope 目录。没有自然 TTL。latest 从存活节点的 sequence 选择，删除消息映射必须比较 NodeRef。此方案降低原子边界复杂度，但每次状态更新/续租都重写 scope 元数据；大 chat 的性能/内存需要部署前量测。
 
-所有文件相关路径先取得 scope 的内核文件锁，再操作 Redis。锁覆盖读取+确认、reserve+写+publish、恢复+GC，不覆盖模型/Telegram。Windows 使用 LockFileEx，支持的 Unix 使用 flock；锁文件稳定不删除。GC 在同一锁内 claim、逐项删除、最终提交，因此不另造超时 cleanup-owner 机制；generation 和不可逆 deleting 仍在 Redis 检验。
+所有文件相关路径先取得 scope 的内核文件锁，再操作 Redis。锁覆盖读取+确认、reserve+写+publish、恢复+GC，不覆盖模型/Telegram。Windows 使用 LockFileEx，支持的 Unix 使用 flock；锁文件稳定不删除。GC 对每个 scope 分段加锁：intent 恢复一次，claim/读取 deleting 清单一次，之后**每个 DAG 的文件删除与 FinishDelete 单独加锁**，让 Load / Commit 可以在 DAG 之间穿插；deleting 状态不可逆、FinishDelete 仍按 generation 检验，因此不另造超时 cleanup-owner 机制。
 
 关闭句柄、解锁和精确删除的失败会与原操作错误合并返回，不通过忽略返回值隐去。`LoadedParent.Close` 会报告 pin 释放失败；此时不能假定 Redis pin 已消失，它仍受 deadline/fencing 约束。补偿或删除失败仍保留 intent/tombstone 供 Recover 重试；不能因清理失败重新发送 Telegram 或重跑模型。
 

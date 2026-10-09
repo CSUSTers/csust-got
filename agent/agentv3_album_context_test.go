@@ -58,6 +58,10 @@ func TestAgentV3SessionChatAlbumRedisUsesCallbackContext(t *testing.T) {
 				ctx, cancel = context.WithTimeout(WithTurnContext(t.Context(), tc), 300*time.Millisecond)
 			}
 			defer cancel()
+			if action == "close" {
+				// Cancel only after Close aborted the candidate, before prepare can fall back to legacy rendering.
+				repo.onRelease = cancel
+			}
 			setupAgentV3SessionTurn(tc)
 			returned := make(chan error, 1)
 			finished := make(chan struct{})

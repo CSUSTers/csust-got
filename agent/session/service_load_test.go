@@ -29,6 +29,7 @@ type fakeRepository struct {
 	renew      func(context.Context)
 	release    func(context.Context)
 	reject     func(context.Context, Scope, NodeRef, string) error
+	renewErr   func() error
 }
 
 func (*fakeRepository) Namespace() string { return StorageNamespace("service-load-test") }
@@ -66,6 +67,11 @@ func (r *fakeRepository) Renew(ctx context.Context, _ Scope, lease Lease, durati
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if r.renewErr != nil {
+		if err := r.renewErr(); err != nil {
+			return err
+		}
 	}
 	if !r.valid(lease) {
 		return ErrFence
@@ -107,6 +113,12 @@ func (r *fakeRepository) Release(ctx context.Context, _ Scope, lease Lease) erro
 		r.lease = Lease{}
 	}
 	return nil
+}
+
+func (r *fakeRepository) setRenewErr(hook func() error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.renewErr = hook
 }
 
 func newFakeLoadService(t *testing.T, options Options) (*Service, *fakeRepository, Scope) {

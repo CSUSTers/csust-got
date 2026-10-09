@@ -106,6 +106,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 		}
 		tc.progressMsg = msg
 		tc.MarkEdited()
+		tc.MarkPlaceholderOverwritten()
 		return "ok"
 	}
 
@@ -114,6 +115,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 		zap.L().Debug("agentv3: failed to edit progress message", zap.Error(err))
 	} else {
 		tc.MarkEdited()
+		tc.MarkPlaceholderOverwritten()
 	}
 	return "ok"
 }
@@ -432,7 +434,7 @@ func downloadImage(ctx context.Context, tc *TurnContext, fileID, imageURL string
 		}
 		mimeType = "image/jpeg" // Telegram typically serves JPEG
 	case imageURL != "":
-		resp, err := doAgentHTTPRequest(ctx, http.MethodGet, imageURL, nil) //nolint:gosec
+		resp, err := fetchPublicImageURL(ctx, imageURL)
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch URL: %w", err)
 		}
@@ -539,11 +541,22 @@ func recoverableImageToolMessage(err error) (string, bool) {
 		return "当前消息里没有可分析的图片。请直接发送图片、回复一张图片，或提供一个可直接访问的图片 URL。", true
 	case errors.Is(err, errBadHTTPStatus):
 		return "图片 URL 当前不可访问，或者返回的不是可下载的图片内容。请换一个可直接访问的图片链接再试。", true
+	case isImageURLPolicyError(err):
+		return "图片 URL 不被允许：只支持指向公网地址的 http/https 图片链接（80/443 端口），不能是内网、本机或保留地址。", true
 	case isTelegramImageUnavailableError(err):
 		return "当前引用的 Telegram 图片不可用：可能没有真实图片附件，或者 file_id 已失效。请让用户直接发送/回复图片后再试。", true
 	default:
 		return "", false
 	}
+}
+
+func isImageURLPolicyError(err error) bool {
+	for _, target := range []error{errImageURLScheme, errImageURLHost, errImageURLPort, errImageURLResolve, errImageURLNotPublic, errImageURLRedirects, errImageURLDialTarget} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func isTelegramImageUnavailableError(err error) bool {

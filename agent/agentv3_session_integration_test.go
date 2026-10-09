@@ -24,6 +24,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/redis/go-redis/v9"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 	tb "gopkg.in/telebot.v3"
 )
@@ -116,7 +117,7 @@ func (f *agentSessionFixture) compile(t *testing.T, cfg *config.AgentConfig, mdl
 	if cfg.Agent == nil {
 		cfg.Agent = &config.AgentOptions{Enable: true}
 	}
-	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: cfg.Name, Model: mdl, Tools: tools, MaxSteps: 4})
+	agent, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: cfg.Name, Model: mdl, Tools: tools, MaxSteps: 3})
 	require.NoError(t, err)
 	compiled := &CompiledAgent{Name: cfg.Name, Config: cfg, Agent: agent, SystemTemplate: template.Must(template.New("system").Parse("SYSTEM_" + cfg.Name))}
 	compiledAgents.Store(cfg.Name, compiled)
@@ -200,9 +201,10 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			root := f.node(t, firstID)
 			require.Nil(t, root.Parent)
 			rootCapture := f.archive(t, root)
-			require.Len(t, rootCapture.Delta, 5)
-			require.Equal(t, firstCalls, rootCapture.Delta[1].Message)
-			require.Equal(t, firstFinal, rootCapture.Delta[4].Message)
+			require.Len(t, rootCapture.Delta, 7, "template addition, user, tool round, guidance and final are archived in model order")
+			require.Equal(t, firstCalls, rootCapture.Delta[2].Message)
+			require.Contains(t, rootCapture.Delta[5].Message.Content, "<agent_runtime_guidance>")
+			require.Equal(t, firstFinal, rootCapture.Delta[6].Message)
 			second := sessionMessage(20, 8, 60, "SECOND_INPUT")
 			second.ReplyTo = &tb.Message{ID: firstID, Text: "UNTRUSTED_EMBEDDED_ANCESTOR"}
 			secondID := f.chat(t, cfg, second, &config.AgentTrigger{Reply: true})
@@ -210,14 +212,15 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			require.Equal(t, &root.Ref, child.Parent)
 			childCapture := f.archive(t, child)
 			require.Empty(t, childCapture.Bootstrap)
-			require.Len(t, childCapture.Delta, 4)
+			require.Len(t, childCapture.Delta, 6)
 			input := mdl.capturedInputs()[2]
 			conversation := sessionConversation(input)
 			require.Equal(t, sessionRecordMessages(rootCapture.Delta), conversation[:len(rootCapture.Delta)])
 			text := replySessionSchemaText(input)
 			require.Equal(t, 1, strings.Count(text, "SECOND_INPUT"))
 			require.NotContains(t, text, "UNTRUSTED_EMBEDDED_ANCESTOR")
-			require.NotContains(t, text, "<agent_runtime_guidance>", "replayed tool rounds must not consume the new invocation's budget")
+			require.Equal(t, 1, strings.Count(text, "<agent_runtime_guidance>"), "only the replayed guidance is present; replayed tool rounds must not consume the new invocation's budget")
+			require.NotContains(t, input[len(input)-1].Content, "<agent_runtime_guidance>")
 			counter.mu.Lock()
 			require.Equal(t, 3, counter.calls)
 			counter.mu.Unlock()
@@ -237,6 +240,59 @@ func TestAgentV3SessionChatToolReplayAndBranches(t *testing.T) {
 			require.Equal(t, sessionRecordMessages(rootCapture.Delta), sessionConversation(crossInput)[:len(rootCapture.Delta)])
 		})
 	}
+}
+
+func TestAgentV3SessionForcedSummaryArchivesWithoutDanglingToolCalls(t *testing.T) {
+	f := newAgentSessionFixture(t)
+	cfg := &config.AgentConfig{Name: "forced", ContextMode: "reply_chain"}
+	unexecuted := sessionToolMessage("never-executed")
+	mdl := &scriptedToolModel{turns: [][]*schema.Message{
+		{sessionToolMessage("call-1")}, {sessionToolMessage("call-2")}, {unexecuted}, {schema.AssistantMessage("FORCED_FINAL", nil)},
+	}}
+	counter := &countingLookupTool{}
+	f.compile(t, cfg, mdl, counter)
+
+	finalID := f.chat(t, cfg, sessionMessage(10, 7, 0, "FORCED_INPUT"), &config.AgentTrigger{Command: "ask"})
+	counter.mu.Lock()
+	require.Equal(t, 2, counter.calls, "the final round's tool calls are never executed")
+	counter.mu.Unlock()
+	require.Len(t, mdl.capturedInputs(), 4)
+	for _, message := range mdl.capturedInputs()[3] {
+		require.NotEqual(t, unexecuted, message, "the forced summary never saw the unexecuted tool calls")
+	}
+
+	node := f.node(t, finalID)
+	require.Nil(t, node.Parent)
+	messages := sessionRecordMessages(f.archive(t, node).Delta)
+	require.Equal(t, "FORCED_FINAL", messages[len(messages)-1].Content)
+	require.NotContains(t, messages, unexecuted)
+	pending := map[string]bool{}
+	for _, message := range messages {
+		switch message.Role {
+		case schema.Assistant:
+			require.Empty(t, pending, "every tool call is answered before the next assistant message")
+			for _, call := range message.ToolCalls {
+				pending[call.ID] = true
+			}
+		case schema.Tool:
+			require.True(t, pending[message.ToolCallID])
+			delete(pending, message.ToolCallID)
+		case schema.User, schema.System:
+		}
+	}
+	require.Empty(t, pending)
+	require.Equal(t, []string{"call-1", "call-2"}, lo.FilterMap(messages, func(message *schema.Message, _ int) (string, bool) {
+		return message.ToolCallID, message.Role == schema.Tool
+	}))
+
+	follow := sessionMessage(20, 8, 60, "FOLLOW_INPUT")
+	follow.ReplyTo = &tb.Message{ID: finalID}
+	followModel := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("FOLLOW_FINAL", nil)}}}
+	f.compile(t, cfg, followModel)
+	followID := f.chat(t, cfg, follow, &config.AgentTrigger{Reply: true})
+	require.Equal(t, &node.Ref, f.node(t, followID).Parent)
+	replay := sessionConversation(followModel.capturedInputs()[0])
+	require.Equal(t, messages, replay[:len(messages)], "the reply replays the archived history including the forced final answer")
 }
 
 func TestAgentV3SessionDefaultsLatestAndReplySelection(t *testing.T) {
@@ -293,12 +349,10 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	capture := f.archive(t, root)
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "LEGACY_SUMMARY")
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "LEGACY_USER")
-	require.NotContains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "OLD_MEMORY")
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "OLD_MEMORY", "the memory snapshot is history so later turns replay it verbatim")
+	require.Len(t, capture.Frame, 1)
+	require.Equal(t, schema.System, capture.Frame[0].Message.Role)
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "REAL_USER")
-	items, err := orm.AgentV3ListMemory(t.Context(), scope)
-	require.NoError(t, err)
-	require.NoError(t, orm.AgentV3ForgetMemory(t.Context(), scope, items[0].ID))
-	require.NoError(t, rebuildAgentV3MemorySnapshot(t.Context(), scope, time.Hour))
 	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "NEW_MEMORY"))
 	// A session hit must bypass every old summary/raw-turn read, even if those keys are broken.
 	keys, err := f.client.Keys(t.Context(), "*:hot:raw_turns").Result()
@@ -314,8 +368,8 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	second := f.chat(t, cfg, sessionMessage(20, 8, 60, "NEW_INPUT"), nil)
 	require.Equal(t, &root.Ref, f.node(t, second).Parent, "legacy save failure must not prevent session commit")
 	text := replySessionSchemaText(mdl.capturedInputs()[1])
-	require.Contains(t, text, "NEW_MEMORY")
-	require.NotContains(t, text, "OLD_MEMORY")
+	require.Equal(t, 1, strings.Count(text, "NEW_MEMORY"), "a changed memory snapshot is appended after the replay")
+	require.Equal(t, 2, strings.Count(text, "OLD_MEMORY"), "the archived snapshot is replayed verbatim and the superseding one repeats the kept entry")
 	require.Equal(t, 1, strings.Count(text, "LEGACY_SUMMARY"))
 	require.Equal(t, 1, strings.Count(text, "LEGACY_USER"))
 }
@@ -370,11 +424,12 @@ func TestAgentV3SessionReplyChainCaptionMultimodalCurrentOnce(t *testing.T) {
 	secondID := f.chat(t, cfg, second, &config.AgentTrigger{Reply: true})
 	rootCapture := f.archive(t, f.node(t, first))
 	childCapture := f.archive(t, f.node(t, secondID))
-	require.Len(t, rootCapture.Delta[0].Message.UserInputMultiContent, 2)
-	require.Len(t, childCapture.Delta[0].Message.UserInputMultiContent, 2)
-	require.Equal(t, "data:image/jpeg;base64,aA==", *childCapture.Delta[0].Message.UserInputMultiContent[1].Image.URL)
+	require.Len(t, rootCapture.Delta[1].Message.UserInputMultiContent, 2)
+	require.Len(t, childCapture.Delta[1].Message.UserInputMultiContent, 2)
+	require.Equal(t, "data:image/jpeg;base64,aA==", *childCapture.Delta[1].Message.UserInputMultiContent[1].Image.URL)
 	input := mdl.capturedInputs()[1]
 	require.Equal(t, rootCapture.Delta[0].Message, input[1])
+	require.Equal(t, rootCapture.Delta[1].Message, input[2])
 	text := replySessionSchemaText(input)
 	require.Equal(t, 1, strings.Count(text, "SECOND_CAPTION"))
 	require.NotContains(t, text, "DO_NOT_REBUILD_ANCESTOR")
@@ -441,7 +496,7 @@ func TestAgentV3SessionCommitIsIndependentOfModelDeadline(t *testing.T) {
 	_, err = compiled.Agent.Generate(WithSessionCapture(ctx, tc.Session.capture), messages)
 	require.NoError(t, err)
 	cancel()
-	commitAgentV3Session(tc, &tb.Message{ID: 42})
+	commitAgentV3Session(tc, []*tb.Message{{ID: 42}})
 	require.Nil(t, f.node(t, 42).Parent)
 }
 
@@ -486,6 +541,7 @@ func TestAgentV3SessionLostParentLeaseForksFullRoot(t *testing.T) {
 	first := f.chat(t, cfg, sessionMessage(100, 7, 0, "old input"), nil)
 	root := f.node(t, first)
 	rootCapture := f.archive(t, root)
+	forksBefore := session.ForkedRootCommits()
 	mdl.before = func(ctx context.Context, _ []*schema.Message) error {
 		tc := GetTurnContext(ctx)
 		if tc.Session.parent == nil {
@@ -500,6 +556,7 @@ func TestAgentV3SessionLostParentLeaseForksFullRoot(t *testing.T) {
 	require.Nil(t, fork.Parent)
 	require.NotEqual(t, root.Ref.DAGID, fork.Ref.DAGID)
 	require.Equal(t, rootCapture.Delta, f.archive(t, fork).Bootstrap)
+	require.Equal(t, forksBefore+1, session.ForkedRootCommits(), "a lost lease fork is counted for observability")
 }
 
 type agentSessionDelegateTool struct{ child *CustomAgent }
@@ -527,9 +584,9 @@ func TestAgentV3SessionDelegatePrivateHistoryIsNotArchived(t *testing.T) {
 	id := f.chat(t, cfg, sessionMessage(100, 7, 0, "parent input"), nil)
 	capture := f.archive(t, f.node(t, id))
 	require.Len(t, childModel.capturedInputs(), 2)
-	require.Len(t, capture.Delta, 4)
-	require.Equal(t, "TOP_CHILD_CALL", capture.Delta[1].Message.ToolCalls[0].ID)
-	require.Equal(t, "child result", capture.Delta[2].Message.Content)
+	require.Len(t, capture.Delta, 6)
+	require.Equal(t, "TOP_CHILD_CALL", capture.Delta[2].Message.ToolCalls[0].ID)
+	require.Equal(t, "child result", capture.Delta[3].Message.Content)
 	encoded, err := json.Marshal(capture)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "PRIVATE_CHILD_TOOL")
@@ -571,7 +628,7 @@ func TestAgentV3SessionChatInputDoesNotRebuildReplyImagesOrTemplateHistory(t *te
 	require.NotContains(t, text, "FORBIDDEN_ANCESTOR")
 }
 
-func TestAgentV3SessionReplayDoesNotRestoreRichOrRuntimePermissions(t *testing.T) {
+func TestAgentV3SessionReplayRestoresRichActivationButNotRuntimePermissions(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "rich-parent", ContextMode: "reply_chain", Agent: &config.AgentOptions{Enable: true, Rich: true}}
 	snapshot := buildAgentV3BuiltinSkillSnapshot(cfg, config.BotConfig.AgentV3)
@@ -595,11 +652,11 @@ func TestAgentV3SessionReplayDoesNotRestoreRichOrRuntimePermissions(t *testing.T
 		environment, _ = tc.runtimeEnvironment()
 		return nil
 	}
-	f.compile(t, cross, currentModel)
+	f.compile(t, cross, currentModel).AgentV3SkillSources = []agentV3SkillSnapshot{buildAgentV3BuiltinSkillSnapshot(cross, config.BotConfig.AgentV3)}
 	current := sessionMessage(200, 8, 60, "current input")
 	current.ReplyTo = &tb.Message{ID: first}
 	f.chat(t, cross, current, &config.AgentTrigger{Reply: true})
-	require.False(t, richLoaded)
+	require.True(t, richLoaded, "a replayed load_skill(rich-message) call keeps rich output active for the continued session")
 	require.Equal(t, map[string]string{"CURRENT_ENV": "current"}, environment)
 	require.Equal(t, sessionRecordMessages(rootCapture.Delta), sessionConversation(currentModel.capturedInputs()[0])[:len(rootCapture.Delta)])
 }

@@ -146,26 +146,10 @@ func (r *AgentV3SessionRepository) ResolveAndPin(ctx context.Context, sel sessio
 				return err
 			}
 		}
-		seen := map[string]bool{}
-		for {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if ref.DAGID != meta.ID || seen[ref.NodeID] {
-				return session.ErrCorrupt
-			}
-			seen[ref.NodeID] = true
-			n, ok := nodes[ref.NodeID]
-			if !ok || n.Ref != ref {
-				return session.ErrCorrupt
-			}
-			out.Nodes = append(out.Nodes, n)
-			if n.Parent == nil {
-				break
-			}
-			ref = *n.Parent
+		out.Nodes, err = sessionAncestorChain(ctx, nodes, ref, meta.ID)
+		if err != nil {
+			return err
 		}
-		slices.Reverse(out.Nodes)
 		now, err := clockCmd.Result()
 		if err != nil {
 			return err
@@ -189,6 +173,74 @@ func (r *AgentV3SessionRepository) ResolveAndPin(ctx context.Context, sel sessio
 	}
 	if len(out.Nodes) == 0 {
 		return session.Pinned{}, session.ErrMiss
+	}
+	return out, nil
+}
+
+func sessionAncestorChain(ctx context.Context, nodes map[string]session.Node, ref session.NodeRef, dagID string) ([]session.Node, error) {
+	var chain []session.Node
+	seen := map[string]bool{}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if ref.DAGID != dagID || seen[ref.NodeID] {
+			return nil, session.ErrCorrupt
+		}
+		seen[ref.NodeID] = true
+		n, ok := nodes[ref.NodeID]
+		if !ok || n.Ref != ref {
+			return nil, session.ErrCorrupt
+		}
+		chain = append(chain, n)
+		if n.Parent == nil {
+			break
+		}
+		ref = *n.Parent
+	}
+	slices.Reverse(chain)
+	return chain, nil
+}
+
+// Chain reads the root-to-node ancestor metadata of an active DAG without pinning it.
+func (r *AgentV3SessionRepository) Chain(ctx context.Context, scope session.Scope, ref session.NodeRef) ([]session.Node, error) {
+	if ref.Validate() != nil {
+		return nil, session.ErrCorrupt
+	}
+	s, err := r.scopeKeys(scope)
+	if err != nil {
+		return nil, err
+	}
+	d := s.dag(ref.DAGID)
+	var out []session.Node
+	err = r.atomic(ctx, func(t *sessionTxn) error {
+		out = nil
+		if err := t.check(map[string]string{d.meta: "string", d.nodes: sessionRedisHash}); err != nil {
+			return err
+		}
+		meta, err := t.meta(d, scope)
+		if err != nil {
+			return err
+		}
+		if meta == nil || meta.State != sessionDAGActive {
+			return session.ErrMiss
+		}
+		raw, err := t.tx.HGetAll(ctx, d.nodes).Result()
+		if err != nil {
+			return err
+		}
+		nodes, err := sessionDecodeNodes(ctx, raw, scope, meta.ID)
+		if err != nil {
+			return err
+		}
+		if _, ok := nodes[ref.NodeID]; !ok {
+			return session.ErrMiss
+		}
+		out, err = sessionAncestorChain(ctx, nodes, ref, meta.ID)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -282,7 +334,7 @@ func (r *AgentV3SessionRepository) Release(ctx context.Context, scope session.Sc
 
 // Reserve durably registers one unique file attempt under a parent or a new root.
 func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Reservation, duration time.Duration) (session.Intent, error) {
-	if !session.ValidID(req.RunID) || req.Agent == "" || duration < time.Millisecond || (req.Parent == nil) != (req.Lease == nil) {
+	if !session.ValidID(req.RunID) || req.Agent == "" || duration < time.Millisecond || (req.Parent == nil) != (req.Lease == nil) || req.MemoryEpoch < 0 {
 		return session.Intent{}, session.ErrCorrupt
 	}
 	s, err := r.scopeKeys(req.Scope)
@@ -355,7 +407,7 @@ func (r *AgentV3SessionRepository) Reserve(ctx context.Context, req session.Rese
 		if err != nil {
 			return err
 		}
-		out = session.Intent{Node: session.Node{Scope: req.Scope, Ref: session.NodeRef{DAGID: meta.ID, NodeID: ids[0]}, Parent: req.Parent, Agent: req.Agent, RunID: req.RunID, FileName: ids[0] + ".jsonl", Version: session.Version}, Lease: lease, Status: sessionIntentPending}
+		out = session.Intent{Node: session.Node{Scope: req.Scope, Ref: session.NodeRef{DAGID: meta.ID, NodeID: ids[0]}, Parent: req.Parent, Agent: req.Agent, RunID: req.RunID, FileName: ids[0] + ".jsonl", Version: session.Version, MemoryEpoch: req.MemoryEpoch}, Lease: lease, Status: sessionIntentPending}
 		t.write("hset", d.intents, req.RunID, sessionEncode(out))
 		t.write("hset", s.runs, req.RunID, sessionEncode(sessionRunIndex{Ref: out.Node.Ref, Status: out.Status}))
 		return t.ensurePending(s, d)
@@ -466,6 +518,22 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 		out = stored.Node
 		out.Digest, out.Size, out.CommitSequence = digest, size, sequence+1
 		out.ReplyMessageIDs = slices.Clone(receipt.MessageIDs)
+		supersedesLatest := true
+		if receipt.RedirectFrom != nil {
+			if stored.Node.Parent != nil {
+				return session.ErrCorrupt
+			}
+			out.RedirectedFrom = receipt.RedirectFrom
+			if out.ReplyMessageIDs, err = t.redirectableMessages(s, receipt); err != nil {
+				return err
+			}
+			if supersedesLatest, err = t.latestIs(s.latest(out.Agent), *receipt.RedirectFrom); err != nil {
+				return err
+			}
+			if out.MemoryEpoch, err = t.memoryEpoch(s.dag(receipt.RedirectFrom.DAGID), *receipt.RedirectFrom); err != nil {
+				return err
+			}
+		}
 		stored.Status, stored.Node = sessionIntentPublished, out
 		meta.LastActive = now.UnixMilli()
 		t.write(sessionRedisSet, s.sequence, strconv.FormatInt(out.CommitSequence, 10))
@@ -473,8 +541,10 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 		t.write("hset", s.runs, out.RunID, sessionEncode(sessionRunIndex{Ref: out.Ref, Status: sessionIntentPublished}))
 		t.write("hset", d.intents, out.RunID, sessionEncode(stored))
 		t.write(sessionRedisSet, d.meta, sessionEncode(meta))
-		t.write("zadd", s.latest(out.Agent), 0, sessionLatestMember(out))
-		for _, id := range receipt.MessageIDs {
+		if supersedesLatest {
+			t.write("zadd", s.latest(out.Agent), 0, sessionLatestMember(out))
+		}
+		for _, id := range out.ReplyMessageIDs {
 			t.write("hset", s.messages, strconv.Itoa(id), sessionEncode(out.Ref))
 		}
 		return t.ensurePending(s, d)
@@ -485,8 +555,150 @@ func (r *AgentV3SessionRepository) Publish(ctx context.Context, scope session.Sc
 	return out, nil
 }
 
+// redirectableMessages keeps only the delivered IDs whose mapping still points at the redirect source.
+func (t *sessionTxn) redirectableMessages(s sessionScopeKeys, receipt session.DeliveryReceipt) ([]int, error) {
+	fields := make([]string, len(receipt.MessageIDs))
+	for i, id := range receipt.MessageIDs {
+		fields[i] = strconv.Itoa(id)
+	}
+	current, err := t.indexFields(s.messages, fields)
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for i, field := range fields {
+		value, ok := current[field]
+		if !ok {
+			continue
+		}
+		var ref session.NodeRef
+		if json.Unmarshal([]byte(value), &ref) != nil || ref.Validate() != nil {
+			return nil, session.ErrCorrupt
+		}
+		if ref == *receipt.RedirectFrom {
+			out = append(out, receipt.MessageIDs[i])
+		}
+	}
+	if len(out) == 0 {
+		return nil, session.ErrStale
+	}
+	return out, nil
+}
+
+// memoryEpoch returns the source node's memory epoch so a compacted root inherits the
+// invalidation state of the history it summarizes.
+func (t *sessionTxn) memoryEpoch(d sessionDAGKeys, ref session.NodeRef) (int64, error) {
+	if err := t.check(map[string]string{d.nodes: sessionRedisHash}); err != nil {
+		return 0, err
+	}
+	var source session.Node
+	found, err := sessionReadJSON(t.ctx, t.tx.HGet(t.ctx, d.nodes, ref.NodeID), &source)
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		return 0, session.ErrStale
+	}
+	return source.MemoryEpoch, nil
+}
+
+// DropLatest removes ref, every older member of agent's latest index, and any newer compacted
+// root redirected from ref. Members sort by their zero-padded commit sequence, so newer
+// concurrent commits stay selectable.
+func (r *AgentV3SessionRepository) DropLatest(ctx context.Context, scope session.Scope, agent string, ref session.NodeRef) error {
+	if agent == "" || ref.Validate() != nil {
+		return session.ErrCorrupt
+	}
+	s, err := r.scopeKeys(scope)
+	if err != nil {
+		return err
+	}
+	key, d := s.latest(agent), s.dag(ref.DAGID)
+	return r.atomic(ctx, func(t *sessionTxn) error {
+		if err := t.check(map[string]string{key: sessionRedisZSet, d.nodes: sessionRedisHash}); err != nil {
+			return err
+		}
+		var node session.Node
+		found, err := sessionReadJSON(ctx, t.tx.HGet(ctx, d.nodes, ref.NodeID), &node)
+		if err != nil || !found {
+			return err
+		}
+		if node.Ref != ref || node.Agent != agent || node.CommitSequence <= 0 {
+			return session.ErrCorrupt
+		}
+		member := sessionLatestMember(node)
+		newer, err := t.tx.ZRangeArgs(ctx, redis.ZRangeArgs{Key: key, Start: "(" + member, Stop: "+", ByLex: true}).Result()
+		if err != nil {
+			return err
+		}
+		t.write("zremrangebylex", key, "-", "["+member)
+		for _, candidate := range newer {
+			redirected, err := t.redirectedFrom(s, candidate, ref)
+			if err != nil {
+				return err
+			}
+			if redirected {
+				t.write("zrem", key, candidate)
+			}
+		}
+		return nil
+	})
+}
+
+// redirectedFrom reports whether the latest member is a compacted root published from ref.
+func (t *sessionTxn) redirectedFrom(s sessionScopeKeys, member string, ref session.NodeRef) (bool, error) {
+	candidate, _, err := sessionParseLatest(member)
+	if err != nil {
+		return false, err
+	}
+	d := s.dag(candidate.DAGID)
+	if err := t.check(map[string]string{d.nodes: sessionRedisHash}); err != nil {
+		return false, err
+	}
+	var node session.Node
+	found, err := sessionReadJSON(t.ctx, t.tx.HGet(t.ctx, d.nodes, candidate.NodeID), &node)
+	if err != nil || !found {
+		return false, err
+	}
+	return node.RedirectedFrom != nil && *node.RedirectedFrom == ref, nil
+}
+
+func (t *sessionTxn) latestIs(key string, ref session.NodeRef) (bool, error) {
+	entries, err := t.tx.ZRevRangeWithScores(t.ctx, key, 0, 0).Result()
+	if err != nil {
+		return false, err
+	}
+	if len(entries) == 0 {
+		return false, nil
+	}
+	if entries[0].Score != 0 {
+		return false, session.ErrCorrupt
+	}
+	latest, _, err := sessionParseLatest(fmt.Sprint(entries[0].Member))
+	if err != nil {
+		return false, err
+	}
+	return latest == ref, nil
+}
+
 func sessionSamePublication(a, b session.Node, digest string, size int64, receipt session.DeliveryReceipt) bool {
-	return a.Scope == b.Scope && a.Ref == b.Ref && a.RunID == b.RunID && a.Agent == b.Agent && sameSessionParent(a.Parent, b.Parent) && a.Version == b.Version && a.FileName == b.FileName && a.Digest == digest && a.Size == size && slices.Equal(a.ReplyMessageIDs, receipt.MessageIDs)
+	if receipt.RedirectFrom == nil {
+		if a.RedirectedFrom != nil || !slices.Equal(a.ReplyMessageIDs, receipt.MessageIDs) {
+			return false
+		}
+	} else if !sameSessionParent(a.RedirectedFrom, receipt.RedirectFrom) || len(a.ReplyMessageIDs) == 0 || !sessionSubsetIDs(a.ReplyMessageIDs, receipt.MessageIDs) {
+		return false
+	}
+	return a.Scope == b.Scope && a.Ref == b.Ref && a.RunID == b.RunID && a.Agent == b.Agent && sameSessionParent(a.Parent, b.Parent) && a.Version == b.Version && a.FileName == b.FileName && a.Digest == digest && a.Size == size
+}
+
+func sessionSubsetIDs(subset, all []int) bool {
+	for _, id := range subset {
+		if !slices.Contains(all, id) {
+			return false
+		}
+	}
+	return true
 }
 
 // GetPublication resolves publication using a WATCH-validated read-only snapshot.
@@ -672,7 +884,7 @@ func (r *AgentV3SessionRepository) FinishIntent(ctx context.Context, scope sessi
 			return err
 		}
 		if stored.Status == sessionIntentPublished {
-			if !found || sessionValidateNode(node, scope, d.id, true) != nil || node.CommitSequence != stored.Node.CommitSequence || !sessionSamePublication(node, stored.Node, stored.Node.Digest, stored.Node.Size, session.DeliveryReceipt{MessageIDs: stored.Node.ReplyMessageIDs}) {
+			if !found || sessionValidateNode(node, scope, d.id, true) != nil || node.CommitSequence != stored.Node.CommitSequence || !sessionSamePublication(node, stored.Node, stored.Node.Digest, stored.Node.Size, session.DeliveryReceipt{MessageIDs: stored.Node.ReplyMessageIDs, RedirectFrom: stored.Node.RedirectedFrom}) {
 				return session.ErrCorrupt
 			}
 		} else if found {

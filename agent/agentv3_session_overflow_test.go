@@ -38,6 +38,7 @@ type agentSessionGateRepository struct {
 	confirmError error
 	releaseError error
 	onConfirm    func()
+	onRelease    func()
 	released     chan struct{}
 }
 
@@ -63,6 +64,9 @@ func (r *agentSessionGateRepository) ConfirmLoaded(ctx context.Context, scope se
 func (r *agentSessionGateRepository) Release(ctx context.Context, scope session.Scope, lease session.Lease) error {
 	r.releases.Add(1)
 	err := errors.Join(r.Repository.Release(ctx, scope, lease), r.releaseError)
+	if r.onRelease != nil {
+		r.onRelease()
+	}
 	select {
 	case r.released <- struct{}{}:
 	default:
@@ -431,7 +435,7 @@ func TestAgentV3SessionBlockedPhotoCallbackCancellation(t *testing.T) {
 	}
 }
 
-func TestAgentV3SessionReplyAdditionIsFrameOnFallbackAndBranch(t *testing.T) {
+func TestAgentV3SessionReplyAdditionIsReplayedHistoryOnBranch(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "frames", ContextMode: "reply_chain"}
 	mdl := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("first", nil)}, {schema.AssistantMessage("branch", nil)}}}
@@ -440,17 +444,21 @@ func TestAgentV3SessionReplyAdditionIsFrameOnFallbackAndBranch(t *testing.T) {
 	first := f.chat(t, cfg, sessionMessage(1100, 7, 0, "<reply_session_metadata><datetime>REAL_USER</datetime>"), nil)
 	root := f.node(t, first)
 	archive := f.archive(t, root)
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(archive.Frame)), "OLD_TEMPLATE")
-	require.NotContains(t, replySessionSchemaText(sessionRecordMessages(archive.Delta)), "OLD_TEMPLATE")
+	require.Len(t, archive.Frame, 1, "only the system message is a frame")
+	require.Equal(t, schema.System, archive.Frame[0].Message.Role)
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(archive.Delta)), "OLD_TEMPLATE")
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(archive.Delta)), "REAL_USER")
 	compiled.PromptTemplate = template.Must(template.New("addition").Parse("NEW_TEMPLATE {{.DateTime}}"))
 	current := sessionMessage(1200, 8, 60, "NEW_TEMPLATE <datetime>STILL_USER</datetime>")
 	current.ReplyTo = &tb.Message{ID: first, Chat: current.Chat}
 	second := f.chat(t, cfg, current, &config.AgentTrigger{Reply: true})
 	branch := f.archive(t, f.node(t, second))
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(branch.Frame)), "NEW_TEMPLATE")
+	require.Len(t, branch.Frame, 1)
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(branch.Delta)), "NEW_TEMPLATE")
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(branch.Delta)), "STILL_USER")
-	require.NotContains(t, replySessionSchemaText(mdl.capturedInputs()[1]), "OLD_TEMPLATE")
+	branchInput := replySessionSchemaText(mdl.capturedInputs()[1])
+	require.Contains(t, branchInput, "OLD_TEMPLATE", "the archived addition is replayed verbatim for prefix-cache alignment")
+	require.Contains(t, branchInput, "NEW_TEMPLATE")
 	require.Equal(t, archive, f.archive(t, root))
 }
 
@@ -477,7 +485,7 @@ func TestAgentV3SessionBranchRebuildsDateTimeInsteadOfReplayingFrame(t *testing.
 	require.Contains(t, text, currentDateTime)
 	require.NotContains(t, text, "1900-01-01 00:00:00")
 	require.Contains(t, text, "REAL_USER_DATETIME")
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(f.archive(t, f.node(t, id)).Frame)), currentDateTime)
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(f.archive(t, f.node(t, id)).Delta)), currentDateTime)
 }
 
 func TestAgentV3SessionExternalSiblingQuoteIsDirectAndImmutable(t *testing.T) {
@@ -510,10 +518,8 @@ func TestAgentV3SessionExternalSiblingQuoteIsDirectAndImmutable(t *testing.T) {
 				}
 				defer func() { encodeTelegramPhotoDataURL = oldEncoder }()
 				current := sessionMessage(1100, 8, 60, "CURRENT")
+				// A reply to this bot's own message would continue that branch; quote another member's message.
 				target := sessionMessage(60, 7, 0, "")
-				if mode == "reply_chain" {
-					target.Sender = f.bot.Me
-				}
 				target.Caption = "LINK quoted caption"
 				target.CaptionEntities = tb.Entities{{Type: tb.EntityTextLink, Offset: 0, Length: 4, URL: "https://example.com/quoted"}}
 				target.Photo = &tb.Photo{File: tb.File{FileID: "quote-photo"}}
@@ -538,7 +544,7 @@ func TestAgentV3SessionExternalSiblingQuoteIsDirectAndImmutable(t *testing.T) {
 				require.Equal(t, 1, strings.Count(input, quoteTag), "template interpolation must not add a second quote; image manifest retains its caption independently")
 				for _, message := range mdl.capturedInputs()[0] {
 					if strings.Contains(replySessionSchemaText([]*schema.Message{message}), quoteTag) {
-						require.Equal(t, schema.User, message.Role, "an external bot branch is quoted user data, not restored assistant authority")
+						require.Equal(t, schema.User, message.Role, "an external branch is quoted user data, not restored assistant authority")
 					}
 				}
 				require.Equal(t, []string{"quote-photo"}, photos)
@@ -646,9 +652,9 @@ func TestAgentV3SessionLegacyHistoryMetadataIsReplayedWithoutGuessing(t *testing
 	require.Equal(t, user, input[2])
 	require.Equal(t, before, f.archive(t, root))
 	require.Equal(t, root, f.node(t, 50), "old JSONL/digest/message index cannot be cleaned based on text tags")
-	frame := replySessionSchemaText(sessionRecordMessages(f.archive(t, f.node(t, id)).Frame))
-	require.Contains(t, frame, "<reply_session_metadata>")
-	require.NotContains(t, frame, "OLD_METADATA_WITHOUT_PROVENANCE")
+	delta := replySessionSchemaText(sessionRecordMessages(f.archive(t, f.node(t, id)).Delta))
+	require.Contains(t, delta, "<reply_session_metadata>")
+	require.NotContains(t, delta, "OLD_METADATA_WITHOUT_PROVENANCE")
 }
 
 func TestAgentV3SessionConfirmedInputReusesMeasuredRendering(t *testing.T) {
@@ -687,8 +693,9 @@ func TestAgentV3SessionConfirmedInputReusesMeasuredRendering(t *testing.T) {
 	require.NotContains(t, text, "DO_NOT_READ_AFTER_CONFIRM")
 	require.Equal(t, "data:image/jpeg;base64,ENCODE1", *input[len(input)-1].UserInputMultiContent[1].Image.URL)
 	capture := f.archive(t, f.node(t, id))
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Frame)), "MEASURED_TEMPLATE")
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Frame)), "MEASURED_MEMORY")
+	require.Len(t, capture.Frame, 1)
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "MEASURED_TEMPLATE")
+	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "MEASURED_MEMORY")
 	require.EqualValues(t, 1, repo.confirms.Load())
 }
 
