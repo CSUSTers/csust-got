@@ -24,7 +24,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8
 	go.uber.org/zap v1.28.0
 	golang.org/x/image v0.46.0
-	golang.org/x/sync v0.23.0
+	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
 	golang.org/x/time v0.16.0
