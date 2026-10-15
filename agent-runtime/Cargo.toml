@@ -20,7 +20,7 @@ diffy = "0.4"
 futures-util = "0.3"
 fs2 = "0.4"
 getrandom = "0.3"
-hickory-resolver = { version = "0.25", default-features = false, features = ["tokio"] }
+hickory-resolver = { version = "0.26", default-features = false, features = ["tokio"] }
 http = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
