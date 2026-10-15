@@ -75,3 +75,69 @@ func TestAppendLoopGuidanceUsesUserTailForEveryLimitNote(t *testing.T) {
 	}
 	assert.Same(t, history[0], appendLoopGuidance(history, "")[0])
 }
+
+func TestAppendLoopGuidanceBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		history []*schema.Message
+	}{
+		{name: "nil"},
+		{name: "empty", history: []*schema.Message{}},
+		{name: "spare capacity", history: []*schema.Message{schema.UserMessage("request"), nil, schema.AssistantMessage("reserved", nil)}[:2]},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			history := tt.history
+			backing := history[:cap(history)]
+			before := append([]*schema.Message(nil), backing...)
+			for _, guidance := range []string{"", " \n\t"} {
+				got := appendLoopGuidance(history, guidance)
+				assert.Equal(t, history, got)
+				if len(history) > 0 {
+					assert.Same(t, &history[0], &got[0])
+				}
+			}
+
+			got := appendLoopGuidance(history, "  limit note  ")
+			require.Len(t, got, len(history)+1)
+			for i, msg := range history {
+				assert.True(t, msg == got[i])
+			}
+			assert.Equal(t, schema.User, got[len(history)].Role)
+			assert.Contains(t, got[len(history)].Content, "\nlimit note\n")
+			got[0] = schema.UserMessage("replacement")
+			for i, msg := range before {
+				assert.True(t, msg == backing[i])
+			}
+		})
+	}
+}
+
+func TestInjectDirectiveTextPreservesHistory(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		history []*schema.Message
+	}{
+		{name: "nil"},
+		{name: "empty", history: []*schema.Message{}},
+		{name: "spare capacity", history: []*schema.Message{schema.UserMessage("request"), nil, schema.AssistantMessage("reserved", nil)}[:2]},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			history := tt.history
+			backing := history[:cap(history)]
+			before := append([]*schema.Message(nil), backing...)
+			got := injectDirectiveText(history, "directive")
+			require.Len(t, got, len(history)+1)
+			assert.Equal(t, schema.System, got[0].Role)
+			assert.Equal(t, "directive", got[0].Content)
+			for i, msg := range history {
+				assert.True(t, msg == got[i+1])
+			}
+			if len(history) > 0 {
+				got[1] = schema.UserMessage("replacement")
+			}
+			for i, msg := range before {
+				assert.True(t, msg == backing[i])
+			}
+		})
+	}
+}

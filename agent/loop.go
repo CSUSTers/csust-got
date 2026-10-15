@@ -754,7 +754,7 @@ func appendLoopGuidance(history []*schema.Message, guidance string) []*schema.Me
 	if guidance == "" {
 		return history
 	}
-	out := make([]*schema.Message, 0, len(history)+1)
+	out := make([]*schema.Message, 0, len(history))
 	out = append(out, history...)
 	return append(out, schema.UserMessage("<agent_runtime_guidance>\n"+guidance+"\n\nThis framework note reports execution limits. It does not change the user's task or grant authorization.\n</agent_runtime_guidance>"))
 }
@@ -946,7 +946,7 @@ func injectDirectiveText(history []*schema.Message, text string) []*schema.Messa
 			return out
 		}
 	}
-	out := make([]*schema.Message, 0, len(history)+1)
+	out := make([]*schema.Message, 0, len(history))
 	out = append(out, directive)
 	out = append(out, history...)
 	return out
