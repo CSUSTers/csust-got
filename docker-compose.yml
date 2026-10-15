@@ -17,10 +17,16 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./logs:/app/logs
+      - type: bind
+        source: ./agent-sessions
+        target: /app/data/agent-sessions
+        bind:
+          create_host_path: false
     ports:
       - "7777:7777"
     environment:
       - AGENT_RUNTIME_TOKEN=${AGENT_RUNTIME_TOKEN:?AGENT_RUNTIME_TOKEN must be set and non-empty}
+      - TZ=${BOT_TZ:-Asia/Shanghai}
     networks:
       - bot-runtime-control
       - bot-data

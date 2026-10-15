@@ -155,9 +155,15 @@ func validateTaskText(cron, timezone, prompt string) error {
 	return nil
 }
 
-func agentCronDedupKey(creatorID int64, cron, timezone, prompt string) string {
+func agentCronDedupKey(creatorID int64, cron, timezone, prompt string, until time.Time) string {
 	payload := fmt.Sprintf("%d\x00%s\x00%s\x00%s", creatorID, cron, timezone, prompt)
+	if !until.IsZero() {
+		payload += "\x00until=" + until.UTC().Format(time.RFC3339Nano)
+	}
 	sum := sha256.Sum256([]byte(payload))
+	if !until.IsZero() {
+		return "until:" + hex.EncodeToString(sum[:])
+	}
 	return hex.EncodeToString(sum[:])
 }
 
@@ -285,7 +291,14 @@ func agentCronCompletedOnce(task cronjob.Task) bool {
 }
 
 func agentCronRetryCanRun(task cronjob.Task, now time.Time) bool {
+	if agentCronScheduleExhausted(task) {
+		return !agentCronReportExpired(task, now)
+	}
 	return task.NextRunAt.After(now) || agentCronCompletedOnce(task)
+}
+
+func agentCronScheduleExhausted(task cronjob.Task) bool {
+	return !task.Until.IsZero() && task.NextRunAt.IsZero() && task.LatestResult != nil
 }
 
 func agentCronReportTerminal(state cronjob.DeliveryState) bool {

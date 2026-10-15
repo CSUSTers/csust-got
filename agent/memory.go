@@ -74,7 +74,7 @@ func collectReplyChainMessages(msg *tb.Message, messages map[int]*tb.Message) {
 	}
 }
 
-// SaveResponse stores the bot's response and metadata to Redis for future context.
+// SaveResponse stores the delivered bot reply so GetMessage and the chat stream can serve it as reply-chain context.
 func SaveResponse(botMsg *tb.Message, userMsg *tb.Message) {
 	if botMsg == nil || botMsg.Chat == nil {
 		return
@@ -87,7 +87,6 @@ func SaveResponse(botMsg *tb.Message, userMsg *tb.Message) {
 		stored.ReplyTo = &parent
 	}
 
-	// Store the bot's response message
 	if err := orm.SetMessage(&stored); err != nil {
 		zap.L().Error("agentv3: failed to store response message",
 			zap.Error(err),
@@ -96,7 +95,6 @@ func SaveResponse(botMsg *tb.Message, userMsg *tb.Message) {
 		)
 	}
 
-	// Push to the chat's message stream for future context retrieval
 	if err := orm.PushMessageToStream(&stored); err != nil {
 		zap.L().Error("agentv3: failed to push response to stream",
 			zap.Error(err),

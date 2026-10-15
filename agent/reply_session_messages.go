@@ -163,6 +163,7 @@ func replySessionEncodingContext(tc *TurnContext, messages []*tb.Message) *TurnC
 	local := &TurnContext{}
 	if tc != nil {
 		local.Bot, local.Config, local.BotUser, local.ChatID = tc.Bot, tc.Config, tc.BotUser, tc.ChatID
+		local.V3 = tc.V3
 	}
 	if len(messages) > 0 {
 		local.Message = messages[0]

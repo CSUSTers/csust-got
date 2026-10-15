@@ -19,7 +19,7 @@ type replySessionTemplateData struct {
 }
 
 func replySessionMetadata(tc *TurnContext) replySessionTemplateData {
-	now := beijingNow()
+	now := agentV3FrameTime(tc)
 	data := replySessionTemplateData{
 		DateTime:      now.Format("2006-01-02 15:04:05"),
 		CurrentDateCN: now.Format("2006年01月02日"),
@@ -167,6 +167,9 @@ func buildReplySessionPromptAddition(cc *CompiledAgent, tc *TurnContext) (*schem
 	content := "<reply_session_metadata>\n<datetime>" + metadata.DateTime + "</datetime>"
 	if prompt != "" {
 		content += "\n" + prompt
+	}
+	if hint := appendAgentV3TriggerHint("", tc.Trigger); hint != "" {
+		content += "\n" + hint
 	}
 	content += "\n</reply_session_metadata>"
 	return schema.UserMessage(content), nil

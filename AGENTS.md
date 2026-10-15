@@ -124,6 +124,16 @@ MCP and MCPO servers are configured per agent, subagent, or skill with `ToolServ
 1. **Base branch**: Always create PRs against `dev` (not `master`)
 2. **Pre-commit**: Run `make build && make fmt && make test`
 3. **Code review**: No style complaints (gofmt/golangci-lint handles it)
+4. **Deployment docs**: Follow the checklist in `.github/PULL_REQUEST_TEMPLATE.md`; see 部署文档随功能走 below
+
+## 部署文档随功能走
+运维不应靠读 Go 源码才能知道一个版本怎么配置。凡是改变部署面的 PR，部署文档必须在同一个 PR 内落地。
+
+1. **触发范围**：新增或修改配置项、挂载、环境变量、时区（TZ）依赖、Redis key 布局或后台任务的 PR，必须同步更新对应 `docs/<feature>.md` 的「部署与配置」段（没有则新增）。
+2. **该段必须包含**：键名与路径、默认值、不配置时的行为、是否需要挂载 / 环境变量 / TZ、对已有部署的迁移步骤、回滚方式。表格模板见 `docs/deployment_checklist.md`。
+3. **`config.yaml` 示例同步更新**：新键必须出现在仓库内的 `config.yaml` 示例中，并带默认值或注释。
+4. **PR 描述勾选部署检查项**：按 `.github/PULL_REQUEST_TEMPLATE.md` 填写，未勾选或勾选不实视为未完成。
+5. 启动时未知配置键会以 warning 记录到日志。运维据此发现"代码已删、文档未改"或"文档写了、代码不认"的不一致，PR 作者在改键名时同样要检查这类告警。
 
 ## Files to Ignore
 - `dict/` - Dictionary files, not part of core logic

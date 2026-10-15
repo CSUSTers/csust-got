@@ -14,7 +14,7 @@ var beijingFallbackLocation = time.FixedZone("CST", 8*60*60)
 
 // buildPromptData creates the template rendering data from the current turn context.
 func buildPromptData(tc *TurnContext, contextMsgs []*ContextMessage) PromptData {
-	now := beijingNow()
+	now := agentV3FrameTime(tc)
 	pd := PromptData{
 		DateTime:        now.Format("2006-01-02 15:04:05"),
 		CurrentDateCN:   now.Format("2006年01月02日"),
@@ -35,6 +35,13 @@ func buildPromptData(tc *TurnContext, contextMsgs []*ContextMessage) PromptData 
 	}
 
 	return pd
+}
+
+func agentV3FrameTime(tc *TurnContext) time.Time {
+	if tc != nil && tc.V3 != nil && !tc.V3.frameTime.IsZero() {
+		return tc.V3.frameTime
+	}
+	return beijingNow()
 }
 
 func beijingNow() time.Time {

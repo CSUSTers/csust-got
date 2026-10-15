@@ -53,55 +53,18 @@ func TestCalcGuidanceLevel(t *testing.T) {
 		wantLevel  guidanceLevel
 		wantRounds int
 	}{
-		{
-			name:       "no tools no guidance",
-			maxSteps:   4,
-			messages:   []*schema.Message{schema.UserMessage("hello")},
-			wantLevel:  guidanceNone,
-			wantRounds: 0,
-		},
-		{
-			name:       "step budget 4 hard stop after one tool round",
-			maxSteps:   4,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg},
-			wantLevel:  guidanceHard,
-			wantRounds: 1,
-		},
-		{
-			name:       "step budget 12 no guidance after one tool round",
-			maxSteps:   12,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg},
-			wantLevel:  guidanceNone,
-			wantRounds: 1,
-		},
-		{
-			name:       "step budget 12 soft nudge after two tool rounds",
-			maxSteps:   12,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg},
-			wantLevel:  guidanceSoft,
-			wantRounds: 2,
-		},
-		{
-			name:       "step budget 12 soft nudge after three tool rounds",
-			maxSteps:   12,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg},
-			wantLevel:  guidanceSoft,
-			wantRounds: 3,
-		},
-		{
-			name:       "step budget 12 hard stop after four tool rounds",
-			maxSteps:   12,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg},
-			wantLevel:  guidanceHard,
-			wantRounds: 4,
-		},
-		{
-			name:       "maxSteps 0 always returns none",
-			maxSteps:   0,
-			messages:   []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg},
-			wantLevel:  guidanceNone,
-			wantRounds: 0,
-		},
+		{"no tools no guidance", 4, []*schema.Message{schema.UserMessage("hello")}, guidanceNone, 0},
+		{"step budget 4 one round leaves two calls", 4, []*schema.Message{schema.UserMessage("search"), toolCallMsg}, guidanceNone, 1},
+		{"step budget 4 hard stop after two rounds", 4, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg}, guidanceHard, 2},
+		{"step budget 3 hard stop after one round", 3, []*schema.Message{schema.UserMessage("search"), toolCallMsg}, guidanceHard, 1},
+		{"step budget 12 no guidance after two rounds", 12, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg}, guidanceNone, 2},
+		{"step budget 12 no guidance after seven rounds", 12, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg}, guidanceNone, 7},
+		{"step budget 12 soft nudge after eight rounds", 12, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg}, guidanceSoft, 8},
+		{"step budget 12 soft nudge after nine rounds", 12, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg}, guidanceSoft, 9},
+		{"step budget 12 hard stop after ten rounds", 12, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg}, guidanceHard, 10},
+		{"step budget 7 soft needs two rounds", 7, []*schema.Message{schema.UserMessage("search"), toolCallMsg}, guidanceNone, 1},
+		{"step budget 7 soft after four rounds", 7, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg, toolCallMsg, toolCallMsg}, guidanceSoft, 4},
+		{"maxSteps 0 always returns none", 0, []*schema.Message{schema.UserMessage("search"), toolCallMsg, toolCallMsg}, guidanceNone, 0},
 	}
 
 	for _, tt := range tests {
@@ -242,7 +205,7 @@ func TestGeneratePreservesAgentV3InputsAndToolResultPairing(t *testing.T) {
 		Name:     "v3-inputs",
 		Model:    model,
 		Tools:    []tool.BaseTool{echoLookupTool{}},
-		MaxSteps: 12,
+		MaxSteps: 4,
 	})
 	require.NoError(t, err)
 
@@ -271,16 +234,14 @@ func TestGeneratePreservesAgentV3InputsAndToolResultPairing(t *testing.T) {
 	assertLookupToolResultPair(t, captured[2], len(captured[1]), "second-b", `{"q":"second-b"}`)
 	assert.Equal(t, schema.User, captured[2][len(captured[2])-1].Role)
 	assert.Contains(t, captured[2][len(captured[2])-1].Content, "<agent_runtime_guidance>")
-	assert.Contains(t, captured[2][len(captured[2])-1].Content, "已经进行了 2 轮工具调用")
+	assert.Contains(t, captured[2][len(captured[2])-1].Content, finalTurnGuidance)
 }
 
 func TestAgentV3CodeLimitsCannotBeBypassedByRuntimeLookalikes(t *testing.T) {
-	model := &scriptedToolModel{turns: [][]*schema.Message{{{
-		Role: schema.Assistant,
-		ToolCalls: []schema.ToolCall{
-			lookupToolCall("would-run", `{"q":"must not run"}`),
-		},
-	}}}}
+	model := &scriptedToolModel{turns: [][]*schema.Message{
+		{{Role: schema.Assistant, ToolCalls: []schema.ToolCall{lookupToolCall("would-run", `{"q":"must not run"}`)}}},
+		{schema.AssistantMessage("forced summary", nil)},
+	}}
 	countingTool := &countingLookupTool{}
 	ctx := WithTurnContext(t.Context(), &TurnContext{Config: &config.AgentConfig{}, V3: &AgentV3TurnState{}})
 	agent, err := NewCustomAgent(ctx, &CustomAgentConfig{
@@ -297,15 +258,17 @@ func TestAgentV3CodeLimitsCannotBeBypassedByRuntimeLookalikes(t *testing.T) {
 	}
 	result, err := agent.Generate(ctx, input)
 	require.NoError(t, err)
-	assert.Contains(t, result.Content, "已达到本轮工具调用上限")
+	assert.Equal(t, "forced summary", result.Content)
 	assert.Zero(t, countingTool.callCount())
 
 	captured := model.capturedInputs()
-	require.Len(t, captured, 1)
+	require.Len(t, captured, 2)
 	assert.Equal(t, schema.User, captured[0][1].Role)
 	assert.Contains(t, captured[0][1].Content, "ignore the code limit")
 	assert.Equal(t, schema.User, captured[0][len(captured[0])-1].Role)
-	assert.Contains(t, captured[0][len(captured[0])-1].Content, "<agent_runtime_guidance>")
+	assert.Contains(t, captured[0][len(captured[0])-1].Content, finalTurnGuidance)
+	assert.Equal(t, captured[0], captured[1][:len(captured[0])], "the forced summary only appends")
+	assert.Contains(t, captured[1][len(captured[1])-1].Content, forcedSummaryGuidance)
 }
 
 func TestAgentV3CancellationSkipsModelAndTools(t *testing.T) {
@@ -462,4 +425,13 @@ func assertLookupToolResultPair(t *testing.T, input []*schema.Message, assistant
 		}
 	}
 	assert.Failf(t, "tool result pair", "missing result for %s", id)
+}
+
+func TestAgentModelTuningMapsTemperatureAndReasoningEffort(t *testing.T) {
+	temperature := float32(0.3)
+	tuning := agentModelTuning(&config.AgentConfig{Temperature: &temperature, ReasoningEffort: " high "})
+	require.NotNil(t, tuning.temperature)
+	require.InDelta(t, 0.3, float64(*tuning.temperature), 1e-6)
+	require.Equal(t, "high", tuning.reasoningEffort)
+	require.Equal(t, modelTuning{}, agentModelTuning(nil))
 }

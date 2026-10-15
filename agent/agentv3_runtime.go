@@ -805,7 +805,12 @@ func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	return strings.TrimSpace(b.String()), nil
 }
 
-type loadSkillTool struct{}
+const agentV3SkillUnavailableText = "[Skill Error] requested skill is not available."
+
+type loadSkillTool struct {
+	// allowed restricts the visible catalog to these canonical names; nil exposes the whole catalog.
+	allowed map[string]struct{}
+}
 
 type loadSkillArgs struct {
 	Name string `json:"name"`
@@ -832,11 +837,16 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	}
 	name, err := parseAgentV3CanonicalSkillName(args.Name)
 	if err != nil || tc.V3 == nil {
-		return "[Skill Error] requested skill is not available.", nil
+		return agentV3SkillUnavailableText, nil
+	}
+	if t.allowed != nil {
+		if _, ok := t.allowed[name]; !ok {
+			return agentV3SkillUnavailableText, nil
+		}
 	}
 	skill, ok := tc.V3.SkillCatalog.ByName[name]
 	if !ok {
-		return "[Skill Error] requested skill is not available.", nil
+		return agentV3SkillUnavailableText, nil
 	}
 	tc.activateSkill(skill)
 	var b strings.Builder

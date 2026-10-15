@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -260,31 +261,53 @@ func TestExampleConfigYAMLAgentsParses(t *testing.T) {
 	defer viper.Reset()
 
 	agents := *BotConfig.Agents
-	req.Len(agents, 4)
+	req.Len(agents, 2)
 
-	seen := make(map[string]bool, len(agents))
+	seen := make(map[string]*AgentConfig, len(agents))
 	for _, agent := range agents {
 		req.NotEmpty(agent.Name)
-		seen[agent.Name] = true
+		seen[agent.Name] = agent
 		req.NotNil(agent.Model)
 		req.NotEmpty(agent.Model.Model)
 		req.NotEmpty(agent.Model.BaseUrl)
 		req.NoError(agent.ValidateContextMode())
+		req.NoError(agent.ValidateTriggers())
+		req.NoError(agent.ValidateSubAgents())
 		req.Empty(agent.ContextMode)
 	}
-	req.True(seen["什么是bot"])
-	req.True(seen["聊天bot"])
-	req.True(seen["思考bot"])
-	req.True(seen["总结bot"])
+	assistant := seen["assistant"]
+	req.NotNil(assistant)
+	req.NotNil(seen["cron-runner"])
+	req.False(seen["cron-runner"].Agent.Enable)
+	req.Empty(seen["cron-runner"].Trigger)
 
-	var think *AgentConfig
-	for _, agent := range agents {
-		if agent.Name == "思考bot" {
-			think = agent
+	commands := make(map[string]*AgentTrigger)
+	for _, trigger := range assistant.Trigger {
+		if trigger.Command != "" {
+			commands[trigger.Command] = trigger
 		}
 	}
-	req.Len(think.Filters.Filters, 1)
-	req.Equal("whitelist", think.Filters.Filters[0].Type)
+	req.Empty(commands["chat"].Hint)
+	for _, hinted := range []string{"sear", "whatis", "summary", "think"} {
+		req.NotEmpty(commands[hinted].Hint, hinted)
+		req.LessOrEqual(utf8.RuneCountInString(commands[hinted].Hint), AgentTriggerHintMaxChars)
+	}
+	reply, ok := assistant.TriggerOnReply()
+	req.True(ok)
+	req.Empty(reply.Hint)
+
+	req.Len(assistant.Agent.SubAgents, 1)
+	researcher := assistant.Agent.SubAgents[0]
+	req.Equal("web_researcher", researcher.Name)
+	req.True(researcher.Runtime)
+	req.Equal([]string{"searxng"}, researcher.Skills)
+	req.Equal(8, researcher.GetMaxSteps())
+	req.Equal(4000, researcher.GetMaxResultChars())
+
+	req.Equal(20, BotConfig.AgentV3.Memory.MaxEntriesPerUser)
+	req.Equal("explicit_or_admin", BotConfig.AgentV3.Memory.WritePolicy)
+	req.Empty(UnknownConfigKeys(), "example config must not carry keys the structs do not accept")
+	req.Empty(UnimplementedConfigKeys(BotConfig.Agents, BotConfig.AgentV3), "example config must not carry unimplemented keys")
 
 	for _, deadKey := range []string{"worker", "llm_models", "chat_whitelist", "github", "mc.max_count"} {
 		req.False(viper.IsSet(deadKey), "dead config key %q must stay out of the example config", deadKey)

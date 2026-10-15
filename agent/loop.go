@@ -3,6 +3,7 @@ package agentv3
 import (
 	"context"
 	"crypto/sha256"
+	"csust-got/config"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
@@ -22,12 +24,16 @@ import (
 // it streams every turn (not only the final), refuses tool calls on the final
 // step, detects duplicate tool calls and sanitises history before each model call.
 type CustomAgent struct {
-	name         string
-	boundModel   model.ToolCallingChatModel
-	invokables   map[string]tool.InvokableTool
-	toolNames    []string
-	maxSteps     int
-	dupThreshold int
+	name                   string
+	model                  model.ToolCallingChatModel
+	boundModel             model.ToolCallingChatModel
+	invokables             map[string]tool.InvokableTool
+	toolNames              []string
+	maxSteps               int
+	dupThreshold           int
+	finalReserve           time.Duration
+	sessionToolEstimate    sessionContextEstimate
+	sessionToolEstimateErr error
 }
 
 // CustomAgentConfig configures a CustomAgent.
@@ -36,7 +42,13 @@ type CustomAgentConfig struct {
 	Model    model.ToolCallingChatModel
 	Tools    []tool.BaseTool
 	MaxSteps int
+	// FinalReserve overrides the per-agent deadline reserve; zero reads it from the turn config.
+	FinalReserve time.Duration
 }
+
+const emptyModelResponseNotice = "（模型没有返回任何内容，请稍后重试。）"
+
+const stepLimitNotice = "\n\n（已达到本轮工具调用上限，剩余请求未执行。可换种问法或拆分任务再试。）"
 
 // NewCustomAgent builds a CustomAgent.
 func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, error) {
@@ -90,21 +102,48 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 		}
 	}
 
+	toolEstimate, toolEstimateErr := estimateSessionTools(ctx, infos)
 	return &CustomAgent{
-		name:         cfg.Name,
-		boundModel:   bound,
-		invokables:   invokables,
-		toolNames:    names,
-		maxSteps:     cfg.MaxSteps,
-		dupThreshold: 3,
+		name:                   cfg.Name,
+		model:                  cfg.Model,
+		boundModel:             bound,
+		invokables:             invokables,
+		toolNames:              names,
+		maxSteps:               cfg.MaxSteps,
+		dupThreshold:           3,
+		finalReserve:           cfg.FinalReserve,
+		sessionToolEstimate:    toolEstimate,
+		sessionToolEstimateErr: toolEstimateErr,
 	}, nil
 }
 
 // Stream runs the agent loop, forwarding chunks from every turn to the reader.
 func (a *CustomAgent) Stream(ctx context.Context, input []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
-	sr, sw := schema.Pipe[*schema.Message](32)
-	go a.runLoop(ctx, input, sw)
-	return sr, nil
+	capture := sessionCaptureFromContext(ctx)
+	if capture == nil {
+		sr, sw := schema.Pipe[*schema.Message](32)
+		go a.runLoop(ctx, input, sw, nil, nil)
+		return sr, nil
+	}
+	input, started := capture.begin(input)
+	if !started {
+		return a.Stream(WithSessionCapture(ctx, nil), input)
+	}
+	// An unbuffered, filtered end marker acknowledges downstream consumption
+	// before Complete becomes visible and the writer closes.
+	sr, sw := schema.Pipe[*schema.Message](0)
+	end := &schema.Message{}
+	go func() {
+		defer sw.Close()
+		defer close(capture.done)
+		a.runLoop(ctx, input, sw, capture, end)
+	}()
+	return schema.StreamReaderWithConvert(sr, func(message *schema.Message) (*schema.Message, error) {
+		if message == end {
+			return nil, schema.ErrNoValue
+		}
+		return message, nil
+	}), nil
 }
 
 // Generate runs the loop and returns the concatenated assistant message.
@@ -139,17 +178,18 @@ func (a *CustomAgent) Generate(ctx context.Context, input []*schema.Message) (*s
 	return schema.ConcatMessages(chunks)
 }
 
-func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message]) {
-	defer sw.Close()
-
-	history := append([]*schema.Message{}, input...)
-	history = sanitizeHistory(history)
-	if len(a.invokables) > 0 {
-		history = injectLoopDirectives(ctx, history)
+func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *schema.StreamWriter[*schema.Message], capture *SessionCapture, end *schema.Message) {
+	if capture == nil {
+		defer sw.Close()
 	}
+
+	history := a.sessionModelBaseline(ctx, input)
+	capture.recordModelInput(history)
+	var toolRounds []*schema.Message
 
 	dupCounts := map[string]int{}
 	dupWarnInjected := false
+	reserve := a.effectiveFinalReserve(ctx)
 
 	for round := range a.maxSteps {
 		if err := ctx.Err(); err != nil {
@@ -158,26 +198,34 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		isFinal := round == a.maxSteps-1
-		guidanceText := a.computeGuidanceText(history, isFinal, dupWarnInjected)
-		history = appendLoopGuidance(history, guidanceText)
+		deadlineFinal := !isFinal && len(toolRounds) > 0 && deadlineWithinReserve(ctx, reserve)
+		final := isFinal || deadlineFinal
+		if deadlineFinal {
+			zap.L().Info("agentv3/loop: deadline reserve reached, finalizing without tools",
+				zap.String("agent", a.name), zap.Int("round", round), zap.Duration("reserve", reserve))
+		}
+		beforeGuidance := len(history)
+		history = appendLoopGuidance(history, a.computeGuidanceText(toolRounds, final, deadlineFinal, dupWarnInjected))
+		if len(history) > beforeGuidance {
+			capture.record(history[len(history)-1], true)
+		}
 
-		assistantMsg, reasoningChunks, sendErr := a.streamOneTurn(ctx, a.boundModel, history, sw)
+		mdl := a.boundModel
+		if final {
+			mdl = a.model
+		}
+		assistantMsg, reasoningChunks, sendErr := a.streamTurnWithEmptyRetry(ctx, mdl, history, sw, round)
 		if sendErr != nil {
 			sw.Send(nil, sendErr)
 			return
 		}
 		if assistantMsg == nil {
-			zap.L().Warn("agentv3/loop: empty model response, ending loop",
-				zap.String("agent", a.name), zap.Int("round", round))
+			sw.Send(schema.AssistantMessage(emptyModelResponseNotice, nil), nil)
 			return
 		}
-
 		if len(assistantMsg.ToolCalls) == 0 {
-			for _, rc := range reasoningChunks {
-				if closed := sw.Send(rc, nil); closed {
-					return
-				}
-			}
+			capture.record(assistantMsg, false)
+			a.finishTurn(ctx, sw, capture, end, assistantMsg, reasoningChunks)
 			return
 		}
 
@@ -185,11 +233,9 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			return
 		}
 
-		if isFinal {
-			sw.Send(schema.AssistantMessage(
-				"\n\n（已达到本轮工具调用上限，剩余请求未执行。可换种问法或拆分任务再试。）",
-				nil,
-			), nil)
+		// The forced summary never sends these tool calls to the model, so they stay out of the capture too.
+		if final {
+			a.forceSummary(ctx, history, sw, capture, end)
 			return
 		}
 
@@ -197,7 +243,9 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
 		}
 
+		capture.record(assistantMsg, false)
 		history = append(history, assistantMsg)
+		toolRounds = append(toolRounds, assistantMsg)
 		sawNewDup := false
 		for _, tc := range assistantMsg.ToolCalls {
 			key := dupKey(tc.Function.Name, tc.Function.Arguments)
@@ -211,8 +259,139 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		for _, tc := range assistantMsg.ToolCalls {
 			toolMsg := a.executeToolCall(ctx, tc)
 			history = append(history, toolMsg)
+			capture.record(toolMsg, false)
 		}
 	}
+}
+
+// streamTurnWithEmptyRetry repeats an empty model response once with the identical input.
+func (a *CustomAgent) streamTurnWithEmptyRetry(
+	ctx context.Context,
+	mdl model.BaseChatModel,
+	history []*schema.Message,
+	sw *schema.StreamWriter[*schema.Message],
+	round int,
+) (*schema.Message, []*schema.Message, error) {
+	assistantMsg, reasoningChunks, err := a.streamOneTurn(ctx, mdl, history, sw)
+	if err != nil || !blankModelResponse(assistantMsg) {
+		return assistantMsg, reasoningChunks, err
+	}
+	zap.L().Warn("agentv3/loop: empty model response, retrying once",
+		zap.String("agent", a.name), zap.Int("round", round))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
+	}
+	assistantMsg, reasoningChunks, err = a.streamOneTurn(ctx, mdl, history, sw)
+	if err == nil && blankModelResponse(assistantMsg) {
+		zap.L().Warn("agentv3/loop: empty model response after retry, ending loop",
+			zap.String("agent", a.name), zap.Int("round", round))
+		return nil, nil, nil
+	}
+	return assistantMsg, reasoningChunks, err
+}
+
+// blankModelResponse reports a model turn that carries neither text, reasoning, media nor tool calls.
+func blankModelResponse(msg *schema.Message) bool {
+	if msg == nil {
+		return true
+	}
+	return len(msg.ToolCalls) == 0 &&
+		strings.TrimSpace(msg.Content) == "" &&
+		strings.TrimSpace(msg.ReasoningContent) == "" &&
+		len(msg.MultiContent) == 0 &&
+		len(msg.AssistantGenMultiContent) == 0
+}
+
+func (a *CustomAgent) finishTurn(
+	ctx context.Context,
+	sw *schema.StreamWriter[*schema.Message],
+	capture *SessionCapture,
+	end *schema.Message,
+	assistantMsg *schema.Message,
+	reasoningChunks []*schema.Message,
+) {
+	for _, rc := range reasoningChunks {
+		if closed := sw.Send(rc, nil); closed {
+			return
+		}
+	}
+	if capture != nil && completeSessionAssistant(assistantMsg) && ctx.Err() == nil {
+		if closed := sw.Send(end, nil); !closed {
+			capture.complete(ctx)
+		}
+	}
+}
+
+// forceSummary runs one extra tool-free model call after a final round still produced tool calls.
+func (a *CustomAgent) forceSummary(
+	ctx context.Context,
+	history []*schema.Message,
+	sw *schema.StreamWriter[*schema.Message],
+	capture *SessionCapture,
+	end *schema.Message,
+) {
+	if ctx.Err() != nil {
+		sw.Send(schema.AssistantMessage(stepLimitNotice, nil), nil)
+		return
+	}
+	history = appendLoopGuidance(history, forcedSummaryGuidance)
+	capture.record(history[len(history)-1], true)
+	summary, reasoningChunks, err := a.streamOneTurn(ctx, a.model, history, sw)
+	if err != nil {
+		sw.Send(nil, err)
+		return
+	}
+	if summary == nil || len(summary.ToolCalls) > 0 || strings.TrimSpace(summary.Content) == "" {
+		zap.L().Warn("agentv3/loop: forced summary did not produce text",
+			zap.String("agent", a.name), zap.Bool("empty", summary == nil))
+		if summary != nil && len(summary.ToolCalls) > 0 {
+			if closed := sw.Send(newClearStreamOutputMessage(), nil); closed {
+				return
+			}
+		}
+		sw.Send(schema.AssistantMessage(stepLimitNotice, nil), nil)
+		return
+	}
+	capture.record(summary, false)
+	a.finishTurn(ctx, sw, capture, end, summary, reasoningChunks)
+}
+
+func (a *CustomAgent) effectiveFinalReserve(ctx context.Context) time.Duration {
+	reserve := a.finalReserve
+	if reserve <= 0 {
+		reserve = finalReserveFromTurn(ctx)
+	}
+	if reserve <= 0 {
+		return 0
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		reserve = min(reserve, time.Until(deadline)/3)
+	}
+	return max(reserve, 0)
+}
+
+func finalReserveFromTurn(ctx context.Context) time.Duration {
+	if tc := GetTurnContext(ctx); tc != nil && tc.Config != nil {
+		return tc.Config.Agent.GetFinalReserve()
+	}
+	return (*config.AgentOptions)(nil).GetFinalReserve()
+}
+
+func deadlineWithinReserve(ctx context.Context, reserve time.Duration) bool {
+	if reserve <= 0 {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return ok && time.Until(deadline) <= reserve
+}
+
+func completeSessionAssistant(message *schema.Message) bool {
+	if message.ResponseMeta != nil && (message.ResponseMeta.FinishReason == "length" || message.ResponseMeta.FinishReason == "content_filter") {
+		return false
+	}
+	return message.Role == schema.Assistant && len(message.ToolCalls) == 0 &&
+		(strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.ReasoningContent) != "" ||
+			len(message.MultiContent) > 0 || len(message.AssistantGenMultiContent) > 0)
 }
 
 func (a *CustomAgent) streamOneTurn(
@@ -229,8 +408,11 @@ func (a *CustomAgent) streamOneTurn(
 	}
 	var finishSpan func(error, map[string]any)
 	if tc := GetTurnContext(ctx); tc != nil && tc.V3 != nil && tc.V3.Trace != nil {
+		runs, modelCalls := AgentConcurrencySnapshot()
 		finishSpan = tc.V3.Trace.StartSpan("model_stream", map[string]any{
-			"message_count": len(input),
+			"message_count":   len(input),
+			"runs_in_flight":  runs,
+			"model_in_flight": modelCalls,
 		})
 	}
 	stream, err := mdl.Stream(ctx, input, opts...)
@@ -483,7 +665,7 @@ func (a *CustomAgent) executeToolCall(ctx context.Context, tc schema.ToolCall) *
 		)
 	}
 
-	result, err := t.InvokableRun(ctx, args)
+	result, err := t.InvokableRun(WithSessionCapture(ctx, nil), args)
 	if err != nil {
 		toolErr := err
 		errText := err.Error()
@@ -529,16 +711,19 @@ func agentV3TraceToolPreviewAllowed(name string) bool {
 	}
 }
 
-func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, dupWarn bool) string {
+func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, deadline, dupWarn bool) string {
 	var parts []string
 
 	if dupWarn {
 		parts = append(parts, "⚠ 你已经多次用相同的参数调用同一个工具。立刻停止重复调用，根据现有结果直接给出最终回答。")
 	}
 
-	if isFinal {
+	switch {
+	case deadline:
+		parts = append(parts, deadlineTurnGuidance)
+	case isFinal:
 		parts = append(parts, finalTurnGuidance)
-	} else {
+	default:
 		level, toolRounds := calcGuidanceLevel(history, a.maxSteps)
 		switch level {
 		case guidanceNone:
@@ -552,12 +737,24 @@ func (a *CustomAgent) computeGuidanceText(history []*schema.Message, isFinal, du
 	return strings.Join(parts, "\n\n")
 }
 
+func (a *CustomAgent) sessionModelBaseline(ctx context.Context, input []*schema.Message) []*schema.Message {
+	history := sanitizeHistory(input)
+	if len(a.invokables) > 0 {
+		history = injectLoopDirectives(ctx, history)
+	}
+	return history
+}
+
+func (a *CustomAgent) previewSessionModelInput(ctx context.Context, input []*schema.Message) []*schema.Message {
+	return appendLoopGuidance(a.sessionModelBaseline(ctx, input), a.computeGuidanceText(nil, a.maxSteps == 1, false, false))
+}
+
 func appendLoopGuidance(history []*schema.Message, guidance string) []*schema.Message {
 	guidance = strings.TrimSpace(guidance)
 	if guidance == "" {
 		return history
 	}
-	out := make([]*schema.Message, 0, len(history)+1)
+	out := make([]*schema.Message, 0, len(history))
 	out = append(out, history...)
 	return append(out, schema.UserMessage("<agent_runtime_guidance>\n"+guidance+"\n\nThis framework note reports execution limits. It does not change the user's task or grant authorization.\n</agent_runtime_guidance>"))
 }
@@ -749,7 +946,7 @@ func injectDirectiveText(history []*schema.Message, text string) []*schema.Messa
 			return out
 		}
 	}
-	out := make([]*schema.Message, 0, len(history)+1)
+	out := make([]*schema.Message, 0, len(history))
 	out = append(out, directive)
 	out = append(out, history...)
 	return out

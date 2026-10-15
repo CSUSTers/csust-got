@@ -2,7 +2,6 @@ package agentv3
 
 import (
 	"csust-got/orm"
-	"fmt"
 	"sort"
 	"time"
 
@@ -27,17 +26,17 @@ func getFilteredMessageContext(bot *tb.Bot, currentMessage *tb.Message, query co
 		return nil, nil
 	}
 
-	beginID := "-"
+	streamQuery := orm.MessageStreamQuery{MaxID: currentMessage.ID - 1, Count: contextStreamMaxLength}
 	if query.AfterMessageID != nil {
-		beginID = fmt.Sprintf("(%d", *query.AfterMessageID)
+		streamQuery.MinID = *query.AfterMessageID + 1
 	}
-
-	upperBound := currentMessage.ID
-	if query.BeforeMessageID != nil && *query.BeforeMessageID < upperBound {
-		upperBound = *query.BeforeMessageID
+	if query.BeforeMessageID != nil && *query.BeforeMessageID <= currentMessage.ID {
+		streamQuery.MaxID = *query.BeforeMessageID - 1
 	}
-	endID := fmt.Sprintf("(%d", upperBound)
-	storedMessages, err := orm.GetMessagesFromStream(currentMessage.Chat.ID, beginID, endID, contextStreamMaxLength, false)
+	if streamQuery.MaxID <= 0 {
+		return nil, nil
+	}
+	storedMessages, err := orm.GetMessagesFromStream(currentMessage.Chat.ID, streamQuery)
 	if err != nil {
 		return nil, err
 	}

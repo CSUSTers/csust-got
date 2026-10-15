@@ -20,7 +20,8 @@ import (
 
 const cronLeaseGrace = 30 * time.Second
 const cronReportTimeout = 30 * time.Second
-const cronTraceFinishTimeout = 5 * time.Second
+
+var cronTraceFinishTimeout = 10 * time.Second
 
 var (
 	cronService                   atomic.Pointer[agentCronService]
@@ -338,7 +339,7 @@ func (s *agentCronService) finishCronTrace(ctx context.Context, result agentCron
 	if result.Finalize == nil {
 		return
 	}
-	finishCtx, cancel := context.WithTimeout(ctx, cronTraceFinishTimeout)
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cronTraceFinishTimeout)
 	defer cancel()
 	result.Finalize(finishCtx)
 }

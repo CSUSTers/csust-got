@@ -46,7 +46,7 @@ func collectAgentV3ImageRefs(tc *TurnContext, history *RichHistory, rawTurns []o
 		}
 	}
 
-	collect(loadCurrentAlbumMessages(tc.Message), nil)
+	collect(loadCurrentAlbumMessagesContext(agentV3RenderContext(tc), tc.Message), nil)
 	if tc.Message.ReplyTo != nil {
 		collect([]*tb.Message{tc.Message.ReplyTo}, nil)
 	}

@@ -31,6 +31,7 @@ const (
 	agentV3ToolTimeoutField   = "timeout"
 	agentV3ToolSkillNameField = "name"
 	agentV3FieldCron          = "cron"
+	agentV3FieldUntil         = "until"
 	agentV3FieldFileID        = "file_id"
 	agentV3FieldMessage       = "message"
 	agentV3FieldVersion       = "version"

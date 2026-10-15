@@ -40,6 +40,12 @@ type urlProcessor interface {
 	writeUrl(buf *bytes.Buffer, u *urlx.ExtraUrl) error
 }
 
+// translatedUrlProcessor 可额外提供翻译版本链接的 urlProcessor
+type translatedUrlProcessor interface {
+	urlProcessor
+	translatedUrl(u *urlx.ExtraUrl) (string, bool)
+}
+
 var urlProcessConfigs []urlProcessor
 
 func registerUrlProcessor(processor ...urlProcessor) {

@@ -147,6 +147,7 @@ type Task struct {
 	Prompt          string
 	Version         int64
 	NextRunAt       time.Time
+	Until           time.Time
 	ActiveRun       *Run
 	LatestResult    *ExecutionResult
 	Report          *Report
@@ -165,6 +166,7 @@ type CreateRequest struct {
 	Timezone        string
 	Prompt          string
 	NextRunAt       time.Time
+	Until           time.Time
 	Now             time.Time
 	MaxTasksPerChat int
 }
@@ -201,6 +203,7 @@ type UpdateRequest struct {
 	ExpectedVersion int64
 	Cron            *string
 	Prompt          *string
+	Until           *time.Time
 	NextRunAt       time.Time
 	Now             time.Time
 }

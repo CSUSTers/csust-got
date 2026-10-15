@@ -49,13 +49,16 @@ func (s *agentCronStore) Reports(ctx context.Context, request cronjob.ReportsReq
 		if loadErr != nil {
 			return nil, agentCronPublicError(loadErr)
 		}
-		if stored == nil || stored.Task.Report == nil || stored.Task.Report.State != cronjob.DeliveryPending || stored.Task.Report.NextAttemptAt.After(request.Now) {
+		if stored == nil || stored.Task.Report == nil {
 			continue
 		}
 		if agentCronReportExpired(stored.Task, request.Now) {
 			if expireErr := s.expirePendingReport(ctx, scope, taskID, request.Now); expireErr != nil {
 				return nil, expireErr
 			}
+			continue
+		}
+		if stored.Task.Report.State != cronjob.DeliveryPending || stored.Task.Report.NextAttemptAt.After(request.Now) {
 			continue
 		}
 		candidates = append(candidates, cronjob.ReportCandidate{
@@ -103,12 +106,9 @@ func (s *agentCronStore) ClaimReport(ctx context.Context, request cronjob.ClaimR
 			stored.Task.Report.LastError = agentCronReportWindowError
 			stored.Task.Report.NextAttemptAt = time.Time{}
 			stored.Task.UpdatedAt = request.Now
-			data, marshalErr := marshalAgentCron(stored)
-			if marshalErr != nil {
-				return marshalErr
+			if err := s.saveReportState(ctx, pipe, stored, request.Now); err != nil {
+				return err
 			}
-			pipe.Set(ctx, s.taskKey(scope, stored.Task.ID), data, 0)
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 			postErr = cronjob.NewError(cronjob.CodeConflict, agentCronReportWindowError)
 			return nil
 		}
@@ -117,12 +117,9 @@ func (s *agentCronStore) ClaimReport(ctx context.Context, request cronjob.ClaimR
 			stored.Task.Report.State = cronjob.DeliveryExhausted
 			stored.Task.Report.NextAttemptAt = time.Time{}
 			stored.Task.UpdatedAt = request.Now
-			data, marshalErr := marshalAgentCron(stored)
-			if marshalErr != nil {
-				return marshalErr
+			if err := s.saveReportState(ctx, pipe, stored, request.Now); err != nil {
+				return err
 			}
-			pipe.Set(ctx, s.taskKey(scope, stored.Task.ID), data, 0)
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 			postErr = cronjob.NewError(cronjob.CodeConflict, "report retry budget exhausted")
 			return nil
 		}
@@ -206,12 +203,10 @@ func (s *agentCronStore) FinishReport(ctx context.Context, request cronjob.Repor
 		report.LeaseToken = ""
 		report.LeaseExpiresAt = time.Time{}
 		report.LastError = agentCronTruncate(request.ErrorMessage, agentCronMaxErrorBytes)
-		member := agentCronTaskMember(scope, stored.Task.ID)
 		switch {
 		case request.Suppressed:
 			report.State = cronjob.DeliverySuppressed
 			report.NextAttemptAt = time.Time{}
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 		case request.Delivered:
 			report.State = cronjob.DeliveryDelivered
 			report.NextAttemptAt = time.Time{}
@@ -221,18 +216,15 @@ func (s *agentCronStore) FinishReport(ctx context.Context, request cronjob.Repor
 			if report.Receipt.DeliveredAt.IsZero() {
 				report.Receipt.DeliveredAt = request.Now
 			}
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 		case agentCronReportExpired(stored.Task, request.Now):
 			report.State = cronjob.DeliveryFailed
 			report.NextAttemptAt = time.Time{}
 			if report.LastError == "" {
 				report.LastError = agentCronReportWindowError
 			}
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 		case request.Exhausted || report.Attempt >= agentCronAutoReportAttempts+stored.ManualReportRetries:
 			report.State = cronjob.DeliveryExhausted
 			report.NextAttemptAt = time.Time{}
-			pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 		default:
 			report.State = cronjob.DeliveryPending
 			report.NextAttemptAt = request.NextAttemptAt
@@ -243,14 +235,11 @@ func (s *agentCronStore) FinishReport(ctx context.Context, request cronjob.Repor
 			if report.NextAttemptAt.After(deadline) {
 				report.NextAttemptAt = deadline
 			}
-			pipe.ZAdd(ctx, s.reportsKey(coordinator), redis.Z{Score: agentCronTimeScore(report.NextAttemptAt), Member: member})
 		}
 		stored.Task.UpdatedAt = request.Now
-		data, err := marshalAgentCron(stored)
-		if err != nil {
+		if err := s.saveReportState(ctx, pipe, stored, request.Now); err != nil {
 			return err
 		}
-		pipe.Set(ctx, s.taskKey(scope, stored.Task.ID), data, 0)
 		s.releaseReportLease(ctx, pipe, *record)
 		resultTask = stored.Task
 		return nil
@@ -301,27 +290,21 @@ func (s *agentCronStore) recoverExpiredReportLeases(ctx context.Context, coordin
 			report.LeaseToken = ""
 			report.LeaseExpiresAt = time.Time{}
 			report.LastError = "report delivery lease expired"
-			member := agentCronTaskMember(stored.Task.Scope, stored.Task.ID)
 			switch {
 			case agentCronReportExpired(stored.Task, now):
 				report.State = cronjob.DeliveryFailed
 				report.NextAttemptAt = time.Time{}
-				pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 			case report.Attempt >= agentCronAutoReportAttempts+stored.ManualReportRetries:
 				report.State = cronjob.DeliveryExhausted
 				report.NextAttemptAt = time.Time{}
-				pipe.ZRem(ctx, s.reportsKey(coordinator), member)
 			default:
 				report.State = cronjob.DeliveryPending
 				report.NextAttemptAt = now
-				pipe.ZAdd(ctx, s.reportsKey(coordinator), redis.Z{Score: agentCronTimeScore(now), Member: member})
 			}
 			stored.Task.UpdatedAt = now
-			data, marshalErr := marshalAgentCron(stored)
-			if marshalErr != nil {
-				return marshalErr
+			if err := s.saveReportState(ctx, pipe, stored, now); err != nil {
+				return err
 			}
-			pipe.Set(ctx, s.taskKey(stored.Task.Scope, stored.Task.ID), data, 0)
 			s.releaseReportLease(ctx, pipe, *record)
 			return nil
 		})
@@ -338,21 +321,48 @@ func (s *agentCronStore) expirePendingReport(ctx context.Context, scope cronjob.
 		if err != nil || stored == nil {
 			return err
 		}
-		if stored.Task.Report == nil || stored.Task.Report.State != cronjob.DeliveryPending || !agentCronReportExpired(stored.Task, now) {
+		if stored.Task.ActiveRun != nil || stored.Task.Report == nil || stored.Task.Report.State == cronjob.DeliveryClaimed || !agentCronReportExpired(stored.Task, now) {
+			return nil
+		}
+		if stored.Task.Report.State != cronjob.DeliveryPending {
+			if agentCronScheduleExhausted(stored.Task) && agentCronReportTerminal(stored.Task.Report.State) {
+				s.deleteTask(ctx, pipe, stored)
+			}
 			return nil
 		}
 		stored.Task.Report.State = cronjob.DeliveryFailed
 		stored.Task.Report.NextAttemptAt = time.Time{}
 		stored.Task.Report.LastError = agentCronReportWindowError
 		stored.Task.UpdatedAt = now
-		data, err := marshalAgentCron(stored)
-		if err != nil {
-			return err
-		}
-		pipe.Set(ctx, s.taskKey(scope, taskID), data, 0)
-		pipe.ZRem(ctx, s.reportsKey(scope.Coordinator()), agentCronTaskMember(scope, taskID))
-		return nil
+		return s.saveReportState(ctx, pipe, stored, now)
 	})
+}
+
+// saveReportState is called within the coordinator transaction after lease fencing.
+// Returned task snapshots from Finish/FinishReport can describe an already reclaimed task.
+func (s *agentCronStore) saveReportState(ctx context.Context, pipe redis.Pipeliner, stored *storedAgentCronTask, now time.Time) error {
+	task := stored.Task
+	report := task.Report
+	member := agentCronTaskMember(task.Scope, task.ID)
+	key := s.reportsKey(task.Scope.Coordinator())
+	switch {
+	case agentCronScheduleExhausted(task) && task.ActiveRun == nil && report != nil && agentCronReportTerminal(report.State):
+		if report.State == cronjob.DeliveryDelivered || report.State == cronjob.DeliverySuppressed || agentCronReportExpired(task, now) {
+			s.deleteTask(ctx, pipe, stored)
+			return nil
+		}
+		pipe.ZAdd(ctx, key, redis.Z{Score: agentCronTimeScore(task.LatestResult.FinishedAt.Add(agentCronReportLifetime)), Member: member})
+	case report != nil && report.State == cronjob.DeliveryPending:
+		pipe.ZAdd(ctx, key, redis.Z{Score: agentCronTimeScore(report.NextAttemptAt), Member: member})
+	default:
+		pipe.ZRem(ctx, key, member)
+	}
+	data, err := marshalAgentCron(stored)
+	if err != nil {
+		return err
+	}
+	pipe.Set(ctx, s.taskKey(task.Scope, task.ID), data, 0)
+	return nil
 }
 
 func (s *agentCronStore) loadReportLease(ctx context.Context, cmd redis.Cmdable, coordinator cronjob.Coordinator, token string) (*agentCronReportLease, error) {
