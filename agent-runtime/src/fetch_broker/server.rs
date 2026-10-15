@@ -206,8 +206,9 @@ where
 
 impl FetchBroker<DedicatedResolver, PinnedHttpClient, JsonlAuditSink> {
     pub async fn from_config(config: BrokerConfig) -> Result<Self, BrokerError> {
+        let resolver = DedicatedResolver::new(&config.dns_servers, config.dns_timeout)
+            .map_err(|_| BrokerError::Configuration("broker DNS initialization failed"))?;
         let mut key = config.load_signing_key().map_err(BrokerError::Config)?;
-        let resolver = DedicatedResolver::new(&config.dns_servers, config.dns_timeout);
         let connector = PinnedHttpClient::new(config.connect_timeout);
         let audit = JsonlAuditSink::open(&config.audit_path)
             .await

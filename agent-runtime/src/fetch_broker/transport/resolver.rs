@@ -2,11 +2,8 @@ use super::{ResolveError, Resolver};
 use async_trait::async_trait;
 use hickory_resolver::{
     TokioResolver,
-    config::{
-        LookupIpStrategy, NameServerConfig, NameServerConfigGroup, ResolveHosts, ResolverConfig,
-    },
-    name_server::TokioConnectionProvider,
-    proto::xfer::Protocol,
+    config::{LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig},
+    net::{NetError, runtime::TokioRuntimeProvider},
 };
 use std::{
     fmt,
@@ -22,27 +19,26 @@ pub struct DedicatedResolver {
 }
 
 impl DedicatedResolver {
-    pub fn new(servers: &[SocketAddr], timeout: Duration) -> Self {
-        let mut name_servers = NameServerConfigGroup::new();
+    pub fn new(servers: &[SocketAddr], timeout: Duration) -> Result<Self, NetError> {
+        let mut config = ResolverConfig::default();
         for socket_addr in servers {
-            for protocol in [Protocol::Udp, Protocol::Tcp] {
-                name_servers.push(NameServerConfig::new(*socket_addr, protocol));
+            let mut name_server = NameServerConfig::udp_and_tcp(socket_addr.ip());
+            for connection in &mut name_server.connections {
+                connection.port = socket_addr.port();
             }
+            config.add_name_server(name_server);
         }
-        let mut builder = TokioResolver::builder_with_config(
-            ResolverConfig::from_parts(None, Vec::new(), name_servers),
-            TokioConnectionProvider::default(),
-        );
+        let mut builder = TokioResolver::builder_with_config(config, TokioRuntimeProvider::new());
         let options = builder.options_mut();
         options.use_hosts_file = ResolveHosts::Never;
         options.ip_strategy = LookupIpStrategy::Ipv4AndIpv6;
         options.timeout = timeout;
         options.attempts = 1;
         options.cache_size = 0;
-        Self {
-            resolver: builder.build(),
+        Ok(Self {
+            resolver: builder.build()?,
             timeout,
-        }
+        })
     }
 }
 
