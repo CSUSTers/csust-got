@@ -38,12 +38,15 @@ func (s *agentCronStore) Create(ctx context.Context, request cronjob.CreateReque
 	if !request.NextRunAt.Equal(next) {
 		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "next run does not match cron schedule")
 	}
+	if !request.Until.IsZero() && (!request.Until.After(request.Now) || !cronjob.AllowsScheduledAt(request.Until, next)) {
+		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "until must be future and include the first occurrence")
+	}
 	if request.MaxTasksPerChat <= 0 {
 		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "task quota must be positive")
 	}
 
 	scope := request.Actor.Scope
-	dedup := agentCronDedupKey(request.Actor.UserID, cronValue, timezone, prompt)
+	dedup := agentCronDedupKey(request.Actor.UserID, cronValue, timezone, prompt, request.Until)
 	err = s.watchCoordinator(ctx, scope.Coordinator(), func(tx *redis.Tx, pipe redis.Pipeliner) error {
 		result = cronjob.CreateResult{}
 		existingID, err := tx.HGet(ctx, s.dedupKey(scope), dedup).Result()
@@ -85,6 +88,7 @@ func (s *agentCronStore) Create(ctx context.Context, request cronjob.CreateReque
 			Prompt:          prompt,
 			Version:         1,
 			NextRunAt:       request.NextRunAt,
+			Until:           request.Until.UTC(),
 			CreatedAt:       request.Now,
 			UpdatedAt:       request.Now,
 		}
@@ -174,8 +178,11 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 	if err := validateScope(request.Actor.Scope); err != nil {
 		return result, err
 	}
-	if request.Actor.UserID == 0 || request.TaskID == "" || request.ExpectedVersion <= 0 || request.Now.IsZero() || (request.Cron == nil && request.Prompt == nil) {
+	if request.Actor.UserID == 0 || request.TaskID == "" || request.ExpectedVersion <= 0 || request.Now.IsZero() || (request.Cron == nil && request.Prompt == nil && request.Until == nil) {
 		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "valid actor, task, version, update, and time are required")
+	}
+	if request.Until != nil && !request.Until.IsZero() && !request.Until.After(request.Now) {
+		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "until must be in the future")
 	}
 	var updatedSchedule *cronjob.Schedule
 	var updatedCron string
@@ -203,6 +210,9 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 		}
 		if stored.Task.ActiveRun != nil || stored.Task.LatestResult != nil && stored.Task.LatestResult.RetryStatus == cronjob.RetryQueued || agentCronReportBlocks(stored.Task) {
 			return cronjob.NewError(cronjob.CodeConflict, "task has active execution, retry, or report work")
+		}
+		if agentCronScheduleExhausted(stored.Task) {
+			return cronjob.NewError(cronjob.CodeConflict, "final result must be retained until report completion or expiry")
 		}
 
 		cronValue := stored.Task.Cron
@@ -244,7 +254,18 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 			}
 			cronValue = updatedSchedule.Expression()
 		}
-		newDedup := agentCronDedupKey(stored.Task.CreatorID, cronValue, stored.Task.Timezone, prompt)
+		until := stored.Task.Until
+		if request.Until != nil {
+			until = request.Until.UTC()
+		}
+		next := stored.Task.NextRunAt
+		if request.Cron != nil {
+			next = request.NextRunAt
+		}
+		if !cronjob.AllowsScheduledAt(until, next) {
+			return cronjob.NewError(cronjob.CodeInvalidArgument, "until excludes the pending occurrence")
+		}
+		newDedup := agentCronDedupKey(stored.Task.CreatorID, cronValue, stored.Task.Timezone, prompt, until)
 		if newDedup != stored.DedupKey {
 			existingID, getErr := tx.HGet(ctx, s.dedupKey(scope), newDedup).Result()
 			if getErr == nil && existingID != stored.Task.ID {
@@ -259,6 +280,7 @@ func (s *agentCronStore) Update(ctx context.Context, request cronjob.UpdateReque
 		}
 		stored.Task.Cron = cronValue
 		stored.Task.Prompt = prompt
+		stored.Task.Until = until
 		stored.Task.Version++
 		if request.Cron != nil {
 			stored.Task.NextRunAt = request.NextRunAt
@@ -308,13 +330,7 @@ func (s *agentCronStore) Delete(ctx context.Context, request cronjob.DeleteReque
 		if stored.Task.Version != request.ExpectedVersion {
 			return cronjob.NewError(cronjob.CodeConflict, "task version changed")
 		}
-		member := agentCronTaskMember(scope, stored.Task.ID)
-		pipe.Del(ctx, s.taskKey(scope, stored.Task.ID))
-		pipe.ZRem(ctx, s.tasksKey(scope), stored.Task.ID)
-		pipe.HDel(ctx, s.dedupKey(scope), stored.DedupKey)
-		pipe.ZRem(ctx, s.dueKey(scope.Coordinator()), member)
-		pipe.ZRem(ctx, s.retryKey(scope.Coordinator()), member)
-		pipe.ZRem(ctx, s.reportsKey(scope.Coordinator()), member)
+		s.deleteTask(ctx, pipe, stored)
 		return nil
 	})
 }
@@ -328,8 +344,10 @@ func (s *agentCronStore) Retry(ctx context.Context, request cronjob.RetryRequest
 		return result, cronjob.NewError(cronjob.CodeInvalidArgument, "valid actor, task, version, run, retry limit, and time are required")
 	}
 	scope := request.Actor.Scope
+	var postErr error
 	err := s.watchCoordinator(ctx, scope.Coordinator(), func(tx *redis.Tx, pipe redis.Pipeliner) error {
 		result = cronjob.RetryResult{}
+		postErr = nil
 		stored, err := loadAgentCronTask(ctx, tx, s.taskKey(scope, request.TaskID))
 		if err != nil {
 			return err
@@ -345,6 +363,13 @@ func (s *agentCronStore) Retry(ctx context.Context, request cronjob.RetryRequest
 		}
 		if stored.Task.ActiveRun != nil || stored.Task.LatestResult == nil || stored.Task.LatestResult.RunID != request.RunID {
 			return cronjob.NewError(cronjob.CodeConflict, "run is stale or still active")
+		}
+		if agentCronScheduleExhausted(stored.Task) && agentCronReportExpired(stored.Task, request.Now) {
+			if stored.Task.Report == nil || stored.Task.Report.State != cronjob.DeliveryClaimed {
+				s.deleteTask(ctx, pipe, stored)
+			}
+			postErr = cronjob.NewError(cronjob.CodeConflict, "final result retention window expired")
+			return nil
 		}
 		member := agentCronTaskMember(scope, stored.Task.ID)
 		switch stored.Task.LatestResult.Outcome {
@@ -393,5 +418,19 @@ func (s *agentCronStore) Retry(ctx context.Context, request cronjob.RetryRequest
 	if err != nil {
 		return cronjob.RetryResult{}, err
 	}
+	if postErr != nil {
+		return cronjob.RetryResult{}, postErr
+	}
 	return result, err
+}
+
+func (s *agentCronStore) deleteTask(ctx context.Context, pipe redis.Pipeliner, stored *storedAgentCronTask) {
+	scope := stored.Task.Scope
+	member := agentCronTaskMember(scope, stored.Task.ID)
+	pipe.Del(ctx, s.taskKey(scope, stored.Task.ID))
+	pipe.ZRem(ctx, s.tasksKey(scope), stored.Task.ID)
+	pipe.HDel(ctx, s.dedupKey(scope), stored.DedupKey)
+	pipe.ZRem(ctx, s.dueKey(scope.Coordinator()), member)
+	pipe.ZRem(ctx, s.retryKey(scope.Coordinator()), member)
+	pipe.ZRem(ctx, s.reportsKey(scope.Coordinator()), member)
 }

@@ -18,8 +18,9 @@ import (
 
 const cronScheduleHelp = "Schedules use the captured configured timezone. @at is resolved once to an absolute UTC instant; new deadlines must be strictly in the future. HH:MM is 24-hour time. Bare @at HH:MM selects the next existing local time; tomorro (exact spelling) means the next local calendar day. Explicit local dates/tomorro in a DST gap are rejected; a fold chooses the earliest strictly future instant, once only. Recurring calendar aliases retain five-field cron DST behavior (skip gaps, both fold instants); nonexistent monthly days are skipped. @every <duration> is fixed-delay from creation/rescheduling or completion/recovery; manual execution retry also moves the next time. @every <weekday-name> HH:MM is weekly calendar cron. Polling, cooldown and report blocking mean no sub-minute start guarantee."
 const cronScheduleDesc = "m h dom mon dow; numeric *, lists, ranges, steps; @at <duration|RFC3339|YYYY-MM-DD HH:MM|HH:MM>; @at tomorro HH:MM; @daily HH:MM; @month/@monthly <1-31> HH:MM; @week/@weekly <0-7|weekday-name> HH:MM; @every <weekday-name> HH:MM; @every <duration>. Examples: @at 10m; @at tomorro 09:00; @weekly 1 09:00; @weekly Wednesday 09:00; @every Wed 09:00; @every 90s. Weekday names are case-insensitive, three-letter or full English (Sun/Sunday through Sat/Saturday); HH:MM required for weekday aliases. Duration: positive whole-millisecond Go duration (e.g. 1h30m), no d/w units. Weekday 0/7 is Sunday; numeric weekdays are not supported with @every. Five-field cron remains numeric."
-const cronDelegateHelp = "Create a one-time or recurring scheduled task in this chat and topic using the configured dedicated runner. No target override. Supply a self-contained prompt with nonempty sections in this exact order: ## Context\n(background)\n## Steps\n(actions)\n## Goal\n(expected result). Do not rely on conversation references. First run is the next scheduled time, not now. Background agents cannot create or manage tasks. Supported cron inputs: " + cronScheduleDesc + " " + cronScheduleHelp
-const cronTasksHelp = "Manage this chat's cron tasks: list/get/delete/update/retry. Only the creator may mutate. Get current task_id, version and latest run_id before mutations; pass expected_version. Update only cron/prompt. Prompt-only updates preserve the scheduled deadline, including once/every; completed one-time tasks require an explicit new cron to reschedule. One-time completion retains the task, result, report and explicit retry entry with next_run_at=null; retained tasks still count toward quota. Retry ONLY after the user explicitly requests it; warn that previous execution may already have caused side effects. A successful execution with failed delivery is report_only: resend saved output without rerunning the model or moving the schedule. Delete cannot undo effects already underway. Background agents cannot create or manage tasks. Supported cron inputs: " + cronScheduleDesc + " " + cronScheduleHelp
+const cronUntilHelp = "Optional until is an inclusive scheduled-time cutoff: RFC3339 with offset or task-local YYYY-MM-DD HH:MM, strictly future when set. Omit for no cutoff on create or to keep on update; update empty string clears; null is invalid. A legal saved occurrence can run after the wall-clock cutoff. After the final report is delivered/suppressed the task is deleted; failed reports retain it up to 24h, with existing retry budgets."
+const cronDelegateHelp = "Create a one-time or recurring scheduled task in this chat and topic using the configured dedicated runner. No target override. Supply a self-contained prompt with nonempty sections in this exact order: ## Context\n(background)\n## Steps\n(actions)\n## Goal\n(expected result). Do not rely on conversation references. First run is the next scheduled time, not now. Background agents cannot create or manage tasks. " + cronUntilHelp + " Supported cron inputs: " + cronScheduleDesc + " " + cronScheduleHelp
+const cronTasksHelp = "Manage this chat's cron tasks: list/get/delete/update/retry. Only the creator may mutate. Get current task_id, version and latest run_id before mutations; pass expected_version. Update only cron/prompt/until. Prompt-only and until-only updates preserve the scheduled deadline, including once/every; completed one-time tasks without until require an explicit new cron to reschedule. Without until, one-time completion retains the task, result, report and explicit retry entry with next_run_at=null; retained tasks still count toward quota. Retry ONLY after the user explicitly requests it; warn that previous execution may already have caused side effects. A successful execution with failed delivery is report_only: resend saved output without rerunning the model or moving the schedule. Delete cannot undo effects already underway. Background agents cannot create or manage tasks. " + cronUntilHelp + " Supported cron inputs: " + cronScheduleDesc + " " + cronScheduleHelp
 
 type cronTool struct {
 	manage  bool
@@ -28,8 +29,9 @@ type cronTool struct {
 
 func (t *cronTool) Info(context.Context) (*schema.ToolInfo, error) {
 	params := map[string]*schema.ParameterInfo{
-		agentV3FieldCron: {Type: schema.String, Desc: cronScheduleDesc, Required: !t.manage},
-		"prompt":         {Type: schema.String, Desc: "Self-contained ## Context, ## Steps, ## Goal sections", Required: !t.manage},
+		agentV3FieldCron:  {Type: schema.String, Desc: cronScheduleDesc, Required: !t.manage},
+		"prompt":          {Type: schema.String, Desc: "Self-contained ## Context, ## Steps, ## Goal sections", Required: !t.manage},
+		agentV3FieldUntil: {Type: schema.String, Desc: cronUntilHelp},
 	}
 	name, desc := agentV3ToolDelegate, cronDelegateHelp
 	if t.manage {
@@ -45,14 +47,15 @@ func (t *cronTool) Info(context.Context) (*schema.ToolInfo, error) {
 }
 
 type cronToolArgs struct {
-	Action          string  `json:"action"`
-	TaskID          string  `json:"task_id"`
-	ExpectedVersion int64   `json:"expected_version"`
-	Cron            *string `json:"cron"`
-	Prompt          *string `json:"prompt"`
-	RunID           string  `json:"run_id"`
-	Cursor          string  `json:"cursor"`
-	Limit           int     `json:"limit"`
+	Action          string          `json:"action"`
+	TaskID          string          `json:"task_id"`
+	ExpectedVersion int64           `json:"expected_version"`
+	Cron            *string         `json:"cron"`
+	Prompt          *string         `json:"prompt"`
+	Until           json.RawMessage `json:"until"`
+	RunID           string          `json:"run_id"`
+	Cursor          string          `json:"cursor"`
+	Limit           int             `json:"limit"`
 }
 
 func cronJSON(value any) (string, error) {
@@ -101,6 +104,14 @@ func (t *cronTool) InvokableRun(ctx context.Context, input string, _ ...tool.Opt
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return cronToolError(cronjob.ErrInvalidArgument)
 	}
+	var untilInput *string
+	if len(args.Until) != 0 {
+		var value string
+		if bytes.Equal(bytes.TrimSpace(args.Until), []byte("null")) || json.Unmarshal(args.Until, &value) != nil {
+			return cronToolError(cronjob.ErrInvalidArgument)
+		}
+		untilInput = &value
+	}
 	now := s.now()
 	if !t.manage {
 		if args.Cron == nil || args.Prompt == nil || args.Action != "" || args.TaskID != "" || args.ExpectedVersion != 0 || args.RunID != "" || args.Cursor != "" || args.Limit != 0 {
@@ -117,13 +128,20 @@ func (t *cronTool) InvokableRun(ctx context.Context, input string, _ ...tool.Opt
 		if err != nil {
 			return cronToolError(err)
 		}
-		result, err := s.store.Create(ctx, cronjob.CreateRequest{Actor: actor, SourceAgent: tc.Config.Name, ChatType: string(tc.Message.Chat.Type), ThreadID: int64(tc.Message.ThreadID), SourceMessageID: tc.Message.ID, Cron: schedule.Expression(), Timezone: schedule.Timezone(), Prompt: strings.TrimSpace(*args.Prompt), NextRunAt: next, Now: now, MaxTasksPerChat: s.cfg.MaxTasksPerChat})
+		var until time.Time
+		if untilInput != nil {
+			until, err = cronjob.ParseUntil(*untilInput, schedule.Timezone(), now)
+			if err != nil {
+				return cronToolError(err)
+			}
+		}
+		result, err := s.store.Create(ctx, cronjob.CreateRequest{Actor: actor, SourceAgent: tc.Config.Name, ChatType: string(tc.Message.Chat.Type), ThreadID: int64(tc.Message.ThreadID), SourceMessageID: tc.Message.ID, Cron: schedule.Expression(), Timezone: schedule.Timezone(), Prompt: strings.TrimSpace(*args.Prompt), NextRunAt: next, Until: until, Now: now, MaxTasksPerChat: s.cfg.MaxTasksPerChat})
 		if err != nil {
 			return cronToolError(err)
 		}
-		return cronJSON(map[string]any{"task_id": result.Task.ID, agentV3FieldVersion: result.Task.Version, agentV3FieldCron: result.Task.Cron, "timezone": result.Task.Timezone, "next_run_at": cronNextView(result.Task.NextRunAt), "deduplicated": result.Deduplicated})
+		return cronJSON(map[string]any{"task_id": result.Task.ID, agentV3FieldVersion: result.Task.Version, agentV3FieldCron: result.Task.Cron, "timezone": result.Task.Timezone, "next_run_at": cronNextView(result.Task.NextRunAt), agentV3FieldUntil: cronNextView(result.Task.Until), "deduplicated": result.Deduplicated})
 	}
-	if args.Action != agentV3ActionUpdate && (args.Cron != nil || args.Prompt != nil) {
+	if args.Action != agentV3ActionUpdate && (args.Cron != nil || args.Prompt != nil || untilInput != nil) {
 		return cronToolError(cronjob.ErrInvalidArgument)
 	}
 	if args.Action == agentV3ActionList {
@@ -164,7 +182,7 @@ func (t *cronTool) InvokableRun(ctx context.Context, input string, _ ...tool.Opt
 		}
 		return cronJSON(map[string]any{"deleted": true, agentV3FieldMessage: "Already-started external effects or messages cannot be undone."})
 	case agentV3ActionUpdate:
-		if args.Cron == nil && args.Prompt == nil {
+		if args.Cron == nil && args.Prompt == nil && untilInput == nil {
 			return cronToolError(cronjob.ErrInvalidArgument)
 		}
 		if args.Prompt != nil {
@@ -191,7 +209,17 @@ func (t *cronTool) InvokableRun(ctx context.Context, input string, _ ...tool.Opt
 			normalized := schedule.Expression()
 			args.Cron = &normalized
 		}
-		updated, err := s.store.Update(ctx, cronjob.UpdateRequest{Actor: actor, TaskID: args.TaskID, ExpectedVersion: args.ExpectedVersion, Cron: args.Cron, Prompt: args.Prompt, NextRunAt: next, Now: now})
+		var until *time.Time
+		if untilInput != nil {
+			until = new(time.Time)
+			if *untilInput != "" {
+				*until, err = cronjob.ParseUntil(*untilInput, task.Timezone, now)
+				if err != nil {
+					return cronToolError(err)
+				}
+			}
+		}
+		updated, err := s.store.Update(ctx, cronjob.UpdateRequest{Actor: actor, TaskID: args.TaskID, ExpectedVersion: args.ExpectedVersion, Cron: args.Cron, Prompt: args.Prompt, Until: until, NextRunAt: next, Now: now})
 		if err != nil {
 			return cronToolError(err)
 		}
@@ -211,7 +239,7 @@ func (t *cronTool) InvokableRun(ctx context.Context, input string, _ ...tool.Opt
 }
 
 func cronTaskView(task cronjob.Task, full bool) map[string]any {
-	view := map[string]any{"task_id": task.ID, agentV3FieldVersion: task.Version, "creator_id": task.CreatorID, "source_agent": task.SourceAgent, agentV3FieldCron: task.Cron, "timezone": task.Timezone, "next_run_at": cronNextView(task.NextRunAt), "running": task.ActiveRun != nil}
+	view := map[string]any{"task_id": task.ID, agentV3FieldVersion: task.Version, "creator_id": task.CreatorID, "source_agent": task.SourceAgent, agentV3FieldCron: task.Cron, "timezone": task.Timezone, "next_run_at": cronNextView(task.NextRunAt), agentV3FieldUntil: cronNextView(task.Until), "running": task.ActiveRun != nil}
 	if full {
 		view["prompt"] = task.Prompt
 	}
@@ -227,7 +255,11 @@ func cronTaskView(task cronjob.Task, full bool) map[string]any {
 		view["latest_result"] = result
 	}
 	if r := task.Report; r != nil {
-		view["report"] = map[string]any{"run_id": r.RunID, "state": r.State, "attempt": r.Attempt, "next_attempt_at": r.NextAttemptAt}
+		var nextAttempt any = r.NextAttemptAt
+		if !task.Until.IsZero() {
+			nextAttempt = cronNextView(r.NextAttemptAt)
+		}
+		view["report"] = map[string]any{"run_id": r.RunID, "state": r.State, "attempt": r.Attempt, "next_attempt_at": nextAttempt}
 	}
 	return view
 }
@@ -236,7 +268,7 @@ func cronNextView(next time.Time) any {
 	if next.IsZero() {
 		return nil
 	}
-	return next
+	return next.UTC().Format(time.RFC3339Nano)
 }
 
 func cronNext(task cronjob.Task, now time.Time) (time.Time, error) {
@@ -244,6 +276,6 @@ func cronNext(task cronjob.Task, now time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	next, _, err := schedule.AfterRun(now)
+	next, _, err := schedule.AfterRunUntil(now, task.Until)
 	return next, err
 }
