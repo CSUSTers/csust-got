@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,7 +27,7 @@ type twitterFixtureTransport func(*http.Request) (*http.Response, error)
 
 func (f twitterFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func newTwitterDispatchFixture(t *testing.T, fetch http.RoundTripper, send func(*http.Request, map[string]string, int) bool) (*Bot, *[]map[string]string, *int) {
+func newTwitterDispatchFixture(t *testing.T, fetch http.RoundTripper, send func(*http.Request, map[string]string, int) bool) (*Bot, func() []map[string]string, func() int) {
 	t.Helper()
 	previousConfig, previousRegex := config.BotConfig, regexHandlers
 	previousTranslator, previousReplyBot := twitterTranslator, twitterReplyBot
@@ -42,12 +44,16 @@ func newTwitterDispatchFixture(t *testing.T, fetch http.RoundTripper, send func(
 	twitterTranslator = base.NewTwitterTranslator(fetch)
 	var payloads []map[string]string
 	var attempts int
+	var mu sync.Mutex
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]string
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		mu.Lock()
 		attempts++
+		attempt := attempts
 		payloads = append(payloads, payload)
-		if send != nil && !send(r, payload, attempts) {
+		mu.Unlock()
+		if send != nil && !send(r, payload, attempt) {
 			_, _ = w.Write([]byte(`{"ok":false,"error_code":429,"description":"failed"}`))
 			return
 		}
@@ -65,7 +71,15 @@ func newTwitterDispatchFixture(t *testing.T, fetch http.RoundTripper, send func(
 	bot.Use(loggerMiddleware, skipMiddleware, blockMiddleware, fakeBanMiddleware, rateMiddleware, noStickerMiddleware, shutdownMiddleware, byeWorldMiddleware, mcMiddleware)
 	registerBaseHandler(bot)
 	registerEventHandler(bot)
-	return bot, &payloads, &attempts
+	return bot, func() []map[string]string {
+			mu.Lock()
+			defer mu.Unlock()
+			return slices.Clone(payloads)
+		}, func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return attempts
+		}
 }
 
 func twitterDispatchMessage(text string) *Message {
@@ -90,8 +104,8 @@ func TestTwitterDispatchMultipleAndFailureIsolation(t *testing.T) {
 			if failure == "fetch" {
 				wantCount = 1
 			}
-			require.Equal(t, wantCount, *attempts)
-			for i, p := range *payloads {
+			require.Equal(t, wantCount, attempts())
+			for i, p := range payloads() {
 				want := fetched[i]
 				if failure == "fetch" {
 					want = fetched[1]
@@ -118,8 +132,8 @@ func TestTwitterDispatchSendTimeoutDoesNotBlockNextLink(t *testing.T) {
 		return true
 	})
 	bot.ProcessUpdate(Update{Message: twitterDispatchMessage("https://x.com/a/status/1 https://x.com/b/status/2")})
-	require.Len(t, *payloads, 2)
-	require.Contains(t, (*payloads)[1]["text"], "https://fxtwitter.com/b/status/2/zh")
+	require.Len(t, payloads(), 2)
+	require.Contains(t, payloads()[1]["text"], "https://fxtwitter.com/b/status/2/zh")
 }
 
 type httpNoCloseReader struct{ *strings.Reader }
@@ -161,7 +175,7 @@ func TestTwitterDispatchMediaRoutingAndMiddleware(t *testing.T) {
 	msg.Caption = "https://x.com/u/status/1"
 	require.NoError(t, bot.Trigger(OnMedia, bot.NewContext(Update{Message: msg})))
 	require.Equal(t, 6, requests)
-	require.Len(t, *payloads, 6)
+	require.Len(t, payloads(), 6)
 	require.Zero(t, regexCalls)
 	photo := twitterDispatchMessage("")
 	photo.ID = 48
@@ -199,7 +213,7 @@ func TestTwitterDispatchPreservesRegexError(t *testing.T) {
 	msg := twitterDispatchMessage("https://x.com/u/status/1")
 	require.ErrorIs(t, bot.Trigger(OnText, bot.NewContext(Update{Message: msg})), wantErr)
 	require.Equal(t, 1, requests)
-	require.Len(t, *payloads, 1)
+	require.Len(t, payloads(), 1)
 }
 
 func TestTwitterDispatchReplyToBotPreservesAgentBranch(t *testing.T) {
@@ -231,8 +245,8 @@ func TestTwitterDispatchReplyToBotPreservesAgentBranch(t *testing.T) {
 	require.Equal(t, msg.Chat.ID, agentLogs[0].ContextMap()["chat_id"])
 	require.Equal(t, agentName, agentLogs[0].ContextMap()["agent"])
 	require.Equal(t, []string{"https://fxtwitter.com/u/status/1/zh"}, fetched)
-	require.Equal(t, 1, *attempts)
-	require.Len(t, *payloads, 1)
-	require.Equal(t, "https://fxtwitter.com/u/status/1/zh\n\n你好", (*payloads)[0]["text"])
-	require.Equal(t, "41", (*payloads)[0]["reply_to_message_id"])
+	require.Equal(t, 1, attempts())
+	require.Len(t, payloads(), 1)
+	require.Equal(t, "https://fxtwitter.com/u/status/1/zh\n\n你好", payloads()[0]["text"])
+	require.Equal(t, "41", payloads()[0]["reply_to_message_id"])
 }
