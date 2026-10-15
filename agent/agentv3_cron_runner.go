@@ -105,7 +105,11 @@ func cronReportMetadata(task cronjob.Task) string {
 	}
 	next := task.NextRunAt.Format(time.RFC3339)
 	if task.NextRunAt.IsZero() {
-		next = "无下一次计划（一次性已结束）"
+		if task.Until.IsZero() {
+			next = "无下一次计划（一次性已结束）"
+		} else {
+			next = "已无截止内下一次计划；报告完成后自动回收"
+		}
 	}
 	return fmt.Sprintf("Cron task %s\nRun %s — %s\nNext scheduled: %s\n\n", task.ID, r.RunID, r.Outcome, next)
 }
@@ -121,6 +125,9 @@ func cronReportText(task cronjob.Task) string {
 	}
 	if r.Outcome == cronjob.OutcomeSkipped {
 		return header + "Skipped: current permissions or policy availability did not permit execution. This occurrence will not be retried."
+	}
+	if !task.Until.IsZero() && task.NextRunAt.IsZero() {
+		return header + "Execution failed or was interrupted. Earlier actions may already have caused side effects. This final task is automatically removed after report delivery; failed delivery retains the result for at most 24 hours."
 	}
 	return header + "Execution failed or was interrupted. Earlier actions may already have caused side effects.\nTo explicitly request a retry, tell the bot: Retry cron task " + task.ID + " run " + r.RunID + ". The bot must get the current version before requesting retry; retries are limited."
 }

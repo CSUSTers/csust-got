@@ -43,9 +43,12 @@ override is accepted. These are taken from trusted current-turn context.
 Pass that object to `delegate`. The three headings must occur exactly once, in
 Context / Steps / Goal order, with nonempty content. Write all necessary context
 and concrete sources into the prompt; do not use references like “the above”.
-Prompts are data, not Go templates. Identical normalized cron/timezone/prompt for
-the same creator and chat is deduplicated atomically. Creation returns `task_id`,
-`version`, `cron`, `timezone`, `next_run_at`, and `deduplicated`.
+Prompts are data, not Go templates. Identical normalized cron/timezone/until/prompt
+for the same creator and chat is deduplicated atomically. Creation returns `task_id`,
+`version`, `cron`, `timezone`, `until`, `next_run_at`, and `deduplicated`.
+The optional `until` field limits scheduled occurrences and enables automatic cleanup;
+omit it to keep the task's existing unlimited/retained behavior. An empty string
+on creation is invalid.
 
 `cron_tasks` accepts:
 
@@ -53,6 +56,8 @@ the same creator and chat is deduplicated atomically. Creation returns `task_id`
 {"action":"list","limit":20}
 {"action":"get","task_id":"TASK_ID"}
 {"action":"update","task_id":"TASK_ID","expected_version":1,"cron":"0 10 * * 1-5"}
+{"action":"update","task_id":"TASK_ID","expected_version":2,"until":"2026-11-30 10:00"}
+{"action":"update","task_id":"TASK_ID","expected_version":3,"until":""}
 {"action":"retry","task_id":"TASK_ID","expected_version":2,"run_id":"RUN_ID"}
 {"action":"delete","task_id":"TASK_ID","expected_version":3}
 ```
@@ -60,19 +65,24 @@ the same creator and chat is deduplicated atomically. Creation returns `task_id`
 List uses an optional cursor (default 20, maximum 50 entries). Get includes the
 bounded latest result and report status. Queries are chat-scoped; **only the task
 creator** may update/delete/retry, with a current `expected_version`. Update accepts
-only cron and/or prompt and keeps the captured timezone. Active execution, queued
+cron, prompt and/or until and keeps the captured timezone. Active execution, queued
 retry or pending/claimed report prevents update. There is no pause/disable action.
-Prompt-only updates preserve the existing deadline (even if overdue), rather than
-restarting a relative delay. A completed one-time task rejects prompt-only updates;
-provide an explicit new `cron` to schedule it again. A terminal one-time task has
-`next_run_at: null` in tool JSON, not a year-0001 timestamp.
+Prompt-only and until-only updates preserve the existing next occurrence (even if
+overdue), rather than restarting a relative delay. Omit until on update to retain
+it, set a nonempty value to replace it, or use `"until":""` to clear it. Explicit
+JSON null is invalid; management actions other than update reject the field.
+A completed one-time task without until requires an explicit
+new `cron` to schedule it again. A task retaining its final failed report for
+automatic cleanup cannot be updated. Terminal tasks have `next_run_at: null` in
+tool JSON; tasks without a cutoff have `until: null`, not a year-0001 timestamp.
 
 Before retry, get the latest version and run ID, explain possible earlier side
 effects, and obtain an explicit user request. A failed execution is queued for a
 new run. A successful execution whose report failed returns `mode: report_only`
 and only resends stored output. Both consume a version and a bounded retry budget;
-stale/replayed requests fail. Failure messages identify the task/run and give this
-conversational retry path; no inline Telegram callback is required.
+stale/replayed requests fail. Failure messages identify the task/run; no inline
+Telegram callback is required. Retry requires the task to remain stored: a final
+delivered or policy-suppressed report for a task with until causes immediate cleanup.
 
 ## Scheduling and safety
 
@@ -142,7 +152,59 @@ all end ordinary scheduling: no next deadline or due-index entry remains. Result
 reports and eligible explicit retries remain available; retries do not create a new
 ordinary occurrence. Reports say “无下一次计划（一次性已结束）”. Completed tasks remain
 stored and **still count toward the chat quota** until explicitly deleted. There is
-no automatic cleanup or automatic execution retry.
+no automatic cleanup unless an explicit `until` is set, and no automatic execution retry.
+
+### Optional cutoff and automatic cleanup
+
+Pass `until` alongside any supported cron expression, including five-field cron,
+`@daily`, weekly/monthly aliases, fixed-delay `@every`, and one-time `@at`:
+
+```json
+{
+  "cron": "@daily 09:00",
+  "until": "2026-10-31T09:00:00+08:00",
+  "prompt": "## Context\nCheck the project's public releases.\n## Steps\nRead the specified release source and summarize changes.\n## Goal\nReturn a short summary with source links."
+}
+```
+
+`until` accepts RFC3339 with an explicit offset or `Z` (including fractional
+seconds), or local `YYYY-MM-DD HH:MM` in the task's captured timezone. It is an
+absolute cutoff, not an execution count, relative duration, runtime limit or report
+deadline. Local DST gaps are rejected; folds choose the earliest strictly future
+instance, as for an explicit local `@at` date. Values normalize to UTC on storage
+and output. Creation and explicitly setting until require a future cutoff. A new
+or rescheduled task with no occurrence at or before its effective cutoff is rejected
+without consuming quota. An until-only update cannot exclude its pending occurrence.
+
+The scheduled instant is inclusive: an occurrence **at** until is allowed; one
+after it is not. Late execution after downtime or congestion may still run the
+saved eligible occurrence once, even if the wall clock has passed until. No missed
+backlog is replayed, and a running occurrence is not cancelled at the cutoff.
+After success, failure, policy skip or interrupted-lease recovery, the ordinary
+next occurrence is computed using the existing calendar/fixed-delay rules and
+discarded if beyond until. A bounded one-time task also cleans up after its sole
+occurrence and final report, even when that occurrence precedes until.
+
+The final result and report remain stored while delivery is pending or claimed,
+including partially sent rich reports. Once the entire report is delivered, or
+delivery is suppressed by policy, the task and its indexes are deleted atomically
+and chat quota is released. It no longer appears in list/get and cannot be retried.
+Automatic cleanup does not undo external effects or messages already sent.
+
+If final delivery fails or exhausts its automatic budget, the task remains available
+until the result's existing 24-hour report window expires. Existing explicit retries
+remain available within that window and their budgets: report-only retry sends only
+unconfirmed parts without rerunning the model or extending the window; execution
+retry retains the original scheduled instant, even after until. At expiry, an
+unclaimed execution retry cannot start and is cleared with the task. Active execution
+or report leases are not deleted out from under a worker; completion or lease
+recovery resumes the lifecycle. A completed execution retry creates its own result
+and report window, subject to the remaining retry budget.
+
+Retained tasks still count toward quota. Cleanup of expired final reports uses the
+existing report poller and Redis indexes, not key TTLs: it resumes after downtime
+when the poller and Redis are available. Without until, completed tasks and results
+continue to be retained until explicit deletion.
 
 Before execution and delivery, the bot checks static and live Redis whitelist/block
 lists, creator fake-ban, chat shutdown, and enabled source/runner agent filters.
@@ -208,7 +270,55 @@ past duplicates, so one chat's task backlog cannot fill the candidate batch and
 hide other eligible chats. Background tool errors are also redacted before being
 returned to the model, including through the production error-wrapper path.
 
-## Compatibility and rollback
+## 部署与配置
+
+The settings table above is under `agent_v3.cron` in `config.yaml`. This feature
+adds tool arguments, **not** configuration keys; do not put `until` in config.yaml.
+
+| 键名 / 路径 | 类型 | 默认值 | 不配置时的行为 | 需要挂载 / 环境变量 / TZ |
+| --- | --- | --- | --- | --- |
+| `delegate.until` | Optional tool string | Omitted | No cutoff; no automatic task cleanup | None |
+| `cron_tasks` with `action: update`, `until` | Optional tool string | Omitted | Retain the saved cutoff; empty string clears it | None |
+| `agent_v3.cron.timezone` | Configuration string | `Asia/Shanghai` | Capture this timezone on new tasks | No host `TZ` dependency; embedded tzdata is used |
+| `agent_v3.cron.runner_agent` | Configuration string | Empty | Cron tools and scheduler are disabled | No new mount or environment variable |
+
+No new config, mount, environment variable or background loop is required. Existing
+tasks keep their captured timezone; changing the configuration does not reinterpret
+their local schedules or stored absolute cutoff.
+
+Redis scope remains `<prefix>:cron:v1:<encoded-bot>:<encoded-platform>`. Stored JSON
+gains an absolute `task.Until` timestamp (tool input/output uses lowercase `until`);
+missing/zero values mean no cutoff. Task,
+chat-task quota, dedup, due, retry and report indexes remain in that scope. The
+reports sorted set also schedules final failed/exhausted reports for cleanup at
+`FinishedAt + 24h`, without adding delivery attempts. Task keys have no new TTL;
+cleanup removes indexes and quota atomically. Redis eviction/durability settings
+still matter: a key without TTL is not protected from an `allkeys-*` eviction policy.
+
+### 对已有部署的迁移步骤
+
+1. Stop all old scheduler instances sharing the Redis coordinator; wait for or
+   safely handle in-flight execution and reports. Do not mix old/new bot binaries.
+2. Deploy all instances with until support before creating or updating bounded
+   tasks. Existing records without until need no migration and retain their behavior.
+3. Verify the dedicated runner and report poller are running. Failed final reports
+   remain visible and occupy quota until their report window expires and polling
+   can perform cleanup.
+
+Old binaries ignore the additional JSON field: they may continue scheduling past
+until or overwrite it. The field does not mechanically fence out an old consumer;
+ordinary rolling deployment must not enable until while old schedulers remain.
+
+### 回滚方式
+
+Stop new until writes, then use the new version to finish/drain all bounded tasks
+and their final reports. Confirm no bounded tasks, active executions, queued retries,
+pending reports or partially delivered reports remain in the affected scopes.
+Early cancellation, backup/archival or manual deletion requires the operator's
+separate authorization and preservation of needed results. Do not strip until from
+records as a migration. Stop all new instances before starting an older version.
+If bounded work cannot be drained safely, keep the new version or leave cron
+disabled; do not let an old scheduler consume those records.
 
 Existing five-field records need no migration. Old bot binaries cannot process new
 `@at`/`@every` records: do not mix old/new bots under the same Redis coordinator.

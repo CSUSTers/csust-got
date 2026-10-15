@@ -39,6 +39,8 @@ func TestCronActualToolInfoScheduleContract(t *testing.T) {
 		require.NoError(t, json.Unmarshal(encoded, &decoded))
 		require.Equal(t, "string", decoded.Properties["cron"].Type)
 		require.Equal(t, "string", decoded.Properties["prompt"].Type)
+		require.Equal(t, "string", decoded.Properties["until"].Type)
+		require.NotContains(t, decoded.Required, "until")
 		for _, syntax := range []string{"m h dom mon dow", "@at <duration|RFC3339|YYYY-MM-DD HH:MM|HH:MM>", "@at tomorro HH:MM", "@daily HH:MM", "@month/@monthly <1-31> HH:MM", "@week/@weekly <0-7|weekday-name> HH:MM", "@every <weekday-name> HH:MM", "@every <duration>", "@at 10m", "@at tomorro 09:00", "@weekly 1 09:00", "@weekly Wednesday 09:00", "@every Wed 09:00", "@every 90s", "positive whole-millisecond", "no d/w", "0/7 is Sunday", "HH:MM required", "case-insensitive", "three-letter or full English"} {
 			require.Contains(t, decoded.Properties["cron"].Description, syntax)
 		}
@@ -52,13 +54,13 @@ func TestCronActualToolInfoScheduleContract(t *testing.T) {
 				require.Contains(t, info.Desc, syntax, "the stable-prefix help must also expose the input syntax")
 			}
 			require.ElementsMatch(t, []string{"cron", "prompt"}, decoded.Required)
-			require.Len(t, decoded.Properties, 2)
+			require.Len(t, decoded.Properties, 3)
 			for _, rule := range []string{"one-time or recurring", "this chat and topic", "dedicated runner", "No target override", "## Context", "## Steps", "## Goal", "not now"} {
 				require.Contains(t, info.Desc, rule)
 			}
 		} else {
 			require.ElementsMatch(t, []string{"action"}, decoded.Required)
-			require.Len(t, decoded.Properties, 8)
+			require.Len(t, decoded.Properties, 9)
 			require.ElementsMatch(t, []string{"list", "get", "delete", "update", "retry"}, decoded.Properties["action"].Enum)
 			require.Equal(t, "integer", decoded.Properties["expected_version"].Type)
 			for _, rule := range []string{"Only the creator", "expected_version", "Update only cron/prompt", "Prompt-only", "explicit new cron", "next_run_at=null", "count toward quota", "user explicitly requests", "side effects", "report_only", "without rerunning the model or moving the schedule"} {
