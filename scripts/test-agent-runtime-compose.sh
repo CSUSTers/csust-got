@@ -354,14 +354,12 @@ check_file_excludes 'attack matrix never exposes the Broker token variable to a 
   "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" 'AGENT_FETCH_TOKEN'
 check_file_excludes 'attack matrix never exposes the Broker socket variable to a command Shell' \
   "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" 'AGENT_FETCH_SOCKET'
-check_file_excludes 'rollback gate no longer references the deleted permissive Fetch default test' \
-  "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" 'TestAgentV3FetchEnabledDefaultsTrueAndAllowsExplicitDisable'
 check_file_contains_all 'rollback gate runs every exact current test selector with observable run/pass evidence' \
   "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" \
   'run_exact_go_test()' '=== RUN   ' '--- PASS: ' 'runs == 1 && passes == 1' \
   'run_exact_go_test ./config TestAgentV3RuntimeFetchDefaultsDisabled rollback-fetch-default-disabled' \
   'run_exact_go_test ./config TestAgentV3RuntimeFetchRequiresExplicitTrue rollback-fetch-explicit-true' \
-  'run_exact_go_test ./agent TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled' \
+  'run_exact_go_test ./agent TestAgentV3FetchGuidanceRespectsEnabledGate rollback-fetch-guidance-disabled' \
   'run_exact_go_test ./agent TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules'
 check_file_excludes 'output cleanup assertions no longer use the obsolete non-dotfile Fetch temp glob' \
   "$REPO_ROOT/scripts/agent-runtime-attack-matrix.sh" '*.fetch-tmp-*'

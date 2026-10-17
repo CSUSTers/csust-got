@@ -3620,7 +3620,7 @@ run_exact_go_test() {
 rollback_gate_case() {
   run_exact_go_test ./config TestAgentV3RuntimeFetchDefaultsDisabled rollback-fetch-default-disabled || return 1
   run_exact_go_test ./config TestAgentV3RuntimeFetchRequiresExplicitTrue rollback-fetch-explicit-true || return 1
-  run_exact_go_test ./agent TestAgentV3FetchGuidanceIsOmittedWhenDisabled rollback-fetch-guidance-disabled || return 1
+  run_exact_go_test ./agent TestAgentV3FetchGuidanceRespectsEnabledGate rollback-fetch-guidance-disabled || return 1
   run_exact_go_test ./agent TestBuildAgentV3StablePrefixHashIncludesRuntimeRules rollback-stable-prefix-runtime-rules || return 1
   assert_bash_success 'test "$(agent-runtime-net-probe socket inet)" = errno=1' task9-rollback rollback-seccomp 5s
 }
