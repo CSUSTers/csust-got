@@ -155,11 +155,15 @@ bash scripts/test-agent-runtime-compose.sh
 bash scripts/agent-runtime-attack-matrix.sh
 ```
 
-The validator, Compose/static test, and attack matrix are deployment checks, not Runtime gates: the Runtime does not dynamically consume or gate on their receipt. Each command should exit 0, the attack matrix should report `fail=0 skipped=0`, and cleanup should leave zero residue. The host validator accepts equivalent nftables reject rendering such as `iifname "br-agent-fetch" reject with icmp port-unreachable`, while still requiring the exact bridge match, required deny sets, hook/priority/policy, and a reject verdict immediately after the expected match. Do not compensate for PRoot issues by using `privileged`, Docker `seccomp=unconfined`, AppArmor unconfined, or `SYS_PTRACE` unless that risk is separately accepted. A target-native Linux production receipt is still pending, so do not enable production Fetch until these conditions are met. See the [Agent Runtime Fetch Egress design](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md) for the full threat model and deployment contract.
+The validator, Compose/static test, and attack matrix are deployment checks, not Runtime gates: the Runtime does not dynamically consume or gate on their receipt. Each command should exit 0, the attack matrix should report `fail=0 skipped=0`, and cleanup should leave zero residue. The host validator accepts equivalent nftables reject rendering such as `iifname "br-agent-fetch" reject with icmp port-unreachable`, while still requiring the exact bridge match, required deny sets, hook/priority/policy, and a reject verdict immediately after the expected match. Do not compensate for PRoot issues by using `privileged`, Docker `seccomp=unconfined`, AppArmor unconfined, or `SYS_PTRACE` unless that risk is separately accepted. Before enabling production Fetch, obtain and retain a complete receipt for the version being deployed on the target native Linux host, then obtain operations approval. Documentation and local fixtures don't establish production acceptance. See the [Agent Runtime Fetch Egress design](docs/superpowers/specs/2026-08-25-agent-runtime-fetch-egress-design.md) for the full threat model and deployment contract.
 
 The Agent Runtime workflow publishes `ghcr.io/csusters/agent-runtime:<tag>` and `ghcr.io/csusters/agent-fetch-broker:<tag>`. The `dev` branch publishes `dev` and `latest-dev`; a published release publishes its release tag and `latest`.
 
 ### Skills, native SearXNG, and Fetch User-Agent
+
+The [skill snapshot and SearXNG specification](docs/superpowers/specs/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua-design.md)
+defines the wire format and activation rules. See [Runtime and state safety](docs/superpowers/specs/2026-08-30-agent-v3-review-remediation-design.md)
+for workspace ownership, reset, persistence and trace requirements.
 
 The new skill sources are closed by default:
 
@@ -386,6 +390,9 @@ setiwant - f=<format> vf=<format> sf=<format> Set sticker format
 - **Containerization**: Docker & Docker Compose
 
 ## Development
+
+The [Go/Paimon contract](docs/superpowers/specs/2026-09-01-go-1.27-paimon-migration-design.md)
+documents JSON compatibility and the outstanding non-race performance coverage requirement.
 
 ### Local Development
 

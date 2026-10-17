@@ -96,6 +96,9 @@ The Redis reader only recognizes the partitioned layout, not the old whole-scope
 
 ## Stable prefix and loop guidance
 
+The [instruction and reply-chain specification](superpowers/specs/2026-09-08-agent-prompt-append-tail-design.md)
+defines the main-agent instruction boundaries and fallback selection requirements.
+
 The stable agent-v3 prefix contains the execution protocol, optional soul,
 runtime and skill rules, loop rules, and the available-skill catalog. It is
 unchanged by reply-session history, memory, summaries, tool results, and loop

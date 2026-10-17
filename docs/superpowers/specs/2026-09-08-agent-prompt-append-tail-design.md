@@ -1,38 +1,18 @@
 # Agent instructions and reply-chain sessions
 
-## Goal and approval
+## Goal and scope
 
-Replace minimal anti-hallucination prompting with precise, conditional, stepwise instructions for the existing Telegram agent. Add an optional reply-chain session mode built from existing Telegram message records, grouping consecutive user utterances into blocks. Keep context naturally stable where practical, without treating exact prefix identity as a product requirement or claiming provider cache hits.
+The main agent uses conditional task and verification instructions. Optional `reply_chain` context is reconstructed from existing Telegram message records, grouping consecutive user utterances into blocks. Stability is best-effort, not an exact-prefix or provider-cache-hit guarantee.
 
-This revision supersedes the initial history-first proposal and reflects these user constraints:
-
-- “暂时不引入新的状态，尽可能从会话中构建稳定前缀”.
-- “增加一个agent配置项，通过reply链进行构建session，以保持本消息之前的稳定”.
-- “构建时尽量保持稳定即可，无需刻意。引入消息时以用户发言为准，例如用户连续在群聊中发送了多条消息且间隔均<1m则作为一个块引入。另外构建session时不要使用{{context}}这样的动态参数，时间等参数可以豁免”.
-
-This is a design artifact, not an implementation or a claim of implementation approval. The boundary defaults below are stated explicitly for the next planning stage.
+This specification covers main-agent instructions and the Telegram reply-chain fallback only. An accepted complete-model session replaces that fallback and has its own persistence contract, described in [Agent session context](../../agent_session_context.md). Configuration and operating limits are in [Reply-chain Agent Sessions](../../agent_reply_sessions.md).
 
 ## Global constraints
 
-- Do not add persistent state, Redis keys/fields, transcript storage, migration, or new conversation caches.
-- Preserve existing raw-turn Content/ImageRefs storage semantics, memory/forget behavior, summary updates and TTLs. Session selection must not import unrelated chat-wide history.
+- The Telegram reply-chain selector uses existing message records, without separate session identities or persistent selection state.
+- Fallback selection preserves raw-turn Content/ImageRefs semantics and doesn't import unrelated chat-wide history. Memory/forget and summary persistence follow their [current contracts](../../agent_memory.md), independently of the selector.
 - Preserve configured system_prompt/soul_path precedence and multimodal, reply, link, document, and skill capabilities. In session mode, restrict prompt templates to static text and allowed metadata instead of interpolated conversation content.
-- Use existing dependencies and the existing OpenAI-compatible model path; do not install software or invoke paid/live services without authorization.
-- Do not stage, commit, push, tag, or otherwise write Git state.
-- Keep changes limited to main-agent prompts, optional session configuration, reply-chain/user-block context composition, tool-loop guidance, their tests and documentation; do not redesign subagent execution or auxiliary summary models.
+- Main-agent instructions do not redefine explicit subagent prompts or auxiliary summary models.
 - Stability is best-effort. Do not add transcript normalization, immutable snapshots, session identities, or special cache instrumentation merely to preserve identical prefixes.
-
-## Current evidence
-
-`agent/agentv3_context.go` builds a stable soul/runtime/skill system, then memory, summary, raw turns and the current dynamic user message. Memory and summary changes therefore invalidate the prefix before raw history. `agent/loop.go` adds fixed loop instructions after prefix identity calculation and merges changing guidance into system on every model call. `saveAgentV3TurnPair` stores raw user input and final output, not the actual rendered prompt or tool transcript. These limitations cannot all be eliminated without new state.
-
-`agent/context.go:GetMessageContext` supplements reply ancestors with nearby group history; `getReplyChain` traverses only embedded ReplyTo objects. `orm/redis-message.go` already stores full Telegram messages by chat/message ID and a bounded chat stream, with a 24-hour TTL. These records provide sender IDs, timestamps and reply links without introducing session storage. `ContextMessage.User` is a username, not a safe identity for grouping; use the full message's Sender.ID.
-
-## Alternatives
-
-1. Continue using chat-wide sliding history: retain as the default compatibility mode, but it cannot represent reply branches independently.
-2. Optional reply-chain sessions with utterance blocks (selected): infer the session from existing messages, avoid unrelated chat history, and accept natural changes from edits, expiry and limits.
-3. Persist exact model transcripts and compact at thresholds: rejected because it adds state and tool-result retention and overemphasizes cache identity.
 
 ## Instruction architecture
 
@@ -48,7 +28,7 @@ Add `context_mode` to each agent entry: `chat` (including an omitted value) pres
 
 In reply-chain mode, follow the current message's ReplyTo ancestors within the same chat. Use existing stored full messages to recover links not embedded in the incoming update. Stop at a root, missing ancestor, cycle or existing resource limit. No reply means a new conversation, though the current user's immediately preceding utterances may belong to its block. Replying to an older message creates a branch from that point without inheriting sibling branches.
 
-Do not append chat-wide raw turns, chat-wide conversation summaries, or arbitrary nearby messages to a reply-chain session. Nearby messages are read only to find the user blocks containing selected chain nodes. Existing raw-turn persistence can remain unchanged for chat-mode compatibility; it is not the session source. Shared group memory remains background data, not conversation history or a source of task authorization.
+Do not append chat-wide raw turns, chat-wide conversation summaries, or arbitrary nearby messages to the Telegram reply-chain fallback. Nearby messages are read only to find the user blocks containing selected chain nodes. Raw-turn persistence is an independent chat-mode fallback mechanism, not this selector's history source. Shared group memory remains background data, not conversation history or a source of task authorization.
 
 Bot responses must retain their actual reply relationship to the initiating user message when saved in the existing message records. Do not create a parallel session mapping. Do not infer missing parent links from message proximity.
 
@@ -76,7 +56,7 @@ The ordinary system-template ban on dynamic conversation data remains; session m
 
 Session messages consist of system instructions, selected historical user blocks and bot replies, optional current group-memory background, allowed per-request metadata/static prompt additions, and the current user block. Preserve content and chronology; do not deliberately rewrite old blocks to optimize cache hits. No immutable-prefix guarantee is required when a block grows, an ancestor changes, or a budget removes older content.
 
-During a tool run, sanitize input and inject fixed instructions before the first model request. Append changing runtime guidance after all results from the preceding tool call, never between an assistant tool call and its results. A separate user-role control note is compatible with the current model transport, not a promotion of arbitrary user tags to authority. Retain appended notes only in the existing run-local history. Keep execution limits, duplicate detection and error handling in code. Do not persist notes or tool traces.
+During a tool run, sanitize input and inject fixed instructions before the first model request. Append changing runtime guidance after all results from the preceding tool call, never between an assistant tool call and its results. A separate user-role control note is compatible with the current model transport, not a promotion of arbitrary user tags to authority. Keep execution limits, duplicate detection and error handling in code. Notes aren't raw chat turns and must not be replayed into a later invocation. A complete-model session archive may retain guidance as an audit frame and tool traces under its separate storage contract.
 
 ## Stable prefix identity and tool definitions
 
@@ -86,7 +66,7 @@ Keep fixed instructions centralized and avoid repeated injection. Existing cache
 
 ## Compatibility and failure behavior
 
-Leave Redis schemas unchanged, including immediate snapshot rebuilding on forget and existing concurrent update behavior. Leave output delivery semantics unchanged except ensuring its already-stored bot response retains the reply link needed for reconstruction. Preserve final-round refusal to execute tools even if the model ignores guidance, duplicate warnings, cancellation, tool-call pairing, and stream clearing. Configured custom identity prompts remain effective under the session template restrictions; main-agent execution rules are supplied independently. Explicit subagent prompts and auxiliary progress-summary prompts are out of scope.
+Reply-chain reconstruction doesn't change memory schemas, immediate snapshot rebuilding on forget or concurrent update behavior. Stored bot responses retain their known reply links. Preserve final-round refusal to execute tools even if the model ignores guidance, duplicate warnings, cancellation, tool-call pairing, and stream clearing. Configured custom identity prompts remain effective under the session template restrictions; main-agent execution rules are supplied independently. Current output delivery semantics are specified in [Telegram delivery](../../agent_delivery.md).
 
 Message expiry or a missing ancestor yields the recoverable chain with an explicit incompleteness indication; it must not silently fall back to unrelated chat history. Do not fabricate deleted or unavailable content. Existing shared memory must remain current after forget; do not pin old snapshots for cache reuse.
 
@@ -100,6 +80,6 @@ Message expiry or a missing ancestor yields the recoverable chain with an explic
 
 ## Verification and limits
 
-During later implementation, capture failing assertions for reply selection, grouping and template restrictions before making them pass. Exercise the real CustomAgent loop with captured model inputs and existing local model fixtures; do not fabricate live cache statistics. Run focused package tests, full available suite/build, and diagnostics. Report toolchain/environment blockers rather than installing dependencies or claiming unrun checks passed.
+Verification exercises reply selection, grouping and template restrictions, and the real CustomAgent loop with captured model inputs and local model fixtures. These checks don't establish live cache statistics.
 
 No claim of exact cross-turn replay, unlimited context, guaranteed provider cache hits, or measured model-quality improvement follows from these tests. Record expiry, message edits, growing utterance blocks, bounded history, transient time/images and missing persisted tool traces remain accepted reuse boundaries. Preserve conversation correctness rather than forcing cache stability.

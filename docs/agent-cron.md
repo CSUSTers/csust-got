@@ -148,11 +148,12 @@ cron, using the captured timezone and the same gap/fold rules as five-field cron
 
 One-time tasks that were never claimed keep their original deadline across downtime
 and run once when eligible. Success, failure, skip, and interrupted-lease recovery
-all end ordinary scheduling: no next deadline or due-index entry remains. Results,
+all end ordinary scheduling: no next deadline or due-index entry remains. Without `until`, results,
 reports and eligible explicit retries remain available; retries do not create a new
 ordinary occurrence. Reports say “无下一次计划（一次性已结束）”. Completed tasks remain
 stored and **still count toward the chat quota** until explicitly deleted. There is
-no automatic cleanup unless an explicit `until` is set, and no automatic execution retry.
+no automatic cleanup for tasks without `until`, and no automatic execution retry.
+Tasks with `until` instead follow the final-report retention and cleanup rules below.
 
 ### Optional cutoff and automatic cleanup
 

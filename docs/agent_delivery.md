@@ -2,7 +2,26 @@
 
 本文描述 Agent v3 把模型输出投递到 Telegram 时的保护逻辑，覆盖流式（`handleStreaming` → `streamToTelegramWithDelivery`）与非流式（`handleNonStreaming` → `nonStreamResponseWithDelivery`）两条路径。实现位于 `agent/streaming.go` 与 `agent/format.go`。
 
-## 1. 最终投递（A4）
+## Rich 输出契约
+
+`agents[].agent.rich: true` 允许 Agent v3 使用 Rich Markdown，但不改变普通文本的
+`format: md|html`。只有本轮成功 `load_skill(name="rich-message")` 后，最终输出中的
+首个 `<telegram_rich_message>...</telegram_rich_message>` 的非空正文才能作为 rich 消息投递；
+后续工具调用不清除本轮授权，加载其他 skill 也不能代替该授权。内置 skill 还受
+`agent_v3.skills.inject_builtin` 控制，见[统一 Skill 规范](superpowers/specs/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua-design.md)。
+
+标签内部是原始 Telegram Rich Markdown，不是 JSON、HTML 或 `InputRichMessage` 对象。
+rich 投递使用 `sendRichMessage.rich_message.markdown`，不先转义为 MarkdownV2 或 HTML。
+解析器只选择第一个起始标签；若闭合标签尚未出现，取其后全部内容作为正文。
+交互流式预览在 envelope 拼装期间暂停普通 placeholder 编辑，最终再完成 rich 投递。
+标签外文本不作为 rich 正文发送；缺少授权的 envelope 转成可见文本后走普通文本路径。
+成功 rich 投递后删除原 placeholder，并为普通消息历史保存派生的可见文本。
+此接口不提供 `sendRichMessageDraft` 或媒体上传。
+
+交互响应的 rich 失败回退见 §1.4；[Cron 报告](agent-cron.md)采用持久化格式标记和回执，
+rich 失败不会降级为普通文本。
+
+## 1. 最终投递
 
 ### 1.1 Flood 重试
 
@@ -41,7 +60,7 @@
 
 - `cronReportChunks` 复用同一切分器，但保持原有的 1800 rune 分段尺寸，以免改变已有报告消息数量。
 
-## 2. 流式编辑去重与退避（B1）
+## 2. 流式编辑去重与退避
 
 `streamProcessor.editPlaceholder` 维护以下状态：
 

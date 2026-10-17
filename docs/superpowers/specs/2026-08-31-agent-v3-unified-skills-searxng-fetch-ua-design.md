@@ -1,9 +1,8 @@
 # Agent v3 Unified Skills, SearXNG 与 Fetch User-Agent 设计
 
-- 日期: 2026-08-31
-- 状态: 已由用户委托决定，可进入实现规划
 - 范围: Bot 的 Agent v3、Rust Agent Runtime、Fetch Broker、配置与部署文档
-- 前置设计: `2026-06-17-agent-v3-builtin-skills-design.md`、`2026-08-25-agent-runtime-fetch-egress-design.md`、`2026-08-30-agent-v3-review-remediation-design.md`
+- 相关契约: [Fetch 隔离](2026-08-25-agent-runtime-fetch-egress-design.md)、[Runtime 与状态安全](2026-08-30-agent-v3-review-remediation-design.md)
+- 使用与部署: [README](../../../README.md#skills-native-searxng-and-fetch-user-agent)
 
 ## 1. 目标与边界
 
@@ -46,14 +45,6 @@ Runtime Fetch request -> HeaderPolicy::review -> inject or retain User-Agent
 
 Bot owns program builtins, chat-gated builtins, the Bot-local snapshot and per-turn state. Runtime owns only its startup `runtime-global` snapshot and exposes it through its authenticated control-plane API. The SearXNG client is a Bot-native, configuration-bound capability. Fetch Broker remains the only generic egress policy authority and owns final HTTP header review. No component reads another component's skill directory after startup.
 
-## 2. 方案比较与选择
-
-1. **动态 `grep`/`read` 发现。** 模型先列目录，再经 Runtime `read` 读取 `SKILL.md`。它实现量小，却会引入目录变更和两次读之间的 manifest/content 竞态，也会让模型提示词鼓励从 `/skills` 任意探索。
-2. **启动时复制 skill 文件。** Bot 或 Runtime 把目录复制到另一处再暴露。复制可减少部分竞态，但会制造两份生命周期、权限与磁盘配额问题，且无法自然表达 Bot 与 Runtime 的来源优先级。
-3. **不可变统一快照。** 每个进程启动时验证自己的直接子目录，读入并散列 skill 正文，之后只服务内存快照。Bot 从 Runtime 一次性获得其完整快照，再为每轮建立合并后的只读视图。
-
-选择第三种。它在 API、缓存键和故障语义上最明确，也不要求 Bot 读取 Runtime 容器卷。动态发现和文件复制均不采用。
-
 ## 3. Skill 文件格式与快照规则
 
 ### 3.1 目录契约
@@ -89,6 +80,14 @@ Bot 和 Runtime 各自只读取自己配置的 filesystem root。二者在读取
 
 `snapshot_sha256` 是按固定的、无歧义的 canonical serialization 计算的 SHA-256。serialization 包含 `schema_version` 和按名称排序的每个 descriptor 的 `name`、`description`、`content`、`sha256`、`source`、`virtual_path`，字段用长度前缀编码，避免拼接歧义。`sha256` 同时校验内容完整性，`snapshot_sha256` 标识整个不可变集合。
 
+跨语言编码逐项写入 8-byte big-endian 无符号 UTF-8 字节长度，再写入对应字节。
+项目顺序为十进制 `schema_version`、十进制 descriptor 数量，然后按名称排序的每个
+descriptor 的上述六个字段。schema 1 的单项协议向量为 `name="alpha"`、
+`description="Alpha skill."`、`content="# Alpha\nAlpha skill.\n"`、
+`source="runtime-global"`、`virtual_path="/skills/alpha/SKILL.md"`；content SHA 为
+`1fbaf47fc271ddf43f40756a9a3d2776156e7e2c6472bf9bf4cd66ea143be574`，snapshot SHA 为
+`66d894d641ce04fcc04eaec3837a0dac24a27dd5ee9160ce8d3871ce0155f9ee`。
+
 ## 4. 配置与启动顺序
 
 ### 4.1 Bot 配置
@@ -116,7 +115,7 @@ agent_v3:
       user_agent: csust-got-agent-v3
 ```
 
-`skills.root` 是 Bot-local root。空值表示禁用该来源。非空值在 `chatv2.Init` 时读取并冻结，所有路径、编码、限额和重复错误都使 Bot 启动失败。`runtime_global` 结构体默认值为 `false`，样例 `config.yaml` 可以显式写 `true`，但不会改变默认兼容行为。`inject_builtin` 继续决定程序 builtins 是否加入。
+`skills.root` 是 Bot-local root。空值表示禁用该来源。非空值在 `agent.Init` 时读取并冻结，所有路径、编码、限额和重复错误都使 Bot 启动失败。`runtime_global` 结构体默认值为 `false`，样例 `config.yaml` 可以显式写 `true`，但不会改变默认兼容行为。`inject_builtin` 继续决定程序 builtins 是否加入。
 
 当 `runtime_global: true` 时，Bot 在 Agent v3 初始化阶段向已认证 Runtime 请求快照，验证 schema、descriptor 和 `snapshot_sha256` 后冻结该响应。连接失败、非成功响应、无效 JSON、内容 SHA 不匹配、重复/无效 descriptor 或快照 SHA 不匹配都使启用 Agent v3 的 Bot 启动失败。`runtime_global: false` 时 Bot 不调用该端点。
 
@@ -148,7 +147,7 @@ Runtime 从其已有的配置 `/skills` root 在 Runtime 启动时构造 `runtim
 ### 4.3 启动顺序和部署
 
 1. Runtime 验证自身配置，读取其 `/skills` root，构造并冻结 Runtime snapshot，之后才报告 ready。
-2. Bot 读取配置，加载程序 builtins，并在 `chatv2.Init` 冻结 Bot-local snapshot。
+2. Bot 读取配置，加载程序 builtins，并在 `agent.Init` 冻结 Bot-local snapshot。
 3. 若 `runtime_global` 已启用，Bot 调用已 ready 的 Runtime `GET /v1/skills` 并验证、冻结返回值。
 4. Bot 编译 Agent v3 chat，只有三类所需快照均固定后才可 ready。
 
@@ -228,7 +227,7 @@ Stable Prefix 的 `<agent_v3_skills>` 只列可用的 skill metadata，不嵌入
 
 请求只追加允许参数，并以稳定顺序编码。响应只接受预期 JSON 结构，最多读取 `max_response_bytes`，最多选择 `num_results` 个项目，并对每个可展示字段施加 `max_result_chars`。`compact` 输出 rank、标题、URL 和截断摘要；`full` 可增加已验证的来源、发布日期、score 和类别。`text` 以固定字段顺序和清晰分隔符格式化，`json` 输出由本实现重新构造、字段稳定且已截断的 JSON，不透传原始 SearXNG JSON。结果排序遵循响应顺序，截断使用确定的 rune 边界和明确的 truncation 标记。
 
-`searxng_search_suggestions` 调用 `/autocompleter`，接收非空 query 和可选 language，使用同一 origin、超时、禁重定向和最大 body 限制。返回一个确定排序且有数量/字符上限的纯 suggestion 列表，不透传额外对象。
+`searxng_search_suggestions` 调用 `/autocompleter`，接收非空 query 和可选 language，使用同一 origin、超时、禁重定向和最大 body 限制。响应只接受顶层 string array，或恰好两项的 `[query, suggestions]`（query 为 string，suggestions 为 string array）；其他长度和类型均拒绝。结果按确定的 rune 边界截断、去重、字典序排序，并施加数量上限，只返回纯 suggestion 列表，不透传额外对象。
 
 `searxng_instance_info` 调用 `/config`，接收 `include_engines`、`include_disabled` 和 `category`。它只返回 bounded、重新格式化的公开实例 metadata 和按条件筛选的 engine summary。category 是受限 token；任何未知 response shape 都按 `invalid_response` 处理。三项工具的搜索 payload 都是 untrusted data，不能影响 system prompt、tool policy 或后续权限判断。
 
@@ -283,7 +282,7 @@ snapshot、turn state 和 loaded-skill set 都是 request/turn scoped immutable-
 
 - loader 覆盖 direct-child success、canonical regex、symlink 拒绝、递归忽略、UTF-8、64 KiB、128 项、1 MiB、描述提取和 rune 截断。
 - 覆盖同来源 duplicate startup failure，三来源 shadow precedence、稳定排序、descriptor SHA 与 snapshot SHA 的 canonical serialization。
-- 覆盖 `chatv2.Init` 读取 Bot-local snapshot，空 root 禁用，非空非法 root 失败，`runtime_global` 默认 false 和开启后的 authenticated snapshot 校验。
+- 覆盖 `agent.Init` 读取 Bot-local snapshot，空 root 禁用，非空非法 root 失败，`runtime_global` 默认 false 和开启后的 authenticated snapshot 校验。
 - 覆盖每轮 `AgentV3TurnState` 合并、availability XML 的 source/SHA、内容变更导致 prefix hash 变更、turn 内不重读文件和 `load_skill` normalization。
 - 覆盖 `TurnContext` 多名称 loaded set、rich-message 本轮加载授权、后续普通工具不清除授权、普通 loaded skill 不能放宽 rich gate，以及最终合并快照非空时暴露 `load_skill`。
 - 覆盖 SearXNG 默认关闭、启用配置所有边界、native tools 前置和 MCPO duplicate warning、未激活零 HTTP I/O、请求参数验证、固定 host、禁 redirect、结果截断与脱敏错误。
