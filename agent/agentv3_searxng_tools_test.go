@@ -113,7 +113,7 @@ func TestSearXNGToolsRequireSuccessfulCurrentTurnLoadWithZeroIO(t *testing.T) {
 		return searXNGNativeHTTPResponse(`{"results":[]}`), nil
 	})}
 	tools := buildAgentV3Tools(nonRichAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}, client)
-	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: searXNGNativeToolCatalog(t, false), loadedSkillNames: map[string]struct{}{}}}
+	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: searXNGNativeToolCatalog(t, false)}}
 	ctx := WithTurnContext(t.Context(), tc)
 
 	for index, args := range []string{`{"query":"tea"}`, `{"query":"tea"}`, `{}`} {
@@ -154,7 +154,7 @@ func TestSearXNGToolsWorkAfterLoadAndDoNotAuthorizeRichOutput(t *testing.T) {
 		}
 	}))
 	tools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}, client)
-	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: searXNGNativeToolCatalog(t, true), loadedSkillNames: map[string]struct{}{}}}
+	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: searXNGNativeToolCatalog(t, true)}}
 	ctx := WithTurnContext(t.Context(), tc)
 
 	loaded, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"searxng"}`)
@@ -204,10 +204,8 @@ func TestSearXNGWebSearchToolAcceptsFiniteOutOfRangeMinScores(t *testing.T) {
 		return searXNGNativeHTTPResponse(`{"results":[{"title":"Below negative threshold","url":"https://example.org/below","content":"below","score":-2},{"title":"Negative threshold match","url":"https://example.org/negative","content":"negative","score":-0.25},{"title":"High threshold match","url":"https://example.org/high","content":"high","score":2}]}`), nil
 	}))
 	webTool := &searXNGWebSearchTool{client: client}
-	tc := &TurnContext{V3: &AgentV3TurnState{
-		SkillCatalog:     searXNGNativeToolCatalog(t, false),
-		loadedSkillNames: map[string]struct{}{agentV3SearXNGSkillName: {}},
-	}}
+	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: searXNGNativeToolCatalog(t, false)}}
+	tc.markSkillLoaded(agentV3SearXNGSkillName)
 	ctx := WithTurnContext(t.Context(), tc)
 
 	for _, testCase := range []struct {
@@ -281,8 +279,8 @@ func TestSearXNGSkillAndToolStateAreIsolatedAcrossTurns(t *testing.T) {
 	}))
 	webTool := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{}, agentV3SkillCatalog{}, client)[0].(tool.InvokableTool)
 	catalog := searXNGNativeToolCatalog(t, true)
-	first := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
-	second := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
+	first := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog}}
+	second := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog}}
 	firstCtx, secondCtx := WithTurnContext(t.Context(), first), WithTurnContext(t.Context(), second)
 
 	_, err := (&loadSkillTool{}).InvokableRun(firstCtx, `{"name":"searxng"}`)

@@ -44,6 +44,12 @@ func agentV3FrameTime(tc *TurnContext) time.Time {
 	return beijingNow()
 }
 
+func agentV3DateTimeBlock(tc *TurnContext) string {
+	now := agentV3FrameTime(tc).In(beijingFallbackLocation)
+	return fmt.Sprintf(`<datetime timezone="Asia/Shanghai" rfc3339="%s">%s</datetime>`,
+		now.Format(time.RFC3339), now.Format("2006-01-02 15:04:05"))
+}
+
 func beijingNow() time.Time {
 	loc, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {

@@ -243,6 +243,7 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		if phErr != nil {
 			zap.L().Warn("agentv3: failed to send progress placeholder", zap.Error(phErr))
 		} else {
+			RecordProcessMessage(tbCtx.Bot(), placeholderMsg, msg)
 			tc.SetProgressMsg(placeholderMsg)
 		}
 	}
@@ -384,11 +385,11 @@ func saveAgentV3Delivery(ctx context.Context, tbCtx tb.Context, tc *TurnContext,
 	defer cancel()
 	if len(delivered) > 1 {
 		for _, msg := range delivered {
-			SaveResponse(msg, tbCtx.Message())
+			_ = SaveResponse(msg, tbCtx.Message())
 		}
 	} else {
 		sent.Text = response
-		SaveResponse(sent, tbCtx.Message())
+		_ = SaveResponse(sent, tbCtx.Message())
 	}
 	if err := saveAgentV3TurnPair(ctx, tc, extractInput(tbCtx.Message(), tc.Trigger), response, sent.ID); err != nil {
 		if tc != nil && tc.V3 != nil && tc.V3.Trace != nil {

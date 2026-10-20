@@ -186,6 +186,7 @@ func (sp *streamProcessor) process(existingMsg *tb.Message) (string, string, *tb
 			return "", "", nil, err
 		}
 		sp.placeholderMsg = sent
+		RecordProcessMessage(sp.tbCtx.Bot(), sent, sp.tbCtx.Message())
 	}
 	// Start periodic update ticker
 	ticker := time.NewTicker(sp.editInterval)

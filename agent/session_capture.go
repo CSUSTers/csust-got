@@ -169,7 +169,8 @@ type sessionCaptureSubAgentTool struct {
 }
 
 func (t *sessionCaptureSubAgentTool) InvokableRun(ctx context.Context, args string, opts ...tool.Option) (string, error) {
-	return t.InvokableTool.InvokableRun(WithSessionCapture(ctx, nil), args, opts...)
+	ctx = beginAgentV3SkillScope(WithSessionCapture(ctx, nil), true)
+	return t.InvokableTool.InvokableRun(ctx, args, opts...)
 }
 
 func cloneSessionCaptureMessages(messages []*schema.Message) ([]*schema.Message, error) {

@@ -39,8 +39,11 @@ func loadReplySession(ctx context.Context, current *tb.Message, maxContext int) 
 	if current == nil || current.Chat == nil || current.ID <= 0 {
 		return replySession{Incomplete: true}, nil
 	}
+	ctx, done := withContextMessageResolver(ctx)
+	defer done()
+	resolver := ctx.Value(contextMessageResolverKey{}).(*contextMessageResolver)
 
-	nearby, scanned, err := orm.GetMessagesFromStreamBestEffort(current.Chat.ID, orm.MessageStreamQuery{
+	nearby, scanned, err := resolver.messageReader().GetMessagesFromStreamBestEffort(current.Chat.ID, orm.MessageStreamQuery{
 		MaxID:   current.ID,
 		Count:   replySessionAncestorLimit,
 		Reverse: true,
@@ -52,19 +55,36 @@ func loadReplySession(ctx context.Context, current *tb.Message, maxContext int) 
 		nearby = nil
 	}
 
-	session, err := selectReplySession(ctx, current, nearby, orm.GetMessage, maxContext)
+	if err := resolver.prime(current.Chat.ID, append(nearby, current)...); err != nil {
+		return replySession{}, err
+	}
+	clone := *current
+	clone.ReplyTo, err = resolveContextReplyChain(ctx, current.Chat.ID, current.ReplyTo)
+	if err != nil {
+		return replySession{}, err
+	}
+	canonical := func(message *tb.Message) (*tb.Message, bool, error) {
+		return resolver.resolve(current.Chat.ID, message)
+	}
+	session, err := selectReplySession(ctx, &clone, nearby, resolver.loadStored, maxContext, canonical)
 	if err == nil && scanned >= replySessionAncestorLimit {
 		session.Incomplete = true
 	}
 	return session, err
 }
 
-func selectReplySession(ctx context.Context, current *tb.Message, nearby []*tb.Message, lookup func(int64, int) (*tb.Message, error), maxContext int) (replySession, error) {
+type replySessionMessageResolver func(*tb.Message) (*tb.Message, bool, error)
+
+func selectReplySession(ctx context.Context, current *tb.Message, nearby []*tb.Message, lookup func(int64, int) (*tb.Message, error), maxContext int, resolvers ...replySessionMessageResolver) (replySession, error) {
 	if err := ctx.Err(); err != nil {
 		return replySession{}, err
 	}
 	if current == nil || current.Chat == nil || current.ID <= 0 {
 		return replySession{Incomplete: true}, nil
+	}
+	canonical := replySessionMessageResolver(func(message *tb.Message) (*tb.Message, bool, error) { return message, false, nil })
+	if len(resolvers) != 0 {
+		canonical = resolvers[0]
 	}
 
 	nearbyByID := make(map[int]*tb.Message, len(nearby))
@@ -77,12 +97,18 @@ func selectReplySession(ctx context.Context, current *tb.Message, nearby []*tb.M
 			continue
 		}
 		nearbyByID[message.ID] = message
-		messagesByID[message.ID] = message
+		resolved, process, err := canonical(message)
+		if err != nil {
+			return replySession{}, err
+		}
+		if !process {
+			messagesByID[message.ID] = resolved
+		}
 	}
 	messagesByID[current.ID] = current
 
 	anchors := map[int]bool{current.ID: true}
-	incomplete, err := collectReplySessionAncestors(ctx, current, nearbyByID, messagesByID, anchors, lookup)
+	incomplete, err := collectReplySessionAncestors(ctx, current, nearbyByID, messagesByID, anchors, lookup, canonical)
 	if err != nil {
 		return replySession{}, err
 	}
@@ -111,7 +137,7 @@ func isReplySessionNearbyMessage(message, current *tb.Message) bool {
 		message.Chat.ID == current.Chat.ID && message.ID > 0 && message.ID <= current.ID
 }
 
-func collectReplySessionAncestors(ctx context.Context, current *tb.Message, nearbyByID, messagesByID map[int]*tb.Message, anchors map[int]bool, lookup func(int64, int) (*tb.Message, error)) (bool, error) {
+func collectReplySessionAncestors(ctx context.Context, current *tb.Message, nearbyByID, messagesByID map[int]*tb.Message, anchors map[int]bool, lookup func(int64, int) (*tb.Message, error), canonical replySessionMessageResolver) (bool, error) {
 	parent := current.ReplyTo
 	previousID := current.ID
 	visited := map[int]bool{current.ID: true}
@@ -132,6 +158,15 @@ func collectReplySessionAncestors(ctx context.Context, current *tb.Message, near
 
 		visited[normalizedParent.ID] = true
 		ancestorCount++
+		normalizedParent, process, err := canonical(normalizedParent)
+		if err != nil {
+			return false, err
+		}
+		if process {
+			previousID = normalizedParent.ID
+			parent = normalizedParent.ReplyTo
+			continue
+		}
 		resolved, fullRecord, err := lookupReplySessionParent(ctx, current.Chat, normalizedParent, nearbyByID, lookup)
 		if err != nil {
 			return false, err
@@ -142,12 +177,18 @@ func collectReplySessionAncestors(ctx context.Context, current *tb.Message, near
 		if resolved.ID != normalizedParent.ID || resolved.Chat == nil || resolved.Chat.ID != current.Chat.ID {
 			return true, nil
 		}
-		if contextMessageFromTelegram(resolved) == nil {
+		resolved, process, err = canonical(resolved)
+		if err != nil {
+			return false, err
+		}
+		if !process && contextMessageFromTelegram(resolved) == nil {
 			return true, nil
 		}
 
-		messagesByID[resolved.ID] = resolved
-		anchors[resolved.ID] = true
+		if !process {
+			messagesByID[resolved.ID] = resolved
+			anchors[resolved.ID] = true
+		}
 		previousID = resolved.ID
 		if !fullRecord {
 			incomplete = true

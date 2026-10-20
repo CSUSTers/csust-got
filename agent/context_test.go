@@ -992,14 +992,14 @@ func TestFormatContextMessagesWithXml(t *testing.T) {
 func TestFormatContextMessageTime(t *testing.T) {
 	now := time.Date(2026, time.September, 1, 10, 30, 0, 0, util.TimeZoneCST)
 
-	assert.Equal(t, "08:15:42", formatContextMessageTime(time.Date(2026, time.September, 1, 8, 15, 42, 0, util.TimeZoneCST).Unix(), now))
-	assert.Equal(t, "2026-08-31 23:59:59", formatContextMessageTime(time.Date(2026, time.August, 31, 23, 59, 59, 0, util.TimeZoneCST).Unix(), now))
+	assert.Equal(t, "2026-09-01T08:15:42+08:00", formatContextMessageTime(time.Date(2026, time.September, 1, 8, 15, 42, 0, util.TimeZoneCST).Unix(), now))
+	assert.Equal(t, "2026-08-31T23:59:59+08:00", formatContextMessageTime(time.Date(2026, time.August, 31, 23, 59, 59, 0, util.TimeZoneCST).Unix(), now))
 	assert.Empty(t, formatContextMessageTime(0, now))
 }
 
 func TestContextMessageFormatIncludesTime(t *testing.T) {
 	messageTime := time.Now().Unix()
-	expectedTime := time.Unix(messageTime, 0).In(util.TimeZoneCST).Format("15:04:05")
+	expectedTime := time.Unix(messageTime, 0).In(util.TimeZoneCST).Format(time.RFC3339)
 	messages := []*ContextMessage{{ID: 1, Unixtime: messageTime, Text: "hello"}}
 
 	assert.Contains(t, FormatContextMessages(messages), expectedTime)

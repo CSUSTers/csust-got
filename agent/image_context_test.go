@@ -187,6 +187,7 @@ func (r *testAlbumMessageReader) GetMessages(chatID int64, ids []int) (map[int]*
 func (r *testAlbumMessageReader) Close() { r.closed = true }
 
 func TestLoadFullContextMessagesUsesReplyChainAndStoredMessages(t *testing.T) {
+	setupReplySessionRedis(t)
 	oldLoader := loadStoredTelegramMessage
 	defer func() { loadStoredTelegramMessage = oldLoader }()
 

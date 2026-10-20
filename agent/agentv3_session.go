@@ -307,6 +307,11 @@ type agentV3PreparedSessionInput struct {
 
 func buildAgentV3SessionInput(cc *CompiledAgent, tc *TurnContext, proof agentV3SessionReplyProof) ([]*schema.Message, error) {
 	current := *tc.Message
+	resolved, err := resolveContextReplyChain(agentV3RenderContext(tc), tc.ChatID, current.ReplyTo)
+	if err != nil {
+		return nil, err
+	}
+	current.ReplyTo = resolved
 	if target, valid := replySessionEmbeddedParent(current.ReplyTo, current.Chat); valid && current.Chat.ID == tc.ChatID {
 		if proof != nil && proof.ContainsReplyMessageID(target.ID) {
 			current.ReplyTo = nil

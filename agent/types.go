@@ -29,6 +29,7 @@ type TurnContext struct {
 	V3            *AgentV3TurnState
 	Session       *agentV3SessionTurn
 	Background    bool
+	skills        agentV3SkillState
 	// Progress tracking — used by update_progress tool and streaming handlers.
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex
@@ -41,7 +42,6 @@ type TurnContext struct {
 	finalized        atomic.Bool                // Set true after final response sent
 	lastEditAt       atomic.Int64               // Unix nanoseconds of the last Telegram edit; shared rate-limit floor.
 	placeholderVer   atomic.Uint64              // Bumped when a non-stream writer overwrites progressMsg.
-	toolMu           sync.Mutex
 }
 
 type progressStep struct {
@@ -102,53 +102,23 @@ func (tc *TurnContext) markSkillLoaded(name string) {
 	if err != nil {
 		return
 	}
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
 	if tc.V3 == nil {
 		return
 	}
-	if tc.V3.loadedSkillNames == nil {
-		tc.V3.loadedSkillNames = make(map[string]struct{})
+	state := &tc.skills
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.names == nil {
+		state.names = make(map[string]struct{})
 	}
-	tc.V3.loadedSkillNames[canonical] = struct{}{}
-}
-
-func (tc *TurnContext) activateSkill(skill agentV3SkillDescriptor) {
-	if tc == nil || tc.V3 == nil {
-		return
-	}
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
-	if tc.V3.loadedSkillNames == nil {
-		tc.V3.loadedSkillNames = make(map[string]struct{})
-	}
-	if _, ok := tc.V3.loadedSkillNames[skill.Name]; ok {
-		return
-	}
-	tc.V3.loadedSkillNames[skill.Name] = struct{}{}
-	switch skill.Source {
-	case agentV3SkillSourceBuiltin:
-	case agentV3SkillSourceBotLocal:
-		if len(skill.environment) > 0 {
-			tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, Env: cloneAgentV3SkillEnvironment(skill.environment)})
-		}
-	case agentV3SkillSourceRuntimeGlobal:
-		tc.V3.loadedSkillEnv = append(tc.V3.loadedSkillEnv, runtimeSkillEnvLayer{Source: skill.Source, Name: skill.Name, SkillSHA256: skill.SHA256})
-	}
+	state.names[canonical] = struct{}{}
 }
 
 func (tc *TurnContext) runtimeEnvironment() (map[string]string, []runtimeSkillEnvLayer) {
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
-	if tc.V3 == nil {
+	if tc == nil || tc.V3 == nil {
 		return nil, nil
 	}
-	layers := make([]runtimeSkillEnvLayer, len(tc.V3.loadedSkillEnv))
-	for i, layer := range tc.V3.loadedSkillEnv {
-		layers[i] = layer
-		layers[i].Env = cloneAgentV3SkillEnvironment(layer.Env)
-	}
-	return cloneAgentV3SkillEnvironment(tc.V3.runtimeEnv), layers
+	return cloneAgentV3SkillEnvironment(tc.V3.runtimeEnv), tc.skills.environment()
 }
 
 func (tc *TurnContext) hasLoadedSkill(name string) bool {
@@ -159,13 +129,10 @@ func (tc *TurnContext) hasLoadedSkill(name string) bool {
 	if err != nil {
 		return false
 	}
-	tc.toolMu.Lock()
-	defer tc.toolMu.Unlock()
 	if tc.V3 == nil {
 		return false
 	}
-	_, ok := tc.V3.loadedSkillNames[canonical]
-	return ok
+	return tc.skills.loaded(canonical)
 }
 
 // WithTurnContext stores TurnContext in a Go context.

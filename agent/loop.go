@@ -34,6 +34,7 @@ type CustomAgent struct {
 	finalReserve           time.Duration
 	sessionToolEstimate    sessionContextEstimate
 	sessionToolEstimateErr error
+	skillAdmission         *agentV3SkillAdmission
 }
 
 // CustomAgentConfig configures a CustomAgent.
@@ -44,6 +45,8 @@ type CustomAgentConfig struct {
 	MaxSteps int
 	// FinalReserve overrides the per-agent deadline reserve; zero reads it from the turn config.
 	FinalReserve time.Duration
+	// SkillAdmission must match the installed loader; nil disables automatic restoration.
+	SkillAdmission *agentV3SkillAdmission
 }
 
 const emptyModelResponseNotice = "（模型没有返回任何内容，请稍后重试。）"
@@ -114,6 +117,7 @@ func NewCustomAgent(ctx context.Context, cfg *CustomAgentConfig) (*CustomAgent, 
 		finalReserve:           cfg.FinalReserve,
 		sessionToolEstimate:    toolEstimate,
 		sessionToolEstimateErr: toolEstimateErr,
+		skillAdmission:         cfg.SkillAdmission,
 	}, nil
 }
 
@@ -183,7 +187,10 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		defer sw.Close()
 	}
 
+	ctx = beginAgentV3SkillScope(ctx, false)
 	history := a.sessionModelBaseline(ctx, input)
+	ctx = withAgentV3VisibleSkills(ctx, history)
+	restoreAgentV3VisibleSkills(ctx, a.skillAdmission)
 	capture.recordModelInput(history)
 	var toolRounds []*schema.Message
 
@@ -214,6 +221,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		if final {
 			mdl = a.model
 		}
+		toolCtx := withAgentV3VisibleSkills(ctx, history)
 		assistantMsg, reasoningChunks, sendErr := a.streamTurnWithEmptyRetry(ctx, mdl, history, sw, round)
 		if sendErr != nil {
 			sw.Send(nil, sendErr)
@@ -257,7 +265,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		dupWarnInjected = sawNewDup
 
 		for _, tc := range assistantMsg.ToolCalls {
-			toolMsg := a.executeToolCall(ctx, tc)
+			toolMsg := a.executeToolCall(toolCtx, tc)
 			history = append(history, toolMsg)
 			capture.record(toolMsg, false)
 		}

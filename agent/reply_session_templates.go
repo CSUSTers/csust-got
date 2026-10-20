@@ -155,7 +155,6 @@ func renderReplySessionTemplate(tpl *template.Template, tc *TurnContext) (string
 }
 
 func buildReplySessionPromptAddition(cc *CompiledAgent, tc *TurnContext) (*schema.Message, error) {
-	metadata := replySessionMetadata(tc)
 	var prompt string
 	if cc != nil {
 		var err error
@@ -164,7 +163,7 @@ func buildReplySessionPromptAddition(cc *CompiledAgent, tc *TurnContext) (*schem
 			return nil, err
 		}
 	}
-	content := "<reply_session_metadata>\n<datetime>" + metadata.DateTime + "</datetime>"
+	content := "<reply_session_metadata>\n" + agentV3DateTimeBlock(tc)
 	if prompt != "" {
 		content += "\n" + prompt
 	}

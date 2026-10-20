@@ -5,11 +5,11 @@ import (
 	"csust-got/config"
 	"csust-got/log"
 	"csust-got/orm"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -194,8 +194,7 @@ func TestGetContextToolReturnsLatestEditedContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, output, "edited wording")
 	assert.NotContains(t, output, "original wording")
-	assert.Equal(t, 1, strings.Count(output, `id="200"`))
-	assert.Less(t, strings.Index(output, `id="200"`), strings.Index(output, `id="201"`))
+	assert.Equal(t, []int{200, 201}, contextOutputIDs(decodeContextOutput(t, output)))
 
 	history, err := GetMessageContext(nil, tc.Message, 10)
 	require.NoError(t, err)
@@ -245,30 +244,25 @@ func TestGetContextToolAdvancedFilters(t *testing.T) {
 	t.Run("earliest applies all filters before limiting", func(t *testing.T) {
 		output, err := tool.InvokableRun(ctx, `{"after_message_id":101,"before_message_id":106,"recent_seconds":300,"limit":2,"limit_from":"earliest"}`)
 		require.NoError(t, err)
-		assert.Contains(t, output, `id="103"`)
-		assert.Contains(t, output, `id="104"`)
+		assert.Equal(t, []int{103, 104}, contextOutputIDs(decodeContextOutput(t, output)))
 		assert.Contains(t, output, "live version")
-		assert.NotContains(t, output, `id="100"`)
-		assert.NotContains(t, output, `id="101"`)
-		assert.NotContains(t, output, `id="102"`)
-		assert.NotContains(t, output, `id="105"`)
-		assert.NotContains(t, output, `id="106"`)
-		assert.Less(t, strings.Index(output, `id="103"`), strings.Index(output, `id="104"`))
 	})
 
 	t.Run("latest keeps chronological output", func(t *testing.T) {
 		output, err := tool.InvokableRun(ctx, `{"after_message_id":101,"before_message_id":106,"recent_seconds":300,"limit":2,"limit_from":"latest"}`)
 		require.NoError(t, err)
-		assert.Contains(t, output, `id="104"`)
-		assert.Contains(t, output, `id="105"`)
-		assert.NotContains(t, output, `id="103"`)
-		assert.Less(t, strings.Index(output, `id="104"`), strings.Index(output, `id="105"`))
+		assert.Equal(t, []int{104, 105}, contextOutputIDs(decodeContextOutput(t, output)))
 	})
 
 	t.Run("empty ID intersection returns no context", func(t *testing.T) {
 		output, err := tool.InvokableRun(ctx, `{"after_message_id":106,"before_message_id":106}`)
 		require.NoError(t, err)
-		assert.Equal(t, "No conversation context available.", output)
+		var document struct {
+			Metadata contextOutputMetadata `xml:"metadata"`
+		}
+		require.NoError(t, xml.Unmarshal([]byte(output), &document))
+		assert.Zero(t, document.Metadata.Count)
+		assert.Equal(t, "unknown", document.Metadata.HistoryComplete)
 	})
 }
 

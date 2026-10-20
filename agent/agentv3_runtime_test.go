@@ -151,7 +151,7 @@ func TestLoadSkillNormalizesAndReadsOnlyTurnCatalog(t *testing.T) {
 		Content:     "# Repo inspect\nInspect repository files.\n\nimmutable instructions\n",
 		VirtualPath: "/skills/repo-inspect/SKILL.md",
 	})
-	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
+	tc := &TurnContext{V3: &AgentV3TurnState{SkillCatalog: catalog}}
 
 	out, err := (&loadSkillTool{}).InvokableRun(WithTurnContext(t.Context(), tc), `{"name":" Repo_Inspect "}`)
 	require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestLoadSkillActivationOnlyEnablesRichForRichMessage(t *testing.T) {
 	}})
 	catalog, _, err := mergeAgentV3SkillSnapshots(rich, repository)
 	require.NoError(t, err)
-	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}}}
+	tc := &TurnContext{Config: richAgentV3ChatConfig(), V3: &AgentV3TurnState{SkillCatalog: catalog}}
 	ctx := WithTurnContext(t.Context(), tc)
 
 	ordinary, err := (&loadSkillTool{}).InvokableRun(ctx, `{"name":"repo-inspect"}`)
@@ -209,7 +209,7 @@ func TestLoadSkillUnavailableNeverFallsBackToDiskOrRuntime(t *testing.T) {
 			t.Fatal("load_skill contacted the runtime")
 			return nil, nil
 		})}},
-		V3: &AgentV3TurnState{SkillCatalog: agentV3SkillCatalog{ByName: map[string]agentV3SkillDescriptor{}}, loadedSkillNames: map[string]struct{}{}},
+		V3: &AgentV3TurnState{SkillCatalog: agentV3SkillCatalog{ByName: map[string]agentV3SkillDescriptor{}}},
 	}
 	ctx := WithTurnContext(t.Context(), tc)
 
