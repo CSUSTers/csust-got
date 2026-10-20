@@ -67,7 +67,6 @@ linters:
       comparison: true
     exhaustive:
       default-signifies-exhaustive: true
-      ignore-enum-members: ""
       package-scope-only: false
     goconst:
       match-constant: true
