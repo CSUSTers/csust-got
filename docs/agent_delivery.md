@@ -72,7 +72,13 @@ rich 失败不会降级为普通文本。
 - 周期性编辑遇到非 flood 失败时，用原文 + `ModeDefault` 重试一次；遇到 flood 不重试、不等待，只记录退避。
 - 最终编辑（`force`）走 §1.1 的等待重试逻辑。
 
-## 3. 测试
+## 3. 工具调用与进度 URL 展示
+
+工具调用标签和进度消息中的完整 HTTP(S) URL，仅在展示副本中将 host 最后一个非空标签从第二个字符起替换为 `*`：例如 `https://example.com/a` → `https://example.c**/a`、`.cn` → `.c*`、`.co.uk` → `.co.u*`。协议匹配不区分大小写，不依赖公共后缀列表；userinfo、端口、路径、查询、片段及周边文本保留原样。Unicode 标签按字符处理，punycode 保留原编码表示，尾随根点保留。IP、单标签 host 和单字符末标签不变；残缺或无法识别的 URL 不猜测。
+
+命令和 skill 标签先处理 URL，再应用原有长度截断。普通进度正文与结构化 step/detail/details 均在 MarkdownV2/HTML 格式化前处理，进度发送和编辑统一禁用网页预览。该规则仅用于展示，不是全面脱敏：原始工具参数、实际执行 URL、模型收到的工具结果、最终答复及内部进度状态均不改写。无需新增配置、挂载、环境变量、TZ 设置或数据迁移。
+
+## 4. 测试
 
 - `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestFinalLongOutputPartialDelivery`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite`、`TestUpdateMessageResendsAfterPlaceholderOverwrittenHook`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
 - `agent/format_test.go`：`TestTakeTelegramChunkPrefersParagraphsAndAvoidsCodeFences`、`TestChunkPlainTelegramTextRoundTrips`、`TestFormatTelegramChunksFormatsEachChunkSeparately`、`TestFormatTelegramChunksKeepsReasonOnFirstChunk`、`TestTailTelegramPreview`。

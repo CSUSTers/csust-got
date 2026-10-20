@@ -567,7 +567,7 @@ func agentV3ToolStageLabel(call schema.ToolCall) string {
 		return toolCallStageLabel(call)
 	case agentV3ToolLoadSkill:
 		if name := extractToolCallStringArg(call.Function.Arguments, agentV3ToolSkillNameField); name != "" {
-			return "正在加载 skill: " + truncateStageText(name, 80)
+			return "正在加载 skill: " + truncateStageText(maskDisplayURLs(name), 80)
 		}
 		return "正在加载 skill"
 	default:
@@ -582,14 +582,14 @@ func toolCallStageLabel(call schema.ToolCall) string {
 	}
 	if name == agentV3ToolBash || strings.EqualFold(name, "bash") {
 		if cmd := extractToolCallStringArg(call.Function.Arguments, agentV3ToolCommandField); cmd != "" {
-			return "$ " + truncateStageText(cmd, 120)
+			return "$ " + truncateStageText(maskDisplayURLs(cmd), 120)
 		}
-		return "$ " + name
+		return "$ " + maskDisplayURLs(name)
 	}
 	if skillName := stageSkillName(name); skillName != "" {
-		return "skill: " + truncateStageText(skillName, 80)
+		return "skill: " + truncateStageText(maskDisplayURLs(skillName), 80)
 	}
-	return name
+	return maskDisplayURLs(name)
 }
 
 func extractToolCallStringArg(argsJSON, key string) string {

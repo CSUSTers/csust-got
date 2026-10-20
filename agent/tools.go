@@ -85,10 +85,21 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 	}
 	var formatted string
 	if args.hasStructuredProgress() && len(tc.progressSteps) > 0 {
-		formatted = formatProgressSteps(tc.progressSteps, outputFormat, style)
+		displaySteps := make([]progressStep, len(tc.progressSteps))
+		for i, step := range tc.progressSteps {
+			displaySteps[i] = progressStep{
+				Title:     maskDisplayURLs(step.Title),
+				Completed: step.Completed,
+				Details:   make([]string, len(step.Details)),
+			}
+			for j, detail := range step.Details {
+				displaySteps[i].Details[j] = maskDisplayURLs(detail)
+			}
+		}
+		formatted = formatProgressSteps(displaySteps, outputFormat, style)
 	} else {
 		var buf strings.Builder
-		formatText(&buf, content, outputFormat, style)
+		formatText(&buf, maskDisplayURLs(content), outputFormat, style)
 		formatted = buf.String()
 	}
 	if formatted == "" {
@@ -96,7 +107,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 	}
 
 	parseMode := GetParseMode(&tc.Config.Format)
-	opts := &tb.SendOptions{ParseMode: parseMode}
+	opts := &tb.SendOptions{ParseMode: parseMode, DisableWebPagePreview: true}
 
 	if tc.progressMsg == nil {
 		msg, err := util.SendMessageWithError(&tb.Chat{ID: tc.ChatID}, util.RawTgText(formatted), opts)
