@@ -101,18 +101,25 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 	}
 
 	// Collect subagent tools: built-in + MCP
+	subOptions := &config.AgentOptions{
+		Tools:      subCfg.Tools,
+		McpServers: subCfg.McpServers,
+		ToolModels: subCfg.ToolModels,
+		Skills:     subCfg.SkillBundles,
+	}
+	effectiveTools, effectiveMcpServers, effectiveToolModels := mergeSkillConfigs(subOptions)
 	var subTools []tool.BaseTool
 
-	if len(subCfg.Tools) > 0 {
-		builtins, err := BuildBuiltinTools(subCfg.Tools, subCfg.ToolModels)
+	if len(effectiveTools) > 0 {
+		builtins, err := BuildBuiltinTools(effectiveTools, effectiveToolModels)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build tools for subagent %q: %w", subCfg.Name, err)
 		}
 		subTools = append(subTools, builtins...)
 	}
 
-	if len(subCfg.McpServers) > 0 && mcpMgr != nil {
-		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, subCfg.McpServers)
+	if len(effectiveMcpServers) > 0 && mcpMgr != nil {
+		mcpTools, err := mcpMgr.GetToolsFromConfig(ctx, effectiveMcpServers)
 		if err != nil {
 			zap.L().Warn("agentv3/agent: failed to get MCP tools for subagent, continuing without them",
 				zap.String("subagent", subCfg.Name),
@@ -143,7 +150,7 @@ func buildSubAgentTool(ctx context.Context, subCfg *config.SubAgentConfig, mcpMg
 	if systemPrompt == "" {
 		systemPrompt = fmt.Sprintf("You are %s. %s", subCfg.Name, subCfg.Description)
 	}
-	systemPrompt = joinAgentV3PromptBlocks(systemPrompt, subAgentSkillPromptBlock(allowedSkills))
+	systemPrompt = joinAgentV3PromptBlocks(systemPrompt, GetSkillPromptAddons(subOptions), subAgentSkillPromptBlock(allowedSkills))
 	maxSteps := subCfg.GetMaxSteps()
 	if subCfg.MaxSteps > 0 && subAgentHasTools(subCfg) && maxSteps != subCfg.MaxSteps {
 		zap.L().Warn("agentv3/agent: subagent max_steps too low for tool-enabled workflow, clamped",
@@ -418,7 +425,18 @@ func calcGuidanceLevel(messages []*schema.Message, maxSteps int) (guidanceLevel,
 }
 
 func subAgentHasTools(cfg *config.SubAgentConfig) bool {
-	return cfg != nil && (len(cfg.Tools) > 0 || len(cfg.McpServers) > 0 || cfg.Runtime || len(cfg.Skills) > 0)
+	if cfg == nil {
+		return false
+	}
+	if len(cfg.Tools) > 0 || len(cfg.McpServers) > 0 || cfg.Runtime || len(cfg.Skills) > 0 {
+		return true
+	}
+	for _, bundle := range cfg.SkillBundles {
+		if bundle != nil && (len(bundle.Tools) > 0 || len(bundle.McpServers) > 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeSkillConfigs(agentCfg *config.AgentOptions) (

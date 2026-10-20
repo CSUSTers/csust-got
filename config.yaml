@@ -222,13 +222,22 @@ agents:
     agent:
       enable: true
       final_reserve: "90s" # 截止前为最后一次无工具模型调用预留的时间，默认 90s，"0s" 关闭 (见 docs/agent_loop.md)
-      # subagents: 主 agent 可调用的子 agent；runtime/skills/max_result_chars 见 docs/agent_subagents.md
+      # subagents: 主 agent 可调用的子 agent；独立配置及隔离规则见 docs/agent_subagents.md
       subagents:
         - name: web_researcher
           description: "在 Runtime 中搜索并整理网页资料，返回带来源的要点。"
           model: *main_model
           runtime: true # 默认 false；true 时获得与主 agent 相同的 read/grep/write/edit/bash 工具，共享本群 Runtime 命名空间
           skills: ["searxng"] # 默认空；仅这些 agent-v3 技能可被该子 agent 用 load_skill 加载
+          skill_bundles: [] # 默认 []；静态工具组合包，与上面的技能加载白名单独立，不继承父 agent 的组合包
+          # 替换上面的 [] 即可启用组合包，例如：
+          # skill_bundles:
+          #   - name: vision
+          #     tools: [analyze_image]
+          #     mcp_servers: [] # 可按需填入与 agent.mcp_servers 相同结构的 MCP / MCPO 配置
+          #     tool_models:
+          #       analyze_image: *main_model # 选择支持图片的模型
+          #     system_prompt_addon: "需要识图时使用 analyze_image，返回结论与依据。"
           max_steps: 8 # runtime: true 时默认 8，否则默认 5
           max_result_chars: 4000 # 默认 4000；返回主 agent 的文本超出时保留首尾并标注省略
           system_prompt: |-

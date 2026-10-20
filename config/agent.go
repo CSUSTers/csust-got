@@ -441,6 +441,7 @@ type SubAgentConfig struct {
 	MaxSteps     int                 `mapstructure:"max_steps"`
 	McpServers   []*ToolServerConfig `mapstructure:"mcp_servers"`
 	ToolModels   map[string]*Model   `mapstructure:"tool_models"`
+	SkillBundles []*SkillConfig      `mapstructure:"skill_bundles"`
 	// Runtime grants the subagent the same remote Runtime tools (read/grep/write/edit/bash) as the main agent.
 	Runtime bool `mapstructure:"runtime"`
 	// Skills lists the agent-v3 skill names the subagent may load through load_skill.
@@ -1037,7 +1038,18 @@ func (c *AgentOptions) GetFinalReserve() time.Duration {
 }
 
 func (c *SubAgentConfig) usesTools() bool {
-	return c != nil && (len(c.Tools) > 0 || len(c.McpServers) > 0 || c.Runtime || len(c.Skills) > 0)
+	if c == nil {
+		return false
+	}
+	if len(c.Tools) > 0 || len(c.McpServers) > 0 || c.Runtime || len(c.Skills) > 0 {
+		return true
+	}
+	for _, bundle := range c.SkillBundles {
+		if bundle != nil && (len(bundle.Tools) > 0 || len(bundle.McpServers) > 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *AgentOptions) usesTools() bool {

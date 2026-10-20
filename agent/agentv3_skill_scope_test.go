@@ -236,6 +236,13 @@ func TestADKSubAgentSkillScopeKeepsEnvironmentAndRichPermissionPrivate(t *testin
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body fakeOpenAIRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		names := make([]string, 0, len(body.Tools))
+		for _, item := range body.Tools {
+			names = append(names, item.Function.Name)
+		}
+		require.Contains(t, names, "get_message")
+		require.NotContains(t, names, "get_image", "parent direct tools must stay private")
+		require.NotContains(t, names, "update_progress", "parent skill bundle tools must stay private")
 		results := 0
 		for _, message := range body.Messages {
 			if message.Role == "tool" {
@@ -267,8 +274,13 @@ func TestADKSubAgentSkillScopeKeepsEnvironmentAndRichPermissionPrivate(t *testin
 	ctx := WithTurnContext(t.Context(), tc)
 	_, err = (&loadSkillTool{}).InvokableRun(ctx, `{"name":"parent"}`)
 	require.NoError(t, err)
-	sub, err := buildSubAgentTool(ctx, &config.SubAgentConfig{Name: "isolated", Description: "scope test", Model: &config.Model{Name: "fixture", Model: "fixture", BaseUrl: model.URL, ApiKey: "fixture"}, Runtime: true, Skills: []string{"alpha", "rich-message"}, MaxSteps: 8}, nil)
+	tc.Config.Agent.Tools = []string{"get_image"}
+	tc.Config.Agent.Skills = []*config.SkillConfig{{Tools: []string{"update_progress"}}}
+	tc.Config.Agent.SubAgents = []*config.SubAgentConfig{{Name: "isolated", Description: "scope test", Model: &config.Model{Name: "fixture", Model: "fixture", BaseUrl: model.URL, ApiKey: "fixture"}, Runtime: true, Skills: []string{"alpha", "rich-message"}, SkillBundles: []*config.SkillConfig{{Tools: []string{"get_message"}, SystemPromptAddon: "Keep child work private."}}, MaxSteps: 8}}
+	parentTools, err := buildConfiguredAgentTools(ctx, "parent", tc.Config.Agent, nil)
 	require.NoError(t, err)
+	require.Len(t, parentTools, 3)
+	sub := parentTools[2]
 	for range 2 {
 		out, err := sub.(tool.InvokableTool).InvokableRun(ctx, `{"request":"inspect the environment"}`)
 		require.NoError(t, err)
