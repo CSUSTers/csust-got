@@ -629,6 +629,36 @@ func TestCronExecutionCompletingAfterDeadlineFails(t *testing.T) {
 	require.Equal(t, cronjob.RetryAvailable, persisted.LatestResult.RetryStatus)
 }
 
+func TestCronExecutionUsesCompletionTimeForDeadline(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		offset  time.Duration
+		outcome cronjob.Outcome
+		retry   cronjob.RetryStatus
+	}{
+		{name: "before", offset: -time.Nanosecond, outcome: cronjob.OutcomeSucceeded, retry: cronjob.RetryUnavailable},
+		{name: "at", outcome: cronjob.OutcomeFailed, retry: cronjob.RetryAvailable},
+		{name: "after", offset: time.Nanosecond, outcome: cronjob.OutcomeFailed, retry: cronjob.RetryAvailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCronFixture(t)
+			task := f.create(t)
+			lease := claimCronTask(t, f, task)
+			f.s.run = func(ctx context.Context, _ cronjob.Lease) agentCronRunResult {
+				f.now = lease.RunTimeoutAt.Add(test.offset)
+				require.NoError(t, ctx.Err())
+				return agentCronRunResult{Text: "completed"}
+			}
+			f.s.execute(t.Context(), lease)
+			persisted, err := f.s.store.Get(t.Context(), cronjob.GetRequest{Scope: task.Scope, TaskID: task.ID})
+			require.NoError(t, err)
+			require.Equal(t, test.outcome, persisted.LatestResult.Outcome)
+			require.Equal(t, test.retry, persisted.LatestResult.RetryStatus)
+			require.True(t, persisted.LatestResult.FinishedAt.Equal(f.now))
+		})
+	}
+}
+
 type cronBlockedFirstStore struct {
 	cronjob.Store
 	candidates []cronjob.Candidate
@@ -705,6 +735,7 @@ func TestCronImageToolWorkerJoinsAtRunDeadline(t *testing.T) {
 	task := f.create(t)
 	lease := claimCronTask(t, f, task)
 	lease.RunTimeoutAt = time.Now().Add(100 * time.Millisecond)
+	f.s.now = time.Now
 	slots := make(chan struct{}, 1)
 	slots <- struct{}{}
 	f.s.launchReserved(slots, func() { f.s.execute(t.Context(), lease) })

@@ -287,6 +287,12 @@ No new config, mount, environment variable or background loop is required. Exist
 tasks keep their captured timezone; changing the configuration does not reinterpret
 their local schedules or stored absolute cutoff.
 
+Execution must finish strictly before its lease's run deadline. Completion at or
+after that instant is recorded as failed under the normal manual-retry policy,
+even if context cancellation has not yet become observable. Deadline enforcement
+requires no additional configuration, mounts, environment variables, TZ setting,
+Redis schema change or data migration; existing stored outcomes are not rewritten.
+
 Redis scope remains `<prefix>:cron:v1:<encoded-bot>:<encoded-platform>`. Stored JSON
 gains an absolute `task.Until` timestamp (tool input/output uses lowercase `until`);
 missing/zero values mean no cutoff. Task,
