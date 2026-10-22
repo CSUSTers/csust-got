@@ -140,7 +140,7 @@ pub fn snapshot_sha256(schema_version: u32, sorted: &[SkillDescriptor]) -> Strin
             hash_length_prefixed(&mut hasher, value);
         }
     }
-    format!("{:x}", hasher.finalize())
+    crate::hex_string(&hasher.finalize())
 }
 
 fn hash_length_prefixed(hasher: &mut Sha256, value: &str) {
@@ -207,7 +207,7 @@ fn validate_descriptor(descriptor: &SkillDescriptor) -> Result<(), SkillSnapshot
             "skill descriptor description does not match content",
         ));
     }
-    let hash = format!("{:x}", Sha256::digest(descriptor.content.as_bytes()));
+    let hash = crate::hex_string(&Sha256::digest(descriptor.content.as_bytes()));
     if descriptor.sha256 != hash {
         return Err(SkillSnapshotError::new(
             "skill descriptor content hash does not match",
