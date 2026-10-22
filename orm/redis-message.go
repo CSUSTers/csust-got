@@ -149,7 +149,7 @@ func PushMessageToStreamWithSeq(msg *Message, seq uint64) error {
 	if err != nil {
 		return err
 	}
-	args := make([]any, 0, 4+len(values))
+	args := make([]any, 0, 12)
 	args = append(args, messageStreamMaxLen, int64(messageCacheTTL.Seconds()), botMessageLifecyclePrefix(msg.Chat.ID), candidates)
 	args = append(args, values...)
 	resp := pushMessageStreamScript.Run(context.TODO(), rc, botMessageLifecycleKeys(key, msg.Chat.ID), args...)
