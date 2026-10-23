@@ -2,7 +2,26 @@
 
 本文描述 Agent v3 把模型输出投递到 Telegram 时的保护逻辑，覆盖流式（`handleStreaming` → `streamToTelegramWithDelivery`）与非流式（`handleNonStreaming` → `nonStreamResponseWithDelivery`）两条路径。实现位于 `agent/streaming.go` 与 `agent/format.go`。
 
-## 1. 最终投递（A4）
+## Rich 输出契约
+
+`agents[].agent.rich: true` 允许 Agent v3 使用 Rich Markdown，但不改变普通文本的
+`format: md|html`。只有本轮成功 `load_skill(name="rich-message")` 后，最终输出中的
+首个 `<telegram_rich_message>...</telegram_rich_message>` 的非空正文才能作为 rich 消息投递；
+后续工具调用不清除本轮授权，加载其他 skill 也不能代替该授权。内置 skill 还受
+`agent_v3.skills.inject_builtin` 控制，见[统一 Skill 规范](superpowers/specs/2026-08-31-agent-v3-unified-skills-searxng-fetch-ua-design.md)。
+
+标签内部是原始 Telegram Rich Markdown，不是 JSON、HTML 或 `InputRichMessage` 对象。
+rich 投递使用 `sendRichMessage.rich_message.markdown`，不先转义为 MarkdownV2 或 HTML。
+解析器只选择第一个起始标签；若闭合标签尚未出现，取其后全部内容作为正文。
+交互流式预览在 envelope 拼装期间暂停普通 placeholder 编辑，最终再完成 rich 投递。
+标签外文本不作为 rich 正文发送；缺少授权的 envelope 转成可见文本后走普通文本路径。
+成功 rich 投递后删除原 placeholder，并为普通消息历史保存派生的可见文本。
+此接口不提供 `sendRichMessageDraft` 或媒体上传。
+
+交互响应的 rich 失败回退见 §1.4；[Cron 报告](agent-cron.md)采用持久化格式标记和回执，
+rich 失败不会降级为普通文本。
+
+## 1. 最终投递
 
 ### 1.1 Flood 重试
 
@@ -41,7 +60,7 @@
 
 - `cronReportChunks` 复用同一切分器，但保持原有的 1800 rune 分段尺寸，以免改变已有报告消息数量。
 
-## 2. 流式编辑去重与退避（B1）
+## 2. 流式编辑去重与退避
 
 `streamProcessor.editPlaceholder` 维护以下状态：
 
@@ -53,7 +72,13 @@
 - 周期性编辑遇到非 flood 失败时，用原文 + `ModeDefault` 重试一次；遇到 flood 不重试、不等待，只记录退避。
 - 最终编辑（`force`）走 §1.1 的等待重试逻辑。
 
-## 3. 测试
+## 3. 工具调用与进度 URL 展示
+
+工具调用标签和进度消息中的完整 HTTP(S) URL，仅在展示副本中将 host 最后一个非空标签从第二个字符起替换为 `*`：例如 `https://example.com/a` → `https://example.c**/a`、`.cn` → `.c*`、`.co.uk` → `.co.u*`。协议匹配不区分大小写，不依赖公共后缀列表；userinfo、端口、路径、查询、片段及周边文本保留原样。Unicode 标签按字符处理，punycode 保留原编码表示，尾随根点保留。IP、单标签 host 和单字符末标签不变；残缺或无法识别的 URL 不猜测。
+
+命令和 skill 标签先处理 URL，再应用原有长度截断。普通进度正文与结构化 step/detail/details 均在 MarkdownV2/HTML 格式化前处理，进度发送和编辑统一禁用网页预览。该规则仅用于展示，不是全面脱敏：原始工具参数、实际执行 URL、模型收到的工具结果、最终答复及内部进度状态均不改写。无需新增配置、挂载、环境变量、TZ 设置或数据迁移。
+
+## 4. 测试
 
 - `agent/streaming_delivery_test.go`：`TestStreamFinalEditRetriesOnceAfterFlood`、`TestStreamFinalEditGivesUpAfterRepeatedFlood`、`TestStreamFinalLongOutputIsSplitIntoOrderedMessages`、`TestFinalLongOutputPartialDelivery`、`TestStreamFinalRichFailureFallsBackToPlainText`、`TestNonStreamRichFailureFallsBackToPlainText`、`TestNonStreamLongOutputIsSplitIntoOrderedMessages`、`TestNonStreamFinalSendRetriesOnceAfterFlood`、`TestNonStreamFormattedFailureRetriesWithRawText`、`TestUpdateMessageSkipsUnchangedText`、`TestStreamFinalEditIgnoresStaleDedupeAfterExternalOverwrite`、`TestUpdateMessageResendsAfterPlaceholderOverwrittenHook`、`TestUpdateMessagePausesEditsUntilFloodWindowPasses`、`TestUpdateMessageBackoffDoublesUpToCap`、`TestUpdateMessageRetriesRawTextOnceAndMarksEditTime`、`TestUpdateMessageShowsTailWhenPreviewExceedsLimit`。
 - `agent/format_test.go`：`TestTakeTelegramChunkPrefersParagraphsAndAvoidsCodeFences`、`TestChunkPlainTelegramTextRoundTrips`、`TestFormatTelegramChunksFormatsEachChunkSeparately`、`TestFormatTelegramChunksKeepsReasonOnFirstChunk`、`TestTailTelegramPreview`。

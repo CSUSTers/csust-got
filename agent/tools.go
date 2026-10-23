@@ -85,10 +85,21 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 	}
 	var formatted string
 	if args.hasStructuredProgress() && len(tc.progressSteps) > 0 {
-		formatted = formatProgressSteps(tc.progressSteps, outputFormat, style)
+		displaySteps := make([]progressStep, len(tc.progressSteps))
+		for i, step := range tc.progressSteps {
+			displaySteps[i] = progressStep{
+				Title:     maskDisplayURLs(step.Title),
+				Completed: step.Completed,
+				Details:   make([]string, len(step.Details)),
+			}
+			for j, detail := range step.Details {
+				displaySteps[i].Details[j] = maskDisplayURLs(detail)
+			}
+		}
+		formatted = formatProgressSteps(displaySteps, outputFormat, style)
 	} else {
 		var buf strings.Builder
-		formatText(&buf, content, outputFormat, style)
+		formatText(&buf, maskDisplayURLs(content), outputFormat, style)
 		formatted = buf.String()
 	}
 	if formatted == "" {
@@ -96,7 +107,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 	}
 
 	parseMode := GetParseMode(&tc.Config.Format)
-	opts := &tb.SendOptions{ParseMode: parseMode}
+	opts := &tb.SendOptions{ParseMode: parseMode, DisableWebPagePreview: true}
 
 	if tc.progressMsg == nil {
 		msg, err := util.SendMessageWithError(&tb.Chat{ID: tc.ChatID}, util.RawTgText(formatted), opts)
@@ -104,6 +115,7 @@ func updateProgressMessage(ctx context.Context, args updateProgressArgs, content
 			zap.L().Debug("agentv3: failed to send progress message", zap.Error(err))
 			return "send_failed"
 		}
+		RecordProcessMessage(tc.Bot, msg, tc.Message)
 		tc.progressMsg = msg
 		tc.MarkEdited()
 		tc.MarkPlaceholderOverwritten()
@@ -134,7 +146,7 @@ type modelConfigurable interface {
 var builtinToolFactories = map[string]func() tool.InvokableTool{
 	agentV3ToolDelegate:  func() tool.InvokableTool { return &cronTool{} },
 	agentV3ToolCronTasks: func() tool.InvokableTool { return &cronTool{manage: true} },
-	"get_context":        func() tool.InvokableTool { return &getContextTool{} },
+	contextToolName:      func() tool.InvokableTool { return &getContextTool{} },
 	"get_image":          func() tool.InvokableTool { return &getImageTool{} },
 	"get_message":        func() tool.InvokableTool { return &getMessageTool{} },
 	"analyze_image":      func() tool.InvokableTool { return &analyzeImageTool{} },
@@ -189,9 +201,9 @@ func (args getContextArgs) validateAdvancedFilters() (string, error) {
 		return "", errNegativeBeforeMessageID
 	}
 	if args.LimitFrom == nil {
-		return "latest", nil
+		return contextLimitLatest, nil
 	}
-	if *args.LimitFrom != "latest" && *args.LimitFrom != "earliest" {
+	if *args.LimitFrom != contextLimitLatest && *args.LimitFrom != contextLimitEarliest {
 		return "", errInvalidLimitFrom
 	}
 	return *args.LimitFrom, nil
@@ -199,12 +211,15 @@ func (args getContextArgs) validateAdvancedFilters() (string, error) {
 
 func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
-		Name: "get_context",
+		Name: contextToolName,
 		Desc: "Retrieve conversation history from the current chat. " +
 			"PROACTIVELY call this tool when you need more context to understand a user's question, " +
 			"especially for follow-up questions, references to earlier messages, or when the user says " +
 			"\"above\", \"earlier\", \"just now\", etc. " +
-			"Returns formatted message history with sender info and timestamps.",
+			"Returns XML history with RFC3339 +08:00 timestamps and coverage/continuation metadata, within 12000 UTF-8 bytes. " +
+			"Cache scans cover at most 1000 stream snapshots, not complete chat history; continuity is not guaranteed. " +
+			"Without advanced filters, reply-chain-first selection is preserved. For adjacent older history use before_message_id=min returned ID with latest; " +
+			"for newer history use after_message_id=max returned ID with earliest, retaining the other bound and time filter. recent_seconds is a moving window.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"limit": {
 				Type: "integer",
@@ -224,7 +239,7 @@ func (t *getContextTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 			},
 			"limit_from": {
 				Type: "string",
-				Desc: "Which end to apply limit from: latest (default) or earliest. All provided filters are intersected before this limit is applied; output remains chronological.",
+				Desc: "Which end to apply limit and byte budget from: latest (default) or earliest. Filters are intersected first; output remains chronological. earliest selects the oldest end of the readable window, NOT the page immediately before a before_message_id cursor.",
 			},
 		}),
 	}, nil
@@ -249,34 +264,27 @@ func (t *getContextTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 		limit = 50
 	}
 
-	var (
-		messages []*ContextMessage
-		err      error
-	)
+	query := contextQuery{
+		RecentSeconds: args.RecentSeconds, AfterMessageID: args.AfterMessageID,
+		BeforeMessageID: args.BeforeMessageID, Limit: limit, LimitFrom: contextLimitLatest,
+	}
+	result := contextQueryResult{Selection: "reply_chain_first", CandidateScope: "default_selection_only"}
+	var err error
 	if args.hasAdvancedFilters() {
 		limitFrom, validationErr := args.validateAdvancedFilters()
 		if validationErr != nil {
 			return "", fmt.Errorf("get_context: %w", validationErr)
 		}
-		messages, err = getFilteredMessageContext(tc.Bot, tc.Message, contextQuery{
-			RecentSeconds:   args.RecentSeconds,
-			AfterMessageID:  args.AfterMessageID,
-			BeforeMessageID: args.BeforeMessageID,
-			Limit:           limit,
-			LimitFrom:       limitFrom,
-		})
+		query.LimitFrom = limitFrom
+		result, err = getFilteredMessageContext(ctx, tc.Bot, tc.Message, query)
 	} else {
-		messages, err = GetMessageContext(tc.Bot, tc.Message, limit)
+		result.Messages, err = getMessageContext(ctx, tc.Bot, tc.Message, limit)
 	}
 	if err != nil {
 		return "", fmt.Errorf("get_context: failed to get message context: %w", err)
 	}
 
-	if len(messages) == 0 {
-		return "No conversation context available.", nil
-	}
-
-	return FormatContextMessagesWithXml(messages), nil
+	return formatContextToolOutput(result, query), nil
 }
 
 // ---- get_image Tool ----

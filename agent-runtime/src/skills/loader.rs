@@ -171,7 +171,7 @@ fn load_runtime_skill_descriptors_inner(
         descriptors.push(SkillDescriptor {
             name: name.clone(),
             description,
-            sha256: format!("{:x}", Sha256::digest(content.as_bytes())),
+            sha256: crate::hex_string(&Sha256::digest(content.as_bytes())),
             content,
             source: "runtime-global".to_string(),
             virtual_path: format!("/skills/{name}/SKILL.md"),

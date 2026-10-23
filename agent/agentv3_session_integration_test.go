@@ -35,17 +35,18 @@ var (
 )
 
 type agentSessionFixture struct {
-	mini         *miniredis.Miniredis
-	client       *redis.Client
-	repo         *orm.AgentV3SessionRepository
-	files        *session.FileStore
-	service      *session.Service
-	directory    string
-	bot          *tb.Bot
-	mu           sync.Mutex
-	nextID       int
-	finalID      int
-	failDelivery bool
+	mini           *miniredis.Miniredis
+	client         *redis.Client
+	repo           *orm.AgentV3SessionRepository
+	files          *session.FileStore
+	service        *session.Service
+	directory      string
+	bot            *tb.Bot
+	telegramClient *http.Client
+	mu             sync.Mutex
+	nextID         int
+	finalID        int
+	failDelivery   bool
 }
 
 func newAgentSessionFixture(t *testing.T) *agentSessionFixture {
@@ -100,7 +101,8 @@ func newAgentSessionFixture(t *testing.T) *agentSessionFixture {
 		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"chat":{"id":-100},"from":{"id":99,"is_bot":true}}}`, id)
 	}))
 	t.Cleanup(server.Close)
-	f.bot, err = tb.NewBot(tb.Settings{Token: "session-fixture-token", Offline: true, URL: server.URL, Client: server.Client()})
+	f.telegramClient = server.Client()
+	f.bot, err = tb.NewBot(tb.Settings{Token: "session-fixture-token", Offline: true, URL: server.URL, Client: f.telegramClient})
 	require.NoError(t, err)
 	f.bot.Me = &tb.User{ID: 99, Username: "sessionbot", IsBot: true}
 	config.BotConfig.Bot = f.bot
@@ -628,7 +630,7 @@ func TestAgentV3SessionChatInputDoesNotRebuildReplyImagesOrTemplateHistory(t *te
 	require.NotContains(t, text, "FORBIDDEN_ANCESTOR")
 }
 
-func TestAgentV3SessionReplayRestoresRichActivationButNotRuntimePermissions(t *testing.T) {
+func TestAgentV3SessionReplayDoesNotAuthorizeRichOrRuntimePermissions(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "rich-parent", ContextMode: "reply_chain", Agent: &config.AgentOptions{Enable: true, Rich: true}}
 	snapshot := buildAgentV3BuiltinSkillSnapshot(cfg, config.BotConfig.AgentV3)
@@ -656,7 +658,7 @@ func TestAgentV3SessionReplayRestoresRichActivationButNotRuntimePermissions(t *t
 	current := sessionMessage(200, 8, 60, "current input")
 	current.ReplyTo = &tb.Message{ID: first}
 	f.chat(t, cross, current, &config.AgentTrigger{Reply: true})
-	require.True(t, richLoaded, "a replayed load_skill(rich-message) call keeps rich output active for the continued session")
+	require.False(t, richLoaded, "rich output requires an explicit load by the current parent invocation")
 	require.Equal(t, map[string]string{"CURRENT_ENV": "current"}, environment)
 	require.Equal(t, sessionRecordMessages(rootCapture.Delta), sessionConversation(currentModel.capturedInputs()[0])[:len(rootCapture.Delta)])
 }

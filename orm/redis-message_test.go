@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"csust-got/config"
 	"csust-got/log"
 
 	"github.com/alicebob/miniredis/v2"
@@ -136,6 +137,66 @@ func TestMessageStreamStrictAndBestEffortDecoding(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []int{2}, cachedMessageIDs(messages))
 	})
+}
+
+func TestPushMessageToStreamFieldCombinations(t *testing.T) {
+	tests := []struct {
+		name     string
+		lastEdit int64
+		seq      uint64
+	}{
+		{name: "plain"},
+		{name: "edited", lastEdit: 1700000100},
+		{name: "sequence", seq: 7},
+		{name: "edited_with_sequence", lastEdit: 1700000100, seq: 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newSessionTestRedis(t)
+			oldClient, oldConfig := rc, config.BotConfig
+			rc = redis.NewClient(&redis.Options{Addr: server.Addr()})
+			config.BotConfig = config.NewBotConfig()
+			config.BotConfig.RedisConfig.KeyPrefix = "test:"
+			log.InitLogger()
+			t.Cleanup(func() {
+				_ = rc.Close()
+				rc, config.BotConfig = oldClient, oldConfig
+			})
+			ancestor := lifecycleTestMessage(11)
+			require.NoError(t, StoreBotMessageLifecycle(ancestor, 99, false))
+			message := cachedTextMessage(12, "stream fields")
+			message.ReplyTo = ancestor
+			message.LastEdit = tt.lastEdit
+			require.NoError(t, PushMessageToStreamWithSeq(message, tt.seq))
+
+			key := wrapKeyWithChat("message_stream", message.Chat.ID)
+			entries, err := rc.XRange(t.Context(), key, "-", "+").Result()
+			require.NoError(t, err)
+			require.Len(t, entries, 1)
+			fields := entries[0].Values
+			require.Equal(t, "12", fields[messageStreamFieldID])
+			require.Equal(t, string(cachedMessageJSON(t, message)), fields[messageStreamFieldMessage])
+			require.JSONEq(t, `{"11":true}`, fields["lifecycle_refs"].(string))
+			wantFields := 3
+			if tt.lastEdit != 0 {
+				require.Equal(t, "1", fields[messageStreamFieldEdited])
+				wantFields++
+			} else {
+				require.NotContains(t, fields, messageStreamFieldEdited)
+			}
+			if tt.seq != 0 {
+				require.Equal(t, "7", fields[messageStreamFieldSeq])
+				wantFields++
+			} else {
+				require.NotContains(t, fields, messageStreamFieldSeq)
+			}
+			require.Len(t, fields, wantFields)
+			ttl, err := rc.TTL(t.Context(), key).Result()
+			require.NoError(t, err)
+			require.Positive(t, ttl)
+			require.LessOrEqual(t, ttl, messageCacheTTL)
+		})
+	}
 }
 
 func TestPushMessageToStreamAcceptsOutOfOrderIDs(t *testing.T) {

@@ -51,9 +51,7 @@ type AgentV3TurnState struct {
 	ImageRefs             []orm.AgentV3ImageRef
 	Trace                 *AgentV3Trace
 	SkillCatalog          agentV3SkillCatalog
-	loadedSkillNames      map[string]struct{}
 	runtimeEnv            map[string]string
-	loadedSkillEnv        []runtimeSkillEnvLayer
 	renderCtx             context.Context
 	frameTime             time.Time
 }
@@ -76,8 +74,6 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	if err != nil {
 		return nil, fmt.Errorf("agent v3 turn skill catalog: %w", err)
 	}
-	loadedSkillNames := make(map[string]struct{})
-
 	if !tc.Background && tc.Session != nil && tc.Session.runID != "" {
 		tc.RunID = tc.Session.runID
 	} else if !tc.Background || tc.RunID == "" {
@@ -94,15 +90,14 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	trace := NewAgentV3Trace(tc.RunID, tc.ChatID, tc.Message.ID)
 	trace.SetContentRedacted(tc.Background)
 	tc.V3 = &AgentV3TurnState{
-		Scope:            scope,
-		RunID:            tc.RunID,
-		Namespace:        tc.Namespace,
-		Trace:            trace,
-		SkillCatalog:     catalog,
-		loadedSkillNames: loadedSkillNames,
-		runtimeEnv:       cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
-		renderCtx:        ctx,
-		frameTime:        beijingNow(),
+		Scope:        scope,
+		RunID:        tc.RunID,
+		Namespace:    tc.Namespace,
+		Trace:        trace,
+		SkillCatalog: catalog,
+		runtimeEnv:   cloneAgentV3SkillEnvironment(cfg.Runtime.Env),
+		renderCtx:    ctx,
+		frameTime:    beijingNow(),
 	}
 	finishContextSpan := trace.StartSpan("context_build", map[string]any{
 		"agent": cc.Name,
@@ -160,9 +155,6 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	soulHash := hashString(soul)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(catalog.Sorted)
 	prefixText := buildAgentV3StablePrefix(soul, skillPromptBlock, fetchEnabled)
-	if cfg.CronConfig().RunnerAgent != "" {
-		prefixText = joinAgentV3PromptBlocks(prefixText, cronDelegateHelp, cronTasksHelp)
-	}
 	prefixHash := hashString(prefixText)
 	modelName := agentV3ModelName(tc.Config)
 	prefixVersion := int64(1)
@@ -268,7 +260,6 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			state.parent, state.replay = loaded.Parent, loaded.Messages
 			tc.V3.ImageRefs = prepared.imageRefs
 			accepted = prepared
-			restoreAgentV3ReplayedRichSkill(tc, loaded.Messages)
 		} else {
 			prepared = agentV3PreparedSessionInput{}
 			state.parent, state.replay, state.input, state.kinds = nil, nil, nil, nil
@@ -493,6 +484,15 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	if history == nil {
 		history = &RichHistory{}
 	}
+	if tc.Message.ReplyTo != nil {
+		current := *tc.Message
+		resolved, err := resolveContextReplyChain(agentV3RenderContext(tc), tc.ChatID, current.ReplyTo)
+		if err != nil {
+			return nil, err
+		}
+		current.ReplyTo = resolved
+		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+	}
 	pd := buildPromptData(tc, history.ContextMessages)
 	var userText string
 	if cc.PromptTemplate != nil {
@@ -508,9 +508,8 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	userText = appendAgentV3TriggerHint(userText, tc.Trigger)
 	dynamic := strings.Builder{}
 	dynamic.WriteString("<dynamic_suffix>\n")
-	dynamic.WriteString("<datetime>")
-	dynamic.WriteString(pd.DateTime)
-	dynamic.WriteString("</datetime>\n")
+	dynamic.WriteString(agentV3DateTimeBlock(tc))
+	dynamic.WriteByte('\n')
 	if userText != "" {
 		dynamic.WriteString(userText)
 	}

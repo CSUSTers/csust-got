@@ -15,7 +15,7 @@ const (
 	agentV3ToolSearXNGSuggestions    = "searxng_search_suggestions"
 	agentV3ToolSearXNGInstanceInfo   = "searxng_instance_info"
 	agentV3SearXNGSkillName          = "searxng"
-	agentV3SearXNGActivationRequired = "[SearXNG Error] load_skill(\"searxng\") is required for this turn."
+	agentV3SearXNGActivationRequired = "[SearXNG Error] searxng is not active; call load_skill(\"searxng\")."
 )
 
 type searXNGWebSearchTool struct{ client *searXNGClient }
@@ -49,7 +49,7 @@ func newSearXNGToolInfo(name, desc, rawSchema string) (*schema.ToolInfo, error) 
 func (t *searXNGWebSearchTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	if tc := GetTurnContext(ctx); tc == nil {
 		return "", fmt.Errorf("%s: %w", agentV3ToolSearXNGWebSearch, errNoTurnContext)
-	} else if !tc.hasLoadedSkill(agentV3SearXNGSkillName) {
+	} else if !agentV3SkillLoaded(ctx, agentV3SearXNGSkillName) {
 		return agentV3SearXNGActivationRequired, nil
 	}
 	var args searXNGWebSearchArgs
@@ -69,7 +69,7 @@ func (t *searXNGWebSearchTool) InvokableRun(ctx context.Context, argsJSON string
 func (t *searXNGSuggestionsTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	if tc := GetTurnContext(ctx); tc == nil {
 		return "", fmt.Errorf("%s: %w", agentV3ToolSearXNGSuggestions, errNoTurnContext)
-	} else if !tc.hasLoadedSkill(agentV3SearXNGSkillName) {
+	} else if !agentV3SkillLoaded(ctx, agentV3SearXNGSkillName) {
 		return agentV3SearXNGActivationRequired, nil
 	}
 	var args searXNGSuggestionsArgs
@@ -89,7 +89,7 @@ func (t *searXNGSuggestionsTool) InvokableRun(ctx context.Context, argsJSON stri
 func (t *searXNGInstanceInfoTool) InvokableRun(ctx context.Context, argsJSON string, _ ...tool.Option) (string, error) {
 	if tc := GetTurnContext(ctx); tc == nil {
 		return "", fmt.Errorf("%s: %w", agentV3ToolSearXNGInstanceInfo, errNoTurnContext)
-	} else if !tc.hasLoadedSkill(agentV3SearXNGSkillName) {
+	} else if !agentV3SkillLoaded(ctx, agentV3SearXNGSkillName) {
 		return agentV3SearXNGActivationRequired, nil
 	}
 	var args searXNGInstanceInfoArgs

@@ -63,9 +63,9 @@ func Decode(ctx tb.Context) error {
 
 	if !util.SliceContains([]string{"utf8", "utf16le", "utf16be"}, from) {
 		var buf bytes.Buffer
-		for _, rune := range text {
-			if rune != utf8.RuneError {
-				_, err = buf.WriteRune(rune)
+		for _, r := range text {
+			if r != utf8.RuneError {
+				_, err = buf.WriteRune(r)
 				if err != nil {
 					log.Debug("write string buf error", zap.Error(err))
 				}

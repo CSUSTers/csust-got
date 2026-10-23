@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	tb "gopkg.in/telebot.v3"
 )
@@ -50,25 +51,22 @@ func FormatContextMessages(messages []*ContextMessage) string {
 	return result.String()
 }
 
-func formatContextMessageTime(unixtime int64, now time.Time) string {
+func formatContextMessageTime(unixtime int64, _ time.Time) string {
 	if unixtime == 0 {
 		return ""
 	}
 
-	messageTime := time.Unix(unixtime, 0).In(util.TimeZoneCST)
-	now = now.In(util.TimeZoneCST)
-	messageYear, messageMonth, messageDay := messageTime.Date()
-	nowYear, nowMonth, nowDay := now.Date()
-	if messageYear == nowYear && messageMonth == nowMonth && messageDay == nowDay {
-		return messageTime.Format("15:04:05")
-	}
-	return messageTime.Format("2006-01-02 15:04:05")
+	return time.Unix(unixtime, 0).In(util.TimeZoneCST).Format(time.RFC3339)
 }
 
 // FormatContextMessagesWithXml 将上下文消息格式化为嵌套XML格式
 // 消息回复链被表示为嵌套结构，回复消息嵌入到被回复的消息中
 func FormatContextMessagesWithXml(messages []*ContextMessage) string {
-	if len(messages) == 0 {
+	return formatContextMessagesWithMetadata(messages, "")
+}
+
+func formatContextMessagesWithMetadata(messages []*ContextMessage, metadata string) string {
+	if len(messages) == 0 && metadata == "" {
 		return ""
 	}
 
@@ -97,11 +95,18 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 
 	buf := strings.Builder{}
 	buf.WriteString("<messages>\n")
+	buf.WriteString(metadata)
 	now := time.Now()
+	visited := make(map[int]bool, len(messages))
 
 	// 递归渲染每个根消息及其回复链
 	for _, rootMsg := range rootMessages {
-		renderNestedMessage(&buf, rootMsg, replies, 0, now)
+		renderNestedMessage(&buf, rootMsg, replies, 0, now, visited)
+	}
+	for _, msg := range messages {
+		if !visited[msg.ID] {
+			renderNestedMessage(&buf, msg, replies, 0, now, visited)
+		}
 	}
 
 	buf.WriteString("</messages>\n")
@@ -109,7 +114,11 @@ func FormatContextMessagesWithXml(messages []*ContextMessage) string {
 }
 
 // renderNestedMessage 递归渲染嵌套消息
-func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[int][]*ContextMessage, depth int, now time.Time) {
+func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[int][]*ContextMessage, depth int, now time.Time, visited map[int]bool) {
+	if visited[msg.ID] {
+		return
+	}
+	visited[msg.ID] = true
 	indent := strings.Repeat("  ", depth+1)
 	messageType := msg.Type
 	if messageType == "" {
@@ -119,7 +128,7 @@ func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[
 	// 开始标签
 	buf.WriteString(indent)
 	fmt.Fprintf(buf, `<message id="%d" username="%s" showname="%s" type="%s"`,
-		msg.ID, html.EscapeString(msg.User), html.EscapeString(msg.UserNames.ShowName()), html.EscapeString(messageType))
+		msg.ID, escapeContextXML(msg.User), escapeContextXML(msg.UserNames.ShowName()), escapeContextXML(messageType))
 
 	if msg.ReplyTo != nil {
 		fmt.Fprintf(buf, ` replyTo="%d"`, *msg.ReplyTo)
@@ -132,26 +141,35 @@ func renderNestedMessage(buf *strings.Builder, msg *ContextMessage, replies map[
 	if messageType == contextMessageTypePhoto {
 		buf.WriteString(indent)
 		buf.WriteString("  ")
-		fmt.Fprintf(buf, `<image file_id="%s" />`, html.EscapeString(msg.PhotoFileID))
+		fmt.Fprintf(buf, `<image file_id="%s" />`, escapeContextXML(msg.PhotoFileID))
 		buf.WriteString("\n")
 	}
 	if msg.Text != "" {
 		buf.WriteString(indent)
 		buf.WriteString("  ")
-		buf.WriteString(html.EscapeString(msg.Text))
+		buf.WriteString(escapeContextXML(msg.Text))
 		buf.WriteString("\n")
 	}
 
 	// 递归渲染回复消息
 	if msgReplies, exists := replies[msg.ID]; exists {
 		for _, reply := range msgReplies {
-			renderNestedMessage(buf, reply, replies, depth+1, now)
+			renderNestedMessage(buf, reply, replies, depth+1, now, visited)
 		}
 	}
 
 	// 结束标签
 	buf.WriteString(indent)
 	buf.WriteString("</message>\n")
+}
+
+func escapeContextXML(text string) string {
+	return html.EscapeString(strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 && r <= 0xd7ff || r >= 0xe000 && r <= 0xfffd || r >= 0x10000 && r <= unicode.MaxRune {
+			return r
+		}
+		return unicode.ReplacementChar
+	}, text))
 }
 
 // FormatSingleTbMessage format tb msg to xml with custom tag

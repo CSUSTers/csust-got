@@ -525,7 +525,7 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled b
 		infos = append(infos, map[string]any{
 			agentV3ToolNameField: agentV3ToolLoadSkill,
 			agentV3ToolArgsField: "name",
-			agentV3ToolDescField: "Load an available agent-v3 skill for the current turn. For rich-message, call this before rich output and finish with one <telegram_rich_message> envelope.",
+			agentV3ToolDescField: "Activate an available skill if not already restored. Visible full bodies may be reused without repetition. Rich-message always requires this agent's explicit load in the current turn before rich output; finish with one <telegram_rich_message> envelope.",
 		})
 	}
 	if len(cronEnabled) > 0 && cronEnabled[0] {
@@ -767,7 +767,7 @@ func (t *remoteBashTool) InvokableRun(ctx context.Context, argsJSON string, _ ..
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("bash: invalid arguments: %w", err)
 	}
-	env, layers := tc.runtimeEnvironment()
+	env, layers := agentV3RuntimeEnvironment(ctx)
 	version := 0
 	if len(env) > 0 || len(layers) > 0 {
 		version = agentV3BashEnvVersion
@@ -819,7 +819,7 @@ type loadSkillArgs struct {
 func (t *loadSkillTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: agentV3ToolLoadSkill,
-		Desc: "Load one available agent-v3 skill by name for the current turn. Use name=\"rich-message\" before rich output, then finish with one <telegram_rich_message> answer.",
+		Desc: "Activate one available skill by name unless already restored from its complete current response. A visible full body may yield a short activation confirmation. Always explicitly load rich-message in this agent's current turn before rich output; history and subagent loads do not authorize it.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			agentV3ToolSkillNameField: {Type: "string", Desc: "Available skill name. For Telegram rich output use exactly rich-message before the final rich envelope.", Required: true},
 		}),
@@ -839,16 +839,20 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if err != nil || tc.V3 == nil {
 		return agentV3SkillUnavailableText, nil
 	}
-	if t.allowed != nil {
-		if _, ok := t.allowed[name]; !ok {
-			return agentV3SkillUnavailableText, nil
-		}
-	}
-	skill, ok := tc.V3.SkillCatalog.ByName[name]
+	skill, ok := (&agentV3SkillAdmission{allowed: t.allowed}).skill(tc, name)
 	if !ok {
 		return agentV3SkillUnavailableText, nil
 	}
-	tc.activateSkill(skill)
+	agentV3SkillsForContext(ctx).activate(skill)
+	full := agentV3LoadedSkillResponse(skill)
+	if visible, _ := ctx.Value(agentV3VisibleSkillsKey{}).(agentV3VisibleSkills); visible.responses[skill.Name] == full {
+		return fmt.Sprintf("<loaded_skill name=\"%s\" source=\"%s\" body=\"reused\">\nActive for this turn; reuse the full body already in the current model input.\n</loaded_skill>",
+			escapeAgentV3SkillAttr(skill.Name), escapeAgentV3SkillAttr(string(skill.Source))), nil
+	}
+	return full, nil
+}
+
+func agentV3LoadedSkillResponse(skill agentV3SkillDescriptor) string {
 	var b strings.Builder
 	b.WriteString("<loaded_skill name=\"")
 	b.WriteString(escapeAgentV3SkillAttr(skill.Name))
@@ -867,7 +871,7 @@ func (t *loadSkillTool) InvokableRun(ctx context.Context, argsJSON string, _ ...
 	if skill.Name == agentV3RichMessageSkillName {
 		b.WriteString(" If you choose rich output, make the final answer exactly one <telegram_rich_message> envelope with no surrounding prose.")
 	}
-	return b.String(), nil
+	return b.String()
 }
 
 func requireAgentV3Runtime(ctx context.Context, name string) (*TurnContext, error) {

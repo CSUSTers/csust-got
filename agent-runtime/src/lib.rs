@@ -2600,17 +2600,11 @@ mod tests {
         assert_eq!(snapshot.skills[1].content, "# Zeta\nZeta skill content.\n");
         assert_eq!(
             snapshot.skills[0].sha256,
-            format!(
-                "{:x}",
-                Sha256::digest(snapshot.skills[0].content.as_bytes())
-            )
+            hex_string(&Sha256::digest(snapshot.skills[0].content.as_bytes()))
         );
         assert_eq!(
             snapshot.skills[1].sha256,
-            format!(
-                "{:x}",
-                Sha256::digest(snapshot.skills[1].content.as_bytes())
-            )
+            hex_string(&Sha256::digest(snapshot.skills[1].content.as_bytes()))
         );
         assert_eq!(
             snapshot.snapshot_sha256,

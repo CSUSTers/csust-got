@@ -485,7 +485,7 @@ impl CommandCgroup {
 
 fn hash_component(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
-    let encoded = format!("{digest:x}");
+    let encoded = crate::hex_string(&digest);
     encoded[..HASH_COMPONENT_LEN].to_string()
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 func TestTurnContextTracksMultipleLoadedSkillNames(t *testing.T) {
-	tc := &TurnContext{V3: &AgentV3TurnState{loadedSkillNames: map[string]struct{}{}}}
+	tc := &TurnContext{V3: &AgentV3TurnState{}}
 	tc.markSkillLoaded(" Repo_Inspect ")
 	tc.markSkillLoaded("rich-message")
 
@@ -24,7 +24,7 @@ func TestRichMessageAuthorizationPersistsAfterOtherToolsButRejectsOrdinarySkill(
 	t.Cleanup(func() { config.BotConfig = oldConfig })
 	tc := &TurnContext{
 		Config: &config.AgentConfig{Agent: &config.AgentOptions{Enable: true, Rich: true}},
-		V3:     &AgentV3TurnState{loadedSkillNames: map[string]struct{}{}},
+		V3:     &AgentV3TurnState{},
 	}
 
 	tc.markSkillLoaded("repo-inspect")

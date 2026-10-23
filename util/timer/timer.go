@@ -5,8 +5,6 @@ import (
 	"sync"
 )
 
-// TODO: use heap when package `heap` is ready
-
 // Timer is a timer running tasks.
 type Timer struct {
 	tasks []*Task

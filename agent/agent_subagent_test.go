@@ -133,7 +133,7 @@ func TestSubAgentRuntimeToolsAndFilteredSkills(t *testing.T) {
 		RunID:         "run_sub",
 		Namespace:     "bot:tg:-100",
 		RuntimeClient: &RemoteRuntimeClient{Endpoint: runtime.URL, HTTPClient: runtime.Client(), CommandTimeout: time.Second, MaxOutputChars: 1000},
-		V3:            &AgentV3TurnState{SkillCatalog: catalog, loadedSkillNames: map[string]struct{}{}},
+		V3:            &AgentV3TurnState{SkillCatalog: catalog},
 	}
 	ctx, cancel := context.WithTimeout(WithTurnContext(t.Context(), tc), 10*time.Second)
 	defer cancel()
@@ -162,7 +162,7 @@ func TestSubAgentRuntimeToolsAndFilteredSkills(t *testing.T) {
 	require.Contains(t, joined, "[Skill Error] requested skill is not available.")
 	require.NotContains(t, joined, "RICH_SKILL_BODY")
 	require.Contains(t, joined, "NOTES_CONTENT /workspace/notes.txt")
-	require.True(t, tc.hasLoadedSkill("searxng"))
+	require.False(t, tc.hasLoadedSkill("searxng"), "subagent activation must stay private")
 	require.False(t, tc.hasLoadedSkill("rich-message"))
 
 	require.Less(t, len(out), 400)

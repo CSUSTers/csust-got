@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"csust-got/log"
 
@@ -57,7 +56,7 @@ type cachedMessageSnapshot struct {
 }
 
 // setMessageScript replaces the snapshot only when the incoming (edit_date, date, seq) is at least as new as the stored one.
-var setMessageScript = redis.NewScript(`
+var setMessageScript = redis.NewScript(botMessageReferencesLua + `
 local stored = redis.call('GET', KEYS[1])
 if stored then
   local ok, current = pcall(cjson.decode, stored)
@@ -73,13 +72,19 @@ if stored then
     end
   end
 end
+lifecyclePrefix = ARGV[6]
+renewStandalone(cjson.decode(ARGV[7]), ARGV[4])
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[4])
 return 1
 `)
 
 func setMessageIfNewer(ctx context.Context, key string, msg *Message, seq uint64, jsonData []byte) error {
-	ttl := int64((24 * time.Hour).Seconds())
-	return setMessageScript.Run(ctx, rc, []string{key}, jsonData, msg.LastEdit, msg.Unixtime, ttl, strconv.FormatUint(seq, 10)).Err()
+	ttl := int64(messageCacheTTL.Seconds())
+	candidates, err := json.Marshal(lifecycleCandidateIDs(msg))
+	if err != nil {
+		return err
+	}
+	return setMessageScript.Run(ctx, rc, botMessageLifecycleKeys(key, msg.Chat.ID), jsonData, msg.LastEdit, msg.Unixtime, ttl, strconv.FormatUint(seq, 10), botMessageLifecyclePrefix(msg.Chat.ID), candidates).Err()
 }
 
 type messageSnapshot struct {
@@ -140,20 +145,50 @@ func PushMessageToStreamWithSeq(msg *Message, seq uint64) error {
 	if seq != 0 {
 		values = append(values, messageStreamFieldSeq, strconv.FormatUint(seq, 10))
 	}
-	resp := rc.XAdd(context.TODO(), &redis.XAddArgs{
-		Stream: key,
-		MaxLen: messageStreamMaxLen,
-		Approx: true,
-		ID:     "*",
-		Values: values,
-	})
+	candidates, err := json.Marshal(lifecycleCandidateIDs(msg))
+	if err != nil {
+		return err
+	}
+	args := make([]any, 0, 12)
+	args = append(args, messageStreamMaxLen, int64(messageCacheTTL.Seconds()), botMessageLifecyclePrefix(msg.Chat.ID), candidates)
+	args = append(args, values...)
+	resp := pushMessageStreamScript.Run(context.TODO(), rc, botMessageLifecycleKeys(key, msg.Chat.ID), args...)
 	if resp.Err() != nil {
 		log.Error("push message to redis stream failed", zap.Int64("chat", msg.Chat.ID), zap.Int("message", msg.ID), zap.Error(resp.Err()))
 		return resp.Err()
 	}
-	_ = rc.Expire(context.TODO(), key, 24*time.Hour)
 	return nil
 }
+
+var pushMessageStreamScript = redis.NewScript(botMessageReferencesLua + `
+lifecyclePrefix = ARGV[3]
+local excess = redis.call('XLEN', KEYS[1]) + 1 - tonumber(ARGV[1])
+local removed = {}
+if excess > 0 then removed = redis.call('XRANGE', KEYS[1], '-', '+', 'COUNT', excess) end
+local refs = {}
+for _, id in ipairs(cjson.decode(ARGV[4])) do
+  if retain(id) then refs[id] = true end
+end
+local values = {}
+for i = 5, #ARGV do table.insert(values, ARGV[i]) end
+table.insert(values, 'lifecycle_refs')
+table.insert(values, cjson.encode(refs))
+redis.call('EXPIRE', KEYS[2], ARGV[2])
+redis.call('EXPIRE', KEYS[3], ARGV[2])
+redis.call('XADD', KEYS[1], '*', unpack(values))
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+redis.call('XTRIM', KEYS[1], 'MAXLEN', ARGV[1])
+for _, record in ipairs(removed) do
+  local fields = record[2]
+  for i = 1, #fields, 2 do
+    if fields[i] == 'lifecycle_refs' then
+      local refs = cjson.decode(fields[i + 1])
+      for id, _ in pairs(refs) do release(id) end
+    end
+  end
+end
+return 1
+`)
 
 // GetMessage 从 Redis 获取完整的消息结构体
 func GetMessage(chatID int64, messageID int) (*Message, error) {
@@ -276,19 +311,36 @@ func getMessageContext(ctx context.Context, client *redis.Client, chatID int64, 
 
 // GetMessagesFromStream returns distinct messages in the query range sorted by message ID, keeping the newest snapshot per ID by edit time, send time, receive sequence, then stream order.
 func GetMessagesFromStream(chatID int64, query MessageStreamQuery) ([]*Message, error) {
-	messages, _, err := getMessagesFromStream(chatID, query, false)
+	messages, _, err := getMessagesFromStream(context.Background(), rc, chatID, query, false)
 	return messages, err
 }
 
 // GetMessagesFromStreamBestEffort skips malformed stream records and returns the number of records scanned.
 func GetMessagesFromStreamBestEffort(chatID int64, query MessageStreamQuery) ([]*Message, int, error) {
-	return getMessagesFromStream(chatID, query, true)
+	return getMessagesFromStream(context.Background(), rc, chatID, query, true)
 }
 
-func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bool) ([]*Message, int, error) {
+// GetMessagesFromStreamBestEffort skips malformed snapshots and returns the number scanned.
+func (r *MessageReader) GetMessagesFromStreamBestEffort(chatID int64, query MessageStreamQuery) ([]*Message, int, error) {
+	return getMessagesFromStream(r.ctx, r.client, chatID, query, true)
+}
+
+// GetMessagesFromStream reads distinct cached messages using the operation's context.
+func (r *MessageReader) GetMessagesFromStream(chatID int64, query MessageStreamQuery) ([]*Message, error) {
+	messages, _, err := getMessagesFromStream(r.ctx, r.client, chatID, query, false)
+	return messages, err
+}
+
+func getMessagesFromStream(ctx context.Context, client *redis.Client, chatID int64, query MessageStreamQuery, bestEffort bool) ([]*Message, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
 	key := wrapKeyWithChat("message_stream", chatID)
 
-	records, err := rc.XRevRangeN(context.TODO(), key, "+", "-", messageStreamMaxLen).Result()
+	records, err := client.XRevRangeN(ctx, key, "+", "-", messageStreamMaxLen).Result()
+	if ctx.Err() != nil {
+		return nil, 0, ctx.Err()
+	}
 	if err != nil {
 		log.Error("get messages from redis stream failed", zap.Int64("chat", chatID),
 			zap.Int("min", query.MinID), zap.Int("max", query.MaxID), zap.Error(err))
@@ -298,6 +350,9 @@ func getMessagesFromStream(chatID int64, query MessageStreamQuery, bestEffort bo
 	// Snapshots are stored concurrently, so an older snapshot may be appended after a newer edit.
 	latest := make(map[int]messageSnapshot, len(records))
 	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return nil, len(records), err
+		}
 		seen := false
 		if id, ok := streamRecordMessageID(record); ok {
 			if !query.contains(id) {

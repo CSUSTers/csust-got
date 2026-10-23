@@ -1,25 +1,19 @@
 # Agent Runtime 受控 Fetch、唯一出网与资源隔离设计
 
-- 日期: 2026-08-25
-- 状态: Tasks 1–9 与 C1–C6 均保留为历史实现波次；binding final review 仍 rejected，Fetch 保持默认关闭，当前只执行 C7 后 C8，并在新的 target native Linux 全量 receipt 前禁止启用
+- 启用约束: Fetch 默认关闭；生产启用前必须在目标原生 Linux 对待部署版本取得完整安全验证回执并经运维批准，不能以代码存在或文档维护代替验收
 - 范围: Agent v3 Runtime、Fetch Broker、Shell 执行隔离、Docker 部署、系统提示词与安全测试
-- 关联代码: `agent-runtime/`、`chatv2/agentv3_context.go`、`chatv2/agentv3_runtime.go`、`config/chat.go`、`docker-compose.yml`
+- 关联代码: `agent-runtime/`、`agent/agentv3_prompts.go`、`agent/agentv3_runtime.go`、`config/agent.go`、`docker-compose.yml`
 
-## 1. 背景
+## 1. 适用范围
 
-Agent v3 当前通过远端 Runtime 执行 `read`、`grep`、`write`、`edit` 和 `bash`。Runtime 镜像包含 curl 与 git，系统提示词也宣称 curl 可用，但 `dangerous_command_reason` 又通过字符串匹配拦截 `curl ` 和 `wget `。
+Agent v3 通过远端 Runtime 执行文件工具和 Bash。Shell 网络权限由 seccomp、
+command-bound Fetch 与隔离的 Broker 控制，不由命令名称、字符串扫描或提示词控制。
+每命令 cgroup 与宿主 aggregate 共同约束资源。部署操作见 [README](../../../README.md#agent-v3-runtime-and-controlled-fetch)。
 
-该机制存在两个问题:
-
-1. 字符串黑名单不是网络安全边界。绝对路径、制表符、变量展开、git、Bash `/dev/tcp` 或未来加入的解释器都可能形成旁路。
-2. 正常的网页请求和 Pipe 用法被阻断，例如 `curl URL | jq`，但底层容器和 seccomp 并未真正撤销 Shell 的网络能力。
-
-当前 Runtime 已有命令超时、输出截断、独立进程组、进程组清理以及阻止 `setsid`/`setpgid` 的 seccomp 规则，但没有 PID、内存、CPU、FD 或磁盘硬配额。Fork bomb 可能在 wall timeout 生效前耗尽资源。
-
-## 2. 已确认的产品决策
+## 2. 产品契约
 
 1. Shell 保持通用 Bash 执行能力，不以命令名称黑名单决定哪些工具可用。
-2. 所有 Shell 网络请求必须经过新命令 `fetch`；其他二进制和 Shell 原语不能直接建立公网连接。
+2. 所有 Shell 网络请求必须经过 `fetch`；其他二进制和 Shell 原语不能直接建立公网连接。
 3. `fetch` 采用类似 HTTPie 的参数风格，正文写 stdout，支持 Pipe、重定向、stdin 和文件上传。
 4. `fetch` 支持除 CONNECT 外的任意应用层 HTTP 方法、应用层 Header、Body 和上传；“完整”指请求表达能力完整，不承诺兼容 HTTPie 的全部 CLI 参数和显示格式。
 5. 允许访问任意公网目标，只拒绝内网、特殊地址、部署控制网络和 SSRF 绕过。
@@ -28,7 +22,7 @@ Agent v3 当前通过远端 Runtime 执行 `read`、`grep`、`write`、`edit` �
 8. Shell 不持有 Broker socket path、Fetch HMAC token 或签名密钥。Runtime 在每命令 cgroup 创建后、exec helper spawn 前创建匿名 AF_UNIX `SOCK_SEQPACKET` command control socketpair，只把 client endpoint 映射为固定继承 FD 4，并把十进制 `AGENT_FETCH_CONTROL_FD=4` 交给 Shell。
 9. 每次 `fetch` invocation 创建独立匿名 AF_UNIX session socketpair，通过 command control FD 发送一个不超过 32 KiB 的原子 control packet，并以 `SCM_RIGHTS` 恰好交付一个 Runtime endpoint。Runtime 依据创建 endpoint 时已固定的 `CommandBinding` 识别 namespace/run/command；任何字符串都不能选择或重放其他命令身份。
 10. Runtime 持有 Broker UDS path、HMAC key 和 command token，使用既有 Broker 协议代理请求。Broker 继续自行验证 token、peer UID/GID、claims 和 quota；Runtime 不能以“自己签过 token”为由绕过 Broker 验证。
-11. Fetch prompt、Runtime Fetch data plane 和 Broker Compose service 均默认关闭。只有显式 Fetch Compose overlay/profile、显式 enable 变量以及 target native Linux `failed=0 skipped=0` receipt 同时满足后才允许启用。
+11. Fetch prompt、Runtime Fetch data plane 和 Broker Compose service 均默认关闭。只有显式 Fetch Compose overlay/profile、显式 enable 变量以及目标原生 Linux 完整安全验证回执同时满足后才允许启用；回执须为 `SUMMARY pass=<positive> fail=0 skipped=0`。
 12. Runtime、exec helper 与 Shell 之间增加 supervisor-owned、单向、CLOEXEC 的可信启动状态管道，固定 helper status FD 为 5。只有目标 `execve` 导致的 clean EOF 才表示 enforcement startup 成功；helper 初始化失败、状态 timeout、malformed/read failure、运行期 cgroup control/CPU accounting failure 都不可逆地令共享 `BashHealth` unhealthy，取消活跃 Bash，并禁止 fallback。
 13. `CommandBinding` 的 control reader 与 session guardian 是两个独立 owner。control reader 不拥有 `JoinSet`；guardian 独占 session `JoinSet`、spawn/join 计数与 receipt。只有 control reader 已观察终止、guardian 成功且 `spawned == joined` 后，命令生命周期才获得 cgroup cleanup 授权。
 14. Runtime local proxy 使用 typed error classification：workspace quota/容量、destination busy 与 path/policy reservation 失败映射 `ErrorCode::Policy`/exit 65；rename 前真实 filesystem I/O 映射 `ErrorCode::Internal`/exit 70。rename 是逻辑 commit 点；rename 后 directory sync 失败不得反报 output failure，而是保持 `output_committed=true`、latch 同一个共享 `BashHealth` 的 durability reason，并禁止后续 Bash。
@@ -211,7 +205,7 @@ Runtime 每个 command 最多读取 20 个 control packets（包括 malformed pa
 
 local session codec 与 Broker enum 分离，但复用现有 `FETCH_PROTOCOL_VERSION=1`、`MAX_METADATA_BYTES=32 KiB`、`MAX_BODY_FRAME_BYTES=64 KiB`、Header aggregate validation 和 5-byte frame header：`kind:u8 || payload_len:u32 big-endian || payload`。reader 必须在分配 payload 前根据 kind 验证 declared length；metadata 使用 bounded JSON，Body/response chunk 使用 raw bytes，空帧要求 length 0。local client kind 固定为 `0x01 BodyChunk`、`0x02 BodyEnd`、`0x03 Cancel`；local Runtime kind 固定为 `0x81 Continue`、`0x82 ResponseHead`、`0x83 ResponseChunk`、`0x84 ResponseEnd`、`0x85 Error`。`CommandControlPacket`、`ResponseHead`、`ResponseEnd` 和 `Error` 中的 version 必须等于 1；unknown kind、unsupported version、duplicate terminal/head/continue、任意 out-of-order frame、Body-before-Continue、Body-after-BodyEnd、额外 payload 和 64 KiB+1 Body 均关闭 session 并禁止继续写 Broker。
 
-每个方向最多只有一个待处理 frame：实现使用 capacity=1 的 bounded channel，或直接逐帧 pump 而不建立队列。不得 coalesce Body、累积 response 到 unbounded `Vec`，也不得在读取 declared length 后先分配再检查。共享 `LocalRequestState`/`LocalResponseState` validator 与 codec 同属 `fetch_protocol`；Runtime proxy 与 C3 Fetch CLI 必须直接使用它们，不能各写一套排序逻辑。Runtime 在 Broker `Continue` 前同时监督 local input；提前 Body 立即按协议错误取消 upstream。正常顺序为 Runtime `Continue` 一次，Shell `BodyChunk*` 后恰好一个 `BodyEnd`，Runtime `ResponseHead` 一次、`ResponseChunk*`、恰好一个 `ResponseEnd`；`Cancel` 可终止尚未 terminal 的 session。local peer 不读取 response、Body producer 停滞或 session 被 revoke 时，Runtime 取消 I/O，并在 100 ms cancel/close bound 内释放 active-session permit。Fetch body/stdout 始终固定 buffer streaming；`--output` 时 response chunks 由 Runtime 写入，不回送给 Shell，最终 local `ResponseEnd` 携带 version、总 body bytes 和 commit 结果。
+每个方向最多只有一个待处理 frame：实现使用 capacity=1 的 bounded channel，或直接逐帧 pump 而不建立队列。不得 coalesce Body、累积 response 到 unbounded `Vec`，也不得在读取 declared length 后先分配再检查。共享 `LocalRequestState`/`LocalResponseState` validator 与 codec 同属 `fetch_protocol`；Runtime proxy 与 Fetch CLI 必须直接使用它们，不能各写一套排序逻辑。Runtime 在 Broker `Continue` 前同时监督 local input；提前 Body 立即按协议错误取消 upstream。正常顺序为 Runtime `Continue` 一次，Shell `BodyChunk*` 后恰好一个 `BodyEnd`，Runtime `ResponseHead` 一次、`ResponseChunk*`、恰好一个 `ResponseEnd`；`Cancel` 可终止尚未 terminal 的 session。local peer 不读取 response、Body producer 停滞或 session 被 revoke 时，Runtime 取消 I/O，并在 100 ms cancel/close bound 内释放 active-session permit。Fetch body/stdout 始终固定 buffer streaming；`--output` 时 response chunks 由 Runtime 写入，不回送给 Shell，最终 local `ResponseEnd` 携带 version、总 body bytes 和 commit 结果。
 
 Runtime proxy error 必须保留 typed `RuntimeProxyErrorClass::{Auth,Policy,Timeout,Network,Protocol,Internal}` 到 local terminal frame。`WorkspaceBudgetErrorClass::Policy` 包含 logical/filesystem capacity、invalid-path policy 与 destination busy；真实 inspect/open/create/write/file-sync/rename failure 是 Internal。protocol/auth/network/timeout 延用既有 `ErrorCode` 语义。`serve_local_session` 是 local terminal 的唯一 owner，并通过带 `terminal_sent` 状态的 writer 让 relay/handshake/output error 在 writer 仍可用时恰好发送一个 `LocalRuntimeFrame::Error`；已发送 Broker Error/ResponseEnd 后不得再发送第二 terminal，writer 本身失效时才允许无法送达。owner 不得把 `Err` 丢弃成 EOF。CLI 既有映射保持：Policy exit 65、Internal exit 70、Auth/Network/Protocol exit 69、Timeout exit 28。
 
@@ -468,7 +462,7 @@ fetch POST https://upload.example.com --form file@/workspace/report.txt
 
 Token、Authorization、Cookie、Proxy-Authorization、Body 明文和完整敏感 query 不写日志。
 
-Runtime 在同一个 `supervise_command` task、同一个现有 JSON tracing logger/stream 中发出两种结构化 marker。`event="command_binding_owned_drain_complete"` 只能由完整 `BindingDrainReceipt` 构造，字段仅含既有 hashed command `cgroup_name`、`control_reader_outcome`、`spawned_sessions`、`joined_sessions`、`joinset_empty=true` 与 `job_channel_closed=true`；它在 process-group/cgroup cleanup 开始前紧邻发出。`event="command_cgroup_cleanup_complete"` 仅含同一个 `cgroup_name`，只在该 command 的 `kill_wait_remove` 成功后发出。两者都不得包含 raw namespace/run/command、path、token 或 request 内容；同 task/logger 保证 captured ordered stream 中 drain event 在 cleanup event 之前。C8 在 request/command termination 后 bounded 等待同一 identity 的两个精确事件并比较日志行顺序，再独立验证 cgroup directory 与 captured PID identities 已消失；不通过 external polling 试图捕获“marker 已有但 cgroup inode 尚在”的瞬间。cleanup failure 时第二个事件必须缺失、health false、case failure。Broker Completion audit 在 cancellation 后以另一条独立 bounded eventual check 验证 final cancellation/completion metadata；不得比较它与任一 Runtime marker 的 wall-clock 位置，也不得仅为测试新增 Broker acknowledgement protocol。
+Runtime 在同一个 `supervise_command` task、同一个现有 JSON tracing logger/stream 中发出两种结构化 marker。`event="command_binding_owned_drain_complete"` 只能由完整 `BindingDrainReceipt` 构造，字段仅含既有 hashed command `cgroup_name`、`control_reader_outcome`、`spawned_sessions`、`joined_sessions`、`joinset_empty=true` 与 `job_channel_closed=true`；它在 process-group/cgroup cleanup 开始前紧邻发出。`event="command_cgroup_cleanup_complete"` 仅含同一个 `cgroup_name`，只在该 command 的 `kill_wait_remove` 成功后发出。两者都不得包含 raw namespace/run/command、path、token 或 request 内容；同 task/logger 保证 captured ordered stream 中 drain event 在 cleanup event 之前。验收在 request/command termination 后 bounded 等待同一 identity 的两个精确事件并比较日志行顺序，再独立验证 cgroup directory 与 captured PID identities 已消失；不通过 external polling 试图捕获“marker 已有但 cgroup inode 尚在”的瞬间。cleanup failure 时第二个事件必须缺失、health false、case failure。Broker Completion audit 在 cancellation 后以另一条独立 bounded eventual check 验证 final cancellation/completion metadata；不得比较它与任一 Runtime marker 的 wall-clock 位置，也不得仅为测试新增 Broker acknowledgement protocol。
 
 ## 15. 测试策略
 
@@ -534,7 +528,7 @@ Runtime 在同一个 `supervise_command` task、同一个现有 JSON tracing log
 
 ### 15.6 Identity、Broker 与部署修正验收
 
-- exec helper 以真实 config/control/status payload/endpoint 覆盖 `(3,4,5)` 的六种排列、config/control/status-only conflict 和无冲突；每种都证明 FD 3/4/5 identity 正确、进入 helper 前三目标 CLOEXEC 已清除、helper 立即令 5 CLOEXEC、错误路径无部分映射或 FD 泄漏。所有 C7 测试都是普通 test target，不得标 `#[ignore]` 或依赖 `--ignored`。
+- exec helper 以真实 config/control/status payload/endpoint 覆盖 `(3,4,5)` 的六种排列、config/control/status-only conflict 和无冲突；每种都证明 FD 3/4/5 identity 正确、进入 helper 前三目标 CLOEXEC 已清除、helper 立即令 5 CLOEXEC、错误路径无部分映射或 FD 泄漏。安全契约测试都是普通 test target，不得标 `#[ignore]` 或依赖 `--ignored`。
 - command control packet 32 KiB、每 command packets 20、active sessions 2；malformed/extra FD/truncation 失败关闭。
 - local session exact-codec 测试覆盖 declared oversize-before-allocation、64 KiB+1 Body、unknown/version、duplicate/out-of-order、Body-before-Continue、Body-after-End、non-reading peer、Broker zero-extra-write 和 permit return。
 - barrier tests 让 control reader 在 admission 后 panic/error，并让 Broker/non-reading output session 阻塞；必须证明独立 guardian 仍消费每个 join receipt、`spawned==joined`、late packet 建立零个 Broker connection。timeout/receipt mismatch 必须保留 entry/handles、health false、cgroup 未清理；success trace 必须只在 control+guardian receipts 完成后按 `command_binding_owned_drain_complete`、successful `kill_wait_remove`、`command_cgroup_cleanup_complete` 顺序出现。注入 cleanup failure 时第二个事件必须缺失且 shared health false。
@@ -544,7 +538,7 @@ Runtime 在同一个 `supervise_command` task、同一个现有 JSON tracing log
 - 部署后从实际 Runtime supervisor PID 的 `/proc/<pid>/cgroup` 证明 service/commands 是同一 approved aggregate 的 direct children，并验证实际 supervisor 自检 dumpable=0、同 UID Shell `ptrace(PTRACE_ATTACH)` 返回 EPERM。
 - Audit Start 对 streaming request 必须断言 `request_body_byte_len=0` 和 empty SHA-256；matching Completion 必须断言 non-zero `request_body_bytes` 与对应 non-empty digest。不得再要求 Start 预知尚未读取的 Body。
 - Native matrix 在 command/request termination 后从同一 Runtime container 的同一 ordered JSON log stream bounded 等待相同 `cgroup_name` 的 `command_binding_owned_drain_complete` 与 `command_cgroup_cleanup_complete`，要求前者日志位置严格小于后者，然后独立验证 exact cgroup directory 和 captured PID identities 已消失；不要求外部 observer 捕获中间 cgroup-existing 状态。Broker completion audit 在 cancellation 后另以 bounded deadline 验证 final metadata，但不比较它与任一 Runtime marker/cgroup removal 的 wall-clock 顺序，也不增加 audit ack。
-- C8 在 native host 使用既有 Rust toolchain，以 `cargo test --locked --release --no-run --message-format=json` 分别构建 C7 private-library 与 `linux_exec_helper`、`linux_cgroup`、`runtime_fetch_proxy`、`fetch_cli` integration-test targets；`jq` 对每个 target 只接受一个 test executable。runner 把每个精确 binary 复制到其 owned temp root，再以已经构建且带 `org.csusters.agent-runtime.security-test-only=true` label 的 `runtime-security-test` image 执行：network none、read-only root、cap-drop ALL、no-new-privileges、bounded PIDs/memory/CPU、bounded `/tmp`，只 read-only bind 对应 test binary，并传单个 exact filter、`--exact --nocapture --test-threads=1`。每次必须显示 `running 1 test`、该 exact test `ok` 与 `1 passed`；这些 test 必须 self-contained，可重 exec 当前 test binary，但不得依赖 `CARGO_BIN_EXE_*` sibling、mount source/Cargo cache/Docker socket/writable host cgroup，也不得给 image 增加 Cargo。需要真实 delegated cgroup mount、deployed Runtime/Broker/network 或 SIGTERM topology 的 case 只在完整 native matrix 中运行，不伪装成 network-none binary test。
+- 在 native host 使用既有 Rust toolchain，以 `cargo test --locked --release --no-run --message-format=json` 分别构建 private-library 安全测试与 `linux_exec_helper`、`linux_cgroup`、`runtime_fetch_proxy`、`fetch_cli` integration-test targets；`jq` 对每个 target 只接受一个 test executable。runner 把每个精确 binary 复制到其 owned temp root，再以已经构建且带 `org.csusters.agent-runtime.security-test-only=true` label 的 `runtime-security-test` image 执行：network none、read-only root、cap-drop ALL、no-new-privileges、bounded PIDs/memory/CPU、bounded `/tmp`，只 read-only bind 对应 test binary，并传单个 exact filter、`--exact --nocapture --test-threads=1`。每次必须显示 `running 1 test`、该 exact test `ok` 与 `1 passed`；这些 test 必须 self-contained，可重 exec 当前 test binary，但不得依赖 `CARGO_BIN_EXE_*` sibling、mount source/Cargo cache/Docker socket/writable host cgroup，也不得给 image 增加 Cargo。需要真实 delegated cgroup mount、deployed Runtime/Broker/network 或 SIGTERM topology 的 case 只在完整 native matrix 中运行，不伪装成 network-none binary test。
 
 ### 15.7 回归验证
 
@@ -591,26 +585,23 @@ Broker 独立配置:
 
 ### 16.4 Compose activation 与 Broker 资源
 
-Base `docker-compose.yml` 运行 Runtime 的 Fetch-disabled 模式，不声明 Broker、Fetch UDS volume 或 HMAC secret dependency，因此仅运行 local Runtime 不要求 Fetch 部署材料。显式 `docker-compose.fetch.yml` overlay 才增加 Runtime Fetch mounts/env 和 `agent-fetch-broker`; Broker service 带 `profiles: [agent-fetch]`，并要求 `AGENT_FETCH_ENABLE=true`。启用命令必须同时选择 overlay、profile 和 enable 变量，任一缺失都保持 disabled 或失败关闭。native Linux receipt 是发布/运维审批前置证据，不是传给容器、可由容器自证的 secret 或布尔开关；Compose 无法判断 receipt 是否真实，旧 C6 receipt 已失效，运维在保存 C8 新的完整 `failed=0 skipped=0` receipt 前不得执行显式启用命令。
+Base `docker-compose.yml` 运行 Runtime 的 Fetch-disabled 模式，不声明 Broker、Fetch UDS volume 或 HMAC secret dependency，因此仅运行 local Runtime 不要求 Fetch 部署材料。显式 `docker-compose.fetch.yml` overlay 才增加 Runtime Fetch mounts/env 和 `agent-fetch-broker`; Broker service 带 `profiles: [agent-fetch]`，并要求 `AGENT_FETCH_ENABLE=true`。启用命令必须同时选择 overlay、profile 和 enable 变量，任一缺失都保持 disabled 或失败关闭。native Linux receipt 是发布/运维审批前置证据，不是传给容器、可由容器自证的 secret 或布尔开关；Compose 无法判断 receipt 是否真实。运维在保存覆盖当前安全契约的完整 `SUMMARY pass=<positive> fail=0 skipped=0` 回执前不得执行显式启用命令。
 
 Broker service 精确限制为 `pids_limit: 128`、`mem_limit: 256m`、`memswap_limit: 256m`（无额外 swap）、`cpus: 1.0`、nofile soft 256/hard 1024、`cap_drop: [ALL]` 和 `no-new-privileges:true`。Broker 不使用 privileged、`CAP_SYS_ADMIN`、Docker socket、host PID namespace 或额外 `/proc` mount。
 
 Runtime 继续使用 cgroup namespace host view（不是 host PID namespace）来解析自己的实际 cgroup。commands bind 必须挂到与 host canonical path 相同的 guest path，避免通过不同 guest alias 伪造 ancestry。
 
-## 17. 迁移顺序
+## 17. 部署前验证与启用
 
-Tasks 1–9 已完成原代码阶段，但 identity-bound final review 因 token replay、aggregate validation 未接线、Broker pre-auth/CONNECT/资源、CLI parser/path/output/cancel、activation 与 Task 9 receipt 缺口而 rejected；这些历史实现不视为生产授权。
+目标原生 Linux 必须对待部署版本运行完整攻击矩阵，保存
+`SUMMARY pass=<positive> fail=0 skipped=0` 回执，再由运维批准显式启用。
+回执须覆盖 helper status/health、独立 guardian drain、typed output/commit、同一
+Runtime 日志流中的 drain-before-cleanup，以及真实 cgroup、SIGTERM、网络拓扑和精确清理。
+只通过本地 fixture、静态检查或不覆盖当前安全契约的旧回执都不足以启用。
 
-历史 Correction round 1 的 blocker ledger 当时冻结为三项：helper config/control FD 3/4 collision-safe install、binding owned revoke/join 与 output commit linearization、exact bounded local session codec。该历史判断不覆盖后来 binding final review 确认的四项 C7/C8 blocker，也不再表示“无需 C7”。
-
-第一轮 Final Review Corrections C1–C6 也已成为历史：它补齐 identity-bound proxy、Broker/CLI/deployment/default-off 与初版 native matrix，但 binding final review 又确认 enforcement health、guardian ownership、typed output commit/error 和 evidence ordering 四项 blocker。C1–C6 的历史行为继续保留，除非被下列 C7/C8 明确 supersede。
-
-当前唯一可执行顺序严格为:
-
-1. C7 在一个 serial correction wave 中实现 trusted exec-status FD 5 + irreversible shared health latch、独立 control reader/session guardian、typed Runtime terminal errors、rename logical commit，以及同 task/logger 的 drain-complete/cleanup-complete 双 marker。任何一部分未 GREEN 都不能进入 C8。
-2. C8 只修订 C6 已有两个 acceptance scripts并原样复用现有 security-test override：host 预编译精确 C7 test executables、受限 container 只运行 hermetic exact filters、以同一 Runtime ordered stream 的双 marker 证明 revoke/join-before-cgroup、独立 bounded 等待 Broker audit，保留真实 native cgroup/SIGTERM/no-host-PID-signal/exact cleanup/default-off，并在 target native Linux 重新生成 `failed=0 skipped=0` receipt。
-
-修正期间不得出现“原生网络仍可用但 fetch 策略尚未完成”的窗口。Shell seccomp/cgroup 始终保留；旧 C6 receipt 已失效，在 C8 新 receipt 前 Fetch prompt false、Broker profile inactive。native Linux full receipt 之后也只允许运维显式启用，不把 repository default 改为 true。
+验证前 Fetch prompt 保持 false、Broker profile 不启用；验证后仓库默认值仍为 false。
+Shell seccomp/cgroup 始终保留，不能出现 Fetch 未就绪却恢复原生网络的窗口。
+本规范不声明任何生产部署已经通过验收。
 
 ## 18. 回滚
 
@@ -620,53 +611,13 @@ Tasks 1–9 已完成原代码阶段，但 identity-bound final review 因 token
 - 不允许回滚到 curl/wget 字符串黑名单作为网络安全边界。
 - 若 cgroup 功能需要紧急停用，应同时停用 Bash endpoint，而不是无隔离执行。
 
-## 19. 文件与模块边界
+## 19. 组件边界
 
-预计涉及:
+Broker policy 不依赖 Go Agent 代码；Prompt 变化不改变安全策略。Fetch shim 不持有
+Broker credentials、DNS/HTTP 或 workspace output writer，Broker 是唯一公网连接组件，
+Runtime proxy 是唯一 Broker client 和 command identity binding point。
 
-- `agent-runtime/src/lib.rs`: Runtime state、Bash execution、把 AppState/supervisor 的同一个 `BashHealth` 传给 command binding。
-- `agent-runtime/src/main.rs`: 配置/readiness，以及 shutdown 中先取得全部 binding drain receipts、再授权 retained stale-cgroup recovery 的唯一协调顺序。
-- `agent-runtime/src/exec.rs` / `agent-runtime/src/exec/health.rs`: config/control/status 三源先规范化到互异 >=6 temp，再安装固定 FD 3/4/5；bounded helper startup status、运行期 cgroup/CPU enforcement latch、drain receipt gate、cleanup failure latch 与 shared irreversible `BashHealth`。
-- `agent-runtime/src/runtime_fetch_proxy.rs`: typed Runtime proxy errors、anonymous command control/session sockets、`CommandBinding` lease、Runtime→Broker translation 与 Runtime-owned atomic output。
-- `agent-runtime/src/runtime_fetch_proxy/control.rs`: fallible control packet reader/admission；只 `try_send` bounded `SessionJob`，不拥有 `JoinSet`。
-- `agent-runtime/src/runtime_fetch_proxy/guardian.rs`: 独立非 panic guardian；唯一 session `JoinSet` owner、spawn/join counters、abort/drain receipt。
-- `agent-runtime/src/runtime_fetch_proxy/lifecycle.rs` / `registry.rs`: 两个 retained owner handles、bounded revoke receipt collection、receipt mismatch fail-closed 与 cleanup authorization。
-- `agent-runtime/src/runtime_fetch_proxy/session.rs` / `response.rs`: exactly-one local terminal writer、typed Runtime/Broker error relay。
-- `agent-runtime/src/runtime_fetch_proxy/output.rs`: rename logical commit、post-rename directory durability latch 与 committed receipt。
-- `agent-runtime/src/bin/fetch.rs`: Shell shim；只消费共享 local codec，不另定义 framing/limit。
-- `agent-runtime/src/bin/agent-fetch-broker.rs`: 独立 Broker。
-- `agent-runtime/src/bin/agent-runtime-exec.rs`: 可信命令启动 helper；FD 5 CLOEXEC 和 stable versioned init-stage failure record。
-- `agent-runtime/src/fetch_protocol.rs`: 分离的 Broker/local 类型与共享 bounded codec；metadata/control 32 KiB、Body 64 KiB、pre-allocation length check 和 exact ordering。
-- `agent-runtime/src/workspace_budget.rs`: write/edit/Fetch 共享 replace path lease、old-file delta、streaming reservation 与 Policy/Internal error class。
-- `agent-runtime/src/fetch_policy.rs`: URL/DNS/IP/redirect/预算策略。
-- `agent-runtime/Cargo.toml` / `Cargo.lock`: HTTP、DNS、token 和测试依赖。
-- `agent-runtime/Dockerfile`: 多 binary 构建与 Runtime 镜像。
-- 新 Broker Dockerfile 或 broker target stage。
-- `docker-compose.yml`: Fetch-disabled base Runtime、总资源上限与 cgroup 委派。
-- `docker-compose.fetch.yml`: 显式 Fetch overlay/profile/enable、Broker、网络、UDS volume、secret 和 Broker service resources。
-- `config/chat.go` / `config.yaml`: Runtime 可见配置及默认值。
-- `chatv2/agentv3_context.go`: system prompt。
-- `chatv2/agentv3_runtime.go`: Bash/tool descriptions。
-- `scripts/test-agent-runtime-compose.sh`: static whitelist 锁定 C8 case、双 Runtime lifecycle marker/same-stream order、host no-run Cargo build + exact binary container runner、独立 Broker audit wait，并拒绝 intermediate-inode poll、container 内 Cargo 与伪 Broker happens-before。
-- `scripts/agent-runtime-attack-matrix.sh`: C8 native-host test-binary compilation/extraction、hardened network-none exact-filter runner、real Linux/Compose enforcement latch、双 marker ordered-log guardian evidence、真实 cgroup/SIGTERM topology 与独立 Broker audit receipt。
-- `docker-compose.security-test.yml`: C8 复用 C6 的现有 test-only override，不修改该文件、不增加 service/production API/privilege；C7 fault injection 只存在于 Rust test implementation。
-- Rust、Go 与 Compose 集成测试。
-
-Broker policy 不依赖 Go Agent 代码；Prompt 变化不改变安全策略。Fetch shim 不持有 Broker credentials、DNS/HTTP 或 workspace output writer，Broker 是唯一公网连接组件，Runtime proxy 是唯一 Broker client 和 command identity binding point。
-
-本修订不引入 Linux 6.13 floor、Landlock、host PID namespace、Broker `/proc` mount、privileged、`CAP_SYS_ADMIN` 或 Docker socket；Go 1.26+ 与 Rust 1.95+ floor 保持不变。
-
-## 20. C7–C8 binding final-review 修正历史
-
-Tasks 1–9 与 C1–C6 的文本和行为证据保留为历史，不重新编号、不伪装为未执行工作。C7/C8 只 supersede 下表四个 binding final-review blocker；未明确覆盖的 global constraints、C1 identity/local codec/shared budget、C2 Broker defenses、C3 CLI、C4 deployment、C5 default/copy 与 C6 matrix breadth 全部继续有效。
-
-| Binding blocker | C7 executable ruling | C8 decisive evidence |
-|---|---|---|
-| Runtime enforcement failure 未 latch；helper init 与 user exit 1 不可区分 | FD 5 versioned status channel；cgroup create/control write、CPU read 与 helper startup failure 都 latch shared health/cancel active；target exit code 不 latch | post-start delegated-control revocation、CPU read fault、每个 helper stage、subsequent Bash 503/status false/local API healthy |
-| control owner panic 会 drop 未 await 的 session JoinSet | 独立 control reader + guardian，bounded `SessionJob`，两个 retained handles，exact `spawned==joined` cleanup authorization；same-task ordered drain-complete/cleanup-complete tracing | barrier/panic/mismatch probes；zero Broker connection after revoke；同 identity 的 drain event 日志位置先于 successful cleanup event，随后独立检查 cgroup/PID 消失 |
-| Runtime output error 被吞成 EOF；directory sync 可在 rename 可见后反报 failure | typed local terminal error；Policy 65/Internal 70；rename 是 logical commit；post-rename sync failure committed success + shared durability latch | exact exit/no-half-file faults；pre-rename old preserved/70；post-rename new visible/committed true/health false |
-| C6 错误假设 Broker Completion audit 先于 Runtime cgroup deletion | Runtime 同 task/logger 的 `command_binding_owned_drain_complete`→`command_cgroup_cleanup_complete` 是唯一 join-before-successful-cgroup-cleanup evidence；Broker audit 独立 bounded await，无新 ack | request termination 后比较同 identity ordered log lines，再独立检查 cgroup/PID gone；real SIGTERM/default-off/exact cleanup 保留；Broker 只断言 final metadata |
-
-Correction round 1 的 plan-critic ledger 冻结且仅含两项 artifact defect：其一，删除“外部必须在 marker 后捕获仍存在的 cgroup inode”这一不可靠 oracle，改为 request termination 后比较同一 Runtime stream 的上述两个事件，再检查最终 cgroup/PID absence；其二，删除 test image 内运行 Cargo 的步骤，改为 native host no-run JSON build、`jq` exact-one executable extraction 和 binary-only hardened container execution。前者不新增 Broker ack/API，后者不修改 image/override、不 mount source/cache/socket/writable cgroup；真实 cgroup/deployment/SIGTERM evidence 仍由 full native matrix 提供。
-
-C7 是一个不可拆分授权波次，可按 status/health、guardian、output/双 marker 串行 RED→GREEN；任一子域失败时 C8 不得开始。C8 只修改 C6 已有 `scripts/agent-runtime-attack-matrix.sh` 与 `scripts/test-agent-runtime-compose.sh`，原样复用 security-test override；除 C7 已增加的两个非敏感 Runtime tracing event 外不扩 production API。C8 的 hermetic Rust receipt 必须由 native host no-run build 与 hardened test-binary-only container execution产生；真实 cgroup/deployment case 仍使用完整 native topology。旧 receipt 不可复用；只有 C7 全 GREEN 且 C8 target native Linux `SUMMARY pass=<positive> fail=0 skipped=0` 的新 receipt 才能返回运维审批，repository default 仍保持 false。
+Runtime shutdown 先取得全部 binding drain receipts，再授权 retained stale-cgroup recovery。
+故障注入只存在于测试实现，不扩展生产 API。安全测试 override 不提供生产额外权限。
+不要求 Linux 6.13 或 Landlock，不引入 host PID namespace、Broker `/proc` mount、
+privileged、`CAP_SYS_ADMIN` 或 Docker socket。构建基线为 Go 1.27+ 与 Rust 1.95+。

@@ -303,9 +303,14 @@ func (s *agentCronService) execute(ctx context.Context, lease cronjob.Lease) {
 		return
 	}
 	runResult := s.run(runCtx, lease)
+	now := s.now()
 	completionErr := runResult.Err
 	if completionErr == nil {
 		completionErr = runCtx.Err()
+	}
+	// A child deadline can fire before runCtx's cancellation becomes observable.
+	if completionErr == nil && !now.Before(lease.RunTimeoutAt) {
+		completionErr = context.DeadlineExceeded
 	}
 	if completionErr != nil {
 		result.Outcome, result.ErrorCode, result.ErrorMessage = cronjob.OutcomeFailed, "execution_failed", "Background execution failed or was interrupted."
@@ -322,7 +327,6 @@ func (s *agentCronService) execute(ctx context.Context, lease cronjob.Lease) {
 		}
 	}
 	cancel()
-	now := s.now()
 	result.FinishedAt = now
 	next, err := cronNext(lease.Task, now)
 	if err != nil {

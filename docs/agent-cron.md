@@ -148,11 +148,12 @@ cron, using the captured timezone and the same gap/fold rules as five-field cron
 
 One-time tasks that were never claimed keep their original deadline across downtime
 and run once when eligible. Success, failure, skip, and interrupted-lease recovery
-all end ordinary scheduling: no next deadline or due-index entry remains. Results,
+all end ordinary scheduling: no next deadline or due-index entry remains. Without `until`, results,
 reports and eligible explicit retries remain available; retries do not create a new
 ordinary occurrence. Reports say “无下一次计划（一次性已结束）”. Completed tasks remain
 stored and **still count toward the chat quota** until explicitly deleted. There is
-no automatic cleanup unless an explicit `until` is set, and no automatic execution retry.
+no automatic cleanup for tasks without `until`, and no automatic execution retry.
+Tasks with `until` instead follow the final-report retention and cleanup rules below.
 
 ### Optional cutoff and automatic cleanup
 
@@ -285,6 +286,12 @@ adds tool arguments, **not** configuration keys; do not put `until` in config.ya
 No new config, mount, environment variable or background loop is required. Existing
 tasks keep their captured timezone; changing the configuration does not reinterpret
 their local schedules or stored absolute cutoff.
+
+Execution must finish strictly before its lease's run deadline. Completion at or
+after that instant is recorded as failed under the normal manual-retry policy,
+even if context cancellation has not yet become observable. Deadline enforcement
+requires no additional configuration, mounts, environment variables, TZ setting,
+Redis schema change or data migration; existing stored outcomes are not rewritten.
 
 Redis scope remains `<prefix>:cron:v1:<encoded-bot>:<encoded-platform>`. Stored JSON
 gains an absolute `task.Until` timestamp (tool input/output uses lowercase `until`);

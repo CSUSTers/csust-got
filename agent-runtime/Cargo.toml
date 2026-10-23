@@ -16,10 +16,10 @@ axum = "0.8"
 bytes = "1"
 cap-fs-ext = "4.0.2"
 cap-std = "4.0.2"
-diffy = "0.4"
+diffy = "0.5"
 futures-util = "0.3"
 fs2 = "0.4"
-getrandom = "0.3"
+getrandom = "0.4"
 hickory-resolver = { version = "0.26", default-features = false, features = ["tokio"] }
 http = "1"
 http-body-util = "0.1"
@@ -30,7 +30,7 @@ regex = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-util = { version = "0.7", features = ["io", "rt"] }
@@ -49,7 +49,7 @@ libc = "0.2"
 seccompiler = { version = "=0.5.0", default-features = false }
 
 [dev-dependencies]
-brotli = "8"
+brotli = "9"
 flate2 = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["test-util"] }

@@ -97,6 +97,11 @@ func UnimplementedConfigKeys(agents *AgentV3Configs, v3 *AgentV3Config) []string
 						subPrefix := fmt.Sprintf("%s.agent.subagents[%d]", prefix, j)
 						keys = append(keys, unimplementedModelKeys(sub.Model, subPrefix+".model")...)
 						keys = append(keys, unimplementedToolModelKeys(sub.ToolModels, subPrefix+".tool_models")...)
+						for k, bundle := range sub.SkillBundles {
+							if bundle != nil {
+								keys = append(keys, unimplementedToolModelKeys(bundle.ToolModels, fmt.Sprintf("%s.skill_bundles[%d].tool_models", subPrefix, k))...)
+							}
+						}
 					}
 				}
 				for j, skill := range agent.Agent.Skills {

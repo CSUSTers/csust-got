@@ -173,13 +173,10 @@ fn runtime_skill_description_and_hash_match_cross_language_vector() {
         snapshot.snapshot().snapshot_sha256,
         "66d894d641ce04fcc04eaec3837a0dac24a27dd5ee9160ce8d3871ce0155f9ee"
     );
-    let expected = format!(
-        "{:x}",
-        Sha256::digest(canonical_bytes_for_test(
-            SKILL_SCHEMA_VERSION,
-            &snapshot.snapshot().skills,
-        ))
-    );
+    let expected = crate::hex_string(&Sha256::digest(canonical_bytes_for_test(
+        SKILL_SCHEMA_VERSION,
+        &snapshot.snapshot().skills,
+    )));
     assert_eq!(snapshot.snapshot().snapshot_sha256, expected);
     assert_eq!(
         snapshot.json_bytes(),
