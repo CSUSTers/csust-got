@@ -23,8 +23,6 @@ use std::{
 };
 use tokio::fs;
 #[cfg(test)]
-use tokio::io::{AsyncRead, AsyncReadExt};
-#[cfg(test)]
 use tokio::time::timeout;
 use tracing::{info, warn};
 use walkdir::WalkDir;
@@ -1552,55 +1550,6 @@ fn supervisor_runtime_error(error: SupervisorError) -> RuntimeError {
     }
 }
 
-#[cfg(test)]
-const OUTPUT_READ_BUFFER_SIZE: usize = 8 * 1024;
-#[cfg(test)]
-const TRUNCATION_MARKER: &str = "\n[truncated]";
-
-#[cfg(test)]
-struct CollectedOutput {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
-#[cfg(test)]
-async fn collect_output<R>(mut reader: R, limit: usize) -> std::io::Result<CollectedOutput>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut bytes = Vec::with_capacity(limit.min(OUTPUT_READ_BUFFER_SIZE));
-    let mut buffer = [0; OUTPUT_READ_BUFFER_SIZE];
-    let mut truncated = false;
-    loop {
-        let read = reader.read(&mut buffer).await?;
-        if read == 0 {
-            break;
-        }
-        if limit == 0 {
-            bytes.extend_from_slice(&buffer[..read]);
-            continue;
-        }
-        let retained = read.min(limit.saturating_sub(bytes.len()));
-        bytes.extend_from_slice(&buffer[..retained]);
-        truncated |= retained < read;
-    }
-    Ok(CollectedOutput { bytes, truncated })
-}
-
-#[cfg(test)]
-fn format_collected_output(output: CollectedOutput) -> String {
-    let mut text = String::from_utf8_lossy(&output.bytes).into_owned();
-    if !output.truncated {
-        return text;
-    }
-    let limit = output.bytes.len();
-    if text.len() > limit {
-        return truncate_output(text, limit).0;
-    }
-    text.push_str(TRUNCATION_MARKER);
-    text
-}
-
 async fn reset_namespace(
     state: &AppState,
     req: &ResetRequest,
@@ -2023,20 +1972,6 @@ fn parse_timeout(raw: &str) -> Option<Duration> {
     raw.parse::<u64>().ok().map(Duration::from_secs)
 }
 
-#[cfg(test)]
-fn truncate_output(value: String, limit: usize) -> (String, bool) {
-    if limit == 0 || value.len() <= limit {
-        return (value, false);
-    }
-    let mut end = limit;
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut out = value[..end].to_string();
-    out.push_str(TRUNCATION_MARKER);
-    (out, true)
-}
-
 async fn write_trace(
     state: &AppState,
     common: &CommonRequest,
@@ -2113,10 +2048,10 @@ mod tests {
     include!("runtime_env_http_tests.rs");
     use super::*;
     use crate::runtime_security::RuntimeFetchSecurity;
+    use crate::scan::TRUNCATION_MARKER;
     use axum::body::to_bytes;
     use serde_json::json;
     use tempfile::tempdir;
-    use tokio::io::AsyncWriteExt;
     use tower::ServiceExt;
 
     fn test_state() -> AppState {
@@ -2359,13 +2294,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn output_truncation_respects_utf8() {
-        let (out, truncated) = truncate_output("你好hello".to_string(), 7);
-        assert!(truncated);
-        assert!(out.starts_with("你好h"));
-    }
-
     #[tokio::test]
     async fn read_bounds_workspace_and_skills_text_at_utf8_boundary() {
         let mut state = test_state();
@@ -2407,23 +2335,6 @@ mod tests {
                 "{path}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn output_collector_limits_retained_bytes_at_utf8_boundary() {
-        let (mut writer, reader) = tokio::io::duplex(64);
-        let writer_task = tokio::spawn(async move {
-            writer.write_all("你好".as_bytes()).await.unwrap();
-        });
-
-        let output = collect_output(reader, 4).await.unwrap();
-        writer_task.await.unwrap();
-
-        assert!(output.truncated);
-        assert_eq!(output.bytes.len(), 4);
-        let formatted = format_collected_output(output);
-        assert_eq!(formatted, "你\n[truncated]");
-        assert!(!formatted.contains('\u{fffd}'));
     }
 
     #[tokio::test]

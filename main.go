@@ -50,8 +50,6 @@ func main() {
 		log.Panic(err.Error())
 	}
 
-	// go iwatch.WatchService()
-
 	bot, err := initBot()
 	if err != nil {
 		log.Panic(err.Error())

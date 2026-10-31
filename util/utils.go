@@ -3,14 +3,12 @@ package util
 import (
 	"errors"
 	"html"
-	"io"
 	"math/rand"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf16"
 
 	"csust-got/config"
@@ -124,11 +122,6 @@ func DeleteMessage(m *tb.Message) {
 	}
 }
 
-// GetFile get file from telegram.
-func GetFile(file *tb.File) (io.ReadCloser, error) {
-	return config.BotConfig.Bot.File(file)
-}
-
 // GetName can get user's name.
 func GetName(user *tb.User) string {
 	name := user.FirstName
@@ -221,21 +214,6 @@ func GroupCommandCtx(fn tb.HandlerFunc) tb.HandlerFunc {
 		}
 		return fn(ctx)
 	}
-}
-
-// IsNumber check rune is number.
-func IsNumber(r rune) bool {
-	return unicode.IsNumber(r)
-}
-
-// IsUpper check rune is upper.
-func IsUpper(r rune) bool {
-	return unicode.IsUpper(r)
-}
-
-// IsLower check rune is lower.
-func IsLower(r rune) bool {
-	return unicode.IsLower(r)
 }
 
 // ReplaceSpace replace all empty chars in a string with the escape char

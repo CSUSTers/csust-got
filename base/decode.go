@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -61,7 +62,7 @@ func Decode(ctx tb.Context) error {
 
 	log.Debug("decode", zap.String("from", from), zap.String("to", to), zap.String("text", text))
 
-	if !util.SliceContains([]string{"utf8", "utf16le", "utf16be"}, from) {
+	if !slices.Contains([]string{"utf8", "utf16le", "utf16be"}, from) {
 		var buf bytes.Buffer
 		for _, r := range text {
 			if r != utf8.RuneError {

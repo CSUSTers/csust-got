@@ -3,7 +3,6 @@ package agentv3
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
 	"testing"
 
 	"csust-got/config"
@@ -157,8 +156,8 @@ func TestTelegramRichRawFailureIsReturned(t *testing.T) {
 }
 
 func TestResolveTelegramRichDelivery(t *testing.T) {
-	cfg := &config.AgentOutputConfig{}
-	setConfigField(t, cfg, "UseNativeReasoning", false)
+	noNative := false
+	cfg := &config.AgentOutputConfig{UseNativeReasoning: &noNative}
 
 	t.Run("plain text stays visible for legacy formatting", func(t *testing.T) {
 		text := "<think>reason</think>plain text"
@@ -290,10 +289,10 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		for _, payloadFmt := range payloadFormats {
 			t.Run(payloadFmt, func(t *testing.T) {
 				formatCfg := &config.AgentOutputConfig{
-					Format:  "markdown",
-					Payload: payloadFmt,
+					Format:             "markdown",
+					Payload:            payloadFmt,
+					UseNativeReasoning: &noNative,
 				}
-				setConfigField(t, formatCfg, "UseNativeReasoning", false)
 
 				text := mustTelegramRichEnvelope(rawMarkdown)
 				delivery := resolveTelegramRichDelivery(text, "", formatCfg, true, true)
@@ -314,10 +313,10 @@ func TestResolveTelegramRichDelivery(t *testing.T) {
 		const rawMarkdown = "# Title\n\n**Body**"
 
 		formatCfg := &config.AgentOutputConfig{
-			Format:  "markdown",
-			Payload: "markdown-block",
+			Format:             "markdown",
+			Payload:            "markdown-block",
+			UseNativeReasoning: &noNative,
 		}
-		setConfigField(t, formatCfg, "UseNativeReasoning", false)
 
 		delivery := resolveTelegramRichDelivery(rawMarkdown, "", formatCfg, true, true)
 
@@ -347,36 +346,4 @@ func (s *stubTelegramRawCaller) Raw(method string, payload any) ([]byte, error) 
 
 func mustTelegramRichEnvelope(content string) string {
 	return telegramRichEnvelopeStart + content + telegramRichEnvelopeEnd
-}
-
-func setConfigField(t *testing.T, cfg *config.AgentOutputConfig, name string, value any) {
-	t.Helper()
-
-	field := reflect.ValueOf(cfg).Elem().FieldByName(name)
-	require.True(t, field.IsValid(), "config field %q not found", name)
-
-	input := reflect.ValueOf(value)
-	if field.Kind() == reflect.Pointer {
-		ptr := reflect.New(field.Type().Elem())
-		switch {
-		case input.Type().AssignableTo(field.Type().Elem()):
-			ptr.Elem().Set(input)
-		case input.Type().ConvertibleTo(field.Type().Elem()):
-			ptr.Elem().Set(input.Convert(field.Type().Elem()))
-		default:
-			t.Fatalf("cannot assign %s to %s", input.Type(), field.Type())
-		}
-		field.Set(ptr)
-		return
-	}
-
-	if input.Type().AssignableTo(field.Type()) {
-		field.Set(input)
-		return
-	}
-	if input.Type().ConvertibleTo(field.Type()) {
-		field.Set(input.Convert(field.Type()))
-		return
-	}
-	t.Fatalf("cannot assign %s to %s", input.Type(), field.Type())
 }
