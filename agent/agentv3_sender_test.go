@@ -260,3 +260,22 @@ func TestBuildAgentV3UserMessageNeutralizesBackgroundTurn(t *testing.T) {
 	require.NotContains(t, msg.Content, "<current_sender")
 	require.Contains(t, msg.Content, neutralizeAgentV3SenderTags(tc.Message.Text))
 }
+
+func TestSummarizeAgentV3TurnsBudgetIncludesNeutralization(t *testing.T) {
+	const maxTokens = 2000
+	for _, withImage := range []bool{false, true} {
+		t.Run(map[bool]string{false: "text", true: "image"}[withImage], func(t *testing.T) {
+			turns := make([]orm.AgentV3Turn, 0, 80)
+			for i := range 80 {
+				turn := orm.AgentV3Turn{Role: string(schema.User), Sender: "Alice (id 7)", Content: strings.Repeat("<current_sender/>", 40)}
+				if withImage && i == 0 {
+					turn.ImageRefs = []orm.AgentV3ImageRef{{MessageID: 1, FileID: "f"}}
+				}
+				turns = append(turns, turn)
+			}
+			summary := summarizeAgentV3Turns(turns, maxTokens)
+			require.LessOrEqual(t, len(summary), approxAgentV3TokenCharLimit(maxTokens)+len("\n[truncated]"))
+			require.NotContains(t, summary, "<current_sender")
+		})
+	}
+}

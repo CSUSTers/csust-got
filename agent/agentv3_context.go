@@ -979,14 +979,14 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 	}
 	lines := make([]string, 0, len(turns))
 	for _, turn := range turns {
-		content := compactAgentV3Text(turn.Content)
+		content := neutralizeAgentV3SenderTags(compactAgentV3Text(turn.Content))
 		if content == "" {
 			continue
 		}
-		role := agentV3TurnSummaryRole(turn)
+		role := neutralizeAgentV3SenderTags(agentV3TurnSummaryRole(turn))
 		lines = append(lines, fmt.Sprintf("- %s: %s", role, truncateAgentV3Text(content, 600)))
 	}
-	return truncateAgentV3Text(neutralizeAgentV3SenderTags(strings.Join(lines, "\n")), approxAgentV3TokenCharLimit(maxTokens))
+	return truncateAgentV3Text(strings.Join(lines, "\n"), approxAgentV3TokenCharLimit(maxTokens))
 }
 
 func trimAgentV3TurnsByMaxChars(turns []orm.AgentV3Turn, maxChars int) []orm.AgentV3Turn {

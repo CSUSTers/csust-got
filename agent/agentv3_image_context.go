@@ -144,8 +144,8 @@ func summarizeAgentV3TurnsWithImageRefs(turns []orm.AgentV3Turn, maxTokens int) 
 	usedChars := 0
 	seenFileIDs := make(map[string]struct{})
 	for _, turn := range turns {
-		content := compactAgentV3Text(turn.Content)
-		role := agentV3TurnSummaryRole(turn)
+		content := neutralizeAgentV3SenderTags(compactAgentV3Text(turn.Content))
+		role := neutralizeAgentV3SenderTags(agentV3TurnSummaryRole(turn))
 		for _, ref := range normalizeAgentV3ImageRefs(turn.ImageRefs) {
 			if _, seen := seenFileIDs[ref.FileID]; seen {
 				continue
@@ -160,7 +160,7 @@ func summarizeAgentV3TurnsWithImageRefs(turns []orm.AgentV3Turn, maxTokens int) 
 		}
 		appendAgentV3SummaryContent(&lines, &usedChars, maxChars, role, content)
 	}
-	return neutralizeAgentV3SenderTags(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
 }
 
 func appendAgentV3SummaryLine(lines *[]string, usedChars *int, maxChars int, line string) bool {
