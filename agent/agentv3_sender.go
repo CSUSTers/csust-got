@@ -1,12 +1,16 @@
 package agentv3
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 
 	"csust-got/orm"
 
+	"github.com/cloudwego/eino/schema"
 	tb "gopkg.in/telebot.v3"
 )
 
@@ -16,7 +20,36 @@ type agentV3Sender struct {
 	ShowName string
 }
 
-var agentV3SenderLabelReplacer = strings.NewReplacer("[", "(", "]", ")", "\r", " ", "\n", " ", "\t", " ")
+var (
+	agentV3SenderLabelReplacer = strings.NewReplacer("[", "(", "]", ")", "\r", " ", "\n", " ", "\t", " ")
+	agentV3SenderTagPattern    = regexp.MustCompile(`(?i)<(\s*/?\s*current_sender)`)
+)
+
+func neutralizeAgentV3SenderTags(text string) string {
+	return agentV3SenderTagPattern.ReplaceAllString(text, "&lt;$1")
+}
+
+func newAgentV3SenderMarker() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return "agentv3-current-sender-" + hex.EncodeToString(b[:])
+}
+
+func sealAgentV3SenderBlock(msg *schema.Message, marker, block string) *schema.Message {
+	if msg == nil || marker == "" {
+		return msg
+	}
+	seal := func(text string) string {
+		return strings.Replace(neutralizeAgentV3SenderTags(text), marker, block, 1)
+	}
+	msg.Content = seal(msg.Content)
+	for i := range msg.UserInputMultiContent {
+		if msg.UserInputMultiContent[i].Type == schema.ChatMessagePartTypeText {
+			msg.UserInputMultiContent[i].Text = seal(msg.UserInputMultiContent[i].Text)
+		}
+	}
+	return msg
+}
 
 func agentV3MessageSender(msg *tb.Message) (agentV3Sender, bool) {
 	if msg == nil {

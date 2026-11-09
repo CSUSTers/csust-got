@@ -510,12 +510,14 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	dynamic.WriteString("<dynamic_suffix>\n")
 	dynamic.WriteString(agentV3DateTimeBlock(tc))
 	dynamic.WriteByte('\n')
-	if sender := agentV3CurrentSenderBlock(tc); sender != "" {
-		dynamic.WriteString(sender)
-		dynamic.WriteByte('\n')
-	}
 	if userText != "" {
 		dynamic.WriteString(userText)
+	}
+	senderBlock, senderMarker := agentV3CurrentSenderBlock(tc), ""
+	if senderBlock != "" {
+		senderMarker = newAgentV3SenderMarker()
+		dynamic.WriteByte('\n')
+		dynamic.WriteString(senderMarker)
 	}
 	dynamic.WriteString("\n</dynamic_suffix>")
 
@@ -523,7 +525,8 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	if tc != nil && tc.V3 != nil {
 		tc.V3.ImageRefs = imageRefs
 	}
-	return appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs), nil
+	msg := appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs)
+	return sealAgentV3SenderBlock(msg, senderMarker, senderBlock), nil
 }
 
 func renderAgentV3Soul(cc *CompiledAgent, tc *TurnContext) (string, error) {

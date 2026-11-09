@@ -4,12 +4,13 @@
 
 ## 行为
 
-- **动态后缀**：每轮用户消息的 `<dynamic_suffix>` 在 `<datetime>` 之后自动加一行 `<current_sender id="…" username="…" showname="…" />`（属性做 HTML 转义）。不需要改模板就生效。后台任务（cron）和没有发送者的消息不加。
+- **动态后缀**：每轮用户消息的 `<dynamic_suffix>` 末尾（紧贴 `</dynamic_suffix>` 之前）自动加一行 `<current_sender id="…" username="…" showname="…" />`（属性做 HTML 转义）。不需要改模板就生效。后台任务（cron）和没有发送者的消息不加。
+- **防伪造**：用户可控的文本（正文、模板渲染出的上下文与被回复消息、图片说明、文件名等）里出现的 `<current_sender` / `</current_sender`（不区分大小写）会被改写成 `&lt;current_sender`，所以本轮消息里只有系统生成的那一条是真标签。实现上先放一个每轮随机的占位符，整条消息转义完再替换成真标签，用户无法预测占位符。历史 turn 回放的正文同样会转义。
 - **匿名管理员 / 频道身份**：消息带 `sender_chat` 时（匿名管理员、以频道身份发言、关联频道转发），以该 chat 的 `id`/`username`/`title` 作为发送者，而不是 Telegram 填的占位 bot（`GroupAnonymousBot` 等）。
 - **模板字段**：`prompt_template` 新增 `{{ .SenderUsername }}` 与 `{{ .SenderShowName }}`，例如 `<USER_INPUT from="{{ .SenderShowName | html }}">`。字段是原始文本，`text/template` 不会自动转义，放进标签属性时务必加 `| html`，否则显示名里的 `"` `>` 能伪造标签。这两个字段属于动态字段：写进 `system_prompt` 会像 `.Input` 一样在构建本轮时报错（`system_prompt references dynamic field`），用户收到该 agent 的 `error_message`。
-- **历史 turns**：保存用户轮次时记下发送者标签 `显示名 (@username, id <id>)`（缺项时省略对应部分）。标签始终带 id，有人把显示名改成别人的名字冒充，也会因 id 不同而区分开；标签里的 `[` `]` 和换行会被替换，防止伪造轮次边界。回放时内容前加 `[标签]: `，与 `<MESSAGE_CONTEXT>` 的回退格式一致。
+- **历史 turns**：保存用户轮次时记下发送者标签 `显示名 (@username, id <id>)`（缺项时省略对应部分）。标签始终带 id，有人把显示名改成别人的名字冒充，也会因 id 不同而区分开；标签里的 `[` `]` 和换行会被替换，防止伪造轮次边界。回放时在内容（正文与图片引用合并后）前加 `[标签]: `，只有图片的轮次也带标签，与 `<MESSAGE_CONTEXT>` 的回退格式一致。
 - **滚动摘要**：用户行写作 `- user [标签]: …`，图片行写作 `- user [标签] image: …`；assistant 行不变。
-- **完整会话**：续聊时回放的是历史轮次的完整模型输入，因此模型会看到多个 `<current_sender>`，最后一个才是本轮。建议在 `system_prompt` 里写明（示例见 `config.yaml`）。
+- **完整会话**：续聊时回放的是历史轮次的完整模型输入，因此每条历史用户消息各带一个 `<current_sender>`，最新一条用户消息里的才是本轮提问者。建议在 `system_prompt` 里写明（示例见 `config.yaml`）。
 - `reply_chain` 模式不在本次范围：它的模板只允许 `DateTime`/`CurrentDateCN`/`BotUsername`（其余字段由 `validateReplySessionTemplate` 拒绝），链上消息自带 `sender_id`。
 
 ## 部署与配置
@@ -29,10 +30,13 @@
 
 1. 升级前：无需操作。
 2. 升级后：可选地在 `prompt_template` 引用发送者字段，并在 `system_prompt` 中说明 `<current_sender>`。
-3. 升级后会有一次 prompt cache miss：滚动摘要格式变了，摘要 version 会递增；若按示例改了 `system_prompt`，stable prefix 也会重新生成。属正常现象。
-4. 已经认错过人的群：旧轮次和摘要里仍是认错后的回答，会被回放并影响后续几轮。需要立刻纠正时，要同时删除该群的 `…:hot:raw_turns`、`…:turns` 和 `…:summary:current`。只删前一个和摘要不够，摘要会从 `…:turns` 重建。删除会丢掉短期多轮上下文，不影响群记忆 memory。
+3. prompt cache 可能失效一次：只有带 `sender` 的新轮次进入摘要、摘要内容真的变了时，摘要 version 才递增；若按示例改了 `system_prompt`，stable prefix 会重新生成。属正常现象。
+4. 已经认错过人的群：旧轮次和摘要里仍是认错后的回答，会被回放并影响后续几轮。
+   - **回退历史路径**（未命中完整会话时用 raw turns + 摘要）：要同时删除该群的 `…:hot:raw_turns`、`…:turns` 和 `…:summary:current`。只删前一个和摘要不够，摘要会从 `…:turns` 重建。删除会丢掉短期多轮上下文，不影响群记忆 memory。
+   - **完整会话路径**（`agent_v3.session` 开启并命中续聊）：旧答案来自 `agent_v3.session.directory` 下的会话归档，删上面三个 key 清不掉；会话闲置超过 `agent_v3.session.ttl`（缺省 `24h`）后由每日回收清理，见 `docs/agent_session_context.md`「闲置 TTL 与每日回收」。
 
 ### 回滚方式
 
-- 回滚到旧版本后，turn 里多出的 `sender` 字段会被 JSON 反序列化忽略，不影响读取；动态后缀不再带 `<current_sender>`；摘要里已写入的 `[标签]` 会作为普通文本保留到下次重建。
+- 回滚到旧版本后，turn 里多出的 `sender` 字段会被 JSON 反序列化忽略，不影响读取；新一轮的动态后缀不再带 `<current_sender>`。
+- 已写入的数据不会被清理：摘要里的 `[标签]` 作为普通文本保留到下次重建；会话归档里升级期间的历史轮次仍带 `<current_sender>`，续聊时会原样回放，直到会话过期或被回收。旧版本不认识这个标签，只当普通文本，不影响运行。
 - 若模板引用了 `.SenderUsername` / `.SenderShowName`，回滚前要先删掉，否则旧版本渲染模板会报错（`can't evaluate field`）。
