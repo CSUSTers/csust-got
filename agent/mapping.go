@@ -28,6 +28,9 @@ func buildPromptData(tc *TurnContext, contextMsgs []*ContextMessage) PromptData 
 	if tc.BotUser != nil {
 		pd.BotUsername = tc.BotUser.Username
 	}
+	if sender, ok := agentV3MessageSender(tc.Message); ok {
+		pd.SenderUsername, pd.SenderShowName = sender.Username, sender.ShowName
+	}
 
 	// Format the replied-to message as XML
 	if tc.Message.ReplyTo != nil {

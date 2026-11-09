@@ -491,7 +491,7 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 			return nil, err
 		}
 		current.ReplyTo = resolved
-		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3, Background: tc.Background}
 	}
 	pd := buildPromptData(tc, history.ContextMessages)
 	var userText string
@@ -510,6 +510,10 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	dynamic.WriteString("<dynamic_suffix>\n")
 	dynamic.WriteString(agentV3DateTimeBlock(tc))
 	dynamic.WriteByte('\n')
+	if sender := agentV3CurrentSenderBlock(tc); sender != "" {
+		dynamic.WriteString(sender)
+		dynamic.WriteByte('\n')
+	}
 	if userText != "" {
 		dynamic.WriteString(userText)
 	}
@@ -632,6 +636,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: now,
 		}, orm.AgentV3Turn{
@@ -655,6 +660,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: time.Now(),
 		}, maxTurns, ttl); err != nil {
@@ -974,10 +980,7 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 		if content == "" {
 			continue
 		}
-		role := turn.Role
-		if role == "" {
-			role = "user"
-		}
+		role := agentV3TurnSummaryRole(turn)
 		lines = append(lines, fmt.Sprintf("- %s: %s", role, truncateAgentV3Text(content, 600)))
 	}
 	return truncateAgentV3Text(strings.Join(lines, "\n"), approxAgentV3TokenCharLimit(maxTokens))
@@ -1033,7 +1036,7 @@ func truncateAgentV3Runes(s string, limit int) string {
 }
 
 func agentV3DynamicSystemField(templateText string) string {
-	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml"} {
+	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml", ".SenderUsername", ".SenderShowName"} {
 		if strings.Contains(templateText, field) {
 			return field
 		}

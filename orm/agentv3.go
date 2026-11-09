@@ -56,6 +56,7 @@ type AgentV3Turn struct {
 	Role      string            `json:"role"`
 	Content   string            `json:"content"`
 	MessageID int               `json:"message_id,omitempty"`
+	Sender    string            `json:"sender,omitempty"`
 	ImageRefs []AgentV3ImageRef `json:"image_refs,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 }
