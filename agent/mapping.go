@@ -99,7 +99,7 @@ func contextToSchemaMessages(msgs []*ContextMessage, tc *TurnContext) []*schema.
 		if isBot {
 			result = append(result, &schema.Message{
 				Role:    schema.Assistant,
-				Content: msg.Text,
+				Content: neutralizeAgentV3SenderTags(msg.Text),
 			})
 		} else {
 			senderInfo := msg.UserNames.ShowName()
@@ -108,7 +108,7 @@ func contextToSchemaMessages(msgs []*ContextMessage, tc *TurnContext) []*schema.
 			}
 			result = append(result, &schema.Message{
 				Role:    schema.User,
-				Content: fmt.Sprintf("[%s]: %s", senderInfo, msg.Text),
+				Content: neutralizeAgentV3SenderTags(fmt.Sprintf("[%s]: %s", senderInfo, msg.Text)),
 			})
 		}
 	}

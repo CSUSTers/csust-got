@@ -323,8 +323,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			return nil, err
 		}
 		messages = buildAgentV3TurnMessages(prefixText, memoryText, "", nil, nil, userMsg)
-		if !strings.Contains(userMsg.Content, tc.Message.Text) {
-			messages = append(messages, schema.UserMessage(tc.Message.Text))
+		if text := neutralizeAgentV3SenderTags(tc.Message.Text); !strings.Contains(userMsg.Content, text) {
+			messages = append(messages, schema.UserMessage(text))
 		}
 	case sessionLoaded:
 		if accepted.messages == nil {
@@ -986,7 +986,7 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 		role := agentV3TurnSummaryRole(turn)
 		lines = append(lines, fmt.Sprintf("- %s: %s", role, truncateAgentV3Text(content, 600)))
 	}
-	return truncateAgentV3Text(strings.Join(lines, "\n"), approxAgentV3TokenCharLimit(maxTokens))
+	return truncateAgentV3Text(neutralizeAgentV3SenderTags(strings.Join(lines, "\n")), approxAgentV3TokenCharLimit(maxTokens))
 }
 
 func trimAgentV3TurnsByMaxChars(turns []orm.AgentV3Turn, maxChars int) []orm.AgentV3Turn {

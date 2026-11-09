@@ -22,7 +22,7 @@ type agentV3Sender struct {
 
 var (
 	agentV3SenderLabelReplacer = strings.NewReplacer("[", "(", "]", ")", "\r", " ", "\n", " ", "\t", " ")
-	agentV3SenderTagPattern    = regexp.MustCompile(`(?i)<(\s*/?\s*current_sender)`)
+	agentV3SenderTagPattern    = regexp.MustCompile(`(?i)[<＜]([\s\p{Z}\p{Cf}]*/?[\s\p{Z}\p{Cf}]*current[\s\p{Z}\p{Cf}_-]?sender)`)
 )
 
 func neutralizeAgentV3SenderTags(text string) string {
@@ -36,11 +36,18 @@ func newAgentV3SenderMarker() string {
 }
 
 func sealAgentV3SenderBlock(msg *schema.Message, marker, block string) *schema.Message {
-	if msg == nil || marker == "" {
+	if msg == nil {
 		return msg
 	}
 	seal := func(text string) string {
-		return strings.Replace(neutralizeAgentV3SenderTags(text), marker, block, 1)
+		text = neutralizeAgentV3SenderTags(text)
+		if marker == "" {
+			return text
+		}
+		if i := strings.LastIndex(text, marker); i >= 0 {
+			return text[:i] + block + text[i+len(marker):]
+		}
+		return text
 	}
 	msg.Content = seal(msg.Content)
 	for i := range msg.UserInputMultiContent {

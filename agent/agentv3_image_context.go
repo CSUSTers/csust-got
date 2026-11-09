@@ -77,11 +77,10 @@ func appendAgentV3ImageRefsToUserMessage(msg *schema.Message, dynamicText string
 
 func agentV3UserTurnPromptContent(turn orm.AgentV3Turn) string {
 	content := joinUserMessageSections(strings.TrimSpace(turn.Content), agentV3ImageRefsContext(turn.ImageRefs))
-	sender := strings.TrimSpace(turn.Sender)
-	if sender == "" || content == "" {
-		return content
+	if sender := strings.TrimSpace(turn.Sender); sender != "" && content != "" {
+		content = fmt.Sprintf("[%s]: %s", sender, content)
 	}
-	return fmt.Sprintf("[%s]: %s", sender, neutralizeAgentV3SenderTags(content))
+	return neutralizeAgentV3SenderTags(content)
 }
 
 func agentV3TurnPromptContent(turn orm.AgentV3Turn) string {
@@ -161,7 +160,7 @@ func summarizeAgentV3TurnsWithImageRefs(turns []orm.AgentV3Turn, maxTokens int) 
 		}
 		appendAgentV3SummaryContent(&lines, &usedChars, maxChars, role, content)
 	}
-	return strings.Join(lines, "\n")
+	return neutralizeAgentV3SenderTags(strings.Join(lines, "\n"))
 }
 
 func appendAgentV3SummaryLine(lines *[]string, usedChars *int, maxChars int, line string) bool {
