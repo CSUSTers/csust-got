@@ -76,7 +76,11 @@ func appendAgentV3ImageRefsToUserMessage(msg *schema.Message, dynamicText string
 }
 
 func agentV3UserTurnPromptContent(turn orm.AgentV3Turn) string {
-	return joinUserMessageSections(strings.TrimSpace(turn.Content), agentV3ImageRefsContext(turn.ImageRefs))
+	content := joinUserMessageSections(strings.TrimSpace(turn.Content), agentV3ImageRefsContext(turn.ImageRefs))
+	if sender := strings.TrimSpace(turn.Sender); sender != "" && content != "" {
+		content = fmt.Sprintf("[%s]: %s", sender, content)
+	}
+	return neutralizeAgentV3SenderTags(content)
 }
 
 func agentV3TurnPromptContent(turn orm.AgentV3Turn) string {
@@ -140,11 +144,8 @@ func summarizeAgentV3TurnsWithImageRefs(turns []orm.AgentV3Turn, maxTokens int) 
 	usedChars := 0
 	seenFileIDs := make(map[string]struct{})
 	for _, turn := range turns {
-		content := compactAgentV3Text(turn.Content)
-		role := turn.Role
-		if role == "" {
-			role = "user"
-		}
+		content := neutralizeAgentV3SenderTags(compactAgentV3Text(turn.Content))
+		role := neutralizeAgentV3SenderTags(agentV3TurnSummaryRole(turn))
 		for _, ref := range normalizeAgentV3ImageRefs(turn.ImageRefs) {
 			if _, seen := seenFileIDs[ref.FileID]; seen {
 				continue

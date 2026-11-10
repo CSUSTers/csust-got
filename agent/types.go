@@ -206,4 +206,6 @@ type PromptData struct {
 	ContextXml      string
 	ReplyToXml      string
 	BotUsername     string
+	SenderUsername  string
+	SenderShowName  string
 }

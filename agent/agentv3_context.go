@@ -323,8 +323,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			return nil, err
 		}
 		messages = buildAgentV3TurnMessages(prefixText, memoryText, "", nil, nil, userMsg)
-		if !strings.Contains(userMsg.Content, tc.Message.Text) {
-			messages = append(messages, schema.UserMessage(tc.Message.Text))
+		if text := neutralizeAgentV3SenderTags(tc.Message.Text); !strings.Contains(userMsg.Content, text) {
+			messages = append(messages, schema.UserMessage(text))
 		}
 	case sessionLoaded:
 		if accepted.messages == nil {
@@ -491,7 +491,7 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 			return nil, err
 		}
 		current.ReplyTo = resolved
-		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3, Background: tc.Background}
 	}
 	pd := buildPromptData(tc, history.ContextMessages)
 	var userText string
@@ -513,13 +513,20 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	if userText != "" {
 		dynamic.WriteString(userText)
 	}
+	senderBlock, senderMarker := agentV3CurrentSenderBlock(tc), ""
+	if senderBlock != "" {
+		senderMarker = newAgentV3SenderMarker()
+		dynamic.WriteByte('\n')
+		dynamic.WriteString(senderMarker)
+	}
 	dynamic.WriteString("\n</dynamic_suffix>")
 
 	imageRefs := collectAgentV3ImageRefs(tc, history, rawTurns)
 	if tc != nil && tc.V3 != nil {
 		tc.V3.ImageRefs = imageRefs
 	}
-	return appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs), nil
+	msg := appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs)
+	return sealAgentV3SenderBlock(msg, senderMarker, senderBlock), nil
 }
 
 func renderAgentV3Soul(cc *CompiledAgent, tc *TurnContext) (string, error) {
@@ -632,6 +639,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: now,
 		}, orm.AgentV3Turn{
@@ -655,6 +663,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: time.Now(),
 		}, maxTurns, ttl); err != nil {
@@ -970,14 +979,11 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 	}
 	lines := make([]string, 0, len(turns))
 	for _, turn := range turns {
-		content := compactAgentV3Text(turn.Content)
+		content := neutralizeAgentV3SenderTags(compactAgentV3Text(turn.Content))
 		if content == "" {
 			continue
 		}
-		role := turn.Role
-		if role == "" {
-			role = "user"
-		}
+		role := neutralizeAgentV3SenderTags(agentV3TurnSummaryRole(turn))
 		lines = append(lines, fmt.Sprintf("- %s: %s", role, truncateAgentV3Text(content, 600)))
 	}
 	return truncateAgentV3Text(strings.Join(lines, "\n"), approxAgentV3TokenCharLimit(maxTokens))
@@ -1033,7 +1039,7 @@ func truncateAgentV3Runes(s string, limit int) string {
 }
 
 func agentV3DynamicSystemField(templateText string) string {
-	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml"} {
+	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml", ".SenderUsername", ".SenderShowName"} {
 		if strings.Contains(templateText, field) {
 			return field
 		}
