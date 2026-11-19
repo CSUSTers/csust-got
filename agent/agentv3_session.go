@@ -29,7 +29,6 @@ var (
 	errAgentV3SessionModelMessagesChanged = errors.New("model session baseline changed non-system messages")
 	errAgentV3SessionModelMessagesOmitted = errors.New("model session baseline omitted input messages")
 	errAgentV3SessionContextOverflow      = errors.New("session context overflow rebuild")
-	errAgentV3SessionMemoryEpoch          = errors.New("session memory deleted since node commit")
 )
 
 type agentV3SessionService struct {
@@ -59,7 +58,6 @@ type agentV3SessionTurn struct {
 	kinds       []agentV3SessionInputKind
 	baselineErr error
 	selection   session.Selection
-	memoryEpoch int64
 	load        bool
 	save        bool
 	ownsHistory bool
@@ -300,7 +298,6 @@ type agentV3SessionReplyProof interface{ ContainsReplyMessageID(int) bool }
 
 type agentV3PreparedSessionInput struct {
 	messages     []*schema.Message
-	frameIndexes []int
 	currentStart int
 	imageRefs    []orm.AgentV3ImageRef
 }
@@ -432,50 +429,13 @@ func rejectAgentV3SessionContext(tc *TurnContext, err error) bool {
 	return true
 }
 
-// buildAgentV3LoadedInput replays the loaded history verbatim after the current system
-// prefix so the provider prompt cache can align on the archived byte sequence. Only the
-// system message is rebuilt; replayed memory snapshots are never rewritten. When the current
-// memory differs from the last replayed snapshot, a superseding snapshot (or an explicit
-// cleared marker) is appended so the model stops trusting the stale text.
-func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, prefix, memory string, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {
+func buildAgentV3LoadedInput(cc *CompiledAgent, tc *TurnContext, frame, replay []*schema.Message, proof agentV3SessionReplyProof) (agentV3PreparedSessionInput, error) {
 	current, err := buildAgentV3SessionInput(cc, tc, proof)
 	if err != nil {
 		return agentV3PreparedSessionInput{}, err
 	}
-	prepared := agentV3PreparedSessionInput{messages: []*schema.Message{schema.SystemMessage(prefix)}, frameIndexes: []int{0}}
-	prepared.messages = append(prepared.messages, replay...)
-	prepared.currentStart = len(prepared.messages)
-	if message := agentV3MemorySnapshotDelta(replay, memory); message != nil {
-		prepared.messages = append(prepared.messages, message)
-	}
-	prepared.messages = append(prepared.messages, current...)
-	prepared.imageRefs = tc.V3.ImageRefs
-	return prepared, nil
-}
-
-// agentV3MemorySnapshotDelta returns the snapshot message to append after the replay, or nil
-// when the replayed history already ends in the current memory state.
-func agentV3MemorySnapshotDelta(replay []*schema.Message, memory string) *schema.Message {
-	memory = strings.TrimSpace(memory)
-	last, found := agentV3ReplayLastMemorySnapshot(replay)
-	switch {
-	case !found:
-		return buildAgentV3MemorySnapshotMessage(memory)
-	case last == memory:
-		return nil
-	default:
-		return buildAgentV3MemorySnapshotUpdate(memory)
-	}
-}
-
-// agentV3ReplayLastMemorySnapshot returns the body of the latest snapshot in the replay.
-func agentV3ReplayLastMemorySnapshot(replay []*schema.Message) (string, bool) {
-	for i := len(replay) - 1; i >= 0; i-- {
-		if body, ok := agentV3MemorySnapshotBody(replay[i]); ok {
-			return body, true
-		}
-	}
-	return "", false
+	frame = append(frame, replay...)
+	return agentV3PreparedSessionInput{messages: append(frame, current...), currentStart: len(frame), imageRefs: tc.V3.ImageRefs}, nil
 }
 
 func isPureAgentV3SessionError(err, sentinel error) bool {
@@ -501,12 +461,12 @@ func logAgentV3SessionLoadError(tc *TurnContext, err error) {
 	fields := []zap.Field{zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Error(err)}
 	if isPureAgentV3SessionError(err, session.ErrMiss) {
 		zap.L().Debug("agentv3: session miss; using legacy context", fields...)
-	} else if !isPureAgentV3SessionError(err, errAgentV3SessionContextOverflow) && !isPureAgentV3SessionError(err, errAgentV3SessionMemoryEpoch) {
+	} else if !isPureAgentV3SessionError(err, errAgentV3SessionContextOverflow) {
 		zap.L().Warn("agentv3: session load rejected or failed; using legacy context", fields...)
 	}
 }
 
-func setAgentV3SessionBaseline(tc *TurnContext, messages []*schema.Message, frameIndexes []int, currentStart int) {
+func setAgentV3SessionBaseline(tc *TurnContext, messages []*schema.Message, frameLen, currentStart int) {
 	state := tc.Session
 	if state == nil || state.capture == nil || state.baselineErr != nil {
 		return
@@ -514,14 +474,14 @@ func setAgentV3SessionBaseline(tc *TurnContext, messages []*schema.Message, fram
 	state.input = messages
 	state.kinds = make([]agentV3SessionInputKind, len(messages))
 	for i := range state.kinds {
-		if i >= currentStart {
-			state.kinds[i] = agentV3SessionCurrent
-		} else {
+		switch {
+		case i < frameLen:
+			state.kinds[i] = agentV3SessionFrame
+		case i < currentStart:
 			state.kinds[i] = agentV3SessionHistory
+		default:
+			state.kinds[i] = agentV3SessionCurrent
 		}
-	}
-	for _, i := range frameIndexes {
-		state.kinds[i] = agentV3SessionFrame
 	}
 }
 
@@ -579,6 +539,39 @@ func agentV3SessionArchive(state *agentV3SessionTurn, snapshot SessionCaptureRes
 	return capture, nil
 }
 
+// Memory tools return live chat data. Omit both sides of those calls while preserving
+// concurrent ordinary calls and their responses, including responses without ToolName.
+func agentV3ReplayableMessages(messages []*schema.Message) []*schema.Message {
+	hidden := map[string]bool{}
+	out := make([]*schema.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role == schema.Tool && hidden[message.ToolCallID] {
+			delete(hidden, message.ToolCallID)
+			continue
+		}
+		calls := message.ToolCalls
+		var kept []schema.ToolCall
+		for _, call := range calls {
+			switch call.Function.Name {
+			case agentV3ToolGroupMemoryRecall, agentV3ToolGroupMemoryManage:
+				hidden[call.ID] = true
+			default:
+				kept = append(kept, call)
+			}
+		}
+		if len(kept) != len(calls) {
+			projected := *message
+			projected.ToolCalls = kept
+			if blankModelResponse(&projected) {
+				continue
+			}
+			message = &projected
+		}
+		out = append(out, message)
+	}
+	return out
+}
+
 // agentV3DeliveredMessages prefers the full chunk list and falls back to the single proven message.
 func agentV3DeliveredMessages(all []*tb.Message, last *tb.Message) []*tb.Message {
 	if len(all) > 0 {
@@ -606,12 +599,13 @@ func commitAgentV3Session(tc *TurnContext, sent []*tb.Message) bool {
 	}
 	state := tc.Session
 	snapshot := state.capture.Snapshot()
+	snapshot.Messages = agentV3ReplayableMessages(snapshot.Messages)
 	capture, err := agentV3SessionArchive(state, snapshot)
 	if err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), agentV3SessionCommitTimeout)
 		defer cancel()
 		var node session.Node
-		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}, MemoryEpoch: state.memoryEpoch})
+		node, err = state.service.Commit(ctx, session.CommitRequest{Scope: state.scope, Agent: tc.Config.Name, RunID: state.runID, Parent: state.parent, Capture: capture, Receipt: session.DeliveryReceipt{MessageIDs: ids}})
 		if err == nil {
 			state.committed = true
 			// The next replay of this node is its full model input plus this turn's new messages.

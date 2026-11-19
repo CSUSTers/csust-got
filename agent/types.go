@@ -17,19 +17,21 @@ type turnContextKey struct{}
 // TurnContext holds per-request runtime data passed through Go context.
 // Tools and subagents access this to interact with Telegram, Redis, etc.
 type TurnContext struct {
-	Bot           *tb.Bot
-	Message       *tb.Message
-	ChatID        int64
-	Config        *config.AgentConfig
-	Trigger       *config.AgentTrigger
-	BotUser       *tb.User
-	RunID         string
-	Namespace     string
-	RuntimeClient *RemoteRuntimeClient
-	V3            *AgentV3TurnState
-	Session       *agentV3SessionTurn
-	Background    bool
-	skills        agentV3SkillState
+	Bot                *tb.Bot
+	Message            *tb.Message
+	ChatID             int64
+	Config             *config.AgentConfig
+	Trigger            *config.AgentTrigger
+	BotUser            *tb.User
+	RunID              string
+	Namespace          string
+	RuntimeClient      *RemoteRuntimeClient
+	V3                 *AgentV3TurnState
+	Session            *agentV3SessionTurn
+	Background         bool
+	skills             agentV3SkillState
+	memoryWriteClaimed atomic.Bool
+	memoryHasHistory   bool
 	// Progress tracking — used by update_progress tool and streaming handlers.
 	// editMu serializes ALL edits to progressMsg to avoid Telegram race conditions.
 	editMu           sync.Mutex

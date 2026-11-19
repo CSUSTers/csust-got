@@ -119,12 +119,12 @@ func TestAgentV3SessionDefaultOverflowExactBoundary(t *testing.T) {
 			commonMessages, err := prepareAgentV3Turn(WithTurnContext(t.Context(), tc), compiled, tc, nil)
 			require.NoError(t, err)
 			replay := []*schema.Message{schema.UserMessage("AAAA"), schema.AssistantMessage("OLD", nil)}
-			prepared, err := buildAgentV3LoadedInput(compiled, tc, commonMessages[0].Content, "", replay, agentSessionAllRepliesProof{})
+			prepared, err := buildAgentV3LoadedInput(compiled, tc, commonMessages[:1:1], replay, agentSessionAllRepliesProof{})
 			require.NoError(t, err)
 			estimate, err := compiled.Agent.estimateSessionContext(WithTurnContext(t.Context(), tc), prepared.messages, math.MaxInt64)
 			require.NoError(t, err)
 			replay[0].Content = strings.Repeat("A", int(tokens-estimate.Tokens+1)*4)
-			prepared, err = buildAgentV3LoadedInput(compiled, tc, prepared.messages[0].Content, "", replay, agentSessionAllRepliesProof{})
+			prepared, err = buildAgentV3LoadedInput(compiled, tc, commonMessages[:1:1], replay, agentSessionAllRepliesProof{})
 			require.NoError(t, err)
 			exact, err := compiled.Agent.estimateSessionContext(WithTurnContext(t.Context(), tc), prepared.messages, math.MaxInt64)
 			require.NoError(t, err)
@@ -667,12 +667,12 @@ func TestAgentV3SessionConfirmedInputReusesMeasuredRendering(t *testing.T) {
 	scope := orm.AgentV3Scope{Bot: f.scope().Bot, Platform: agentV3Platform, ChatID: -100}
 	config.BotConfig.AgentV3.Memory.Enable = true
 	config.BotConfig.AgentV3.ContextCache.Enable = true
-	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "MEASURED_MEMORY"))
+	seedSessionMemory(t, scope, "MEASURED_DIRECTORY", "教室位置", "正文")
 	seedAgentSession(t, f, cfg, 50, []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
 	repo := installAgentSessionGate(t, f, session.Options{})
 	repo.onConfirm = func() {
 		compiled.PromptTemplate = template.Must(template.New("addition").Parse("DO_NOT_RENDER_AFTER_CONFIRM"))
-		require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "DO_NOT_READ_AFTER_CONFIRM"))
+		seedSessionMemory(t, scope, "DO_NOT_READ_AFTER_CONFIRM", "场馆位置", "正文")
 	}
 	oldEncoder := encodeTelegramPhotoDataURL
 	var encodes int
@@ -688,14 +688,15 @@ func TestAgentV3SessionConfirmedInputReusesMeasuredRendering(t *testing.T) {
 	input := mdl.capturedInputs()[0]
 	text := replySessionSchemaText(input)
 	require.Contains(t, text, "MEASURED_TEMPLATE")
-	require.Contains(t, text, "MEASURED_MEMORY")
+	require.Contains(t, text, "MEASURED_DIRECTORY")
 	require.NotContains(t, text, "DO_NOT_RENDER_AFTER_CONFIRM")
 	require.NotContains(t, text, "DO_NOT_READ_AFTER_CONFIRM")
 	require.Equal(t, "data:image/jpeg;base64,ENCODE1", *input[len(input)-1].UserInputMultiContent[1].Image.URL)
 	capture := f.archive(t, f.node(t, id))
-	require.Len(t, capture.Frame, 1)
+	require.Len(t, capture.Frame, 2)
+	require.Contains(t, capture.Frame[1].Message.Content, "MEASURED_DIRECTORY")
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "MEASURED_TEMPLATE")
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "MEASURED_MEMORY")
+	require.NotContains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "MEASURED_DIRECTORY")
 	require.EqualValues(t, 1, repo.confirms.Load())
 }
 
@@ -711,7 +712,7 @@ func TestAgentV3SessionCurrentFrameAndToolsCanCauseOverflow(t *testing.T) {
 			tc := &TurnContext{Bot: f.bot, BotUser: f.bot.Me, Message: current, ChatID: -100, Config: cfg}
 			common, err := prepareAgentV3Turn(WithTurnContext(t.Context(), tc), compiled, tc, nil)
 			require.NoError(t, err)
-			prepared, err := buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
+			prepared, err := buildAgentV3LoadedInput(compiled, tc, common[:1:1], []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
 			require.NoError(t, err)
 			plain, err := NewCustomAgent(t.Context(), &CustomAgentConfig{Name: cfg.Name, Model: &scriptedToolModel{}, MaxSteps: 4})
 			require.NoError(t, err)
@@ -727,7 +728,7 @@ func TestAgentV3SessionCurrentFrameAndToolsCanCauseOverflow(t *testing.T) {
 				compiled.SystemTemplate = template.Must(template.New("system").Parse(strings.Repeat("SYSTEM", 1000)))
 			case "memory":
 				config.BotConfig.AgentV3.Memory.Enable = true
-				require.NoError(t, addAgentV3Memory(t.Context(), tc.V3.Scope, 7, strings.Repeat("MEMORY", 1000)))
+				seedSessionMemory(t, tc.V3.Scope, "教学楼", "教室位置", "正文")
 			case "tools":
 				withTools, err := compiled.Agent.estimateSessionContext(WithTurnContext(t.Context(), tc), prepared.messages, math.MaxInt64)
 				require.NoError(t, err)

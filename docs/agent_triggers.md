@@ -1,6 +1,6 @@
 # Agent 触发器与 hint
 
-一个 agent 可以挂多个触发器（`command` / `regex` / `reply`），它们共享同一份 system prompt、prompt cache、记忆与会话。
+一个 agent 可以挂多个触发器（`command` / `regex` / `reply`），它们共享同一份 system prompt、prompt cache 和会话配置。[群记忆](agent_memory.md)在同一聊天内跨 agent 和触发器共享。
 推荐布局是一个交互 agent 承载全部命令，再加一个无触发器的专用 `cron-runner`（见 `config.yaml` 示例）。
 
 ## hint 的工作方式
@@ -24,7 +24,7 @@
 ### 对已有部署的迁移步骤
 
 1. 升级前：无需操作。旧的多 agent 配置（每个命令一个 agent）继续有效。
-2. 升级后：可选地把多个命令合并为一个 agent 并给每个命令加 `hint`。合并后 prompt cache 与记忆按 agent 名共享；改名会使 `<prefix>:agentv3:…:prefix:current:<agent>:<model>` 记录重新生成一次（不影响历史）。
+2. 升级后：可选地把多个命令合并为一个 agent 并给每个命令加 `hint`。合并不改变群记忆范围；改名会使 `<prefix>:agentv3:…:prefix:current:<agent>:<model>` 记录重新生成一次（不影响历史）。
 3. 启动日志中若出现 `unknown config key` warning，说明有键名拼错（例如 `hints`），请按日志路径修正。
 
 ### 回滚方式

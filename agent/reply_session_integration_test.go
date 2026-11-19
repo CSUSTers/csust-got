@@ -138,28 +138,26 @@ func TestReplySessionPrepareSkipsInvalidChatHistoryKeys(t *testing.T) {
 	}
 }
 
-func TestReplySessionPrepareKeepsCurrentMemoryButAllowsForget(t *testing.T) {
+func TestReplySessionPrepareUsesDirectoryOnlyWhenMemoryEnabled(t *testing.T) {
 	setupReplySessionRedis(t)
 	config.BotConfig.AgentV3 = setupReplySessionTurnConfig()
 	config.BotConfig.AgentV3.Memory.Enable = true
 	cfg := &config.AgentConfig{Name: "session", ContextMode: "reply_chain", Model: &config.Model{Model: "fixture"}}
 	scope := orm.AgentV3Scope{Bot: "bot", Platform: agentV3Platform, ChatID: -100}
-	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "MEMORY_SENTINEL"))
+	id := seedSessionMemory(t, scope, "实验室", "场馆位置", "MEMORY_SENTINEL")
 
 	current := sessionMessage(42, 7, 0, "CURRENT_SENTINEL")
 	got, err := prepareAgentV3Turn(t.Context(), &CompiledAgent{Name: "session", Config: cfg}, replySessionTurnContext(cfg, current), nil)
 	require.NoError(t, err)
 	text := replySessionSchemaText(got)
-	assert.Less(t, strings.Index(text, "MEMORY_SENTINEL"), strings.Index(text, "CURRENT_SENTINEL"))
+	assert.Contains(t, got[1].Content, "校园 > 实验室：场馆位置")
+	assert.NotContains(t, text, "MEMORY_SENTINEL")
+	assert.NotContains(t, text, id)
 
-	items, err := orm.AgentV3ListMemory(t.Context(), scope)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	require.NoError(t, orm.AgentV3ForgetMemory(t.Context(), scope, items[0].ID))
-	require.NoError(t, rebuildAgentV3MemorySnapshot(t.Context(), scope, config.BotConfig.AgentV3.ContextCacheTTL()))
+	config.BotConfig.AgentV3.Memory.Enable = false
 	got, err = prepareAgentV3Turn(t.Context(), &CompiledAgent{Name: "session", Config: cfg}, replySessionTurnContext(cfg, current), nil)
 	require.NoError(t, err)
-	assert.NotContains(t, replySessionSchemaText(got), "MEMORY_SENTINEL")
+	assert.NotContains(t, replySessionSchemaText(got), "场馆位置")
 }
 
 func TestReplySessionPrepareUsesRedisChainRolesAndIDs(t *testing.T) {

@@ -54,16 +54,16 @@ func TestBuildAgentV3ToolsExposeOnlyFiveRuntimeTools(t *testing.T) {
 		}
 	}
 
-	toolDefsText := agentV3ToolDefinitionsText(false, true, false)
+	toolDefsText := agentV3ToolDefinitionsText(false, true, false, false, false)
 	assert.NotContains(t, toolDefsText, "load_skill")
 	assert.NotContains(t, toolDefsText, "/skills")
 	assert.Contains(t, toolDefsText, "fetch")
 
-	searxngToolDefs := agentV3ToolDefinitionsText(false, false, true)
+	searxngToolDefs := agentV3ToolDefinitionsText(false, false, true, false, false)
 	for _, name := range []string{agentV3ToolSearXNGWebSearch, agentV3ToolSearXNGSuggestions, agentV3ToolSearXNGInstanceInfo} {
 		assert.Contains(t, searxngToolDefs, name)
 	}
-	assert.NotEqual(t, hashString(agentV3ToolDefinitionsText(false, false, false)), hashString(searxngToolDefs))
+	assert.NotEqual(t, hashString(agentV3ToolDefinitionsText(false, false, false, false, false)), hashString(searxngToolDefs))
 }
 
 func nonRichAgentV3ChatConfig() *config.AgentConfig {
@@ -88,7 +88,7 @@ func TestBuildAgentV3ToolsAddsLoadSkillForNonEmptyCatalog(t *testing.T) {
 		richNames = append(richNames, info.Name)
 	}
 	assert.ElementsMatch(t, []string{"read", "grep", "write", "edit", "bash", "load_skill"}, richNames)
-	assert.Contains(t, agentV3ToolDefinitionsText(true, true, false), "load_skill")
+	assert.Contains(t, agentV3ToolDefinitionsText(true, true, false, false, false), "load_skill")
 
 	disabled := false
 	emptyCatalogTools := buildAgentV3Tools(richAgentV3ChatConfig(), &config.AgentV3Config{
@@ -115,7 +115,7 @@ func TestAgentV3FetchGuidanceRespectsEnabledGate(t *testing.T) {
 		for name, text := range map[string]string{
 			"runtime rules":     agentV3RuntimeSkillRules(enabled),
 			"stable prefix":     buildAgentV3StablePrefix("soul", "", enabled),
-			"JSON definitions":  agentV3ToolDefinitionsText(false, enabled, false),
+			"JSON definitions":  agentV3ToolDefinitionsText(false, enabled, false, false, false),
 			"bash description":  info.Desc,
 			"command parameter": string(paramsJSON),
 		} {
@@ -124,7 +124,7 @@ func TestAgentV3FetchGuidanceRespectsEnabledGate(t *testing.T) {
 			})
 		}
 	}
-	assert.NotEqual(t, hashString(agentV3ToolDefinitionsText(false, true, false)), hashString(agentV3ToolDefinitionsText(false, false, false)))
+	assert.NotEqual(t, hashString(agentV3ToolDefinitionsText(false, true, false, false, false)), hashString(agentV3ToolDefinitionsText(false, false, false, false, false)))
 }
 
 func TestLoadSkillToolLoadsOnlyAvailableRichSkill(t *testing.T) {
@@ -341,9 +341,6 @@ func TestRemoteRuntimeClientReset(t *testing.T) {
 }
 
 func TestAgentV3Helpers(t *testing.T) {
-	assert.Equal(t, "fact", extractExplicitMemoryContent("记住：fact"))
-	assert.Empty(t, extractExplicitMemoryContent("普通聊天"))
-
 	turns := agentV3TurnsToMessages([]orm.AgentV3Turn{
 		{Role: string(schema.User), Content: "u"},
 		{Role: string(schema.Assistant), Content: "a"},
@@ -370,8 +367,7 @@ func TestAgentV3Helpers(t *testing.T) {
 
 func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 	messages := buildAgentV3TurnMessages(
-		"stable prefix",
-		"- memory fact",
+		[]*schema.Message{schema.SystemMessage("stable prefix"), schema.UserMessage("memory directory")},
 		"- user: old question\n- assistant: old answer",
 		nil,
 		[]orm.AgentV3Turn{
@@ -384,10 +380,9 @@ func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 	require.Len(t, messages, 6)
 	assert.Equal(t, 1, countRoleMessages(messages, schema.System))
 	assert.Equal(t, schema.System, messages[0].Role)
-	assert.NotContains(t, messages[0].Content, "memory fact")
+	assert.NotContains(t, messages[0].Content, "memory directory")
 	assert.Equal(t, schema.User, messages[1].Role)
-	assert.Contains(t, messages[1].Content, "<group_memory_snapshot>")
-	assert.Contains(t, messages[1].Content, "memory fact")
+	assert.Contains(t, messages[1].Content, "memory directory")
 	assert.Equal(t, schema.User, messages[2].Role)
 	assert.Contains(t, messages[2].Content, "<conversation_summary>")
 	assert.Contains(t, messages[2].Content, "old question")
@@ -397,7 +392,7 @@ func TestAgentV3TurnMessagesKeepSingleSystemPrompt(t *testing.T) {
 	withDirective := injectLoopDirectives(ctx, messages)
 	assert.Equal(t, 1, countRoleMessages(withDirective, schema.System))
 	assert.Contains(t, withDirective[0].Content, "stable prefix")
-	assert.NotContains(t, withDirective[0].Content, "memory fact")
+	assert.NotContains(t, withDirective[0].Content, "memory directory")
 }
 
 func TestSanitizeHistoryMergesMultipleSystemMessages(t *testing.T) {
@@ -792,7 +787,7 @@ func TestBuildAgentV3BuiltinSkillsRespectInjectionGate(t *testing.T) {
 func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *testing.T) {
 	withoutRich := buildAgentV3StablePrefix("soul", "", true)
 	assert.Contains(t, withoutRich, "<agent_v3_execution_protocol>")
-	assert.NotContains(t, withoutRich, "<group_memory_snapshot>")
+	assert.NotContains(t, withoutRich, "<group_memory_directory>")
 	assert.NotContains(t, withoutRich, "\n<agent_v3_skills>\n")
 	assert.NotContains(t, withoutRich, "<tool_definitions>")
 
@@ -804,7 +799,7 @@ func TestBuildAgentV3StablePrefixIncludesSkillPromptBlockOnlyWhenProvided(t *tes
 		Source:      agentV3SkillSourceBuiltin,
 	}})
 	withRich := buildAgentV3StablePrefix("soul", skillBlock, true)
-	assert.NotContains(t, withRich, "<group_memory_snapshot>")
+	assert.NotContains(t, withRich, "<group_memory_directory>")
 	assert.Contains(t, withRich, "<agent_v3_skills>")
 	assert.Contains(t, withRich, "<skill name=\"rich-message\" description=\"Rich output\" source=\"builtin\" sha256=\"")
 	assert.Contains(t, withRich, "status=\"available\" activation=\"load_skill\"")
@@ -836,14 +831,4 @@ func TestBuildAgentV3StablePrefixHashIncludesRuntimeRules(t *testing.T) {
 	assert.NotEqual(t, withoutRich, withRich)
 	assert.NotEqual(t, withoutRich, withoutFetch)
 	assert.Equal(t, withoutRich, hashString(buildAgentV3StablePrefix("soul", "", true)))
-}
-
-func TestBuildAgentV3MemorySnapshotMessageKeepsMemoryOutOfSystem(t *testing.T) {
-	assert.Nil(t, buildAgentV3MemorySnapshotMessage("   "))
-
-	msg := buildAgentV3MemorySnapshotMessage("- remember me")
-	require.NotNil(t, msg)
-	assert.Equal(t, schema.User, msg.Role)
-	assert.Contains(t, msg.Content, "<group_memory_snapshot>")
-	assert.Contains(t, msg.Content, "- remember me")
 }

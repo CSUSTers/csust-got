@@ -52,7 +52,6 @@ type AgentV3Trace struct {
 	PromptCacheKeyHash      string             `json:"prompt_cache_key_hash"`
 	PromptTokens            int                `json:"prompt_tokens"`
 	CachedTokens            int                `json:"cached_tokens"`
-	MemorySnapshotVersion   int64              `json:"memory_snapshot_version"`
 	SummaryVersion          int64              `json:"summary_version"`
 	RawTurnCount            int                `json:"raw_turn_count"`
 	ToolCallCount           int                `json:"tool_call_count"`
@@ -218,7 +217,6 @@ func (t *AgentV3Trace) finish(saveCtx context.Context, scope orm.AgentV3Scope) {
 		PromptCacheKeyHash:      t.PromptCacheKeyHash,
 		PromptTokens:            t.PromptTokens,
 		CachedTokens:            t.CachedTokens,
-		MemorySnapshotVersion:   t.MemorySnapshotVersion,
 		SummaryVersion:          t.SummaryVersion,
 		RawTurnCount:            t.RawTurnCount,
 		ToolCallCount:           t.ToolCallCount,

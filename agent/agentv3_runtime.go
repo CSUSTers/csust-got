@@ -500,13 +500,16 @@ func buildAgentV3Tools(_ *config.AgentConfig, cfg *config.AgentV3Config, catalog
 	if len(catalog.Sorted) > 0 {
 		tools = append(tools, &loadSkillTool{})
 	}
+	if cfg != nil && cfg.Memory.Enable {
+		tools = append(tools, &groupMemoryRecallTool{}, &groupMemoryManageTool{})
+	}
 	if cfg != nil && cfg.CronConfig().RunnerAgent != "" {
 		tools = append(tools, &cronTool{}, &cronTool{manage: true})
 	}
 	return tools
 }
 
-func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled bool, cronEnabled ...bool) string {
+func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled, cronEnabled, memoryEnabled bool) string {
 	infos := []map[string]any{
 		{agentV3ToolNameField: agentV3ToolRead, agentV3ToolArgsField: agentV3ToolPathField, agentV3ToolDescField: "Read a file from /workspace."},
 		{agentV3ToolNameField: agentV3ToolGrep, agentV3ToolArgsField: "pattern,path?", agentV3ToolDescField: "Search literal or regex text in /workspace."},
@@ -528,12 +531,17 @@ func agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled b
 			agentV3ToolDescField: "Activate an available skill if not already restored. Visible full bodies may be reused without repetition. Rich-message always requires this agent's explicit load in the current turn before rich output; finish with one <telegram_rich_message> envelope.",
 		})
 	}
-	if len(cronEnabled) > 0 && cronEnabled[0] {
-		for _, t := range []*cronTool{{}, {manage: true}} {
-			info, _ := t.Info(context.Background())
-			params, _ := info.ParamsOneOf.ToJSONSchema()
-			infos = append(infos, map[string]any{agentV3ToolNameField: info.Name, agentV3ToolDescField: info.Desc, agentV3ToolArgsField: params})
-		}
+	var optional []tool.BaseTool
+	if memoryEnabled {
+		optional = append(optional, &groupMemoryRecallTool{}, &groupMemoryManageTool{})
+	}
+	if cronEnabled {
+		optional = append(optional, &cronTool{}, &cronTool{manage: true})
+	}
+	for _, t := range optional {
+		info, _ := t.Info(context.Background())
+		params, _ := info.ParamsOneOf.ToJSONSchema()
+		infos = append(infos, map[string]any{agentV3ToolNameField: info.Name, agentV3ToolDescField: info.Desc, agentV3ToolArgsField: params})
 	}
 	data, _ := json.Marshal(infos)
 	return string(data)

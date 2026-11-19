@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -78,84 +77,66 @@ func TestAgentV3SessionArchiveKeepsGuidanceInlineAsHistory(t *testing.T) {
 	require.Len(t, replayed.Delta, 5)
 }
 
-func TestAgentV3SessionLoadedInputReplaysVerbatimAndSupersedesMemory(t *testing.T) {
+func TestAgentV3SessionArchivesOnlyOrdinaryToolPairs(t *testing.T) {
 	f := newAgentSessionFixture(t)
-	cfg := &config.AgentConfig{Name: "memory-dedupe", ContextMode: "reply_chain"}
-	compiled := f.compile(t, cfg, &scriptedToolModel{})
-	current := sessionMessage(1100, 8, 60, "CURRENT")
-	tc := &TurnContext{Bot: f.bot, BotUser: f.bot.Me, Config: cfg, Message: current, ChatID: -100}
-	common, err := prepareAgentV3Turn(WithTurnContext(t.Context(), tc), compiled, tc, nil)
-	require.NoError(t, err)
-	memory := "- remembered fact"
-	snapshot := buildAgentV3MemorySnapshotMessage(memory)
-	replay := []*schema.Message{snapshot, schema.UserMessage("<reply_session_metadata>OLD_ADDITION</reply_session_metadata>"), schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}
-	count := func(messages []*schema.Message) int {
-		return strings.Count(replySessionSchemaText(messages), "<group_memory_snapshot")
+	cfg := &config.AgentConfig{Name: "memory-replay", ContextMode: "reply_chain", Session: config.AgentSessionConfig{LoadContext: true}}
+	calls := sessionToolMessage("visible")
+	calls.Extra = map[string]any{"provider": "fixture"}
+	expected := *calls
+	for _, name := range []string{agentV3ToolGroupMemoryRecall, agentV3ToolGroupMemoryManage} {
+		calls.ToolCalls = append([]schema.ToolCall{{ID: name, Type: "function", Function: schema.FunctionCall{Name: name, Arguments: `{"query":"PRIVATE_ARGUMENT"}`}}}, calls.ToolCalls...)
 	}
-
-	prepared, err := buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, replay, nil)
-	require.NoError(t, err)
-	require.Equal(t, []int{0}, prepared.frameIndexes, "only the system message is a frame")
-	require.Equal(t, replay, prepared.messages[1:1+len(replay)], "history including old addition and memory replays verbatim")
-	require.Equal(t, 1+len(replay), prepared.currentStart)
-	require.Equal(t, 1, count(prepared.messages), "an unchanged memory snapshot is not repeated")
-	require.Contains(t, replySessionSchemaText(prepared.messages[prepared.currentStart:]), "CURRENT")
-
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "- changed fact", replay, nil)
-	require.NoError(t, err)
-	require.Equal(t, 2, count(prepared.messages), "a changed memory snapshot is appended after the replay")
-	require.Equal(t, 1+len(replay), prepared.currentStart, "the fresh snapshot belongs to this turn's delta")
-	require.Equal(t, replay, prepared.messages[1:1+len(replay)], "the stale snapshot is never rewritten")
-	appended := prepared.messages[prepared.currentStart]
-	require.True(t, strings.HasPrefix(appended.Content, agentV3MemorySnapshotSupersedeHeader), "the appended snapshot declares that it supersedes earlier ones")
-	require.Contains(t, appended.Content, "- changed fact")
-
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", replay, nil)
-	require.NoError(t, err)
-	require.Equal(t, 2, count(prepared.messages), "cleared memory appends an explicit marker")
-	require.Equal(t, agentV3MemorySnapshotCleared, prepared.messages[prepared.currentStart].Content)
-	require.Contains(t, prepared.messages[prepared.currentStart].Content, "群记忆已清空")
-
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", []*schema.Message{schema.UserMessage("old"), schema.AssistantMessage("answer", nil)}, nil)
-	require.NoError(t, err)
-	require.Zero(t, count(prepared.messages), "no memory and no earlier snapshot appends nothing")
-
-	cleared := []*schema.Message{snapshot, schema.UserMessage("a"), schema.AssistantMessage("b", nil), schema.UserMessage(agentV3MemorySnapshotCleared), schema.UserMessage("c"), schema.AssistantMessage("d", nil)}
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, "", cleared, nil)
-	require.NoError(t, err)
-	require.Equal(t, 2, count(prepared.messages), "an already cleared history gets no second marker")
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, cleared, nil)
-	require.NoError(t, err)
-	require.Equal(t, 3, count(prepared.messages), "memory restored after a clear is appended as superseding")
-	require.True(t, strings.HasPrefix(prepared.messages[prepared.currentStart].Content, agentV3MemorySnapshotSupersedeHeader))
-
-	older := []*schema.Message{buildAgentV3MemorySnapshotMessage("- stale"), schema.UserMessage("a"), schema.AssistantMessage("b", nil), snapshot, schema.UserMessage("c"), schema.AssistantMessage("d", nil)}
-	prepared, err = buildAgentV3LoadedInput(compiled, tc, common[0].Content, memory, older, nil)
-	require.NoError(t, err)
-	require.Equal(t, 2, count(prepared.messages), "comparison uses the latest archived snapshot")
-	superseded := []*schema.Message{snapshot, schema.UserMessage("a"), buildAgentV3MemorySnapshotUpdate("- second"), schema.UserMessage("c")}
-	require.Nil(t, agentV3MemorySnapshotDelta(superseded, "- second"), "a superseding snapshot counts as the latest state")
-
-	tests := []struct {
-		name    string
-		message *schema.Message
-		body    string
-		found   bool
-	}{
-		{name: "nil", message: nil},
-		{name: "plain", message: snapshot, body: memory, found: true},
-		{name: "superseding", message: buildAgentV3MemorySnapshotUpdate("- next"), body: "- next", found: true},
-		{name: "cleared", message: schema.UserMessage(agentV3MemorySnapshotCleared), body: "", found: true},
-		{name: "assistant role", message: &schema.Message{Role: schema.Assistant, Content: snapshot.Content}},
-		{name: "look-alike user text", message: schema.UserMessage("<group_memory_snapshot>REAL_USER")},
+	mdl := &scriptedToolModel{turns: [][]*schema.Message{{calls}, {schema.AssistantMessage("first final", nil)}, {schema.AssistantMessage("second final", nil)}}}
+	f.compile(t, cfg, mdl, lookupTool{}, sessionMemoryTool(agentV3ToolGroupMemoryRecall), sessionMemoryTool(agentV3ToolGroupMemoryManage))
+	first := f.chat(t, cfg, sessionMessage(10, 7, 0, "first input"), nil)
+	live := mdl.capturedInputs()[1]
+	require.Contains(t, replySessionSchemaText(live), "PRIVATE_RESULT")
+	root := f.node(t, first)
+	archive := f.archive(t, root)
+	require.NoError(t, session.ValidateCapture(archive, true))
+	second := f.chat(t, cfg, sessionMessage(20, 7, 60, "second input"), nil)
+	require.Equal(t, &root.Ref, f.node(t, second).Parent)
+	for _, messages := range [][]*schema.Message{sessionRecordMessages(archive.Delta), mdl.capturedInputs()[2]} {
+		require.Contains(t, messages, &expected, "the ordinary call retains its reasoning and provider metadata")
+		text := renderAgentV3SessionTranscript(messages)
+		require.NotContains(t, text, "PRIVATE_ARGUMENT")
+		require.NotContains(t, text, "PRIVATE_RESULT")
+		require.Contains(t, text, "tool_call lookup")
+		require.Contains(t, text, "first final")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body, found := agentV3MemorySnapshotBody(tt.message)
-			require.Equal(t, tt.found, found)
-			require.Equal(t, tt.body, body)
-		})
-	}
+}
+
+func TestAgentV3ReplayableMessagesRetainsAssistantMedia(t *testing.T) {
+	memory := schema.ToolCall{ID: "memory", Function: schema.FunctionCall{Name: agentV3ToolGroupMemoryRecall}}
+	ordinary := lookupToolCall("visible", `{}`)
+	media := schema.AssistantMessage("", []schema.ToolCall{memory})
+	media.AssistantGenMultiContent = []schema.MessageOutputPart{{
+		Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageOutputImage{MessagePartCommon: schema.MessagePartCommon{URL: new("https://example.org/image")}},
+	}}
+	mixed := schema.AssistantMessage("", []schema.ToolCall{memory, ordinary})
+	pure := schema.AssistantMessage("", []schema.ToolCall{memory})
+	result := &schema.Message{Role: schema.Tool, ToolCallID: memory.ID, Content: "private"}
+	visible := &schema.Message{Role: schema.Tool, ToolCallID: ordinary.ID, Content: "visible"}
+	input := []*schema.Message{media, result, mixed, result, visible, pure, result}
+
+	got := agentV3ReplayableMessages(input)
+	require.Len(t, got, 3)
+	require.Same(t, visible, got[2])
+	require.Equal(t, media.AssistantGenMultiContent, got[0].AssistantGenMultiContent)
+	require.Empty(t, got[0].ToolCalls)
+	require.Equal(t, []schema.ToolCall{ordinary}, got[1].ToolCalls)
+	require.Equal(t, []schema.ToolCall{memory, ordinary}, mixed.ToolCalls)
+	require.Same(t, result, input[1])
+}
+
+type sessionMemoryTool string
+
+func (name sessionMemoryTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{Name: string(name)}, nil
+}
+
+func (sessionMemoryTool) InvokableRun(context.Context, string, ...tool.Option) (string, error) {
+	return "PRIVATE_RESULT", nil
 }
 
 type agentSessionPublishFailureRepository struct {

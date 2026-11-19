@@ -58,8 +58,8 @@ func TestSearXNGNativeToolSchemasAreExactAndDefaultOff(t *testing.T) {
 		assert.NotContains(t, searXNGToolSchemaJSON(t, enabled[0]), forbidden)
 	}
 
-	withoutSearXNG := agentV3ToolDefinitionsText(false, false, false)
-	withSearXNG := agentV3ToolDefinitionsText(false, false, true)
+	withoutSearXNG := agentV3ToolDefinitionsText(false, false, false, false, false)
+	withSearXNG := agentV3ToolDefinitionsText(false, false, true, false, false)
 	for _, name := range []string{"searxng_web_search", "searxng_search_suggestions", "searxng_instance_info"} {
 		assert.NotContains(t, withoutSearXNG, name)
 		assert.Contains(t, withSearXNG, name)

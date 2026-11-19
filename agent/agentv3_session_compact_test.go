@@ -10,6 +10,7 @@ import (
 
 	"csust-got/agent/session"
 	"csust-got/config"
+	"csust-got/orm"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -107,6 +108,9 @@ func TestAgentV3SessionCompactionDisabledCreatesNoCompactor(t *testing.T) {
 func TestAgentV3SessionCompactionWritesNewRootAndRedirectsReplies(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "compact", ContextMode: "reply_chain"}
+	config.BotConfig.AgentV3.Memory.Enable = true
+	scope := orm.AgentV3Scope{Bot: f.scope().Bot, Platform: agentV3Platform, ChatID: -100}
+	id := seedSessionMemory(t, scope, "设施", "场馆位置", "设施正文")
 	mdl := &scriptedToolModel{turns: [][]*schema.Message{{schema.AssistantMessage("FIRST_FINAL", nil)}, {schema.AssistantMessage("SECOND_FINAL", nil)}, {schema.AssistantMessage("THIRD_FINAL", nil)}, {schema.AssistantMessage("FOURTH_FINAL", nil)}}}
 	f.compile(t, cfg, mdl)
 	summarizer := newCompactTestModel()
@@ -154,13 +158,22 @@ func TestAgentV3SessionCompactionWritesNewRootAndRedirectsReplies(t *testing.T) 
 	require.NotContains(t, prompt, "THIRD_INPUT", "kept turns are not summarized")
 	require.Contains(t, prompt, "Hard limit: 500 characters")
 	require.Len(t, rootCapture.Delta, len(turns[0].Delta))
+	require.NotContains(t, prompt, "场馆位置")
+	require.NotContains(t, prompt, "设施正文")
 
+	denial, err := orm.ChangeGroupMemory(t.Context(), scope, "校园", "设施", id, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, denial)
+	seedSessionMemory(t, scope, "日程", "讲座安排", "讲座正文")
 	fourth := sessionMessage(40, 7, 180, "FOURTH_INPUT")
 	fourth.ReplyTo = &tb.Message{ID: third}
 	fourthID := f.chat(t, cfg, fourth, &config.AgentTrigger{Reply: true})
 	require.Equal(t, &compacted.Ref, f.node(t, fourthID).Parent, "replying to the compacted message continues the new root")
 	input := replySessionSchemaText(mdl.capturedInputs()[3])
 	require.Contains(t, input, compactSummaryText)
+	require.Contains(t, input, "校园 > 日程：讲座安排")
+	require.NotContains(t, input, "场馆位置")
+	require.NotContains(t, input, "讲座正文")
 	require.Contains(t, input, "SECOND_INPUT")
 	require.Contains(t, input, "THIRD_INPUT")
 	require.Equal(t, 1, strings.Count(input, "FIRST_INPUT"), "the old first turn survives only inside the summary")

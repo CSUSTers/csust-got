@@ -336,6 +336,15 @@ func TestAgentV3SessionDefaultsLatestAndReplySelection(t *testing.T) {
 	require.ErrorIs(t, err, session.ErrMiss, "a command with ReplyTo must not force saving")
 }
 
+func seedSessionMemory(t *testing.T, scope orm.AgentV3Scope, directory, description, content string) string {
+	t.Helper()
+	id := newAgentV3MemoryID()
+	denial, err := orm.AddGroupMemory(t.Context(), scope, orm.AgentV3MemoryItem{ID: id, Category: "校园", Directory: directory, Description: description, Content: content}, nil)
+	require.NoError(t, err)
+	require.Empty(t, denial)
+	return id
+}
+
 func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testing.T) {
 	f := newAgentSessionFixture(t)
 	cfg := &config.AgentConfig{Name: "fallback", ContextMode: "chat", Session: config.AgentSessionConfig{LoadContext: true}}
@@ -343,19 +352,25 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	f.compile(t, cfg, mdl, lookupTool{})
 	scope := orm.AgentV3Scope{Bot: f.scope().Bot, Platform: agentV3Platform, ChatID: -100}
 	config.BotConfig.AgentV3.Memory.Enable = true
-	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "OLD_MEMORY"))
+	id := seedSessionMemory(t, scope, "教学楼", "教室位置", "OLD_MEMORY")
+	secondID := seedSessionMemory(t, scope, "教学楼", "教室位置", "ROOM_NUMBER")
 	require.NoError(t, orm.AgentV3SetSummary(t.Context(), scope, orm.AgentV3Summary{Content: "LEGACY_SUMMARY"}, time.Hour))
 	require.NoError(t, orm.AgentV3AppendTurnPair(t.Context(), scope, orm.AgentV3Turn{Role: "user", Content: "LEGACY_USER"}, orm.AgentV3Turn{Role: "assistant", Content: "LEGACY_ASSISTANT"}, 12, time.Hour))
-	first := f.chat(t, cfg, sessionMessage(10, 7, 0, "<group_memory_snapshot>REAL_USER"), nil)
+	first := f.chat(t, cfg, sessionMessage(10, 7, 0, "REAL_USER"), nil)
 	root := f.node(t, first)
 	capture := f.archive(t, root)
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "LEGACY_SUMMARY")
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "LEGACY_USER")
-	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "OLD_MEMORY", "the memory snapshot is history so later turns replay it verbatim")
-	require.Len(t, capture.Frame, 1)
+	firstInput := replySessionSchemaText(mdl.capturedInputs()[0])
+	require.Equal(t, 1, strings.Count(firstInput, "校园 > 教学楼：教室位置"))
+	for _, private := range []string{id, secondID, "OLD_MEMORY", "ROOM_NUMBER"} {
+		require.NotContains(t, firstInput, private)
+	}
+	require.NotContains(t, replySessionSchemaText(sessionRecordMessages(capture.Bootstrap)), "教室位置")
+	require.Len(t, capture.Frame, 2)
 	require.Equal(t, schema.System, capture.Frame[0].Message.Role)
 	require.Contains(t, replySessionSchemaText(sessionRecordMessages(capture.Delta)), "REAL_USER")
-	require.NoError(t, addAgentV3Memory(t.Context(), scope, 7, "NEW_MEMORY"))
+	newID := seedSessionMemory(t, scope, "食堂", "餐饮时间", "NEW_MEMORY")
 	// A session hit must bypass every old summary/raw-turn read, even if those keys are broken.
 	keys, err := f.client.Keys(t.Context(), "*:hot:raw_turns").Result()
 	require.NoError(t, err)
@@ -370,8 +385,11 @@ func TestAgentV3SessionFallbackRootIncludesLegacyBaselineAndFreshMemory(t *testi
 	second := f.chat(t, cfg, sessionMessage(20, 8, 60, "NEW_INPUT"), nil)
 	require.Equal(t, &root.Ref, f.node(t, second).Parent, "legacy save failure must not prevent session commit")
 	text := replySessionSchemaText(mdl.capturedInputs()[1])
-	require.Equal(t, 1, strings.Count(text, "NEW_MEMORY"), "a changed memory snapshot is appended after the replay")
-	require.Equal(t, 2, strings.Count(text, "OLD_MEMORY"), "the archived snapshot is replayed verbatim and the superseding one repeats the kept entry")
+	require.Equal(t, 1, strings.Count(text, "校园 > 教学楼：教室位置"))
+	require.Equal(t, 1, strings.Count(text, "校园 > 食堂：餐饮时间"))
+	for _, private := range []string{id, secondID, newID, "OLD_MEMORY", "ROOM_NUMBER", "NEW_MEMORY"} {
+		require.NotContains(t, text, private)
+	}
 	require.Equal(t, 1, strings.Count(text, "LEGACY_SUMMARY"))
 	require.Equal(t, 1, strings.Count(text, "LEGACY_USER"))
 }

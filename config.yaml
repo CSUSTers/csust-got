@@ -105,14 +105,14 @@ agent_v3:
     max_summary_tokens: 2000
     max_raw_tokens: 6000
     redis_ttl: "30d"
-  # memory 项与 snapshot 不设 TTL（持久保存，依赖 Redis maxmemory-policy），详见 docs/agent_memory.md
+  # 群内共享、按需召回；每个聊天的 Redis group_catalog 无 TTL，仍受淘汰策略影响。详见 docs/agent_memory.md。
   memory:
-    enable: true
+    enable: true # 缺省关闭；本示例显式开启
     scope: "group"
     allow_global: false
-    snapshot_max_tokens: 2000 # 约 4 字符/token；写满后拒绝新写入并回复用户，snapshot 超限时丢弃最旧条目
-    write_policy: "explicit_or_admin" # explicit_or_admin(默认，仅管理员可写) | explicit_quota(非管理员按配额写入)
-    max_entries_per_user: 20 # 默认 20；仅 explicit_quota 下生效，非管理员每人最多条目数
+    snapshot_max_tokens: 2000 # 记忆正文容量预算，约 4 字符/单位；超出时拒绝新增或替换
+    write_policy: "explicit_or_admin" # 默认仅管理员可增删改；explicit_quota 也允许普通成员管理自己添加的条目
+    max_entries_per_user: 20 # 仅 explicit_quota 下限制普通成员每人可持有的条数
   runtime:
     enable: true
     mode: "remote_http"
@@ -167,7 +167,7 @@ agent_v3:
     busy_message: "当前任务太多，稍后再试。"
 
 # agents: 顶层 agent 列表。推荐布局：一个交互 agent 承载全部触发器，再加一个专用 cron-runner。
-# 同一 agent 的所有触发器共享 system prompt、记忆、prompt cache 与会话；每个触发器可带 hint，
+# 同一 agent 的触发器共享 system prompt、prompt cache 与会话配置；群记忆按聊天共享。每个触发器可带 hint，
 # 触发时追加到本轮用户消息末尾（<trigger_hint>…</trigger_hint>），不进入 system prompt，详见 docs/agent_triggers.md。
 # context_mode: 上下文来源, "chat" (默认, 使用聊天历史) 或 "reply_chain"
 #   (仅从触发的 Telegram 回复链构建模型上下文, 模板只可用 DateTime/CurrentDateCN/BotUsername 插值,
@@ -187,7 +187,7 @@ agents:
       request_timeout: "0s" # 单次 HTTP 请求总超时，默认 0 不限制；流式请求通常只需 stream_idle_timeout
       stream_idle_timeout: "60s" # 流式响应连续无新 chunk 的看门狗，默认 60s，"0s" 关闭 (见 docs/agent_loop.md)
     message_context: 6 # reply msg上下文数量
-    # session 缺省 save_context=true/load_context=false；不关闭 raw turns / summaries / memory 等旧存储。
+    # session 缺省 save_context=true/load_context=false；群记忆和聊天历史存储独立配置。
     # 全局 session 启用且可用时，实际 reply 分支强制 true/true；带 ReplyTo 的 command/regex 仍使用下列开关。
     # reply 精确续接被回复的 bot 消息，可同 chat 跨 agent 分叉；非 reply load=true 续接同 agent 最近成功提交。
     # 加载缺失/损坏/Redis 失败或候选估算超阈值时整体回退 context_mode，保存时新建 root；最终送达成功才存增量 JSONL。

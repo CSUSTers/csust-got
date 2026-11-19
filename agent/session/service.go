@@ -231,7 +231,7 @@ func (s *Service) LoadWithAcceptance(ctx context.Context, selection Selection, a
 		return LoadResult{}, err
 	}
 	if err = context.Cause(candidateCtx); err == nil && accept != nil {
-		err = accept(candidateCtx, &LoadCandidate{Messages: messages, MemoryEpoch: pinned.Nodes[len(pinned.Nodes)-1].MemoryEpoch, ancestorReplyIDs: ancestorReplyIDs})
+		err = accept(candidateCtx, &LoadCandidate{Messages: messages, ancestorReplyIDs: ancestorReplyIDs})
 	}
 	if err != nil {
 		return LoadResult{}, err
@@ -477,7 +477,7 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 || req.MemoryEpoch < 0 {
+	if req.Agent == "" || !ValidID(req.RunID) || len(req.Receipt.MessageIDs) == 0 {
 		return Node{}, ErrCorrupt
 	}
 	if req.Receipt.RedirectFrom != nil && (req.Parent != nil || req.Receipt.RedirectFrom.Validate() != nil) {
@@ -515,7 +515,7 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (Node, error) {
 			node = *published
 			return nil
 		}
-		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID, MemoryEpoch: req.MemoryEpoch}
+		reservation := Reservation{Scope: req.Scope, Agent: req.Agent, RunID: req.RunID}
 		if req.Parent != nil {
 			if req.Parent.alive() {
 				err = s.repo.Renew(op, req.Scope, req.Parent.lease, s.options.LeaseDuration)

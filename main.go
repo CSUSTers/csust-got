@@ -191,7 +191,6 @@ func registerBaseHandler(bot *Bot) {
 	bot.Handle("/run_after", base.RunTask)
 
 	bot.Handle("/getvoice", base.GetVoice)
-	bot.Handle("/memory", agentv3.MemoryCommand)
 	bot.Handle("/trace_last", agentv3.TraceLastCommand)
 	bot.Handle("/context_cache", agentv3.ContextCacheCommand)
 	bot.Handle("/runtime_status", agentv3.RuntimeStatusCommand)

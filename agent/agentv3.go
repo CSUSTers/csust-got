@@ -216,13 +216,6 @@ func Chat(tbCtx tb.Context, agentConfig *config.AgentConfig, trigger *config.Age
 		return sendAgentErrorMessage(tbCtx, agentConfig, err)
 	}
 	defer tc.V3.Trace.Finish(ctx, tc.V3.Scope)
-	if err := maybeRememberExplicitInput(ctx, tc, input); err != nil {
-		tc.V3.Trace.SetError(err)
-		zap.L().Warn("agentv3: failed to write agent v3 explicit memory",
-			zap.String("run_id", tc.RunID),
-			zap.Error(err),
-		)
-	}
 	zap.L().Info("agentv3: agent v3 turn started",
 		zap.String("run_id", tc.RunID),
 		zap.String("agent", agentConfig.Name),

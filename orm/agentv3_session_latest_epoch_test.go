@@ -1,7 +1,6 @@
 package orm
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -89,40 +88,4 @@ func TestAgentV3SessionDropLatestRemovesCompactedRedirect(t *testing.T) {
 	latest, err = sessionLatestRef(t, f, "A")
 	require.NoError(t, err)
 	require.Equal(t, newer.Ref, latest, "a genuinely newer commit stays selectable")
-}
-
-func TestAgentV3SessionMemoryEpochRoundTrip(t *testing.T) {
-	f := newSessionFixture(t, session.Options{})
-	req := sessionRequest(t, f.scope, "A", nil, 101, "root")
-	req.MemoryEpoch = 3
-	root, err := f.service.Commit(t.Context(), req)
-	require.NoError(t, err)
-	require.Equal(t, int64(3), root.MemoryEpoch)
-
-	var seen int64
-	loaded, err := f.service.LoadWithAcceptance(t.Context(), session.Selection{Scope: f.scope, Agent: "A", Mode: session.SelectReply, ReplyMessageID: 101}, func(_ context.Context, candidate *session.LoadCandidate) error {
-		seen = candidate.MemoryEpoch
-		return nil
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = loaded.Parent.Close() })
-	require.Equal(t, int64(3), seen)
-
-	child := sessionRequest(t, f.scope, "A", loaded.Parent, 102, "child")
-	child.MemoryEpoch = 4
-	node, err := f.service.Commit(t.Context(), child)
-	require.NoError(t, err)
-	require.Equal(t, int64(4), node.MemoryEpoch)
-	chain, err := f.repo.Chain(t.Context(), f.scope, node.Ref)
-	require.NoError(t, err)
-	require.Equal(t, []int64{3, 4}, []int64{chain[0].MemoryEpoch, chain[1].MemoryEpoch})
-
-	compacted, err := f.service.Commit(t.Context(), sessionCompactedRequest(t, f.scope, node))
-	require.NoError(t, err)
-	require.Equal(t, int64(4), compacted.MemoryEpoch, "a compacted root inherits the source epoch")
-
-	bad := sessionRequest(t, f.scope, "A", nil, 103, "bad")
-	bad.MemoryEpoch = -1
-	_, err = f.service.Commit(t.Context(), bad)
-	require.ErrorIs(t, err, session.ErrCorrupt)
 }
