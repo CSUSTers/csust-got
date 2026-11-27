@@ -28,6 +28,9 @@ func buildPromptData(tc *TurnContext, contextMsgs []*ContextMessage) PromptData 
 	if tc.BotUser != nil {
 		pd.BotUsername = tc.BotUser.Username
 	}
+	if sender, ok := agentV3MessageSender(tc.Message); ok {
+		pd.SenderUsername, pd.SenderShowName = sender.Username, sender.ShowName
+	}
 
 	// Format the replied-to message as XML
 	if tc.Message.ReplyTo != nil {
@@ -96,7 +99,7 @@ func contextToSchemaMessages(msgs []*ContextMessage, tc *TurnContext) []*schema.
 		if isBot {
 			result = append(result, &schema.Message{
 				Role:    schema.Assistant,
-				Content: msg.Text,
+				Content: neutralizeAgentV3SenderTags(msg.Text),
 			})
 		} else {
 			senderInfo := msg.UserNames.ShowName()
@@ -105,7 +108,7 @@ func contextToSchemaMessages(msgs []*ContextMessage, tc *TurnContext) []*schema.
 			}
 			result = append(result, &schema.Message{
 				Role:    schema.User,
-				Content: fmt.Sprintf("[%s]: %s", senderInfo, msg.Text),
+				Content: neutralizeAgentV3SenderTags(fmt.Sprintf("[%s]: %s", senderInfo, msg.Text)),
 			})
 		}
 	}

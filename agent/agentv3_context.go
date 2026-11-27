@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,23 +36,21 @@ var (
 
 // AgentV3TurnState stores per-turn agent-v3 context metadata.
 type AgentV3TurnState struct {
-	Scope                 orm.AgentV3Scope
-	RunID                 string
-	Namespace             string
-	PrefixHash            string
-	PrefixVersion         int64
-	PromptCacheKey        string
-	MemorySnapshotHash    string
-	MemorySnapshotVersion int64
-	SummaryVersion        int64
-	RawTurnCount          int
-	ToolDefsHash          string
-	ImageRefs             []orm.AgentV3ImageRef
-	Trace                 *AgentV3Trace
-	SkillCatalog          agentV3SkillCatalog
-	runtimeEnv            map[string]string
-	renderCtx             context.Context
-	frameTime             time.Time
+	Scope          orm.AgentV3Scope
+	RunID          string
+	Namespace      string
+	PrefixHash     string
+	PrefixVersion  int64
+	PromptCacheKey string
+	SummaryVersion int64
+	RawTurnCount   int
+	ToolDefsHash   string
+	ImageRefs      []orm.AgentV3ImageRef
+	Trace          *AgentV3Trace
+	SkillCatalog   agentV3SkillCatalog
+	runtimeEnv     map[string]string
+	renderCtx      context.Context
+	frameTime      time.Time
 }
 
 func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext, history *RichHistory) ([]*schema.Message, error) {
@@ -107,50 +104,28 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		finishContextSpan(err, nil)
 		return nil, err
 	}
-	if state := tc.Session; !tc.Background && state != nil && state.service != nil {
-		// Read before the snapshot: a deletion racing this turn leaves the node on an older epoch.
-		state.memoryEpoch, err = orm.AgentV3GetMemoryEpoch(ctx, scope)
-		if err != nil {
-			err = fmt.Errorf("agent v3 memory epoch: %w", err)
-			finishContextSpan(err, nil)
-			return nil, err
-		}
-	}
-	memoryText := ""
-	var memoryVersion int64
-	memoryHash := hashString("")
-	finishMemorySpan := trace.StartSpan("memory_snapshot", map[string]any{
-		"enabled": cfg.Memory.Enable,
-	})
+	var directory string
+	finishMemorySpan := trace.StartSpan("memory_directory", map[string]any{"enabled": cfg.Memory.Enable})
 	if cfg.Memory.Enable {
-		snapshot, epoch, err := orm.AgentV3GetCurrentMemorySnapshot(ctx, scope, func(ctx context.Context) error {
-			return rebuildAgentV3MemorySnapshot(ctx, scope, agentV3MemoryTTL())
-		})
+		directories, err := orm.GroupMemoryCatalog(ctx, scope)
 		if err != nil {
-			err = fmt.Errorf("agent v3 memory snapshot: %w", err)
+			err = fmt.Errorf("agent v3 memory directory: %w", err)
 			finishMemorySpan(err, nil)
 			finishContextSpan(err, nil)
 			return nil, err
 		}
-		if state := tc.Session; !tc.Background && state != nil && state.service != nil {
-			state.memoryEpoch = epoch
+		lines := make([]string, 0, len(directories))
+		for _, dir := range directories {
+			lines = append(lines, fmt.Sprintf("- %s > %s：%s", dir.Category, dir.Directory, dir.Description))
 		}
-		if snapshot != nil {
-			memoryText = snapshot.Content
-			memoryVersion = snapshot.Version
-			memoryHash = snapshot.Hash
-		}
+		directory = strings.Join(lines, "\n")
 	}
-	finishMemorySpan(nil, map[string]any{
-		agentV3FieldVersion: memoryVersion,
-		"hash":              memoryHash,
-		"chars":             utf8.RuneCountInString(memoryText),
-	})
+	finishMemorySpan(nil, map[string]any{"chars": utf8.RuneCountInString(directory)})
 
 	includeLoadSkill := len(catalog.Sorted) > 0
 	fetchEnabled := cfg.RuntimeFetchEnabled()
 	searxngEnabled := cc.AgentV3StartupSkills != nil && cc.AgentV3StartupSkills.SearXNG != nil
-	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled, cfg.CronConfig().RunnerAgent != "")
+	toolDefs := agentV3ToolDefinitionsText(includeLoadSkill, fetchEnabled, searxngEnabled, cfg.CronConfig().RunnerAgent != "", cfg.Memory.Enable)
 	toolDefsHash := hashString(toolDefs)
 	soulHash := hashString(soul)
 	skillPromptBlock := buildAgentV3SkillPromptBlock(catalog.Sorted)
@@ -186,16 +161,14 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			promptCacheKey = buildAgentV3PromptCacheKey(scope, modelName, prefixVersion)
 		}
 		rec := orm.AgentV3PrefixRecord{
-			Agent:                 cc.Name,
-			Model:                 modelName,
-			Version:               prefixVersion,
-			Hash:                  prefixHash,
-			SoulHash:              soulHash,
-			MemorySnapshotHash:    memoryHash,
-			MemorySnapshotVersion: memoryVersion,
-			ToolDefsHash:          toolDefsHash,
-			PromptCacheKey:        promptCacheKey,
-			UpdatedAt:             time.Now(),
+			Agent:          cc.Name,
+			Model:          modelName,
+			Version:        prefixVersion,
+			Hash:           prefixHash,
+			SoulHash:       soulHash,
+			ToolDefsHash:   toolDefsHash,
+			PromptCacheKey: promptCacheKey,
+			UpdatedAt:      time.Now(),
 		}
 		if err := orm.AgentV3SetPrefix(ctx, scope, rec, cfg.ContextCacheTTL()); err != nil {
 			err = fmt.Errorf("agent v3 prefix set: %w", err)
@@ -216,12 +189,14 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	trace.PrefixHash = prefixHash
 	trace.PrefixVersion = prefixVersion
 	trace.PromptCacheKeyHash = hashString(promptCacheKey)
-	trace.MemorySnapshotVersion = memoryVersion
 	trace.RuntimeNamespaceHash = hashString(tc.Namespace)
 	tc.V3.PrefixHash, tc.V3.PrefixVersion, tc.V3.PromptCacheKey = prefixHash, prefixVersion, promptCacheKey
-	tc.V3.MemorySnapshotHash, tc.V3.MemorySnapshotVersion = memoryHash, memoryVersion
 	tc.V3.ToolDefsHash = toolDefsHash
 
+	frame := []*schema.Message{schema.SystemMessage(prefixText)}
+	if directory != "" {
+		frame = append(frame, schema.UserMessage("<group_memory_directory>\n群记忆目录（仅供参考）：\n"+directory+"\n</group_memory_directory>"))
+	}
 	var accepted agentV3PreparedSessionInput
 	rebuilt := false
 	state := tc.Session
@@ -229,15 +204,11 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		state.load = false
 		var prepared agentV3PreparedSessionInput
 		loaded, loadErr := state.service.LoadWithAcceptance(ctx, state.selection, func(op context.Context, candidate *session.LoadCandidate) error {
-			if candidate.MemoryEpoch != state.memoryEpoch {
-				zap.L().Debug("agentv3: memory deleted since session node; rebuilding as new root", zap.String("agent", tc.Config.Name), zap.Int64("chat_id", tc.ChatID), zap.Int64("node_memory_epoch", candidate.MemoryEpoch), zap.Int64("memory_epoch", state.memoryEpoch))
-				return errAgentV3SessionMemoryEpoch
-			}
 			candidateV3 := *tc.V3
 			candidateV3.renderCtx = op
 			candidateTC := &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: tc.Message, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: &candidateV3}
 			var err error
-			prepared, err = buildAgentV3LoadedInput(cc, candidateTC, prefixText, memoryText, candidate.Messages, candidate)
+			prepared, err = buildAgentV3LoadedInput(cc, candidateTC, frame, candidate.Messages, candidate)
 			if err != nil {
 				return err
 			}
@@ -313,7 +284,6 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	tc.V3.SummaryVersion, tc.V3.RawTurnCount = summaryVersion, len(rawTurns)
 
 	var messages []*schema.Message
-	var frameIndexes []int
 	currentStart := 0
 	switch {
 	case tc.Background:
@@ -322,19 +292,19 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			finishContextSpan(err, nil)
 			return nil, err
 		}
-		messages = buildAgentV3TurnMessages(prefixText, memoryText, "", nil, nil, userMsg)
-		if !strings.Contains(userMsg.Content, tc.Message.Text) {
-			messages = append(messages, schema.UserMessage(tc.Message.Text))
+		messages = buildAgentV3TurnMessages(frame, "", nil, nil, userMsg)
+		if text := neutralizeAgentV3SenderTags(tc.Message.Text); !strings.Contains(userMsg.Content, text) {
+			messages = append(messages, schema.UserMessage(text))
 		}
 	case sessionLoaded:
 		if accepted.messages == nil {
-			accepted, err = buildAgentV3LoadedInput(cc, tc, prefixText, memoryText, state.replay, state.parent)
+			accepted, err = buildAgentV3LoadedInput(cc, tc, frame, state.replay, state.parent)
 			if err != nil {
 				finishContextSpan(err, nil)
 				return nil, err
 			}
 		}
-		messages, frameIndexes, currentStart = accepted.messages, accepted.frameIndexes, accepted.currentStart
+		messages, currentStart = accepted.messages, accepted.currentStart
 	case replyChain:
 		replyContext, err := loadReplySession(ctx, tc.Message, tc.Config.MessageContext)
 		if err != nil {
@@ -360,14 +330,8 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			finishContextSpan(err, nil)
 			return nil, err
 		}
-		// Only the system message is a frame; memory and the template addition are archived
-		// as history so later turns replay them verbatim for prompt-cache alignment.
-		messages = []*schema.Message{schema.SystemMessage(prefixText)}
-		frameIndexes = append(frameIndexes, 0)
+		messages = frame
 		messages = append(messages, sessionMessages[:len(sessionMessages)-1]...)
-		if memoryMsg := buildAgentV3MemorySnapshotMessage(memoryText); memoryMsg != nil {
-			messages = append(messages, memoryMsg)
-		}
 		currentStart = len(messages)
 		messages = append(messages, promptAddition, sessionMessages[len(sessionMessages)-1])
 	default:
@@ -377,8 +341,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 			return nil, err
 		}
 		fallbackHistory := agentV3FallbackHistoryMessages(rawTurns, history, tc)
-		messages = buildAgentV3TurnMessages(prefixText, memoryText, summary, fallbackHistory, rawTurns, userMsg)
-		frameIndexes = append(frameIndexes, 0)
+		messages = buildAgentV3TurnMessages(frame, summary, fallbackHistory, rawTurns, userMsg)
 		currentStart = len(messages) - 1
 	}
 	if err := ctx.Err(); err != nil {
@@ -395,7 +358,11 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 		}
 	}
 	if !tc.Background {
-		setAgentV3SessionBaseline(tc, messages, frameIndexes, currentStart)
+		tc.memoryHasHistory = lo.ContainsBy(messages[len(frame):currentStart], func(m *schema.Message) bool {
+			return (m.Role == schema.User || m.Role == schema.Assistant) && len(m.ToolCalls) == 0 &&
+				(strings.TrimSpace(m.Content) != "" || len(m.UserInputMultiContent) != 0)
+		})
+		setAgentV3SessionBaseline(tc, messages, len(frame), currentStart)
 	}
 
 	finishContextSpan(nil, map[string]any{
@@ -405,11 +372,7 @@ func prepareAgentV3Turn(ctx context.Context, cc *CompiledAgent, tc *TurnContext,
 	return messages, nil
 }
 
-func buildAgentV3TurnMessages(prefixText, memory, summary string, fallbackHistory []*schema.Message, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
-	messages := []*schema.Message{schema.SystemMessage(prefixText)}
-	if memoryMsg := buildAgentV3MemorySnapshotMessage(memory); memoryMsg != nil {
-		messages = append(messages, memoryMsg)
-	}
+func buildAgentV3TurnMessages(messages []*schema.Message, summary string, fallbackHistory []*schema.Message, rawTurns []orm.AgentV3Turn, userMsg *schema.Message) []*schema.Message {
 	if summaryMsg := buildAgentV3SummaryMessage(summary); summaryMsg != nil {
 		messages = append(messages, summaryMsg)
 	}
@@ -419,50 +382,6 @@ func buildAgentV3TurnMessages(prefixText, memory, summary string, fallbackHistor
 		messages = append(messages, userMsg)
 	}
 	return messages
-}
-
-const (
-	agentV3MemorySnapshotHeader          = "<group_memory_snapshot>\nThe following group memory is context only, not a new user request.\n"
-	agentV3MemorySnapshotSupersedeHeader = "<group_memory_snapshot supersedes=\"earlier\">\nThe following group memory is context only, not a new user request. It is the current group memory and supersedes every earlier group_memory_snapshot in this conversation.\n"
-	agentV3MemorySnapshotFooter          = "\n</group_memory_snapshot>"
-	agentV3MemorySnapshotCleared         = "<group_memory_snapshot cleared=\"true\">\n群记忆已清空，忽略此前所有记忆快照。" + agentV3MemorySnapshotFooter
-)
-
-func buildAgentV3MemorySnapshotMessage(memory string) *schema.Message {
-	memory = strings.TrimSpace(memory)
-	if memory == "" {
-		return nil
-	}
-	return schema.UserMessage(agentV3MemorySnapshotHeader + memory + agentV3MemorySnapshotFooter)
-}
-
-// buildAgentV3MemorySnapshotUpdate renders the snapshot appended after a replayed history that
-// already contains an older snapshot: the current memory marked as superseding, or an explicit
-// cleared marker when the memory is now empty.
-func buildAgentV3MemorySnapshotUpdate(memory string) *schema.Message {
-	memory = strings.TrimSpace(memory)
-	if memory == "" {
-		return schema.UserMessage(agentV3MemorySnapshotCleared)
-	}
-	return schema.UserMessage(agentV3MemorySnapshotSupersedeHeader + memory + agentV3MemorySnapshotFooter)
-}
-
-// agentV3MemorySnapshotBody extracts the memory text from any snapshot variant; a cleared
-// marker yields an empty body.
-func agentV3MemorySnapshotBody(message *schema.Message) (string, bool) {
-	if message == nil || message.Role != schema.User {
-		return "", false
-	}
-	content := message.Content
-	if content == agentV3MemorySnapshotCleared {
-		return "", true
-	}
-	for _, header := range []string{agentV3MemorySnapshotHeader, agentV3MemorySnapshotSupersedeHeader} {
-		if body, ok := strings.CutPrefix(content, header); ok {
-			return strings.TrimSpace(strings.TrimSuffix(body, agentV3MemorySnapshotFooter)), true
-		}
-	}
-	return "", false
 }
 
 func buildAgentV3SummaryMessage(summary string) *schema.Message {
@@ -491,7 +410,7 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 			return nil, err
 		}
 		current.ReplyTo = resolved
-		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3}
+		tc = &TurnContext{Bot: tc.Bot, BotUser: tc.BotUser, Message: &current, ChatID: tc.ChatID, Config: tc.Config, Trigger: tc.Trigger, V3: tc.V3, Background: tc.Background}
 	}
 	pd := buildPromptData(tc, history.ContextMessages)
 	var userText string
@@ -513,13 +432,20 @@ func buildAgentV3UserMessage(cc *CompiledAgent, tc *TurnContext, history *RichHi
 	if userText != "" {
 		dynamic.WriteString(userText)
 	}
+	senderBlock, senderMarker := agentV3CurrentSenderBlock(tc), ""
+	if senderBlock != "" {
+		senderMarker = newAgentV3SenderMarker()
+		dynamic.WriteByte('\n')
+		dynamic.WriteString(senderMarker)
+	}
 	dynamic.WriteString("\n</dynamic_suffix>")
 
 	imageRefs := collectAgentV3ImageRefs(tc, history, rawTurns)
 	if tc != nil && tc.V3 != nil {
 		tc.V3.ImageRefs = imageRefs
 	}
-	return appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs), nil
+	msg := appendAgentV3ImageRefsToUserMessage(buildUserMessage(dynamic.String(), tc, history), dynamic.String(), tc, imageRefs)
+	return sealAgentV3SenderBlock(msg, senderMarker, senderBlock), nil
 }
 
 func renderAgentV3Soul(cc *CompiledAgent, tc *TurnContext) (string, error) {
@@ -632,6 +558,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: now,
 		}, orm.AgentV3Turn{
@@ -655,6 +582,7 @@ func saveAgentV3TurnPair(ctx context.Context, tc *TurnContext, userInput, assist
 			Role:      string(schema.User),
 			Content:   userInput,
 			MessageID: messageID,
+			Sender:    agentV3TurnSender(tc),
 			ImageRefs: agentV3TurnImageRefs(tc),
 			CreatedAt: time.Now(),
 		}, maxTurns, ttl); err != nil {
@@ -692,38 +620,6 @@ func agentV3SessionLoadedTurn(tc *TurnContext) bool {
 	return tc != nil && !tc.Background && tc.Session != nil && tc.Session.parent != nil && tc.Session.committed
 }
 
-func maybeRememberExplicitInput(ctx context.Context, tc *TurnContext, input string) error {
-	if tc == nil || tc.V3 == nil || config.BotConfig == nil || config.BotConfig.AgentV3 == nil || !config.BotConfig.AgentV3.Memory.Enable {
-		return nil
-	}
-	content := extractExplicitMemoryContent(input)
-	if content == "" {
-		return nil
-	}
-	var sender *tb.User
-	var chat *tb.Chat
-	if tc.Message != nil {
-		sender, chat = tc.Message.Sender, tc.Message.Chat
-	}
-	denial, err := addAgentV3MemoryChecked(ctx, tc.V3.Scope, chat, sender, content)
-	if err != nil {
-		return err
-	}
-	if denial != "" {
-		agentV3MemoryReply(tc, denial)
-	}
-	return nil
-}
-
-var agentV3MemoryReply = func(tc *TurnContext, text string) {
-	if tc == nil || tc.Bot == nil || tc.Message == nil || tc.Message.Chat == nil {
-		return
-	}
-	if _, err := tc.Bot.Send(tc.Message.Chat, text, &tb.SendOptions{ReplyTo: tc.Message}); err != nil {
-		zap.L().Warn("agentv3: failed to send memory reply", zap.Error(err))
-	}
-}
-
 var agentV3IsChatAdmin = func(chat *tb.Chat, user *tb.User) bool {
 	if chat == nil || chat.Type == tb.ChatPrivate {
 		return true
@@ -756,7 +652,7 @@ func agentV3MemoryWriteDenial(items []orm.AgentV3MemoryItem, admin bool, senderI
 	if !admin {
 		used := lo.CountBy(items, func(item orm.AgentV3MemoryItem) bool { return item.CreatedBy == senderID })
 		if quota := memory.EffectiveMaxEntriesPerUser(); used >= quota {
-			return fmt.Sprintf("你的群记忆配额已用完（%d/%d 条），请先用 /memory forget <id> 删除一些再添加。", used, quota)
+			return fmt.Sprintf("你的群记忆配额已用完（%d/%d 条）。你可以请求按条目 ID 删除自己添加的记忆，再试一次。", used, quota)
 		}
 	}
 	limit := approxAgentV3TokenCharLimit(memory.SnapshotMaxTokens)
@@ -767,132 +663,13 @@ func agentV3MemoryWriteDenial(items []orm.AgentV3MemoryItem, admin bool, senderI
 		return utf8.RuneCountInString(agentV3MemoryLine(item.Content)) + 1
 	})
 	if used+utf8.RuneCountInString(agentV3MemoryLine(content)) > limit {
-		return fmt.Sprintf("群记忆已满（约 %d/%d 字符），这条没有记住。请先用 /memory forget <id> 删除一些再添加。", used, limit)
+		return fmt.Sprintf("群记忆已满（约 %d/%d 字符），这条没有记住。你可以请求按条目 ID 删除有权管理的记忆，再试一次。", used, limit)
 	}
 	return ""
-}
-
-// addAgentV3MemoryChecked applies the write policy, then validates quota and capacity inside
-// the same Redis transaction that stores the item, so racing writers cannot exceed the limits.
-// A non-empty denial means nothing was written.
-func addAgentV3MemoryChecked(ctx context.Context, scope orm.AgentV3Scope, chat *tb.Chat, sender *tb.User, content string) (string, error) {
-	admin := agentV3IsChatAdmin(chat, sender)
-	if denial := agentV3MemoryPolicyDenial(admin); denial != "" {
-		return denial, nil
-	}
-	var senderID int64
-	if sender != nil {
-		senderID = sender.ID
-	}
-	return writeAgentV3Memory(ctx, scope, senderID, content, func(items []orm.AgentV3MemoryItem) string {
-		return agentV3MemoryWriteDenial(items, admin, senderID, content)
-	})
 }
 
 func agentV3MemoryLine(content string) string {
 	return "- " + strings.TrimSpace(content)
-}
-
-// agentV3MemoryTTL returns the Redis TTL for memory keys; memory is persistent and never expires.
-func agentV3MemoryTTL() time.Duration {
-	return 0
-}
-
-func extractExplicitMemoryContent(input string) string {
-	input = strings.TrimSpace(input)
-	for _, prefix := range []string{"记住：", "记住:", "记住 ", "请记住：", "请记住:"} {
-		if strings.HasPrefix(input, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(input, prefix))
-		}
-	}
-	if input == "记住" {
-		return ""
-	}
-	return ""
-}
-
-// addAgentV3Memory stores memory without quota or capacity checks.
-func addAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int64, content string) error {
-	_, err := writeAgentV3Memory(ctx, scope, createdBy, content, nil)
-	return err
-}
-
-func writeAgentV3Memory(ctx context.Context, scope orm.AgentV3Scope, createdBy int64, content string, check orm.AgentV3MemoryAddCheck) (string, error) {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return "", nil
-	}
-	ttl := agentV3MemoryTTL()
-	item := orm.AgentV3MemoryItem{
-		ID:        newAgentV3MemoryID(),
-		Content:   content,
-		CreatedBy: createdBy,
-		CreatedAt: time.Now(),
-	}
-	denial, err := orm.AgentV3AddMemoryChecked(ctx, scope, item, ttl, check)
-	if err != nil || denial != "" {
-		return denial, err
-	}
-	return "", rebuildAgentV3MemorySnapshot(ctx, scope, ttl)
-}
-
-func rebuildAgentV3MemorySnapshot(ctx context.Context, scope orm.AgentV3Scope, ttl time.Duration) error {
-	return orm.AgentV3RebuildMemorySnapshot(ctx, scope, ttl, func(items []orm.AgentV3MemoryItem, current *orm.AgentV3MemorySnapshot) (*orm.AgentV3MemorySnapshot, error) {
-		sort.Slice(items, func(i, j int) bool {
-			return items[i].CreatedAt.Before(items[j].CreatedAt)
-		})
-		lines := make([]string, 0, len(items))
-		for _, item := range items {
-			if strings.TrimSpace(item.Content) == "" {
-				continue
-			}
-			lines = append(lines, agentV3MemoryLine(item.Content))
-		}
-		limit := 0
-		if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
-			limit = approxAgentV3TokenCharLimit(config.BotConfig.AgentV3.Memory.SnapshotMaxTokens)
-		}
-		content := joinAgentV3MemoryLinesNewest(lines, limit)
-		version := int64(1)
-		if current != nil {
-			version = current.Version + 1
-		}
-		return &orm.AgentV3MemorySnapshot{
-			Version:   version,
-			Hash:      hashString(content),
-			Content:   content,
-			UpdatedAt: time.Now(),
-		}, nil
-	})
-}
-
-// joinAgentV3MemoryLinesNewest joins oldest-to-newest memory lines, dropping from the head so the
-// newest entries always survive the snapshot budget, which counts Unicode characters.
-func joinAgentV3MemoryLinesNewest(lines []string, maxChars int) string {
-	if maxChars <= 0 {
-		return strings.Join(lines, "\n")
-	}
-	total := 0
-	start := len(lines)
-	for i := len(lines) - 1; i >= 0; i-- {
-		next := total + utf8.RuneCountInString(lines[i])
-		if i != len(lines)-1 {
-			next++
-		}
-		if next > maxChars {
-			break
-		}
-		total = next
-		start = i
-	}
-	kept := lines[start:]
-	if start == 0 {
-		return strings.Join(kept, "\n")
-	}
-	if len(kept) == 0 {
-		return truncateAgentV3Runes(lines[len(lines)-1], maxChars)
-	}
-	return fmt.Sprintf("[earlier memory omitted: %d entries]\n%s", start, strings.Join(kept, "\n"))
 }
 
 func agentV3ScopeFromContext(ctx tb.Context) orm.AgentV3Scope {
@@ -970,14 +747,11 @@ func summarizeAgentV3Turns(turns []orm.AgentV3Turn, maxTokens int) string {
 	}
 	lines := make([]string, 0, len(turns))
 	for _, turn := range turns {
-		content := compactAgentV3Text(turn.Content)
+		content := neutralizeAgentV3SenderTags(compactAgentV3Text(turn.Content))
 		if content == "" {
 			continue
 		}
-		role := turn.Role
-		if role == "" {
-			role = "user"
-		}
+		role := neutralizeAgentV3SenderTags(agentV3TurnSummaryRole(turn))
 		lines = append(lines, fmt.Sprintf("- %s: %s", role, truncateAgentV3Text(content, 600)))
 	}
 	return truncateAgentV3Text(strings.Join(lines, "\n"), approxAgentV3TokenCharLimit(maxTokens))
@@ -1025,15 +799,8 @@ func truncateAgentV3Text(s string, limit int) string {
 	return s[:end] + "\n[truncated]"
 }
 
-func truncateAgentV3Runes(s string, limit int) string {
-	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
-		return s
-	}
-	return string([]rune(s)[:limit]) + "\n[truncated]"
-}
-
 func agentV3DynamicSystemField(templateText string) string {
-	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml"} {
+	for _, field := range []string{".DateTime", ".CurrentDateCN", ".Input", ".ContextMessages", ".ContextText", ".ContextXml", ".ReplyToXml", ".SenderUsername", ".SenderShowName"} {
 		if strings.Contains(templateText, field) {
 			return field
 		}

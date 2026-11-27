@@ -5,15 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
-	"strconv"
-	"sync"
 	"time"
 
-	"csust-got/log"
-
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 const (
@@ -33,16 +27,14 @@ type AgentV3Scope struct {
 
 // AgentV3PrefixRecord stores current stable-prefix metadata.
 type AgentV3PrefixRecord struct {
-	Agent                 string    `json:"agent"`
-	Model                 string    `json:"model"`
-	Version               int64     `json:"version"`
-	Hash                  string    `json:"hash"`
-	SoulHash              string    `json:"soul_hash"`
-	MemorySnapshotHash    string    `json:"memory_snapshot_hash"`
-	MemorySnapshotVersion int64     `json:"memory_snapshot_version"`
-	ToolDefsHash          string    `json:"tool_defs_hash"`
-	PromptCacheKey        string    `json:"prompt_cache_key"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	Agent          string    `json:"agent"`
+	Model          string    `json:"model"`
+	Version        int64     `json:"version"`
+	Hash           string    `json:"hash"`
+	SoulHash       string    `json:"soul_hash"`
+	ToolDefsHash   string    `json:"tool_defs_hash"`
+	PromptCacheKey string    `json:"prompt_cache_key"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // AgentV3ImageRef identifies a Telegram image that an agent-v3 turn can download.
@@ -56,25 +48,20 @@ type AgentV3Turn struct {
 	Role      string            `json:"role"`
 	Content   string            `json:"content"`
 	MessageID int               `json:"message_id,omitempty"`
+	Sender    string            `json:"sender,omitempty"`
 	ImageRefs []AgentV3ImageRef `json:"image_refs,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 }
 
 // AgentV3MemoryItem stores one chat-scoped memory item.
 type AgentV3MemoryItem struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
-	CreatedBy int64     `json:"created_by,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// AgentV3MemorySnapshot stores rendered memory content for prompts.
-type AgentV3MemorySnapshot struct {
-	Version   int64     `json:"version"`
-	Hash      string    `json:"hash"`
-	Content   string    `json:"content"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Epoch     int64     `json:"epoch,omitempty"`
+	ID          string    `json:"id"`
+	Category    string    `json:"category"`
+	Directory   string    `json:"directory"`
+	Description string    `json:"description"`
+	Content     string    `json:"content"`
+	CreatedBy   int64     `json:"created_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // AgentV3Summary stores the rolling agent-v3 conversation summary.
@@ -88,9 +75,6 @@ type AgentV3Summary struct {
 // AgentV3SummaryBuilder builds a replacement rolling summary from watched state.
 type AgentV3SummaryBuilder func(turns []AgentV3Turn, current *AgentV3Summary) (*AgentV3Summary, error)
 
-// AgentV3MemorySnapshotBuilder builds a replacement memory snapshot from watched state.
-type AgentV3MemorySnapshotBuilder func(items []AgentV3MemoryItem, current *AgentV3MemorySnapshot) (*AgentV3MemorySnapshot, error)
-
 // AgentV3TraceSummary stores compact trace metadata for the last run.
 type AgentV3TraceSummary struct {
 	RunID                   string                    `json:"run_id"`
@@ -101,7 +85,6 @@ type AgentV3TraceSummary struct {
 	PromptCacheKeyHash      string                    `json:"prompt_cache_key_hash"`
 	PromptTokens            int                       `json:"prompt_tokens"`
 	CachedTokens            int                       `json:"cached_tokens"`
-	MemorySnapshotVersion   int64                     `json:"memory_snapshot_version"`
 	SummaryVersion          int64                     `json:"summary_version"`
 	RawTurnCount            int                       `json:"raw_turn_count"`
 	ToolCallCount           int                       `json:"tool_call_count"`
@@ -299,364 +282,6 @@ func AgentV3UpdateSummary(ctx context.Context, scope AgentV3Scope, maxTurns int,
 	})
 }
 
-// AgentV3MemoryAddCheck inspects the active items visible to the write transaction and
-// returns a user-facing denial, or "" to allow the write.
-type AgentV3MemoryAddCheck func(items []AgentV3MemoryItem) string
-
-// AgentV3AddMemory stores one active memory item without any quota check.
-func AgentV3AddMemory(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration) error {
-	data, err := marshalAgentV3MemoryItem(&item)
-	if err != nil {
-		return err
-	}
-	pipe := rc.Pipeline()
-	agentV3PipelineAddMemory(ctx, pipe, scope, item.ID, data, ttl)
-	_, err = pipe.Exec(ctx)
-	return err
-}
-
-// AgentV3AddMemoryChecked atomically validates the active items and stores one memory item.
-// A non-empty denial means the check rejected the write and nothing was stored; concurrent
-// memory changes retry the check, so quota and capacity limits hold across racing writers.
-func AgentV3AddMemoryChecked(ctx context.Context, scope AgentV3Scope, item AgentV3MemoryItem, ttl time.Duration, check AgentV3MemoryAddCheck) (string, error) {
-	if check == nil {
-		return "", AgentV3AddMemory(ctx, scope, item, ttl)
-	}
-	data, err := marshalAgentV3MemoryItem(&item)
-	if err != nil {
-		return "", err
-	}
-	activeKey := agentV3MemoryActiveKey(scope)
-	denial := ""
-	for range agentV3CASMaxAttempts {
-		activeIDs, err := agentV3LoadMemoryActiveIDs(ctx, rc, activeKey)
-		if err != nil {
-			return "", err
-		}
-		watchKeys := make([]string, 0, len(activeIDs)+1)
-		watchKeys = append(watchKeys, activeKey)
-		for _, id := range activeIDs {
-			watchKeys = append(watchKeys, agentV3MemoryItemKey(scope, id))
-		}
-		err = rc.Watch(ctx, func(tx *redis.Tx) error {
-			currentIDs, err := agentV3LoadMemoryActiveIDs(ctx, tx, activeKey)
-			if err != nil {
-				return err
-			}
-			if !agentV3MemoryActiveIDsEqual(activeIDs, currentIDs) {
-				return redis.TxFailedErr
-			}
-			items, _, _, err := agentV3LoadMemoryItemsFromTx(ctx, tx, scope, currentIDs)
-			if err != nil {
-				return err
-			}
-			if denial = check(items); denial != "" {
-				return nil
-			}
-			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				agentV3PipelineAddMemory(ctx, pipe, scope, item.ID, data, ttl)
-				return nil
-			})
-			return err
-		}, watchKeys...)
-		if !errors.Is(err, redis.TxFailedErr) {
-			return denial, err
-		}
-	}
-	return "", ErrAgentV3StateConflict
-}
-
-func marshalAgentV3MemoryItem(item *AgentV3MemoryItem) ([]byte, error) {
-	if item.ID == "" {
-		item.ID = strconv.FormatInt(time.Now().UnixNano(), 36)
-	}
-	if item.CreatedAt.IsZero() {
-		item.CreatedAt = time.Now()
-	}
-	return json.Marshal(item)
-}
-
-func agentV3PipelineAddMemory(ctx context.Context, pipe redis.Pipeliner, scope AgentV3Scope, id string, data []byte, ttl time.Duration) {
-	pipe.Set(ctx, agentV3MemoryItemKey(scope, id), data, ttl)
-	pipe.SAdd(ctx, agentV3MemoryActiveKey(scope), id)
-	agentV3ApplyTTL(ctx, pipe, agentV3MemoryActiveKey(scope), ttl)
-}
-
-// agentV3LoadMemoryItemsFromTx reads the active items inside a WATCH transaction, splitting
-// the IDs into those whose item key still exists and those that are stale.
-func agentV3LoadMemoryItemsFromTx(ctx context.Context, tx *redis.Tx, scope AgentV3Scope, ids []string) ([]AgentV3MemoryItem, []string, []string, error) {
-	items := make([]AgentV3MemoryItem, 0, len(ids))
-	live := make([]string, 0, len(ids))
-	stale := make([]string, 0)
-	for _, id := range ids {
-		data, err := tx.Get(ctx, agentV3MemoryItemKey(scope, id)).Result()
-		switch {
-		case errors.Is(err, redis.Nil):
-			stale = append(stale, id)
-		case err != nil:
-			return nil, nil, nil, err
-		default:
-			var item AgentV3MemoryItem
-			if err := json.Unmarshal([]byte(data), &item); err != nil {
-				return nil, nil, nil, err
-			}
-			items = append(items, item)
-			live = append(live, id)
-		}
-	}
-	return items, live, stale, nil
-}
-
-// AgentV3CountMemoryByUser counts active memory items created by one user.
-func AgentV3CountMemoryByUser(ctx context.Context, scope AgentV3Scope, userID int64) (int, error) {
-	items, err := AgentV3ListMemory(ctx, scope)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, item := range items {
-		if item.CreatedBy == userID {
-			count++
-		}
-	}
-	return count, nil
-}
-
-func agentV3ApplyTTL(ctx context.Context, pipe redis.Pipeliner, key string, ttl time.Duration) {
-	if ttl <= 0 {
-		pipe.Persist(ctx, key)
-		return
-	}
-	pipe.Expire(ctx, key, ttl)
-}
-
-// AgentV3ListMemory lists active memory items.
-func AgentV3ListMemory(ctx context.Context, scope AgentV3Scope) ([]AgentV3MemoryItem, error) {
-	ids, err := rc.SMembers(ctx, agentV3MemoryActiveKey(scope)).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	items := make([]AgentV3MemoryItem, 0, len(ids))
-	for _, id := range ids {
-		data, err := rc.Get(ctx, agentV3MemoryItemKey(scope, id)).Result()
-		if errors.Is(err, redis.Nil) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		var item AgentV3MemoryItem
-		if err := json.Unmarshal([]byte(data), &item); err != nil {
-			continue
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-var agentV3ForgetMemoryScript = redis.NewScript(`
-local removed = redis.call('SREM', KEYS[1], ARGV[1]) + redis.call('DEL', KEYS[2])
-if removed > 0 then
-	redis.call('INCR', KEYS[3])
-end
-return removed
-`)
-
-// AgentV3ForgetMemory removes one active memory item and, when anything was removed,
-// atomically advances the chat memory epoch.
-func AgentV3ForgetMemory(ctx context.Context, scope AgentV3Scope, id string) error {
-	keys := []string{agentV3MemoryActiveKey(scope), agentV3MemoryItemKey(scope, id), agentV3MemoryEpochKey(scope)}
-	return agentV3ForgetMemoryScript.Run(ctx, rc, keys, id).Err()
-}
-
-// AgentV3GetMemoryEpoch returns the chat memory epoch, advanced whenever memory is deleted.
-// Session nodes recorded under an older epoch may replay deleted memory and must not be continued.
-func AgentV3GetMemoryEpoch(ctx context.Context, scope AgentV3Scope) (int64, error) {
-	epoch, err := rc.Get(ctx, agentV3MemoryEpochKey(scope)).Int64()
-	if errors.Is(err, redis.Nil) {
-		return 0, nil
-	}
-	return epoch, err
-}
-
-func agentV3GetMemoryEpochFromTx(ctx context.Context, tx *redis.Tx, key string) (int64, error) {
-	epoch, err := tx.Get(ctx, key).Int64()
-	if errors.Is(err, redis.Nil) {
-		return 0, nil
-	}
-	return epoch, err
-}
-
-// AgentV3SetMemorySnapshot stores rendered memory snapshot content.
-func AgentV3SetMemorySnapshot(ctx context.Context, scope AgentV3Scope, snapshot AgentV3MemorySnapshot, ttl time.Duration) error {
-	if snapshot.UpdatedAt.IsZero() {
-		snapshot.UpdatedAt = time.Now()
-	}
-	data, err := json.Marshal(snapshot)
-	if err != nil {
-		return err
-	}
-	return rc.Set(ctx, agentV3MemorySnapshotCurrentKey(scope), data, ttl).Err()
-}
-
-// AgentV3RebuildMemorySnapshot atomically rebuilds a memory snapshot from active memory items.
-func AgentV3RebuildMemorySnapshot(ctx context.Context, scope AgentV3Scope, ttl time.Duration, builder AgentV3MemorySnapshotBuilder) error {
-	if builder == nil {
-		return nil
-	}
-
-	activeKey := agentV3MemoryActiveKey(scope)
-	currentKey := agentV3MemorySnapshotCurrentKey(scope)
-	epochKey := agentV3MemoryEpochKey(scope)
-	for range agentV3CASMaxAttempts {
-		activeIDs, err := agentV3LoadMemoryActiveIDs(ctx, rc, activeKey)
-		if err != nil {
-			return err
-		}
-		watchKeys := make([]string, 0, len(activeIDs)+3)
-		watchKeys = append(watchKeys, currentKey, activeKey, epochKey)
-		for _, id := range activeIDs {
-			watchKeys = append(watchKeys, agentV3MemoryItemKey(scope, id))
-		}
-
-		err = rc.Watch(ctx, func(tx *redis.Tx) error {
-			currentIDs, err := agentV3LoadMemoryActiveIDs(ctx, tx, activeKey)
-			if err != nil {
-				return err
-			}
-			if !agentV3MemoryActiveIDsEqual(activeIDs, currentIDs) {
-				return redis.TxFailedErr
-			}
-
-			items, liveIDs, staleIDs, err := agentV3LoadMemoryItemsFromTx(ctx, tx, scope, currentIDs)
-			if err != nil {
-				return err
-			}
-
-			current, err := agentV3GetMemorySnapshotFromTx(ctx, tx, currentKey)
-			if err != nil {
-				return err
-			}
-			epoch, err := agentV3GetMemoryEpochFromTx(ctx, tx, epochKey)
-			if err != nil {
-				return err
-			}
-			next, err := builder(items, current)
-			if err != nil || next == nil {
-				return err
-			}
-			// A deletion since the current snapshot was built leaves a window where turns read the
-			// new epoch with the stale snapshot; advancing again invalidates those turns too.
-			bump := epoch > 0 && (current == nil || current.Epoch < epoch)
-			if bump {
-				epoch++
-			}
-			next.Epoch = epoch
-			data, err := json.Marshal(next)
-			if err != nil {
-				return err
-			}
-			staleMembers := make([]interface{}, len(staleIDs))
-			for i, id := range staleIDs {
-				staleMembers[i] = id
-			}
-
-			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				if len(staleIDs) > 0 {
-					pipe.SRem(ctx, activeKey, staleMembers...)
-				}
-				for _, id := range liveIDs {
-					agentV3ApplyTTL(ctx, pipe, agentV3MemoryItemKey(scope, id), ttl)
-				}
-				agentV3ApplyTTL(ctx, pipe, activeKey, ttl)
-				pipe.Set(ctx, currentKey, data, ttl)
-				if bump {
-					pipe.Set(ctx, epochKey, epoch, 0)
-				}
-				return nil
-			})
-			return err
-		}, watchKeys...)
-		if !errors.Is(err, redis.TxFailedErr) {
-			return err
-		}
-	}
-	return ErrAgentV3StateConflict
-}
-
-// AgentV3GetMemorySnapshot loads the current memory snapshot.
-func AgentV3GetMemorySnapshot(ctx context.Context, scope AgentV3Scope) (*AgentV3MemorySnapshot, error) {
-	data, err := rc.Get(ctx, agentV3MemorySnapshotCurrentKey(scope)).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var snapshot AgentV3MemorySnapshot
-	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
-		return nil, err
-	}
-	agentV3PersistLegacyMemoryTTL(ctx, scope)
-	return &snapshot, nil
-}
-
-// AgentV3GetCurrentMemorySnapshot reads the epoch and then the snapshot for one turn. A snapshot whose
-// epoch differs from the memory epoch predates a deletion and may contain deleted text, so it is rebuilt
-// first; if that fails no snapshot is returned. The returned epoch is the one the snapshot belongs to.
-func AgentV3GetCurrentMemorySnapshot(ctx context.Context, scope AgentV3Scope, rebuild func(context.Context) error) (*AgentV3MemorySnapshot, int64, error) {
-	for attempt := 0; ; attempt++ {
-		epoch, err := AgentV3GetMemoryEpoch(ctx, scope)
-		if err != nil {
-			return nil, 0, err
-		}
-		snapshot, err := AgentV3GetMemorySnapshot(ctx, scope)
-		if err != nil {
-			return nil, 0, err
-		}
-		if snapshot == nil || snapshot.Epoch == epoch {
-			return snapshot, epoch, nil
-		}
-		if attempt > 0 || rebuild == nil {
-			log.Warn("agent v3 memory snapshot is older than the memory epoch, ignoring it",
-				zap.Int64("chat", scope.ChatID), zap.Int64("snapshot_epoch", snapshot.Epoch), zap.Int64("epoch", epoch))
-			return nil, epoch, nil
-		}
-		if err := rebuild(ctx); err != nil {
-			log.Warn("agent v3 memory snapshot rebuild after deletion failed, ignoring the stale snapshot",
-				zap.Int64("chat", scope.ChatID), zap.Error(err))
-			return nil, epoch, nil
-		}
-	}
-}
-
-var agentV3MemoryPersisted sync.Map
-
-func agentV3PersistLegacyMemoryTTL(ctx context.Context, scope AgentV3Scope) {
-	base := agentV3BaseKey(scope)
-	if _, done := agentV3MemoryPersisted.Load(base); done {
-		return
-	}
-	activeKey := agentV3MemoryActiveKey(scope)
-	ids, err := rc.SMembers(ctx, activeKey).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return
-	}
-	pipe := rc.Pipeline()
-	pipe.Persist(ctx, agentV3MemorySnapshotCurrentKey(scope))
-	pipe.Persist(ctx, activeKey)
-	for _, id := range ids {
-		pipe.Persist(ctx, agentV3MemoryItemKey(scope, id))
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		return
-	}
-	agentV3MemoryPersisted.Store(base, struct{}{})
-}
-
 // AgentV3SaveTraceSummary stores the latest trace summary.
 func AgentV3SaveTraceSummary(ctx context.Context, scope AgentV3Scope, summary AgentV3TraceSummary, ttl time.Duration) error {
 	key := agentV3TraceLastKey(scope)
@@ -753,45 +378,6 @@ func agentV3GetSummaryFromTx(ctx context.Context, tx *redis.Tx, key string) (*Ag
 	return &summary, nil
 }
 
-func agentV3LoadMemoryActiveIDs(ctx context.Context, client redis.Cmdable, key string) ([]string, error) {
-	ids, err := client.SMembers(ctx, key).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(ids)
-	return ids, nil
-}
-
-func agentV3MemoryActiveIDsEqual(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func agentV3GetMemorySnapshotFromTx(ctx context.Context, tx *redis.Tx, key string) (*AgentV3MemorySnapshot, error) {
-	data, err := tx.Get(ctx, key).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var snapshot AgentV3MemorySnapshot
-	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
-		return nil, err
-	}
-	return &snapshot, nil
-}
-
 func agentV3LoadRecentTurnsFromTx(ctx context.Context, tx *redis.Tx, key string, maxTurns int) ([]AgentV3Turn, error) {
 	items, err := tx.LRange(ctx, key, int64(-maxTurns), -1).Result()
 	if errors.Is(err, redis.Nil) {
@@ -829,22 +415,6 @@ func agentV3HotRawTurnsKey(scope AgentV3Scope) string {
 
 func agentV3SummaryCurrentKey(scope AgentV3Scope) string {
 	return agentV3BaseKey(scope) + ":summary:current"
-}
-
-func agentV3MemoryItemKey(scope AgentV3Scope, id string) string {
-	return fmt.Sprintf("%s:memory:item:%s", agentV3BaseKey(scope), id)
-}
-
-func agentV3MemoryActiveKey(scope AgentV3Scope) string {
-	return agentV3BaseKey(scope) + ":memory:active"
-}
-
-func agentV3MemoryEpochKey(scope AgentV3Scope) string {
-	return agentV3BaseKey(scope) + ":memory:epoch"
-}
-
-func agentV3MemorySnapshotCurrentKey(scope AgentV3Scope) string {
-	return agentV3BaseKey(scope) + ":memory:snapshot:current"
 }
 
 func agentV3TraceLastKey(scope AgentV3Scope) string {

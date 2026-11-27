@@ -164,10 +164,10 @@ func TestCronToolsValidationOwnershipAndScope(t *testing.T) {
 	require.Equal(t, "not_found", f.invoke(t, true, map[string]any{"action": "get", "task_id": task.ID})["code"])
 	f.tc.ChatID, f.tc.Message.Chat.ID = -100, -100
 	require.Equal(t, true, f.invoke(t, true, map[string]any{"action": "delete", "task_id": task.ID, "expected_version": task.Version + 1})["deleted"])
-	defs := agentV3ToolDefinitionsText(false, false, false, true)
+	defs := agentV3ToolDefinitionsText(false, false, false, true, false)
 	require.Contains(t, defs, "expected_version")
 	require.Contains(t, defs, "## Context")
-	require.NotContains(t, agentV3ToolDefinitionsText(false, false, false), "delegate")
+	require.NotContains(t, agentV3ToolDefinitionsText(false, false, false, false, false), "delegate")
 }
 
 func TestCronDedicatedRunnerRuntimeAndTelegramOutbox(t *testing.T) {

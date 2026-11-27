@@ -88,7 +88,7 @@ func TestBuildAgentV3UserMessageSkipsRawHistoryImageRefs(t *testing.T) {
 	userMsg, err := buildAgentV3UserMessage(&CompiledAgent{}, tc, history, rawTurns)
 	require.NoError(t, err)
 	assert.Empty(t, tc.V3.ImageRefs)
-	messages := buildAgentV3TurnMessages("prefix", "", "", nil, rawTurns, userMsg)
+	messages := buildAgentV3TurnMessages(nil, "", nil, rawTurns, userMsg)
 	contents := make([]string, 0, len(messages))
 	for _, message := range messages {
 		contents = append(contents, message.Content)

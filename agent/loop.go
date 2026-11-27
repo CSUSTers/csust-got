@@ -248,7 +248,7 @@ func (a *CustomAgent) runLoop(ctx context.Context, input []*schema.Message, sw *
 		}
 
 		if marker := buildStageMarker(ctx, assistantMsg.ToolCalls); marker != "" && shouldEmitStageMarker(ctx) {
-			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: "replace"}, marker, wholeTextTypeCollapse)
+			updateProgressMessage(ctx, updateProgressArgs{Content: marker, Mode: progressModeReplace}, marker, wholeTextTypeCollapse)
 		}
 
 		capture.record(assistantMsg, false)
@@ -712,6 +712,8 @@ func agentV3TraceToolPreviewAllowed(name string) bool {
 		agentV3ToolSearXNGSuggestions,
 		agentV3ToolSearXNGInstanceInfo,
 		agentV3ToolDelegate,
+		agentV3ToolGroupMemoryRecall,
+		agentV3ToolGroupMemoryManage,
 		agentV3ToolCronTasks:
 		return false
 	default:

@@ -40,7 +40,7 @@ var parent *session.LoadedParent
 if err == nil {
     parent = loaded.Parent
     defer parent.Close() // 必须覆盖慢模型、交付、提交；save=false 也必须 Close
-    // loaded.Messages 是完整 replay；使用当前 system/memory/tools，不重复旧上下文。
+    // loaded.Messages 是会话回放；另用当前 system、群记忆目录和工具权限。
 } else {
     // ErrMiss / ErrCorrupt / 存储错误：调用原 fallback；parent 必须保持 nil。
 }
@@ -63,7 +63,7 @@ node, err := svc.Commit(commitCtx, session.CommitRequest{
 - 普通 `load_context=true` 用 `SelectLatest`，只选本 agent，按 Redis 提交 sequence；不加载可直接不调用 Load，或使用 `SelectNone`。实际 reply 的 true/true 强制由调用层处理。
 - Scope.Namespace 可留空，由 Service 根据 Redis prefix 的 SHA-256 自动补齐；显式 namespace 不匹配会拒绝。bot/platform 使用结构化哈希、chat 使用十进制；agent 名和模型参数不成为路径。
 - 只有完整 Load 返回的 opaque LoadedParent 能续接。调用者改动 `loaded.Messages` 不会改动失租 fallback 的私有快照。提交前失租使用完整 replay 建新根，记录 Warn 并累加 `session.ForkedRootCommits()`；写中失租返回 fence 错误并补偿，绝不连接旧父，也不重跑模型。
-- Frame/Guidance 显式分类；`Bootstrap` 和 `Delta` 中也可放带 SourceFrame/SourceGuidance 的 Record，归档保留但 replay 不注入。用户文本中的框架标记没有分类作用。system 必须分类为 frame。agent owner 目前只把 system 归为 Frame：runtime guidance、memory snapshot、模板附加指令都按 `SourceHistory` 内联归档，原顺序 replay，以保证模型输入前缀与上一轮逐字节一致。
+- Frame/Guidance 显式分类；`Bootstrap` 和 `Delta` 中也可放带 SourceFrame/SourceGuidance 的 Record，归档保留但 replay 不注入。用户文本中的框架标记没有分类作用。system 必须分类为 frame。调用层把 system 和当前群记忆目录归为 Frame，不回放；群记忆工具调用及配对结果在提交前剔除。Runtime guidance、模板附加指令和普通工具消息按 `SourceHistory` 归档，按原顺序回放。
 - `DeliveryReceipt.MessageIDs` 可包含同一轮次拆分发送的全部 Telegram 消息 ID；Publish 为每个 ID 建立 message 索引，回复任意分片都能解析到该节点，首个 ID 为主消息。
 - 根保存 bootstrap + delta；子节点禁止带 bootstrap，只保存新轮次。完整工具链和非空最终 assistant、Complete、正数成功交付消息 ID 都是发布门槛。进度消息、用户消息 ID 和发送失败不能成为 receipt。
 - `Commit` 自动 JSON 深快照。消息保存完整 schema.Message，包括多模态、工具参数/响应、推理签名、ToolSearchResult、Extra/ResponseMeta；JSON 数字使用 `json.Number` 保精度，不保证 Extra 中任意自定义 Go 类型身份。

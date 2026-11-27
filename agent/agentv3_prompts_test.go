@@ -88,13 +88,15 @@ func TestAgentV3ReplySessionStablePrefixCacheSurface(t *testing.T) {
 	assert.Equal(t, tc.V3.PromptCacheKey, sameTC.V3.PromptCacheKey)
 	assert.Equal(t, messages[0].Content, sameMessages[0].Content)
 
-	require.NoError(t, addAgentV3Memory(t.Context(), tc.V3.Scope, user.Sender.ID, "MEMORY_CHANGED"))
+	id := seedSessionMemory(t, tc.V3.Scope, "课表", "查询上课地点", "MEMORY_CHANGED")
 	memoryTC := replySessionTurnContext(chatCfg, current)
 	memoryMessages, err := prepareAgentV3Turn(t.Context(), compiled, memoryTC, nil)
 	require.NoError(t, err)
 	assert.Equal(t, tc.V3.PrefixHash, memoryTC.V3.PrefixHash)
 	assert.Equal(t, messages[0].Content, memoryMessages[0].Content)
-	assert.Contains(t, replySessionSchemaText(memoryMessages), "MEMORY_CHANGED")
+	assert.Contains(t, memoryMessages[1].Content, "校园 > 课表：查询上课地点")
+	assert.NotContains(t, replySessionSchemaText(memoryMessages), "MEMORY_CHANGED")
+	assert.NotContains(t, replySessionSchemaText(memoryMessages), id)
 
 	t.Logf("QA surface: roles=%v ids=10,11,12 image_refs=%d tool_pair=%s final=%q", messageRoles(captured[0]), len(tc.V3.ImageRefs), captured[1][len(captured[0])+1].ToolCallID, result.Content)
 }

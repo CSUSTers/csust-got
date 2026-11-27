@@ -14,84 +14,6 @@ import (
 	tb "gopkg.in/telebot.v3"
 )
 
-// MemoryCommand handles agent-v3 memory management commands.
-func MemoryCommand(ctx tb.Context) error {
-	scope := agentV3ScopeFromContext(ctx)
-	payload := agentV3CommandPayload(ctx)
-	if payload == "" {
-		return ctx.Reply("用法：/memory add 内容、/memory list、/memory forget <id>")
-	}
-	cmd, rest, _ := strings.Cut(payload, " ")
-	cmd = strings.ToLower(strings.TrimSpace(cmd))
-	rest = strings.TrimSpace(rest)
-
-	switch cmd {
-	case "add":
-		if rest == "" {
-			return ctx.Reply("要记住的内容不能为空。")
-		}
-		denial, err := addAgentV3MemoryChecked(context.Background(), scope, ctx.Chat(), ctx.Sender(), rest)
-		if err != nil {
-			return replyAgentV3CommandError(ctx, "memory_add", err)
-		}
-		if denial != "" {
-			return ctx.Reply(denial)
-		}
-		return ctx.Reply("已记住。")
-	case agentV3ActionList:
-		admin := canManageAgentV3Memory(ctx)
-		if !admin && !agentV3MemoryQuotaWrites() {
-			return ctx.Reply("只有管理员可以查看群记忆。")
-		}
-		items, err := orm.AgentV3ListMemory(context.Background(), scope)
-		if err != nil {
-			return replyAgentV3CommandError(ctx, "memory_list", err)
-		}
-		var b strings.Builder
-		for _, item := range items {
-			if !admin && item.CreatedBy != agentV3SenderID(ctx) {
-				continue
-			}
-			b.WriteString(item.ID)
-			b.WriteString(": ")
-			b.WriteString(item.Content)
-			b.WriteByte('\n')
-		}
-		if b.Len() == 0 {
-			return ctx.Reply("当前没有 memory。")
-		}
-		return replyAgentV3Pre(ctx, b.String())
-	case "forget":
-		admin := canManageAgentV3Memory(ctx)
-		if !admin && !agentV3MemoryQuotaWrites() {
-			return ctx.Reply("只有管理员可以删除群记忆。")
-		}
-		if rest == "" {
-			return ctx.Reply("请提供 memory id。")
-		}
-		if !admin {
-			owned, err := agentV3MemoryOwnedBy(context.Background(), scope, rest, agentV3SenderID(ctx))
-			if err != nil {
-				return replyAgentV3CommandError(ctx, "memory_forget", err)
-			}
-			if !owned {
-				return ctx.Reply("只能删除你自己添加的群记忆。")
-			}
-		}
-		if err := orm.AgentV3ForgetMemory(context.Background(), scope, rest); err != nil {
-			return replyAgentV3CommandError(ctx, "memory_forget", err)
-		}
-		if config.BotConfig != nil && config.BotConfig.AgentV3 != nil {
-			if err := rebuildAgentV3MemorySnapshot(context.Background(), scope, agentV3MemoryTTL()); err != nil {
-				return replyAgentV3CommandError(ctx, "memory_snapshot_rebuild", err)
-			}
-		}
-		return ctx.Reply("已删除。")
-	default:
-		return ctx.Reply("未知 memory 子命令。")
-	}
-}
-
 // TraceLastCommand shows the latest agent-v3 trace summary.
 func TraceLastCommand(ctx tb.Context) error {
 	if !canManageAgentV3Memory(ctx) {
@@ -125,12 +47,11 @@ func ContextCacheCommand(ctx tb.Context) error {
 		cacheHit = fmt.Sprint(v)
 	}
 	msg := fmt.Sprintf(
-		"prefix_version: %d\nprefix_hash: %s\nprompt_cache_key_hash: %s\ncontext_cache_hit: %s\nmemory_snapshot_version: %d\nsummary_version: %d\nraw_turn_count: %d\nprompt_tokens: %d\ncached_tokens: %d",
+		"prefix_version: %d\nprefix_hash: %s\nprompt_cache_key_hash: %s\ncontext_cache_hit: %s\nsummary_version: %d\nraw_turn_count: %d\nprompt_tokens: %d\ncached_tokens: %d",
 		summary.PrefixVersion,
 		shortHash(summary.PrefixHash),
 		shortHash(summary.PromptCacheKeyHash),
 		cacheHit,
-		summary.MemorySnapshotVersion,
 		summary.SummaryVersion,
 		summary.RawTurnCount,
 		summary.PromptTokens,
@@ -206,23 +127,6 @@ func RuntimeResetCommand(ctx tb.Context) error {
 	return replyAgentV3Pre(ctx, string(data))
 }
 
-func agentV3MemoryQuotaWrites() bool {
-	return config.BotConfig != nil && config.BotConfig.AgentV3 != nil && config.BotConfig.AgentV3.Memory.QuotaWrites()
-}
-
-func agentV3MemoryOwnedBy(ctx context.Context, scope orm.AgentV3Scope, id string, userID int64) (bool, error) {
-	items, err := orm.AgentV3ListMemory(ctx, scope)
-	if err != nil {
-		return false, err
-	}
-	for _, item := range items {
-		if item.ID == id {
-			return item.CreatedBy == userID && userID != 0, nil
-		}
-	}
-	return false, nil
-}
-
 func canManageAgentV3Memory(ctx tb.Context) bool {
 	if ctx.Chat() == nil || ctx.Chat().Type == tb.ChatPrivate {
 		return true
@@ -240,13 +144,6 @@ func agentV3CommandPayload(ctx tb.Context) string {
 	return strings.TrimSpace(ctx.Message().Payload)
 }
 
-func agentV3SenderID(ctx tb.Context) int64 {
-	if ctx == nil || ctx.Sender() == nil {
-		return 0
-	}
-	return ctx.Sender().ID
-}
-
 func replyAgentV3CommandError(ctx tb.Context, operation string, err error) error {
 	zap.L().Warn("agentv3: agent v3 command failed",
 		zap.String("operation", operation),
@@ -257,14 +154,6 @@ func replyAgentV3CommandError(ctx tb.Context, operation string, err error) error
 
 func agentV3CommandErrorMessage(operation string) string {
 	switch operation {
-	case "memory_add":
-		return "写入 memory 失败，请稍后重试。"
-	case "memory_list":
-		return "读取 memory 失败，请稍后重试。"
-	case "memory_forget":
-		return "删除 memory 失败，请稍后重试。"
-	case "memory_snapshot_rebuild":
-		return "重建 memory snapshot 失败，请稍后重试。"
 	case "trace_last":
 		return "读取 trace 失败，请稍后重试。"
 	case "context_cache":
