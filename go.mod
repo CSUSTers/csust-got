@@ -14,7 +14,7 @@ require (
 	github.com/mark3labs/mcp-go v1.6.0
 	github.com/meguminnnnnnnnn/go-openai v0.1.6
 	github.com/meilisearch/meilisearch-go v0.36.3
-	github.com/redis/go-redis/v9 v9.23.0
+	github.com/redis/go-redis/v9 v9.24.0
 	github.com/samber/lo v1.53.0
 	github.com/sashabaranov/go-openai v1.44.0
 	github.com/spf13/viper v1.21.0
