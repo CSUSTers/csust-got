@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -38,11 +39,20 @@ func (r *HitokotoResponse) setDefault() {
 	}
 }
 
-func (r *HitokotoResponse) get(withSource bool) string {
+func (r *HitokotoResponse) format(withSource bool) string {
 	r.setDefault()
-	str := r.Sentence
+	if !withSource {
+		return r.Sentence
+	}
+	return fmt.Sprintf("%s by <em>%s %s</em>",
+		html.EscapeString(r.Sentence),
+		html.EscapeString(r.Author),
+		html.EscapeString(r.From))
+}
+
+func (r *HitokotoResponse) get(withSource bool) string {
+	str := r.format(withSource)
 	if withSource {
-		str += fmt.Sprintf(" by <em>%s %s</em>", r.Author, r.From)
 		go orm.StoreHitokoto(str)
 	}
 	return str

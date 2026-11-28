@@ -66,6 +66,9 @@ func banAndGetMessage(m *Message, banTarget *User, hard bool, banTime time.Durat
 	}
 
 	if banTarget == nil {
+		if m.ReplyTo == nil || m.ReplyTo.Sender == nil {
+			return text
+		}
 		banTarget = m.ReplyTo.Sender
 	}
 

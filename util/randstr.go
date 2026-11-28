@@ -2,6 +2,7 @@ package util
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,7 @@ var (
 )
 
 type randstr struct {
+	mu        sync.Mutex
 	seedRunes []byte
 	rnd       *rand.Rand
 	length    int
@@ -76,25 +78,22 @@ func RandStrLen(length int) string {
 // RandBytesLen returns a random bytes with given.
 // if length == 0, it will return empty bytes; if length < 0, it will return default length bytes.
 func (r *randstr) RandBytesLen(length int) []byte {
-	rnd := r.rnd
-
-	// if length == 0, it will return empty bytes;
-	// if length < 0, it will return default length bytes.
-	if length == 0 {
+	if length == 0 || len(r.seedRunes) == 0 {
 		return []byte{}
-	} else if r.length < 0 {
+	}
+	if length < 0 {
 		length = defaultRandStrLength
 	}
 
-	// if rnd == nil, it will use a new Rand.
+	r.mu.Lock()
 	if r.rnd == nil {
 		r.rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
-
 	buf := make([]byte, length)
 	for i := range buf {
-		buf[i] = r.seedRunes[rnd.Intn(len(r.seedRunes))]
+		buf[i] = r.seedRunes[r.rnd.Intn(len(r.seedRunes))]
 	}
+	r.mu.Unlock()
 	return buf
 }
 

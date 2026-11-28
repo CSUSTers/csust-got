@@ -93,6 +93,10 @@ func Forward(m *Message) {
 			}
 			forwardMsg.ID = id
 		} else {
+			if m.ID <= 0 {
+				util.SendReply(m.Chat, "嗦啥呢", m)
+				return
+			}
 			forwardMsg.ID = rand.Intn(m.ID) + 1
 		}
 

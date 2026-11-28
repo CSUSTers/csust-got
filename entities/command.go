@@ -92,7 +92,7 @@ func (c BotCommand) Argc() int {
 
 // Arg - get arg at index `idx`.
 func (c BotCommand) Arg(idx int) string {
-	if idx >= c.Argc() {
+	if idx < 0 || idx >= c.Argc() {
 		return ""
 	}
 	return c.args[idx]
@@ -100,6 +100,9 @@ func (c BotCommand) Arg(idx int) string {
 
 // MultiArgsFrom - get args from index `idx`.
 func (c BotCommand) MultiArgsFrom(idx int) []string {
+	if idx < 0 {
+		idx = 0
+	}
 	if idx >= c.Argc() {
 		return []string{}
 	}

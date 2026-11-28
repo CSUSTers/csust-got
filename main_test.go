@@ -11,14 +11,30 @@ import (
 
 type mainTestContext struct {
 	Context
-	msg *Message
-	bot *Bot
+	msg    *Message
+	chat   *Chat
+	bot    *Bot
+	update Update
 }
 
 func (m *mainTestContext) Message() *Message { return m.msg }
-func (m *mainTestContext) Chat() *Chat       { return m.msg.Chat }
-func (m *mainTestContext) Sender() *User     { return m.msg.Sender }
-func (m *mainTestContext) Bot() *Bot         { return m.bot }
+func (m *mainTestContext) Chat() *Chat {
+	if m.chat != nil {
+		return m.chat
+	}
+	if m.msg != nil {
+		return m.msg.Chat
+	}
+	return nil
+}
+func (m *mainTestContext) Sender() *User {
+	if m.msg != nil {
+		return m.msg.Sender
+	}
+	return nil
+}
+func (m *mainTestContext) Bot() *Bot      { return m.bot }
+func (m *mainTestContext) Update() Update { return m.update }
 
 func TestIsAllowedMessageCommand(t *testing.T) {
 	tests := []struct {
@@ -177,4 +193,61 @@ func TestShouldStoreMessageIncludesMediaWithoutText(t *testing.T) {
 			require.Equal(t, tt.want, shouldStoreMessage(tt.msg))
 		})
 	}
+}
+
+func TestCustomHandlerReplyToNilSenderDoesNotPanic(t *testing.T) {
+	originalConfig := config.BotConfig
+	originalRegexHandlers := regexHandlers
+	t.Cleanup(func() {
+		config.BotConfig = originalConfig
+		regexHandlers = originalRegexHandlers
+	})
+
+	config.BotConfig = config.NewBotConfig()
+	regexHandlers = nil
+
+	ctx := &mainTestContext{
+		msg: &Message{
+			Text:    "replying to channel post",
+			Chat:    &Chat{ID: 200},
+			Sender:  &User{ID: 100},
+			ReplyTo: &Message{ID: 10},
+		},
+		bot: &Bot{Me: &User{Username: "test_bot"}},
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, customHandler(ctx))
+	})
+}
+
+func TestMcMiddlewareSkipsNilMessageAndEditedUpdates(t *testing.T) {
+	originalConfig := config.BotConfig
+	t.Cleanup(func() { config.BotConfig = originalConfig })
+
+	config.BotConfig = config.NewBotConfig()
+	config.BotConfig.McConfig.Mc2Dead = 3
+
+	called := 0
+	mw := mcMiddleware(func(Context) error {
+		called++
+		return nil
+	})
+
+	require.NoError(t, mw(&mainTestContext{
+		chat: &Chat{ID: -100, Type: ChatSuperGroup},
+		msg:  nil,
+	}))
+	require.Equal(t, 1, called)
+
+	editedMsg := &Message{
+		Chat:     &Chat{ID: -100, Type: ChatSuperGroup},
+		Text:     "edited",
+		LastEdit: 100,
+	}
+	require.NoError(t, mw(&mainTestContext{
+		msg:    editedMsg,
+		update: Update{EditedMessage: editedMsg},
+	}))
+	require.Equal(t, 2, called)
 }

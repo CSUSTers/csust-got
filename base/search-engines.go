@@ -2,6 +2,7 @@ package base
 
 import (
 	"fmt"
+	"html"
 	"net/url"
 	"strings"
 
@@ -56,29 +57,29 @@ func searchEngine(engineFunc searchEngineFunc) htmlMapper {
 func google(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := "https://google.com/search?q=" + query
-	return fmt.Sprintf("谷歌的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("谷歌的搜索结果~: <a href=\"%s\">%s</a>", website, html.EscapeString(cmd))
 }
 
 func bing(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := "https://bing.com/search?q=" + query
-	return fmt.Sprintf("必应的搜索结果~: <a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("必应的搜索结果~: <a href=\"%s\">%s</a>", website, html.EscapeString(cmd))
 }
 
 func bilibili(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := "https://search.bilibili.com/all?keyword=" + query
-	return fmt.Sprintf("哔哩哔哩🍻~: <a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("哔哩哔哩🍻~: <a href=\"%s\">%s</a>", website, html.EscapeString(cmd))
 }
 
 func github(cmd string) string {
 	query := url.QueryEscape(cmd)
 	website := "https://github.com/search?q=" + query
-	return fmt.Sprintf("🐙🐱 Github: <a href=\"%s\">%s</a>", website, cmd)
+	return fmt.Sprintf("🐙🐱 Github: <a href=\"%s\">%s</a>", website, html.EscapeString(cmd))
 }
 
 func repeat(cmd string) string {
-	return cmd
+	return html.EscapeString(cmd)
 }
 
 // Search Engine.

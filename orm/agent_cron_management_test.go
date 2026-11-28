@@ -146,3 +146,21 @@ func TestAgentCronCreatorCASUpdateAndDelete(t *testing.T) {
 	_, err = store.Get(t.Context(), cronjob.GetRequest{Scope: scope, TaskID: task.ID})
 	assert.True(t, errors.Is(err, cronjob.ErrNotFound), fmt.Sprintf("unexpected error: %v", err))
 }
+
+func TestAgentCronListOmitsNextCursorWhenSkippedPrefixReachesEnd(t *testing.T) {
+	setupAgentV3Redis(t)
+	store := NewAgentCronStore().(*agentCronStore)
+	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	scope := agentCronTestScope(-1300)
+
+	first := createAgentCronTask(t, store, scope, 41, now, "first")
+	second := createAgentCronTask(t, store, scope, 42, now.Add(time.Minute), "second")
+
+	require.NoError(t, store.client.Del(t.Context(), store.taskKey(scope, first.ID)).Err())
+
+	page, err := store.List(t.Context(), cronjob.ListRequest{Scope: scope, Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, page.Tasks, 1)
+	require.Equal(t, second.ID, page.Tasks[0].ID)
+	require.Empty(t, page.NextCursor)
+}

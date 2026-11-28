@@ -137,7 +137,7 @@ func (s *agentCronStore) List(ctx context.Context, request cronjob.ListRequest) 
 			}
 		}
 	}
-	for _, id := range ids[start:] {
+	for i, id := range ids[start:] {
 		stored, loadErr := loadAgentCronTask(ctx, s.client, s.taskKey(request.Scope, id))
 		if loadErr != nil {
 			return page, agentCronPublicError(loadErr)
@@ -147,7 +147,7 @@ func (s *agentCronStore) List(ctx context.Context, request cronjob.ListRequest) 
 		}
 		page.Tasks = append(page.Tasks, stored.Task)
 		if len(page.Tasks) == limit {
-			if start+len(page.Tasks) < len(ids) {
+			if start+i+1 < len(ids) {
 				page.NextCursor = id
 			}
 			break

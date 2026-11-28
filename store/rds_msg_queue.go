@@ -45,6 +45,9 @@ func (q *DeleteMsgQueue) fetch() ([]*Message, error) {
 }
 
 func (q *DeleteMsgQueue) process(m *Message) error {
+	if m == nil || m.Chat == nil {
+		return nil
+	}
 	// delete message
 	log.Info("delete message by byeWorld", zap.Int64("chat_id", m.Chat.ID), zap.Int("message_id", m.ID))
 	return q.bot.Delete(m)

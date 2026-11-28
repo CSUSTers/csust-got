@@ -155,6 +155,9 @@ func (c *biliProcessor) processBiliShortenUrl(ctx context.Context, u *urlx.Extra
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// get origin URL from a shorten URL
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {

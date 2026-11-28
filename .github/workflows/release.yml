@@ -16,6 +16,7 @@ jobs:
 
   build:
     name: Build and Push
+    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
       - name: Get source

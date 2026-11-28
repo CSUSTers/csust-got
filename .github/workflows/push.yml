@@ -19,6 +19,7 @@ jobs:
 
   build:
     name: Build
+    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
 

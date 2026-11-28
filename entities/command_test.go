@@ -65,3 +65,11 @@ func Test_splitText(t *testing.T) {
 		assert.Equal(t, []string{"love", "and peace"}, got)
 	})
 }
+
+func TestBotCommandNegativeIndex(t *testing.T) {
+	cmd, _, err := CommandFromText("/cmd a b", -1)
+	require.NoError(t, err)
+	require.Equal(t, "", cmd.Arg(-1))
+	require.Equal(t, []string{"a", "b"}, cmd.MultiArgsFrom(-1))
+	require.Empty(t, cmd.MultiArgsFrom(10))
+}

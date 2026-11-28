@@ -23,7 +23,7 @@ func (c *FFConv) ConvertPipe2Pipe(r io.Reader, inputStreamFunc StreamApply,
 	stderr := io.Discard
 	var stderrCloser io.Closer
 	if c.DebugFile != "" {
-		f, err := os.OpenFile(c.DebugFile, os.O_APPEND|os.O_CREATE, 0644)
+		f, err := os.OpenFile(c.DebugFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err == nil {
 			stderr = f
 			stderrCloser = f

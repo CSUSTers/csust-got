@@ -2,6 +2,7 @@ package restrict
 
 import (
 	"strconv"
+	"sync"
 	"time"
 
 	"csust-got/config"
@@ -12,22 +13,32 @@ import (
 	. "gopkg.in/telebot.v3"
 )
 
-var limitMap = make(map[string]*rate.Limiter, 16)
+var (
+	limitMu  sync.Mutex
+	limitMap = make(map[string]*rate.Limiter, 16)
+)
 
 // CheckLimit 限制消息发送的频率，以防止刷屏.
 func CheckLimit(m *Message) bool {
 	rateConfig := config.BotConfig.RateLimitConfig
 	key := strconv.FormatInt(m.Chat.ID, 10) + ":" + strconv.FormatInt(m.Sender.ID, 10)
-	if limiter, ok := limitMap[key]; ok {
-		if checkRate(m, limiter) {
-			return true
-		}
-		// 令牌不足撤回消息
-		util.DeleteMessage(m)
-		return false
+	limitMu.Lock()
+	limiter, ok := limitMap[key]
+	if !ok {
+		limiter = rate.NewLimiter(rate.Limit(rateConfig.Limit), rateConfig.MaxToken)
+		limitMap[key] = limiter
 	}
-	limitMap[key] = rate.NewLimiter(rate.Limit(rateConfig.Limit), rateConfig.MaxToken)
-	return true
+	limitMu.Unlock()
+
+	if !ok {
+		return true
+	}
+	if checkRate(m, limiter) {
+		return true
+	}
+	// 令牌不足撤回消息
+	util.DeleteMessage(m)
+	return false
 }
 
 // return false if message should be limited.
@@ -37,7 +48,7 @@ func checkRate(m *Message, limiter *rate.Limiter) bool {
 	msgTime := m.Time()
 	checkTime := time.Now()
 	if checkTime.Sub(msgTime) > rateConfig.ExpireTime {
-		checkTime = time.Unix(msgTime.Unix(), checkTime.UnixNano())
+		checkTime = time.Unix(msgTime.Unix(), int64(checkTime.Nanosecond()))
 	}
 
 	if m.Sticker != nil {

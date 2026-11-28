@@ -51,19 +51,22 @@ func (o *OutputFileReaderImpl) Close() error {
 // ReadBuffer wrap an [io.Reader] with buffer
 type ReadBuffer struct {
 	io.Reader
+	closer io.Closer
 }
 
 // NewReadBuffer create a new [ReadBuffer]
 func NewReadBuffer(r io.Reader, bufSize int) *ReadBuffer {
+	closer, _ := r.(io.Closer)
 	return &ReadBuffer{
 		Reader: bufio.NewReaderSize(r, bufSize),
+		closer: closer,
 	}
 }
 
 // Close close the reader
 func (o *ReadBuffer) Close() error {
-	if c, ok := o.Reader.(io.Closer); ok {
-		return c.Close()
+	if o.closer != nil {
+		return o.closer.Close()
 	}
 	return nil
 }

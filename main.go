@@ -267,7 +267,7 @@ func customHandler(ctx Context) error {
 	// reply to bot
 	if text != "" && ctx.Message().ReplyTo != nil {
 		reply := ctx.Message().ReplyTo
-		if reply.Sender.Username == ctx.Bot().Me.Username {
+		if reply.Sender != nil && ctx.Bot() != nil && ctx.Bot().Me != nil && reply.Sender.Username == ctx.Bot().Me.Username {
 			for _, agentConfig := range *config.BotConfig.Agents {
 				if trigger, ok := agentConfig.TriggerOnReply(); ok {
 					return handleAgentConfig(ctx, agentConfig, agentInvocationTrigger(trigger, agentTriggerReply))
@@ -520,9 +520,7 @@ func byeWorldMiddleware(next HandlerFunc) HandlerFunc {
 
 func mcMiddleware(next HandlerFunc) HandlerFunc {
 	if config.BotConfig.McConfig.Mc2Dead <= 0 {
-		return func(ctx Context) error {
-			return next(ctx)
-		}
+		return next
 	}
 
 	return func(ctx Context) error {
@@ -532,8 +530,7 @@ func mcMiddleware(next HandlerFunc) HandlerFunc {
 		}
 
 		m := ctx.Message()
-		// continue with inline query
-		if m == nil && ctx.Query() != nil {
+		if m == nil || isEditedUpdate(ctx) {
 			return next(ctx)
 		}
 

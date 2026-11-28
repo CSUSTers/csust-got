@@ -94,9 +94,9 @@ func (t *TimeTask) Run() {
 			go t.getLoopFn(exited, waiter)()
 			tries++
 		case <-timer:
+			log.Info("time task loop recovered", zap.Int("tries", tries))
 			tries = 0
 			timer = nil
-			log.Info("time task loop recovered", zap.Int("tries", tries))
 		}
 	}
 	log.Fatal("time task loop exited too many times", zap.Int("tries", tries))
@@ -138,7 +138,7 @@ func (t *TimeTask) addTaskLoop() {
 			// if add to redis error, then reset timer in 10ms, and try again.
 			if err := orm.AddTasks(ts...); err != nil {
 				log.Error("add tasks error", zap.Error(err))
-				timer.Reset(time.Microsecond * 10)
+				timer.Reset(time.Millisecond * 10)
 				return
 			}
 
@@ -158,10 +158,10 @@ func (t *TimeTask) parseTasks(tasks []*orm.Task) ([]*orm.TaskNonced, int64) {
 	next := t.nextTime.Get()
 	for _, task := range tasks {
 		now := time.Now()
-		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() || task.ExecTime <= next {
+		if task.ExecTime < now.Add(FetchTaskTime).UnixMilli() {
 			t.runningChan <- task
 		} else {
-			if task.ExecTime < next {
+			if next == 0 || task.ExecTime < next {
 				next = task.ExecTime
 			}
 			ts = append(ts, orm.NewTaskNonced(task))
@@ -172,7 +172,7 @@ func (t *TimeTask) parseTasks(tasks []*orm.Task) ([]*orm.TaskNonced, int64) {
 
 func (t *TimeTask) deleteTaskLoop() {
 	const timerCycleTime = time.Second * 15
-	const tryCycleTime = time.Microsecond * 10
+	const tryCycleTime = time.Millisecond * 10
 
 	taskStrs := make([]string, 0, 8)
 	timer := time.NewTimer(timerCycleTime)
@@ -254,29 +254,26 @@ func (t *TimeTask) fetchTask(from, to int64) error {
 }
 
 func (t *TimeTask) getLoopFn(name string, waiter chan string) func() {
+	var run func()
 	switch name {
 	case "add_loop":
-		return func() {
-			t.addTaskLoop()
-			waiter <- "add_loop"
-		}
-
+		run = t.addTaskLoop
 	case "delete_loop":
-		return func() {
-			t.deleteTaskLoop()
-			waiter <- "delete_loop"
-		}
+		run = t.deleteTaskLoop
 	case "running_loop":
-		return func() {
-			t.runningTaskLoop()
-			waiter <- "running_loop"
-		}
+		run = t.runningTaskLoop
 	case "fetch_loop":
-		return func() {
-			t.fetchTaskLoop()
-			waiter <- "fetch_loop"
-		}
+		run = t.fetchTaskLoop
 	default:
 		panic("unknown loop name")
+	}
+	return func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("time task loop panicked", zap.String("loop", name), zap.Any("panic", r))
+			}
+			waiter <- name
+		}()
+		run()
 	}
 }

@@ -242,7 +242,35 @@ var (
 	ErrNoAudioFound = errors.New("no audio found")
 )
 
-var idChars = append(lo.NumbersCharset, []rune("abcde")...)
+var (
+	voiceQueryArgPatt = regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\'.*\'))\s*)`)
+	idChars           = append(lo.NumbersCharset, []rune("abcde")...)
+)
+
+func escapeMeiliFilterValue(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	return s
+}
+
+func buildVoiceCharacterFilter(ch string) string {
+	if ch == "" {
+		return ""
+	}
+	switch {
+	case strings.HasSuffix(ch, "*") || strings.HasSuffix(ch, "%"):
+		if s := ch[:len(ch)-1]; s != "" {
+			return "ch STARTS WITH '" + escapeMeiliFilterValue(s) + "'"
+		}
+	case strings.HasPrefix(ch, "*") || strings.HasPrefix(ch, "%"):
+		if s := ch[1:]; s != "" {
+			return "ch CONTAINS '" + escapeMeiliFilterValue(s) + "'"
+		}
+	default:
+		return "ch = '" + escapeMeiliFilterValue(ch) + "'"
+	}
+	return ""
+}
 
 func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, err error) {
 	if indexName == "" && query.Index != "" {
@@ -252,29 +280,9 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 	if !ok {
 		return nil, ErrIndexNotFound
 	}
-	idx := getVoiceClient.Index(index.IndexUid)
 
 	random := query.Text == ""
-
-	var filter = ""
-	if ch := query.Character; ch != "" {
-		// NEEDS TO ENABLE `containsFilter` EXPIRIMENTAL FEATURE
-		// AND ADD `id` FIELD TO FILTER
-		switch {
-		case strings.HasSuffix(ch, "*") || strings.HasSuffix(ch, "%"):
-			s := ch[:len(ch)-1]
-			if s != "" {
-				filter = "ch STARTS WITH '" + s + "'"
-			}
-		case strings.HasPrefix(ch, "*") || strings.HasPrefix(ch, "%"):
-			s := ch[1:]
-			if s != "" {
-				filter = "ch CONTAINS '" + s + "'"
-			}
-		default:
-			filter = "ch = '" + query.Character + "'"
-		}
-	}
+	filter := buildVoiceCharacterFilter(query.Character)
 	searchOpt := &meilisearch.SearchRequest{
 		Filter:                  filter,
 		ShowMatchesPosition:     true,
@@ -285,74 +293,79 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 	// nolint:nestif
 	if random {
 		if index.VoiceDb != nil {
+			var chip *VoiceChip
 			if query.Character != "" {
-				return &GetVoiceResult{VoiceChip: *index.RandomVoiceByCh(query.Character)}, nil
+				chip = index.RandomVoiceByCh(query.Character)
+			} else {
+				chip = index.RandomVoice()
 			}
-			return &GetVoiceResult{VoiceChip: *index.RandomVoice()}, nil
-		}
-
-		ret = &GetVoiceResult{}
-
-		filterTempl := "id STARTS WITH '%s'"
-		if searchOpt.Filter != "" {
-			filterTempl = fmt.Sprintf("(%s) AND (%s)", searchOpt.Filter, filterTempl)
-		}
-
-		var resp *meilisearch.SearchResponse
-		for range 64 {
-			// NEEDS TO ENABLE `containsFilter` EXPIRIMENTAL FEATURE
-			// AND ADD `id` FIELD TO FILTER
-			prefix := lo.RandomString(2, idChars)
-
-			searchOpt.Filter = fmt.Sprintf(filterTempl, prefix)
-
-			// TODO check meilisearch query
-			searchOpt.Limit = 2000
-			setSearchRequestHitsPerPage(searchOpt, 1)
-
-			resp, err = idx.Search(query.Text, searchOpt)
-			if err != nil {
-				return nil, err
-			}
-
-			log.Debug("random get voice: checking",
-				zap.Any("resp", resp))
-
-			if resp.TotalHits > 0 {
-				break
-			}
-		}
-
-		if resp.TotalHits == 0 {
-			searchOpt.Filter = filter
-			resp, err = idx.Search(query.Text, searchOpt)
-			if err != nil {
-				return nil, err
-			}
-			if resp.TotalHits == 0 {
+			if chip == nil {
 				return nil, ErrNoAudioFound
 			}
-		}
+			ret = &GetVoiceResult{VoiceChip: *chip}
+		} else {
+			idx := getVoiceClient.Index(index.IndexUid)
+			ret = &GetVoiceResult{}
 
-		setSearchRequestHitsPerPage(searchOpt, 1)
-		searchOpt.Page = rand.N(resp.TotalHits)
-		resp, err = idx.Search(query.Text, searchOpt)
-		if err != nil {
-			return nil, err
-		}
-		if len(resp.Hits) == 0 {
-			return nil, ErrNoAudioFound
-		}
-		log.Debug("random get voice",
-			zap.Any("resp", resp))
+			filterTempl := "id STARTS WITH '%s'"
+			if searchOpt.Filter != "" {
+				filterTempl = fmt.Sprintf("(%s) AND (%s)", searchOpt.Filter, filterTempl)
+			}
 
-		v := &GetVoiceResult{}
-		err = mapstructure.Decode(resp.Hits[0], v)
-		if err != nil {
-			return nil, err
+			var resp *meilisearch.SearchResponse
+			for range 64 {
+				prefix := lo.RandomString(2, idChars)
+
+				searchOpt.Filter = fmt.Sprintf(filterTempl, prefix)
+
+				searchOpt.Limit = 2000
+				setSearchRequestHitsPerPage(searchOpt, 1)
+
+				resp, err = idx.Search(query.Text, searchOpt)
+				if err != nil {
+					return nil, err
+				}
+
+				log.Debug("random get voice: checking",
+					zap.Any("resp", resp))
+
+				if resp.TotalHits > 0 {
+					break
+				}
+			}
+
+			if resp.TotalHits == 0 {
+				searchOpt.Filter = filter
+				resp, err = idx.Search(query.Text, searchOpt)
+				if err != nil {
+					return nil, err
+				}
+				if resp.TotalHits == 0 {
+					return nil, ErrNoAudioFound
+				}
+			}
+
+			setSearchRequestHitsPerPage(searchOpt, 1)
+			searchOpt.Page = rand.N(resp.TotalHits) + 1
+			resp, err = idx.Search(query.Text, searchOpt)
+			if err != nil {
+				return nil, err
+			}
+			if len(resp.Hits) == 0 {
+				return nil, ErrNoAudioFound
+			}
+			log.Debug("random get voice",
+				zap.Any("resp", resp))
+
+			v := &GetVoiceResult{}
+			err = mapstructure.Decode(resp.Hits[0], v)
+			if err != nil {
+				return nil, err
+			}
+			ret = v
 		}
-		ret = v
 	} else {
+		idx := getVoiceClient.Index(index.IndexUid)
 		searchOpt.Limit = 2000
 		setSearchRequestHitsPerPage(searchOpt, 2000)
 		resp, err := idx.Search(query.Text, searchOpt)
@@ -371,12 +384,8 @@ func getVoiceMeta(indexName string, query *GetVoiceQuery) (ret *GetVoiceResult, 
 		res := lo.PartitionBy(results, func(v *GetVoiceResult) int {
 			rank := int(math.Floor(v.RankingScore * 10000))
 			switch {
-			// case rank == 10000:
-			// 	return 10000
 			case rank >= 9999:
 				return 9999
-			// case rank >= 9990:
-			// 	return 9990
 			case rank >= 9900:
 				return 9900
 			case rank >= 9000:
@@ -404,7 +413,7 @@ func getVoiceMetaFromIndexes(indexes []*VoiceConfigNDb, q *GetVoiceQuery, random
 		var bestScore float64
 
 		for _, indexConfig := range indexes {
-			if indexConfig.IndexUid == "" {
+			if indexConfig.IndexUid == "" || len(indexConfig.Alias) == 0 {
 				continue
 			}
 
@@ -505,9 +514,9 @@ func GetVoice(ctx tb.Context) error {
 func formatVoiceCaption(gameName, characterName, text string) string {
 	var gameTag string
 	if gameName != "" {
-		gameTag = "#" + strings.ReplaceAll(gameName, " ", "_")
+		gameTag = "#" + html.EscapeString(strings.ReplaceAll(gameName, " ", "_"))
 	}
-	characterTag := "#" + strings.ReplaceAll(characterName, " ", "_")
+	characterTag := "#" + html.EscapeString(strings.ReplaceAll(characterName, " ", "_"))
 
 	blockquoteText := fmt.Sprintf("<blockquote expandable>%s</blockquote>", html.EscapeString(text))
 
@@ -576,16 +585,14 @@ func parseQueryText(text string) *GetVoiceQuery {
 		Text: text,
 	}
 
-	// extract args like `key=value` in front of all text
-	patt := regexp.MustCompile(`(?i)^(?:\s*(?P<arg>\S+=(?:[^"'\s]\S*|\".*\"|\'.*\'))\s*)`)
 	cur := 0
 	args := make([]string, 0)
 	for {
-		groups := patt.FindStringSubmatch(text[cur:])
+		groups := voiceQueryArgPatt.FindStringSubmatch(text[cur:])
 		if len(groups) == 0 {
 			break
 		}
-		args = append(args, groups[patt.SubexpIndex("arg")])
+		args = append(args, groups[voiceQueryArgPatt.SubexpIndex("arg")])
 		cur += len(groups[0])
 	}
 

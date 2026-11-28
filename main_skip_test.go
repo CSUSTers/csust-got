@@ -19,10 +19,16 @@ type skipTestContext struct {
 func (c *skipTestContext) Update() Update { return c.update }
 func (c *skipTestContext) Query() *Query  { return nil }
 func (c *skipTestContext) Message() *Message {
-	if c.update.EditedMessage != nil {
+	switch {
+	case c.update.EditedMessage != nil:
 		return c.update.EditedMessage
+	case c.update.EditedChannelPost != nil:
+		return c.update.EditedChannelPost
+	case c.update.ChannelPost != nil:
+		return c.update.ChannelPost
+	default:
+		return c.update.Message
 	}
-	return c.update.Message
 }
 
 func TestSkipMiddlewareUsesEditTimeForEditedUpdates(t *testing.T) {
@@ -52,9 +58,6 @@ func TestSkipMiddlewareUsesEditTimeForEditedUpdates(t *testing.T) {
 			config.BotConfig = config.NewBotConfig()
 			config.BotConfig.SkipDuration = tt.skipSec
 			ctx := &skipTestContext{update: tt.update}
-			if tt.update.EditedChannelPost != nil {
-				ctx.update.EditedMessage = tt.update.EditedChannelPost
-			}
 			called := false
 			handler := skipMiddleware(func(Context) error {
 				called = true

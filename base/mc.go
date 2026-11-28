@@ -29,6 +29,12 @@ type mcSascrfice struct {
 
 func computeSas(idx int) int {
 	baseSas := config.BotConfig.McConfig.Sacrifices
+	if len(baseSas) == 0 {
+		return 0
+	}
+	if idx < 0 {
+		return baseSas[0]
+	}
 	if idx >= len(baseSas) {
 		return baseSas[len(baseSas)-1]
 	}

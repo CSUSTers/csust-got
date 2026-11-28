@@ -5,6 +5,7 @@ import (
 	"csust-got/log"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 
@@ -21,7 +22,7 @@ func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, intputStream
 	stderr := io.Discard
 	var stderrCloser io.Closer
 	if c.DebugFile != "" {
-		f, err := os.OpenFile(c.DebugFile, os.O_APPEND|os.O_CREATE, 0644)
+		f, err := os.OpenFile(c.DebugFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err == nil {
 			stderr = f
 			stderrCloser = f
@@ -44,20 +45,28 @@ func (c *FFConv) ConvertPipe2File(ctx context.Context, r io.Reader, intputStream
 	}
 
 	runner := input.Output(outputFile, outputArgs...).Silent(true).WithInput(r).WithErrorOutput(stderr)
+	compiled := runner.Compile()
 	if c.LogCmd {
-		cmd := runner.Compile()
-		log.Info("ffmpeg command", zap.String("cmd", cmd.Path), zap.Strings("args", cmd.Args))
+		log.Info("ffmpeg command", zap.String("cmd", compiled.Path), zap.Strings("args", compiled.Args))
 	}
 
 	go func() {
-
 		if stderrCloser != nil {
 			defer func() {
 				_ = stderrCloser.Close()
 			}()
 		}
-		err := runner.Run()
-		resultCh <- err
+		var args []string
+		if len(compiled.Args) > 1 {
+			args = compiled.Args[1:]
+		}
+		cmd := exec.CommandContext(ctx, compiled.Path, args...)
+		cmd.Stdin = compiled.Stdin
+		cmd.Stdout = compiled.Stdout
+		cmd.Stderr = compiled.Stderr
+		cmd.Dir = compiled.Dir
+		cmd.Env = compiled.Env
+		resultCh <- cmd.Run()
 	}()
 
 	return &OutputFileReaderImpl{

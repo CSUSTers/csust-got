@@ -1697,6 +1697,9 @@ func (c *AgentV3Configs) readConfig() {
 	}
 	// An omitted agent section uses the default enabled agent options.
 	for _, cfg := range *c {
+		if cfg == nil {
+			continue
+		}
 		if cfg.Agent == nil {
 			cfg.Agent = &AgentOptions{Enable: true}
 		}

@@ -416,20 +416,22 @@ func sendVideoSticker(ctx tb.Context, sticker *tb.Sticker, filename string, emoj
 		cc, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		r, errCh := ff.ConvertPipe2File(cc, reader, ffconv.NewPipeInputStream("webm"), filename+"."+f, outputArgs...)
-		defer func() {
-			_ = r.Close()
-		}()
+		if r != nil {
+			defer func() {
+				_ = r.Close()
+			}()
+		}
 		select {
 		case err := <-errCh:
 			if err != nil {
 				log.Error("failed to convert", zap.Error(err))
-				err1 := ctx.Reply("convert to mp4 failed")
+				err1 := ctx.Reply(fmt.Sprintf("convert to %s failed", f))
 				return errors.Join(err, err1)
 			}
 		case <-time.After(time.Second * 30):
 			cancel()
 			log.Error("wait ffmpeg exec result timeout", zap.String("filename", filename), zap.String("convert_format", f))
-			return ctx.Reply("convert to mp4 failed")
+			return ctx.Reply(fmt.Sprintf("convert to %s failed", f))
 		}
 		sendFile := &tb.Document{
 			File:                 tb.FromReader(r),
@@ -641,12 +643,12 @@ loop:
 					}
 					replyMsgLock.Unlock()
 
-					return err
+					return err1
 				}
 
 				of, err1 := os.OpenFile(path.Join(tempDir, filename), os.O_CREATE|os.O_WRONLY, 0o640)
 				if err1 != nil {
-					return err
+					return err1
 				}
 				defer func() { _ = of.Close() }()
 
@@ -677,7 +679,7 @@ loop:
 					}
 					replyMsgLock.Unlock()
 
-					return err
+					return err2
 				}
 			}
 
@@ -704,35 +706,44 @@ loop:
 		err2 := ctx.Reply("process failed")
 		return errors.Join(err, err2)
 	}
+	packPath := packFile.Name()
 	defer func() {
-		_ = os.Remove(packFile.Name())
+		_ = os.Remove(packPath)
 	}()
-	compress := zip.NewWriter(packFile)
-	for _, f := range outputFiles {
-		w, err1 := compress.Create(f)
-		if err1 != nil {
-			err2 := ctx.Reply("process failed")
-			return errors.Join(err1, err2)
-		}
+	zipErr := func() error {
+		defer func() {
+			_ = packFile.Close()
+		}()
+		compress := zip.NewWriter(packFile)
+		for _, f := range outputFiles {
+			w, err1 := compress.Create(f)
+			if err1 != nil {
+				_ = compress.Close()
+				return err1
+			}
 
-		file, err1 := os.Open(path.Join(tempDir, f))
-		if err1 != nil {
-			err2 := ctx.Reply("process failed")
-			return errors.Join(err1, err2)
-		}
+			file, err1 := os.Open(path.Join(tempDir, f))
+			if err1 != nil {
+				_ = compress.Close()
+				return err1
+			}
 
-		_, err1 = io.Copy(w, file)
-		_ = file.Close()
-		if err1 != nil {
-			err2 := ctx.Reply("process failed")
-			return errors.Join(err1, err2)
+			_, err1 = io.Copy(w, file)
+			_ = file.Close()
+			if err1 != nil {
+				_ = compress.Close()
+				return err1
+			}
 		}
+		return compress.Close()
+	}()
+	if zipErr != nil {
+		err2 := ctx.Reply("process failed")
+		return errors.Join(zipErr, err2)
 	}
-	fileInfo, _ := packFile.Stat()
-	_ = compress.Close()
-	_ = packFile.Close()
+	fileInfo, _ := os.Stat(packPath)
 
-	cpFile := tb.FromDisk(packFile.Name())
+	cpFile := tb.FromDisk(packPath)
 	setName := replaceIllegalFilenameCharsWithString(stickerSet.Name, "_")
 	setTitle := replaceIllegalFilenameCharsWithString(stickerSet.Title, "_")
 	respMsg, err := ctx.Bot().Send(ctx.Recipient(), &tb.Document{
@@ -745,7 +756,11 @@ loop:
 		}
 		return ctx.Reply("太大了，反正就是大")
 	}
-	if doc := respMsg.Document; doc != nil {
+	if err != nil {
+		return err
+	}
+	if respMsg != nil && respMsg.Document != nil {
+		doc := respMsg.Document
 		fileCache := &orm.FileCache{
 			FileId:   doc.FileID,
 			Filename: doc.FileName,

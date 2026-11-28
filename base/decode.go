@@ -56,7 +56,23 @@ func Decode(ctx tb.Context) error {
 		}
 	}
 
+	result, err := decodeText(from, to, text)
+	if err != nil {
+		return err
+	}
+	log.Debug("decode result", zap.String("result", result))
+
+	result = fmt.Sprintf("```%s```", escapeMdCodeBlockChars(result))
+
+	util.SendReply(ctx.Chat(), util.RawTgText(result), ctx.Message(), tb.ModeMarkdownV2)
+
+	return nil
+}
+
+// nolint:goconst
+func decodeText(from, to, text string) (string, error) {
 	var bs []byte
+	var err error
 	var encoder *exencoding.Encoder
 	useEncoder := true
 
@@ -101,12 +117,12 @@ func Decode(ctx tb.Context) error {
 		case "base64":
 			bs, err = base64.StdEncoding.DecodeString(text)
 			if err != nil {
-				return err
+				return "", err
 			}
 		case "hex":
 			bs, err = hex.DecodeString(text)
 			if err != nil {
-				return err
+				return "", err
 			}
 		case "utf8":
 			bs = []byte(text)
@@ -180,15 +196,10 @@ func Decode(ctx tb.Context) error {
 			for i := range s {
 				s[i] = uint16(bs[i*2+1]) | uint16(bs[i*2])<<8
 			}
+			result = string(utf16.Decode(s))
 		}
 	}
-	log.Debug("decode result", zap.String("result", result))
-
-	result = fmt.Sprintf("```%s```", escapeMdReservedChars(result))
-
-	util.SendReply(ctx.Chat(), util.RawTgText(result), ctx.Message(), tb.ModeMarkdownV2)
-
-	return nil
+	return result, nil
 }
 
 func normalizeEncoding(in string) string {
@@ -219,12 +230,8 @@ func normalizeEncoding(in string) string {
 	}
 }
 
-func escapeMdReservedChars(s string) string {
-	reservedChars := []string{"\\", "_", "*", "[", "]", "(", ")", "~", "`", ">", "#", "+", "-", "=", "|", "{", "}", ".", "!"}
-
-	for _, char := range reservedChars {
-		s = strings.ReplaceAll(s, char, "\\"+char)
-	}
-
+func escapeMdCodeBlockChars(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "`", "\\`")
 	return s
 }
